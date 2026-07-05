@@ -4,6 +4,7 @@
 #include "AYButton.h"
 #include "AYWindow.h"
 #include "AYBox.h"
+#include "AYSplitterHandle.h"
 #include "AYImage.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
@@ -87,6 +88,16 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("titleBarHeight")) {
                 window->setTitleBarHeight(j["titleBarHeight"]);
             }
+            if (j.contains("movable")) {
+                window->setMovable(j["movable"].get<bool>());
+            }
+            if (j.contains("resizable")) {
+                window->setResizable(j["resizable"].get<bool>());
+            }
+            if (j.contains("minSize") && j["minSize"].is_object()) {
+                window->setMinSize(j["minSize"].value("w", 120.0f),
+                                   j["minSize"].value("h", 80.0f));
+            }
         }
 
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
@@ -149,6 +160,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "Window";
         j["title"] = std::string(window->getTitle().begin(), window->getTitle().end());
         j["titleBarHeight"] = window->getTitleBarHeight();
+        j["movable"] = window->isMovable();
+        j["resizable"] = window->isResizable();
+        j["minSize"] = { {"w", window->getMinSize().x}, {"h", window->getMinSize().y} };
     }
     else if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
         j["type"] = "VBox";
@@ -157,6 +171,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         j["type"] = "HBox";
         j["spacing"] = hbox->getSpacing();
+    }
+    else if (dynamic_cast<SplitterHandle*>(widget) != nullptr) {
+        j["type"] = "SplitterHandle";
     }
     else if (Image* image = dynamic_cast<Image*>(widget)) {
         j["type"] = "Image";

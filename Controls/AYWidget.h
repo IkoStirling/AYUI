@@ -50,6 +50,14 @@ struct UIMouseEvent {
         : mousePos(pos), mouseButton(btn) {}
 };
 
+enum class UiCursorHint {
+    Default,
+    Hand,
+    SizeHorizontal,
+    SizeVertical,
+    Move,
+};
+
 class Widget {
 public:
     Widget();
@@ -64,13 +72,24 @@ public:
 
     // Spatial properties
     const math::FVector2& getPosition() const { return _position; }
-    void setPosition(const math::FVector2& pos) { _position = pos; }
+    void setPosition(const math::FVector2& pos) {
+        _position = pos;
+        markBoundsDirty();
+    }
 
     const math::FVector2& getSize() const { return _size; }
-    void setSize(const math::FVector2& size) { _size = size; }
+    void setSize(const math::FVector2& size) {
+        _size = size;
+        markBoundsDirty();
+    }
 
     float getWidth() const { return _size.x; }
     float getHeight() const { return _size.y; }
+
+    bool isLayoutPositionManaged() const { return _layoutPositionManaged; }
+    void setLayoutPositionManaged(bool managed) { _layoutPositionManaged = managed; }
+
+    void bringToFront();
 
     // Bounds
     const math::FRectangle& getBounds() const { return _bounds; }
@@ -93,6 +112,8 @@ public:
     virtual bool onKeyDown(int keyCode);
     virtual bool onKeyUp(int keyCode);
     virtual bool onTextInput(wchar_t ch);
+
+    virtual UiCursorHint getCursorHint() const { return UiCursorHint::Default; }
 
     // Event propagation
     void addEventHandler(UIEventType type, std::function<void(UIEvent&)> handler);
@@ -119,6 +140,15 @@ public:
     virtual void render(IRenderBackend& renderer);
     virtual void renderChildren(IRenderBackend& renderer);
 
+    void markBoundsDirty() {
+        _boundsDirty = true;
+        for (Widget* child : _children) {
+            if (child) {
+                child->markBoundsDirty();
+            }
+        }
+    }
+
 protected:
     // Override in subclasses to implement specific rendering
     virtual void onRender(IRenderBackend& renderer) {}
@@ -133,6 +163,7 @@ protected:
     std::vector<Widget*> _children;
 
     bool _visible;
+    bool _layoutPositionManaged = true;
     std::string _styleId;
     std::string _id;
 

@@ -14,3 +14,4 @@
 #include "AYLayoutLoader.h"
 #include "AYI18n.h"
 #include "AYWidgetSerializer.h"
+#include "AYUIManager.h"

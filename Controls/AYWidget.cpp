@@ -49,6 +49,21 @@ void Widget::detachFromParent() {
     }
 }
 
+void Widget::bringToFront() {
+    if (_parent == nullptr) {
+        return;
+    }
+
+    std::vector<Widget*>& siblings = _parent->_children;
+    for (auto it = siblings.begin(); it != siblings.end(); ++it) {
+        if (*it == this) {
+            siblings.erase(it);
+            siblings.push_back(this);
+            return;
+        }
+    }
+}
+
 math::FVector2 Widget::getWorldPosition() const {
     if (_parent) {
         return _parent->getWorldBounds().getMin() + _position;

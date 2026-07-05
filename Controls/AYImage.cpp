@@ -1,4 +1,5 @@
 #include "AYImage.h"
+#include "AYIRenderBackend.h"
 
 namespace ayt::ui {
 
@@ -10,6 +11,27 @@ Image::Image()
 }
 
 Image::~Image() {
+}
+
+void Image::performLayout() {
+    // Leaf widget: size/position come from the parent layout pass.
+}
+
+void Image::onRender(IRenderBackend& renderer) {
+    if (_size.x <= 0.0f || _size.y <= 0.0f) {
+        return;
+    }
+
+    math::FRectangle bounds = getWorldBounds();
+    if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
+        return;
+    }
+
+    if (_textureHandle != nullptr) {
+        renderer.drawRect(bounds, _textureHandle, _uv);
+    } else {
+        renderer.drawRect(bounds, _color);
+    }
 }
 
 } // namespace ayt::ui

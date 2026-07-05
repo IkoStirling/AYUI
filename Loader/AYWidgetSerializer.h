@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ayt::ui {
+namespace ayt { namespace ui {
 using json = nlohmann::json;
 
 class WidgetSerializer {
@@ -18,4 +18,4 @@ private:
     static void serializeWidgetToJson(Widget* widget, json& j);
 };
 
-} // namespace ayt::ui
+} } // namespace ayt::ui

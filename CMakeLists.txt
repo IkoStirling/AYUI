@@ -9,7 +9,9 @@ set(SRC_FILES
     Controls/AYTextLabel.cpp
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
+    Controls/AYUIManager.cpp
     Layout/AYBox.cpp
+    Layout/AYSplitterHandle.cpp
     Loader/AYLayoutLoader.cpp
     Loader/AYWidgetFactory.cpp
     Loader/AYWidgetSerializer.cpp
@@ -25,8 +27,10 @@ set(HEAD_FILES
     Controls/AYImage.h
     Controls/AYTextLabel.h
     Controls/AYWidget.h
+    Controls/AYUIManager.h
     Controls/AYWindow.h
     Layout/AYBox.h
+    Layout/AYSplitterHandle.h
     Loader/AYLayoutLoader.h
     Loader/AYWidgetFactory.h
     Loader/AYWidgetSerializer.h
@@ -35,7 +39,9 @@ set(HEAD_FILES
     i18n/AYI18n.h
 )
 
-find_package(nlohmann_json REQUIRED)
+set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
+
+find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
 target_include_directories(${MODULE_NAME} PUBLIC
@@ -46,9 +52,15 @@ target_include_directories(${MODULE_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Loader
     ${CMAKE_CURRENT_SOURCE_DIR}/Style
     ${CMAKE_CURRENT_SOURCE_DIR}/i18n
+    ${AYUI_NLOHMANN_DIR}
 )
 
-target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont PRIVATE nlohmann_json::nlohmann_json)
+if(nlohmann_json_FOUND)
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont PRIVATE nlohmann_json::nlohmann_json)
+else()
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont)
+    message(STATUS "AYUI: using bundled nlohmann/json from ${AYUI_NLOHMANN_DIR}")
+endif()
 
 enable_testing()
 add_subdirectory(unittest)

@@ -1,5 +1,8 @@
 # AYUI v1 架构方案
 
+> **Superseded for planning purposes by [`design.md`](design.md) (v1.3, 2026-07).**  
+> This document remains as v1.2 reference; paths mentioning `AliyatRenderer` and unchecked phases may be outdated.
+
 **版本：** v1.2
 **日期：** 2026/05/28
 **状态：** 核心完成，序列化/性能测试已添加

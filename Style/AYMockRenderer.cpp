@@ -102,16 +102,7 @@ void MockRenderer::drawRect(const math::FRectangle& bounds, const BorderStyle& b
 }
 
 void MockRenderer::drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius) {
-    AYUNREFERENCED_PARAM(cornerRadius);
-    AYUNREFERENCED_PARAM(borderWidth);
-    DrawCall dc;
-    dc.type = DrawCall::Rect;
-    dc.bounds = bounds;
-    dc.color = color;
-    dc.texture = nullptr;
-    _drawCalls.push_back(dc);
-    _triangleCount += 2;
-    _vertexCount += 6;
+    IRenderBackend::drawBorderRect(bounds, color, borderWidth, cornerRadius);
 }
 
 void MockRenderer::drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) {

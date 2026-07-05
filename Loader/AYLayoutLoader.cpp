@@ -5,11 +5,71 @@
 #include "AYTextLabel.h"
 #include "AYWindow.h"
 #include "AYBox.h"
+#include "AYSplitterHandle.h"
+#include "AYImage.h"
 
 #include <fstream>
 #include <sstream>
+#include <cstdio>
+
+#if defined(_DEBUG) && defined(_MSC_VER)
+#  include <crtdbg.h>
+
+namespace {
+
+void loaderHeapCheck(const char* label)
+{
+    if (!_CrtCheckMemory()) {
+        std::fprintf(stderr, "[LoaderHeapCheck] FAIL at %s\n", label);
+        _CrtDbgBreak();
+    } else {
+        std::fprintf(stderr, "[LoaderHeapCheck] OK at %s\n", label);
+    }
+}
+
+void loaderHeapCheckId(const char* prefix, const char* parentId, const char* childId)
+{
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "%s_%s_%s", prefix, parentId, childId);
+    loaderHeapCheck(buf);
+}
+
+} // namespace
+#  define LOADER_HEAP_CHECK(label) loaderHeapCheck(label)
+#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId)                                       \
+      loaderHeapCheckId("after_attach", (parentId), (childId))
+#else
+#  define LOADER_HEAP_CHECK(label) ((void)0)
+#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId) ((void)0)
+#endif
 
 namespace ayt::ui {
+
+namespace {
+
+BoxSlotLimits parseHBoxSlotLimits(const json& childJson, float& outWidth)
+{
+    BoxSlotLimits limits;
+    outWidth = 0.0f;
+    if (childJson.contains("size") && childJson["size"].is_object()) {
+        outWidth = childJson["size"].value("w", 0.0f);
+    }
+    if (!childJson.contains("slot") || !childJson["slot"].is_object()) {
+        return limits;
+    }
+
+    const json& slot = childJson["slot"];
+    if (slot.contains("width")) {
+        outWidth = slot["width"].get<float>();
+    }
+    limits.minWidth = slot.value("minWidth", 0.0f);
+    limits.maxWidth = slot.value("maxWidth", 0.0f);
+    limits.minWidthPercent = slot.value("minWidthPercent", 0.0f);
+    limits.maxWidthPercent = slot.value("maxWidthPercent", 0.0f);
+    return limits;
+}
+
+} // namespace
 
 UILayoutLoader::UILayoutLoader()
     : _factory(&WidgetFactory::get())
@@ -42,10 +102,13 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
 
     try {
         json j = json::parse(jsonStr);
-        return buildWidgetTree(j);
+        LOADER_HEAP_CHECK("after_json_parse");
+        Widget* root = buildWidgetTree(j);
+        LOADER_HEAP_CHECK("after_build_widget_tree");
+        return root;
     }
     catch (const std::exception& e) {
-        //AYLOG_WARN("UILayoutLoader parse error: {}", e.what());
+        std::fprintf(stderr, "[UILayoutLoader] parse error: %s\n", e.what());
         return nullptr;
     }
 }
@@ -87,6 +150,10 @@ void UILayoutLoader::clearEventBindings() {
     _eventBindings.clear();
 }
 
+void UILayoutLoader::clearWidgetRegistry() {
+    _widgetsById.clear();
+}
+
 Widget* UILayoutLoader::findWidgetById(const std::string& id) const {
     auto it = _widgetsById.find(id);
     return (it != _widgetsById.end()) ? it->second : nullptr;
@@ -96,17 +163,23 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     if (!j.is_object()) return nullptr;
 
     std::string type = j.value("type", "Widget");
+    std::string id = j.value("id", "");
 
     Widget* widget = _factory->create(type);
-    if (!widget) {
-        widget = new Widget();
+    if (widget == nullptr) {
+        std::fprintf(stderr, "[UILayoutLoader] missing factory creator for type='%s'\n",
+                     type.c_str());
+        return nullptr;
     }
+    loaderHeapCheckId("after_factory_create", type.c_str(),
+                      id.empty() ? "anonymous" : id.c_str());
 
     // ID
-    std::string id = j.value("id", "");
     if (!id.empty()) {
         widget->setId(id);
         _widgetsById[id] = widget;
+        std::fprintf(stderr, "[UILayoutLoader] built widget type='%s' id='%s'\n", type.c_str(),
+                     id.c_str());
     }
 
     // Position
@@ -121,6 +194,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         float w = j["size"].value("w", 100.0f);
         float h = j["size"].value("h", 50.0f);
         widget->setSize(math::FVector2(w, h));
+        LOADER_HEAP_CHECK("after_set_size");
     }
 
     // Visible
@@ -132,6 +206,57 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         widget->setStyleId(style);
     }
 
+    if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
+        if (j.contains("spacing")) {
+            vbox->setSpacing(j["spacing"].get<float>());
+        }
+        if (j.contains("padding") && j["padding"].is_object()) {
+            vbox->setPadding(
+                j["padding"].value("left", 4.0f),
+                j["padding"].value("top", 4.0f),
+                j["padding"].value("right", 4.0f),
+                j["padding"].value("bottom", 4.0f));
+        }
+    } else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
+        if (j.contains("spacing")) {
+            hbox->setSpacing(j["spacing"].get<float>());
+        }
+        if (j.contains("padding") && j["padding"].is_object()) {
+            hbox->setPadding(
+                j["padding"].value("left", 4.0f),
+                j["padding"].value("top", 4.0f),
+                j["padding"].value("right", 4.0f),
+                j["padding"].value("bottom", 4.0f));
+        }
+    }
+
+    if (Image* image = dynamic_cast<Image*>(widget)) {
+        if (j.contains("color") && j["color"].is_array() && j["color"].size() >= 4) {
+            const auto& c = j["color"];
+            image->setColor(math::FVector4(
+                c[0].get<float>(),
+                c[1].get<float>(),
+                c[2].get<float>(),
+                c[3].get<float>()));
+        }
+    }
+
+    if (Window* window = dynamic_cast<Window*>(widget)) {
+        if (j.contains("movable")) {
+            window->setMovable(j["movable"].get<bool>());
+        }
+        if (j.contains("resizable")) {
+            window->setResizable(j["resizable"].get<bool>());
+        }
+        if (j.contains("titleBarHeight")) {
+            window->setTitleBarHeight(j["titleBarHeight"].get<float>());
+        }
+        if (j.contains("minSize") && j["minSize"].is_object()) {
+            window->setMinSize(j["minSize"].value("w", 120.0f),
+                               j["minSize"].value("h", 80.0f));
+        }
+    }
+
     // Text with i18n support
     std::string text = j.value("text", "");
     if (!text.empty()) {
@@ -140,15 +265,21 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             text = std::string(wtext.begin(), wtext.end());
         }
 
-        if (Button* button = dynamic_cast<Button*>(widget)) {
-            button->setText(std::wstring(text.begin(), text.end()));
+        const std::wstring wtext(text.begin(), text.end());
+        if (type == "Button") {
+            if (Button* button = dynamic_cast<Button*>(widget)) {
+                button->setText(wtext);
+            }
+        } else if (type == "TextLabel") {
+            if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
+                label->setText(wtext);
+            }
+        } else if (type == "Window") {
+            if (Window* window = dynamic_cast<Window*>(widget)) {
+                window->setTitle(wtext);
+            }
         }
-        if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
-            label->setText(std::wstring(text.begin(), text.end()));
-        }
-        if (Window* window = dynamic_cast<Window*>(widget)) {
-            window->setTitle(std::wstring(text.begin(), text.end()));
-        }
+        LOADER_HEAP_CHECK("after_set_text");
     }
 
     // onClick binding
@@ -165,12 +296,47 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
 
     // Children
     if (j.contains("children") && j["children"].is_array()) {
-        for (const auto& childJson : j["children"]) {
-            Widget* child = buildWidgetTree(childJson);
-            if (child) {
-                widget->addChild(child);
+        const char* parentId = id.empty() ? type.c_str() : id.c_str();
+        if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
+            for (const auto& childJson : j["children"]) {
+                Widget* child = buildWidgetTree(childJson);
+                if (!child) continue;
+                float slotHeight = 0.0f;
+                if (childJson.contains("size") && childJson["size"].is_object()) {
+                    slotHeight = childJson["size"].value("h", 0.0f);
+                }
+                vbox->addWidget(child, slotHeight);
+                LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
+            }
+        } else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
+            for (const auto& childJson : j["children"]) {
+                Widget* child = buildWidgetTree(childJson);
+                if (!child) continue;
+                if (dynamic_cast<SplitterHandle*>(child) != nullptr) {
+                    hbox->addWidget(child, SplitterHandle::kDefaultWidth);
+                } else {
+                    float slotWidth = 0.0f;
+                    const BoxSlotLimits limits = parseHBoxSlotLimits(childJson, slotWidth);
+                    hbox->addWidget(child, slotWidth, limits);
+                }
+                LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
+            }
+            hbox->rebindSplitters();
+        } else {
+            for (const auto& childJson : j["children"]) {
+                Widget* child = buildWidgetTree(childJson);
+                if (child) {
+                    widget->addChild(child);
+                    LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
+                }
             }
         }
+    }
+
+    if (!id.empty()) {
+        char buf[80];
+        std::snprintf(buf, sizeof(buf), "after_build_%s", id.c_str());
+        LOADER_HEAP_CHECK(buf);
     }
 
     return widget;

@@ -1,8 +1,11 @@
 #pragma once
 
 #include "AYWidget.h"
+#include "AYBoxSlotLimits.h"
 
 namespace ayt::ui {
+
+class SplitterHandle;
 
 class BoxBase : public CompoundWidget {
 public:
@@ -36,6 +39,7 @@ public:
     void insertWidget(int index, Widget* widget, float height = 0.0f);
 
     void layoutChildren() override;
+    void performLayout() override;
 
 private:
     struct Slot {
@@ -47,19 +51,48 @@ private:
 
 class HBox : public BoxBase {
 public:
+    static constexpr float kMinPanelWidth = 120.0f;
+
     HBox();
     virtual ~HBox();
 
-    void addWidget(Widget* widget, float width = 0.0f);
-    void insertWidget(int index, Widget* widget, float width = 0.0f);
+    void addWidget(Widget* widget, float width = 0.0f, const BoxSlotLimits& limits = {});
+    void insertWidget(int index, Widget* widget, float width = 0.0f, const BoxSlotLimits& limits = {});
+
+    void setSlotLimits(int slotIndex, const BoxSlotLimits& limits);
+
+    float slotWidth(int slotIndex) const;
+
+    void applySplitterDrag(int leftPanelSlot, int rightPanelSlot, float mouseWorldX,
+                           float dragStartMouseX, float dragStartPrimaryWidth, bool adjustLeft);
+
+    void rebindSplitters();
+
+    Widget* hitTest(const math::FVector2& worldPos) override;
+    void render(IRenderBackend& renderer) override;
 
     void layoutChildren() override;
+    void performLayout() override;
 
 private:
     struct Slot {
-        Widget* widget;
-        float width;
+        Widget* widget = nullptr;
+        float width = 0.0f;
+        BoxSlotLimits limits;
     };
+
+    bool isSplitterSlot(int slotIndex) const;
+    int panelSlotBefore(int slotIndex) const;
+    int panelSlotAfter(int slotIndex) const;
+    void bindSplitter(SplitterHandle* splitter, int splitterSlotIndex);
+
+    float contentWidth() const;
+    float resolveMinSlotWidth(const Slot& slot) const;
+    float resolveMaxSlotWidth(const Slot& slot) const;
+    float minSlotWidth(int slotIndex) const;
+    float maxSlotWidth(int slotIndex) const;
+    float clampSlotWidth(int slotIndex, float width) const;
+
     std::vector<Slot> _slots;
 };
 

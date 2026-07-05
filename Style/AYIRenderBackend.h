@@ -3,6 +3,7 @@
 #include "AYMathTypes.h"
 #include "AYMathUtils.h"
 #include "AYFont.h"
+#include <algorithm>
 #include <string>
 
 namespace ayt::ui {
@@ -994,9 +995,45 @@ inline void IRenderBackend::drawRect(const math::FRectangle& bounds, const Borde
 }
 
 inline void IRenderBackend::drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius) {
-    AYUNREFERENCED_PARAM(borderWidth);
-    AYUNREFERENCED_PARAM(cornerRadius);
-    drawRect(bounds, color);
+    if (borderWidth <= 0.0f) {
+        return;
+    }
+
+    const float minX = bounds.minX;
+    const float minY = bounds.minY;
+    const float maxX = bounds.maxX;
+    const float maxY = bounds.maxY;
+    const float width  = maxX - minX;
+    const float height = maxY - minY;
+
+    if (width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+
+    const float w = std::min(borderWidth, std::min(width, height) * 0.5f);
+    if (w <= 0.0f) {
+        return;
+    }
+
+    if (width <= w * 2.0f || height <= w * 2.0f) {
+        drawRect(bounds, color);
+        return;
+    }
+
+    const float maxRadius = std::min(width, height) * 0.5f;
+    const float r         = std::max(0.0f, std::min(cornerRadius, maxRadius - w));
+
+    drawRect(math::FRectangle(minX + r, minY, maxX - r, minY + w), color);
+    drawRect(math::FRectangle(minX + r, maxY - w, maxX - r, maxY), color);
+    drawRect(math::FRectangle(minX, minY + r, minX + w, maxY - r), color);
+    drawRect(math::FRectangle(maxX - w, minY + r, maxX, maxY - r), color);
+
+    if (r > 0.0f) {
+        drawRect(math::FRectangle(minX, minY, minX + r, minY + r), color);
+        drawRect(math::FRectangle(maxX - r, minY, maxX, minY + r), color);
+        drawRect(math::FRectangle(minX, maxY - r, minX + r, maxY), color);
+        drawRect(math::FRectangle(maxX - r, maxY - r, maxX, maxY), color);
+    }
 }
 
 inline void IRenderBackend::drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) {

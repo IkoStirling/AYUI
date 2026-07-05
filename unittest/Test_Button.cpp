@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYButton.h"
+#include "AYMockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -98,6 +99,25 @@ TEST_CASE(button_hover_enter_leave_enter) {
     UIMouseEvent reenter(FVector2(50.0f, 16.0f), 0);
     CHECK(button.onMouseMove(reenter));
     CHECK(button.getState() == ButtonState::Hovered);
+}
+
+TEST_CASE(button_render_preserves_hover_fill) {
+    MockRenderer renderer;
+    Button button;
+    button.setSize(FVector2(100.0f, 32.0f));
+    button.setText(L"OK");
+
+    UIMouseEvent hover(FVector2(50.0f, 16.0f), 0);
+    button.onMouseMove(hover);
+    button.onRender(renderer);
+
+    CHECK(renderer.getDrawCalls().size() >= 5u);
+
+    const MockRenderer::DrawCall& fill = renderer.getDrawCalls()[0];
+    CHECK(fill.type == MockRenderer::DrawCall::Rect);
+    CHECK(fill.color.x == 0.36f);
+    CHECK(fill.color.y == 0.38f);
+    CHECK(fill.color.z == 0.42f);
 }
 
 TEST_SUITE_END

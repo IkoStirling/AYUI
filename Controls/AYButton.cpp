@@ -1,4 +1,5 @@
 #include "AYButton.h"
+#include "AYIRenderBackend.h"
 #include "AYMathUtils.h"
 
 namespace ayt::ui {
@@ -86,6 +87,41 @@ void Button::onMouseLeave() {
     _isPressed = false;
     if (_state == ButtonState::Hovered || _state == ButtonState::Pressed) {
         _state = ButtonState::Normal;
+    }
+}
+
+UiCursorHint Button::getCursorHint() const {
+    if (_enabled && _isMouseOver) {
+        return UiCursorHint::Hand;
+    }
+    return UiCursorHint::Default;
+}
+
+void Button::onRender(IRenderBackend& renderer) {
+    math::FRectangle bounds = getWorldBounds();
+    math::FVector4 bg(0.28f, 0.28f, 0.30f, 1.0f);
+
+    switch (_state) {
+    case ButtonState::Hovered:
+        bg = math::FVector4(0.36f, 0.38f, 0.42f, 1.0f);
+        break;
+    case ButtonState::Pressed:
+        bg = math::FVector4(0.18f, 0.45f, 0.78f, 1.0f);
+        break;
+    case ButtonState::Disabled:
+        bg = math::FVector4(0.20f, 0.20f, 0.20f, 1.0f);
+        break;
+    default:
+        break;
+    }
+
+    renderer.drawRect(bounds, bg);
+    renderer.drawBorderRect(bounds, math::FVector4(0.12f, 0.12f, 0.12f, 1.0f), 1.0f, 2.0f);
+
+    if (!_text.empty()) {
+        math::FVector4 textColor = _enabled ? math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)
+                                          : math::FVector4(0.55f, 0.55f, 0.55f, 1.0f);
+        renderer.drawText(getTextBounds(), _text, 14, textColor);
     }
 }
 

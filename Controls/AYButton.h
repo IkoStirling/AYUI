@@ -32,6 +32,8 @@ public:
     bool onMouseButtonUp(const UIMouseEvent& e) override;
     void onMouseLeave() override;
 
+    UiCursorHint getCursorHint() const override;
+
     void setPadding(float left, float top, float right, float bottom);
 
 protected:
@@ -45,6 +47,8 @@ protected:
     bool _isPressed;
 
     math::FRectangle getTextBounds() const;
+
+    void onRender(IRenderBackend& renderer) override;
 };
 
 } // namespace ayt::ui

@@ -4,6 +4,7 @@
 #include "AYImage.h"
 #include "AYWindow.h"
 #include "AYBox.h"
+#include "AYSplitterHandle.h"
 
 namespace ayt::ui {
 
@@ -37,11 +38,12 @@ struct DefaultWidgetRegistrar {
     DefaultWidgetRegistrar() {
         REGISTER_WIDGET("Widget", Widget);
         REGISTER_WIDGET("Button", Button);
-        REGISTER_WIDGET("TextLabel", TextLabel);
+        WidgetFactory::get().registerCreator("TextLabel", createTextLabelWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("VBox", VBox);
         REGISTER_WIDGET("HBox", HBox);
+        REGISTER_WIDGET("SplitterHandle", SplitterHandle);
     }
 };
 

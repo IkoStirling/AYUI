@@ -28,14 +28,14 @@
 ## 架构决策（v1）
 
 ### 配置系统
-- JSON 配置格式
-- 解析库：nlohmann/json（header-only，位于 thirdparty/nlohmann/）
-- UI 配置使用 JSON 文件，可热重载
+- JSON 配置格式（**复用 `UILayoutLoader`**，见 `design.md` §4）
+- 解析库：nlohmann/json（CMake `find_package`）
+- UI 布局热重载：扩展 `UILayoutLoader::isReloadNeeded`（U1）；v1 不依赖 AYConfig
 
 ### 事件系统
 - 双层事件架构：内部冒泡 + 外部桥接
-- EventBridge 负责引擎事件与 UI 事件的转换
-- AYUI 内部事件系统稳定，外部引擎事件可能演化
+- 内部事件：**`UIEvent` / `UIEventType`**（`AYWidget.h`）；`Events/AYEvent.h` 待删除
+- EventBridge（U3）负责引擎输入 → `UIEvent`，见 `design.md` §5
 
 ### 国际化（i18n）
 - 文本 key 格式：`ui.{section}.{key}`
@@ -90,4 +90,5 @@ cmake --build build --target AYMath_unittest
 
 ## 参考文档
 
-- [AYUI-v1-Design.md](AYUI-v1-Design.md) - 架构设计文档
+- [AYUI-v1-Design.md](AYUI-v1-Design.md) - 架构设计文档（v1.2 归档）
+- [design.md](design.md) - **当前权威设计**（v1.3）

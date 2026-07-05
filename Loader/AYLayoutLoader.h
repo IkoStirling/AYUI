@@ -33,6 +33,7 @@ public:
     void bindEvent(const std::string& widgetId, const std::string& eventType,
                    std::function<void()> handler);
     void clearEventBindings();
+    void clearWidgetRegistry();
 
     Widget* findWidgetById(const std::string& id) const;
 

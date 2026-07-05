@@ -18,6 +18,10 @@ public:
     void setUV(const math::FRectangle& uv) { _uv = uv; }
     const math::FRectangle& getUV() const { return _uv; }
 
+    void performLayout() override;
+
+    void onRender(IRenderBackend& renderer) override;
+
 protected:
     void* _textureHandle;
     math::FVector4 _color;
