@@ -1,31 +1,13 @@
 #include "AYUIManager.h"
 #include "AYBox.h"
 #include "AYButton.h"
+#include "AYImage.h"
+#include "AYTextLabel.h"
+#include "AYWindow.h"
 #include "AYMathUtils.h"
+#include "AYWidgetFactory.h"
 
-#include <cstdio>
 #include <vector>
-
-#if defined(_DEBUG) && defined(_MSC_VER)
-#  include <crtdbg.h>
-
-namespace {
-
-void uiHeapCheck(const char* label)
-{
-    if (!_CrtCheckMemory()) {
-        std::fprintf(stderr, "[UIHeapCheck] FAIL at %s\n", label);
-        _CrtDbgBreak();
-    } else {
-        std::fprintf(stderr, "[UIHeapCheck] OK at %s\n", label);
-    }
-}
-
-} // namespace
-#  define UI_HEAP_CHECK(label) uiHeapCheck(label)
-#else
-#  define UI_HEAP_CHECK(label) ((void)0)
-#endif
 
 namespace ayt::ui {
 
@@ -70,7 +52,24 @@ UIManager& UIManager::get() {
     return instance;
 }
 
+// Register the four built-in widget factories on first use. The
+// `AYTextLabel.cpp` and (formerly) `AYButton.cpp` self-registrars
+// in anonymous namespaces are vulnerable to MSVC COMDAT stripping
+// when the executable's link-order doesn't pull in the registrar's
+// TU as a kept symbol — leading to `[UILayoutLoader] missing
+// factory creator` warnings at runtime. Centralizing the call
+// here (which is the universal `initialize` entry point) makes the
+// factories robust to linker decisions.
+static void ensureBuiltInFactoriesRegistered() {
+    WidgetFactory& f = WidgetFactory::get();
+    if (!f.isRegistered("Button"))    f.registerCreator("Button",    []() { return new Button(); });
+    if (!f.isRegistered("Image"))     f.registerCreator("Image",     []() { return new Image(); });
+    if (!f.isRegistered("TextLabel")) f.registerCreator("TextLabel", []() { return new TextLabel(); });
+    if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
+}
+
 void UIManager::initialize(IRenderBackend* backend) {
+    ensureBuiltInFactoriesRegistered();
     _backend = backend;
 }
 
@@ -95,37 +94,29 @@ void UIManager::shutdown() {
 }
 
 bool UIManager::loadLayout(const std::string& path) {
-    UI_HEAP_CHECK("loadLayout_begin");
     delete _root;
     _root = nullptr;
-    UI_HEAP_CHECK("loadLayout_after_delete_root");
 
     _root = _loader.loadFromFile(path);
-    UI_HEAP_CHECK("loadLayout_after_load_from_file");
     if (_root) {
         _root->setPosition(math::FVector2(0.0f, 0.0f));
         if (_clientWidth > 0.0f && _clientHeight > 0.0f) {
             _root->setSize(math::FVector2(_clientWidth, _clientHeight));
-            UI_HEAP_CHECK("loadLayout_after_set_root_size");
             layout();
-            UI_HEAP_CHECK("loadLayout_after_layout");
         }
     }
     return _root != nullptr;
 }
 
 bool UIManager::loadFromString(const std::string& json) {
-    UI_HEAP_CHECK("loadFromString_begin");
     delete _root;
     _root = nullptr;
     _root = _loader.loadFromString(json);
-    UI_HEAP_CHECK("loadFromString_after_parse");
     if (_root) {
         _root->setPosition(math::FVector2(0.0f, 0.0f));
         if (_clientWidth > 0.0f && _clientHeight > 0.0f) {
             _root->setSize(math::FVector2(_clientWidth, _clientHeight));
             layout();
-            UI_HEAP_CHECK("loadFromString_after_layout");
         }
     }
     return _root != nullptr;
@@ -221,6 +212,13 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     math::FVector2 pos(x, y);
     Widget* target = _capturedWidget != nullptr ? _capturedWidget : pickWidgetAt(_root, pos);
     _capturedWidget = nullptr;
+    // Re-evaluate the hovered widget now that the capture is gone —
+    // otherwise `_hoverWidget` still points at the widget we were
+    // dragging on (e.g. a splitter handle) and its cursor hint leaks
+    // past the mouse-up. Trigger the standard hover re-evaluation at
+    // the release position so the cursor hint matches the widget
+    // actually under the pointer.
+    updateHoverWidget(_hoverWidget, pickWidgetAt(_root, pos));
     if (target != nullptr) {
         return target->onMouseButtonUp(UIMouseEvent(pos, button));
     }
