@@ -798,6 +798,50 @@ public:
     // =============================================================================
 
     /*
+       @name: addColoredQuad
+       @func: Append a flat colored quad to the active batch.
+       @param bounds: quad bounds in screen space
+       @param color:  RGBA tint
+       @return true if the quad was retained in a backend-side batch;
+               false if the backend has no batching and the default
+               implementation fell back to immediate drawRect.
+       @note: Backends that implement batching override this and return true;
+               default implementation just calls drawRect and returns false.
+               UIManager::render calls flushBatches() once at end of frame.
+    */
+    virtual bool addColoredQuad(const math::FRectangle& bounds, const math::FVector4& color) {
+        drawRect(bounds, color);
+        return false;
+    }
+
+    /*
+       @name: addTexturedQuad
+       @func: Append a flat textured quad to the active batch.
+       @param bounds:        quad bounds in screen space
+       @param textureHandle: backend texture handle
+       @param uv:            uv region inside the texture
+       @param tint:          per-quad RGBA tint (default white)
+       @return true if the quad was retained in a backend-side batch;
+               false if the backend has no batching and the default
+               implementation fell back to immediate drawRect.
+    */
+    virtual bool addTexturedQuad(const math::FRectangle& bounds, void* textureHandle,
+                                 const math::FRectangle& uv,
+                                 const math::FVector4& tint = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)) {
+        AYUNREFERENCED_PARAM(tint);
+        drawRect(bounds, textureHandle, uv);
+        return false;
+    }
+
+    /*
+       @name: flushBatches
+       @func: Submit all batched quads accumulated since the previous flush.
+       @note: Called by UIManager::render once before endCanvas(). Default
+               implementation is a no-op for backends without batching.
+    */
+    virtual void flushBatches() {}
+
+    /*
        @name: flush
        @func: 刷新渲染队列 - 强制提交所有待处理的渲染命令
        @note: 通常自动在帧结束时调用，也可手动调用以确保渲染顺序

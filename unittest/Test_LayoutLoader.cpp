@@ -5,6 +5,7 @@
 #include "AYTextLabel.h"
 #include "AYWindow.h"
 #include "AYBox.h"
+#include "AYWidget.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -139,6 +140,46 @@ TEST_CASE(test_layout_loader_reload_api) {
     // Test reload returns nullptr when no file path
     Widget* reloaded = loader.reload("test");
     CHECK(reloaded == nullptr);
+}
+
+TEST_CASE(test_layout_loader_partial_height_fills_parent_width) {
+    UILayoutLoader loader;
+
+    const char* json = R"({
+        "type": "VBox",
+        "id": "root",
+        "size": { "w": 640, "h": 480 },
+        "children": [
+            {
+                "type": "HBox",
+                "id": "toolbar",
+                "size": { "h": 44 },
+                "spacing": 8,
+                "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+                "children": [
+                    { "type": "Button", "id": "btn_play",  "size": { "w": 72, "h": 32 } },
+                    { "type": "Button", "id": "btn_pause", "size": { "w": 72, "h": 32 } }
+                ]
+            }
+        ]
+    })";
+
+    Widget* root = loader.loadFromString(json);
+    CHECK(root != nullptr);
+    root->performLayout();
+
+    auto* toolbar = dynamic_cast<HBox*>(loader.findWidgetById("toolbar"));
+    CHECK(toolbar != nullptr);
+    CHECK(toolbar->isLayoutSizeManaged());
+    CHECK_FLOAT_EQ(toolbar->getHeight(), 44.0f, 1e-5f);
+    // VBox padding 4 + toolbar stretches to client width (640 - 8).
+    CHECK_FLOAT_EQ(toolbar->getWidth(), 632.0f, 1e-5f);
+
+    Widget* btnPause = loader.findWidgetById("btn_pause");
+    CHECK(btnPause != nullptr);
+    CHECK(toolbar->hitTest(FVector2(130.0f, 22.0f)) == btnPause);
+
+    destroyWidgetTree(root);
 }
 
 TEST_SUITE_END

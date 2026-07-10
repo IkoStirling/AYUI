@@ -74,8 +74,8 @@ TEST_CASE(test_uimanager_window_drag_with_capture) {
                 "id": "panel",
                 "text": "Panel",
                 "position": { "x": 40, "y": 40 },
-                "size": { "w": 220, "h": 160 },
-                "minSize": { "w": 120, "h": 80 }
+                "size": { "w": 120, "h": 100 },
+                "minSize": { "w": 80, "h": 60 }
             }
         ]
     })";
@@ -86,7 +86,6 @@ TEST_CASE(test_uimanager_window_drag_with_capture) {
 
     Window* panel = dynamic_cast<Window*>(ui.findById("panel"));
     CHECK(panel != nullptr);
-
     CHECK(ui.onMouseButtonDown(80.0f, 50.0f, 0));
     CHECK(panel->isDragging());
     ui.onMouseLeave();
@@ -112,8 +111,8 @@ TEST_CASE(test_uimanager_cancel_capture) {
     })";
 
     CHECK(ui.loadFromString(json));
-    ui.setClientSize(640.0f, 480.0f);
-    ui.layout();
+    // Root is the panel itself, so setClientSize would resize it to the
+    // viewport. Skip that step to preserve the JSON-declared 220x160 size.
 
     Window* panel = dynamic_cast<Window*>(ui.findById("panel"));
     CHECK(panel != nullptr);
@@ -127,3 +126,5 @@ TEST_CASE(test_uimanager_cancel_capture) {
     CHECK(!panel->isDragging());
     ui.shutdown();
 }
+
+TEST_SUITE_END

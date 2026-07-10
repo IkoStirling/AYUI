@@ -14,11 +14,14 @@ Widget::Widget()
 }
 
 Widget::~Widget() {
-    // Prevent children from accessing this during destruction
+    // Phase UI-OWN-1: Widget never owns its children. The parent detaches
+    // child _parent pointers here so that any subsequent access from the
+    // child side (e.g. during child destruction) finds a null parent and
+    // skips back-pointers into freed memory. Children themselves are
+    // destroyed by the owning container via destroyWidgetTree().
     for (Widget* child : _children) {
         if (child) {
             child->_parent = nullptr;
-            delete child;
         }
     }
     _children.clear();
@@ -30,6 +33,13 @@ void Widget::addChild(Widget* child) {
         child->_parent = this;
         _children.push_back(child);
     }
+}
+
+void Widget::addChildExternal(Widget* child) {
+    // Reference-only attach, identical to addChild today. Kept as a separate
+    // name so callers (tests, stacks) can document intent. Lifetime of the
+    // child remains the caller's responsibility.
+    addChild(child);
 }
 
 void Widget::removeChild(Widget* child) {
@@ -81,7 +91,15 @@ void Widget::updateWorldBounds() {
 }
 
 math::FRectangle Widget::getWorldBounds() const {
+    // Lazy propagate: walk up the parent chain. If any ancestor is dirty,
+    // we need to recompute our own bounds too — because getWorldPosition
+    // depends on the parent's world position. This avoids the need to
+    // pre-emptively dirty every descendant on every setter call.
     if (_boundsDirty) {
+        const_cast<Widget*>(this)->updateWorldBounds();
+        return _bounds;
+    }
+    if (_parent != nullptr && _parent->_boundsDirty) {
         const_cast<Widget*>(this)->updateWorldBounds();
     }
     return _bounds;

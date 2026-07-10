@@ -182,18 +182,47 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                      id.c_str());
     }
 
-    // Position
+    // Position — only axes present in JSON are applied. Pinning requires both
+    // x and y so a single-axis value (e.g. toolbar offset) does not block
+    // parent layout from managing the other axis.
     if (j.contains("position") && j["position"].is_object()) {
-        float x = j["position"].value("x", 0.0f);
-        float y = j["position"].value("y", 0.0f);
-        widget->setPosition(math::FVector2(x, y));
+        const json& posJson = j["position"];
+        const bool hasX = posJson.contains("x");
+        const bool hasY = posJson.contains("y");
+        math::FVector2 pos = widget->getPosition();
+        if (hasX) {
+            pos.x = posJson["x"].get<float>();
+        }
+        if (hasY) {
+            pos.y = posJson["y"].get<float>();
+        }
+        if (hasX || hasY) {
+            widget->setPosition(pos);
+        }
+        if (hasX && hasY) {
+            widget->setLayoutPositionManaged(false);
+        }
     }
 
-    // Size
+    // Size — same per-axis rule: `"size": { "h": 44 }` sets height only and
+    // leaves width layout-managed so VBox/HBox can stretch the child.
     if (j.contains("size") && j["size"].is_object()) {
-        float w = j["size"].value("w", 100.0f);
-        float h = j["size"].value("h", 50.0f);
-        widget->setSize(math::FVector2(w, h));
+        const json& sizeJson = j["size"];
+        const bool hasW = sizeJson.contains("w");
+        const bool hasH = sizeJson.contains("h");
+        math::FVector2 size = widget->getSize();
+        if (hasW) {
+            size.x = sizeJson["w"].get<float>();
+        }
+        if (hasH) {
+            size.y = sizeJson["h"].get<float>();
+        }
+        if (hasW || hasH) {
+            widget->setSize(size);
+        }
+        if (hasW && hasH) {
+            widget->setLayoutSizeManaged(false);
+        }
         LOADER_HEAP_CHECK("after_set_size");
     }
 

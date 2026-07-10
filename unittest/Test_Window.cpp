@@ -104,7 +104,7 @@ TEST_CASE(window_drag_moves_position) {
     Window window;
     window.setPosition(FVector2(100.0f, 80.0f));
     window.setSize(FVector2(240.0f, 180.0f));
-    root.addChild(&window);
+    root.addChildExternal(&window);
 
     UIMouseEvent down(FVector2(150.0f, 90.0f), 0);
     CHECK(window.onMouseButtonDown(down));
@@ -129,7 +129,7 @@ TEST_CASE(window_drag_clamped_to_parent_bounds) {
     window.setMinSize(120.0f, 80.0f);
     window.setPosition(FVector2(20.0f, 20.0f));
     window.setSize(FVector2(200.0f, 150.0f));
-    root.addChild(&window);
+    root.addChildExternal(&window);
 
     CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(40.0f, 30.0f), 0)));
     CHECK(window.onMouseMove(UIMouseEvent(FVector2(500.0f, 400.0f), 0)));
@@ -145,7 +145,7 @@ TEST_CASE(window_drag_keeps_min_visible_when_larger_than_parent) {
     window.setMinSize(160.0f, 120.0f);
     window.setPosition(FVector2(0.0f, 0.0f));
     window.setSize(FVector2(400.0f, 260.0f));
-    root.addChild(&window);
+    root.addChildExternal(&window);
 
     CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(20.0f, 10.0f), 0)));
     CHECK(window.onMouseMove(UIMouseEvent(FVector2(500.0f, 500.0f), 0)));

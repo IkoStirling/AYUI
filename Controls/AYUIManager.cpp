@@ -4,6 +4,7 @@
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
+#include "AYSplitterHandle.h"
 #include "AYMathUtils.h"
 #include "AYWidgetFactory.h"
 
@@ -12,19 +13,6 @@
 namespace ayt::ui {
 
 namespace {
-
-void clearWidgetHandlers(Widget* widget)
-{
-    if (widget == nullptr) {
-        return;
-    }
-    if (Button* button = dynamic_cast<Button*>(widget)) {
-        button->setOnClicked({});
-    }
-    for (Widget* child : widget->getChildren()) {
-        clearWidgetHandlers(child);
-    }
-}
 
 Widget* pickWidgetAt(Widget* widget, const math::FVector2& worldPos)
 {
@@ -66,11 +54,28 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("Image"))     f.registerCreator("Image",     []() { return new Image(); });
     if (!f.isRegistered("TextLabel")) f.registerCreator("TextLabel", []() { return new TextLabel(); });
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
+    // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
+    // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are
+    // vulnerable to COMDAT stripping when the executable's link-order
+    // doesn't pull in their registrar TU. Registering them centrally here
+    // (the universal initialize() entry point) mirrors the fix applied to
+    // Button/Image/TextLabel/Window and prevents the "[UILayoutLoader]
+    // missing factory creator" warning for layout widgets.
+    if (!f.isRegistered("VBox"))          f.registerCreator("VBox",          []() { return new VBox(); });
+    if (!f.isRegistered("HBox"))          f.registerCreator("HBox",          []() { return new HBox(); });
+    if (!f.isRegistered("SplitterHandle")) f.registerCreator("SplitterHandle", []() { return new SplitterHandle(); });
 }
 
 void UIManager::initialize(IRenderBackend* backend) {
     ensureBuiltInFactoriesRegistered();
     _backend = backend;
+    // Reset client size to "unset" so loadFromString doesn't auto-resize the
+    // root to the default 1280x720 viewport. Callers that want auto-sizing
+    // must call setClientSize() explicitly between loadFromString and the
+    // first render — that matches the documented flow.
+    _clientWidth = 0.0f;
+    _clientHeight = 0.0f;
+    _shutdown = false;
 }
 
 void UIManager::shutdown() {
@@ -79,14 +84,18 @@ void UIManager::shutdown() {
     }
     _shutdown = true;
 
-    _loader.clearEventBindings();
-    _loader.clearWidgetRegistry();
+    // Order matters: clear captures/registry BEFORE destroying the tree so
+    // any std::function holding a Widget* (or capturing by reference into a
+    // soon-to-be-freed widget) is released first.
     _capturedWidget = nullptr;
     _hoverWidget = nullptr;
+    _loader.clearEventBindings();
+    _loader.clearWidgetRegistry();
 
     if (_root != nullptr) {
-        clearWidgetHandlers(_root);
-        delete _root;
+        // destroyWidgetTree recurses through children before deleting the root,
+        // so factory-allocated widgets are released exactly once.
+        destroyWidgetTree(_root);
         _root = nullptr;
     }
 
@@ -94,12 +103,22 @@ void UIManager::shutdown() {
 }
 
 bool UIManager::loadLayout(const std::string& path) {
-    delete _root;
-    _root = nullptr;
+    if (_root != nullptr) {
+        destroyWidgetTree(_root);
+        _root = nullptr;
+    }
+    _lastLayoutWidth = -1.0f;
+    _lastLayoutHeight = -1.0f;
 
     _root = _loader.loadFromFile(path);
     if (_root) {
-        _root->setPosition(math::FVector2(0.0f, 0.0f));
+        // Force root to origin so children with absolute positions are
+        // measured relative to the viewport. Loader-supplied positions on
+        // the root itself are intentionally overridden — the root is
+        // always the top-left corner of the UI canvas.
+        if (_root->isLayoutPositionManaged()) {
+            _root->setPosition(math::FVector2(0.0f, 0.0f));
+        }
         if (_clientWidth > 0.0f && _clientHeight > 0.0f) {
             _root->setSize(math::FVector2(_clientWidth, _clientHeight));
             layout();
@@ -109,11 +128,17 @@ bool UIManager::loadLayout(const std::string& path) {
 }
 
 bool UIManager::loadFromString(const std::string& json) {
-    delete _root;
-    _root = nullptr;
+    if (_root != nullptr) {
+        destroyWidgetTree(_root);
+        _root = nullptr;
+    }
+    _lastLayoutWidth = -1.0f;
+    _lastLayoutHeight = -1.0f;
     _root = _loader.loadFromString(json);
     if (_root) {
-        _root->setPosition(math::FVector2(0.0f, 0.0f));
+        if (_root->isLayoutPositionManaged()) {
+            _root->setPosition(math::FVector2(0.0f, 0.0f));
+        }
         if (_clientWidth > 0.0f && _clientHeight > 0.0f) {
             _root->setSize(math::FVector2(_clientWidth, _clientHeight));
             layout();
@@ -133,23 +158,40 @@ void UIManager::setClientSize(float width, float height) {
     if (_root) {
         _root->setPosition(math::FVector2(0.0f, 0.0f));
         _root->setSize(math::FVector2(width, height));
+        // Force the next layout() to actually run — we just resized the
+        // root, which means children need a fresh performLayout pass.
+        _lastLayoutWidth = -1.0f;
+        _lastLayoutHeight = -1.0f;
     }
 }
 
 void UIManager::update(float dt) {
     AYUNREFERENCED_PARAM(dt);
     if (Widget* reloaded = _loader.tryReload()) {
-        delete _root;
+        if (_root != nullptr) {
+            destroyWidgetTree(_root);
+        }
         _root = reloaded;
+        _lastLayoutWidth = -1.0f;
+        _lastLayoutHeight = -1.0f;
         setClientSize(_clientWidth, _clientHeight);
         layout();
     }
 }
 
 void UIManager::layout() {
-    if (_root) {
-        _root->performLayout();
+    if (!_root) {
+        return;
     }
+    // Phase UI-PERF-1: skip performLayout when the client size hasn't
+    // changed since the last pass. The tree's bounds are already up-to-date
+    // because VBox/HBox performLayout mutates children on every call.
+    if (_clientWidth == _lastLayoutWidth && _clientHeight == _lastLayoutHeight) {
+        return;
+    }
+    _root->performLayout();
+    _lastLayoutWidth = _clientWidth;
+    _lastLayoutHeight = _clientHeight;
 }
 
 void UIManager::render() {
@@ -161,6 +203,10 @@ void UIManager::render() {
     math::FRectangle viewport(0.0f, 0.0f, _clientWidth, _clientHeight);
     _backend->beginCanvas(viewport);
     _root->render(*_backend);
+    // Flush any batched quads accumulated during the widget tree walk.
+    // Default backend implementation is a no-op; backends that override
+    // addColoredQuad/addTexturedQuad for batching submit here in one go.
+    _backend->flushBatches();
     _backend->endCanvas();
     _backend->endFrame();
 }

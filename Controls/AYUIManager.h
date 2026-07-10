@@ -11,6 +11,11 @@ namespace ayt::ui {
 class UIManager {
 public:
     UIManager() = default;
+    // RAII: destructor delegates to shutdown() so factory-allocated widget
+    // trees are released via destroyWidgetTree even if the caller forgets
+    // to invoke shutdown() explicitly. Idempotent — shutdown() guards
+    // itself with _shutdown.
+    ~UIManager() { shutdown(); }
 
     static UIManager& get();
 
@@ -53,6 +58,12 @@ private:
     Widget* _capturedWidget = nullptr;
     Widget* _hoverWidget = nullptr;
     bool _shutdown = false;
+    // Phase UI-PERF-1: track the last client size we laid out against. If
+    // layout() is invoked again with the same values and no explicit tree
+    // mutation has occurred, skip performLayout entirely. Set to a sentinel
+    // (-1, -1) after tree mutations so the next layout() always re-runs.
+    float _lastLayoutWidth = -1.0f;
+    float _lastLayoutHeight = -1.0f;
 };
 
 } // namespace ayt::ui

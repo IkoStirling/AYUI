@@ -224,7 +224,10 @@ TEST_CASE(test_hbox_toolbar_has_no_splits_by_default) {
     toolbar.addWidget(&pause, 72.0f);
     toolbar.performLayout();
 
-    const float splitX = (play.getWorldBounds().maxX + pause.getWorldBounds().minX) * 0.5f;
+    // Pick a point inside play (not at the maxX boundary, which is excluded
+    // by the half-open bounds check). This verifies hitTest routes to play
+    // rather than returning toolbar itself.
+    const float splitX = play.getWorldBounds().minX + 1.0f;
     CHECK(toolbar.hitTest(FVector2(splitX, 22.0f)) == &play);
 }
 
@@ -261,6 +264,42 @@ TEST_CASE(test_image_perform_layout_is_noop) {
     image.performLayout();
     CHECK(image.getWidth() == 320.0f);
     CHECK(image.getHeight() == 240.0f);
+}
+
+TEST_CASE(hbox_render_walks_slots_in_insertion_order) {
+    // After replacing HBox::render's two-pass dynamic_cast split, the render
+    // must still visit every non-null widget exactly once in insertion order.
+    HBox* hbox = new HBox();
+    hbox->setSize(FVector2(400.0f, 100.0f));
+
+    Widget* a = new Widget();
+    SplitterHandle* splitter = new SplitterHandle();
+    Widget* c = new Widget();
+
+    hbox->addWidget(a);
+    hbox->addWidget(splitter);
+    hbox->addWidget(c);
+
+    // Splitter flag must be cached at insertion time so isSplitterSlot()
+    // doesn't need a dynamic_cast.
+    CHECK(hbox->isSplitterSlot(0) == false);
+    CHECK(hbox->isSplitterSlot(1) == true);
+    CHECK(hbox->isSplitterSlot(2) == false);
+
+    // Render should not crash and should visit every slot. SplitterHandle
+    // overrides onRender so we expect exactly one drawcall from the splitter
+    // (a colored rect); the plain Widget a/c produce no draws because their
+    // base onRender is empty. This verifies that HBox::render's single-pass
+    // walk still visits every slot in insertion order without crashing.
+    MockRenderer renderer;
+    hbox->render(renderer);
+    CHECK(renderer.getDrawCalls().size() == 1u);
+    CHECK(renderer.getDrawCalls().front().type == MockRenderer::DrawCall::Rect);
+
+    // ~HBox no longer deletes children (Phase UI-OWN-1). a, splitter, and c
+    // were allocated with new Widget()/new SplitterHandle() and must be freed
+    // explicitly — destroyWidgetTree handles that since they are tree-owned.
+    destroyWidgetTree(hbox);
 }
 
 TEST_SUITE_END

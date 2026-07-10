@@ -104,7 +104,9 @@ void VBox::layoutChildren() {
         if (slot.widget->isLayoutPositionManaged()) {
             slot.widget->setPosition(math::FVector2(x, y));
         }
-        slot.widget->setSize(math::FVector2(childWidth, childHeight));
+        if (slot.widget->isLayoutSizeManaged()) {
+            slot.widget->setSize(math::FVector2(childWidth, childHeight));
+        }
         if (!slot.widget->getChildren().empty()) {
             slot.widget->performLayout();
         }
@@ -136,9 +138,10 @@ void HBox::addWidget(Widget* widget, float width, const BoxSlotLimits& limits) {
     slot.widget = widget;
     slot.width = width;
     slot.limits = limits;
+    slot.isSplitter = (dynamic_cast<SplitterHandle*>(widget) != nullptr);
     _slots.push_back(slot);
 
-    if (auto* splitter = dynamic_cast<SplitterHandle*>(widget)) {
+    if (slot.isSplitter) {
         rebindSplitters();
     }
 }
@@ -156,6 +159,7 @@ void HBox::insertWidget(int index, Widget* widget, float width, const BoxSlotLim
     slot.widget = widget;
     slot.width = width;
     slot.limits = limits;
+    slot.isSplitter = (dynamic_cast<SplitterHandle*>(widget) != nullptr);
 
     if (index >= (int)_slots.size()) {
         _slots.push_back(slot);
@@ -164,7 +168,7 @@ void HBox::insertWidget(int index, Widget* widget, float width, const BoxSlotLim
         _slots.insert(_slots.begin() + index, slot);
     }
 
-    if (auto* splitter = dynamic_cast<SplitterHandle*>(widget)) {
+    if (slot.isSplitter) {
         rebindSplitters();
     }
 }
@@ -187,7 +191,7 @@ bool HBox::isSplitterSlot(int slotIndex) const {
     if (slotIndex < 0 || slotIndex >= static_cast<int>(_slots.size())) {
         return false;
     }
-    return dynamic_cast<const SplitterHandle*>(_slots[static_cast<size_t>(slotIndex)].widget) != nullptr;
+    return _slots[static_cast<size_t>(slotIndex)].isSplitter;
 }
 
 int HBox::panelSlotBefore(int slotIndex) const {
@@ -224,8 +228,8 @@ void HBox::bindSplitter(SplitterHandle* splitter, int splitterSlotIndex) {
 
 void HBox::rebindSplitters() {
     for (size_t i = 0; i < _slots.size(); ++i) {
-        if (auto* splitter = dynamic_cast<SplitterHandle*>(_slots[i].widget)) {
-            bindSplitter(splitter, static_cast<int>(i));
+        if (_slots[i].isSplitter) {
+            bindSplitter(static_cast<SplitterHandle*>(_slots[i].widget), static_cast<int>(i));
         }
     }
 }
@@ -241,7 +245,7 @@ void HBox::layoutChildren() {
     float totalFixedWidth = 0.0f;
     size_t fillCount = 0;
     for (const auto& slot : _slots) {
-        if (dynamic_cast<SplitterHandle*>(slot.widget) != nullptr) {
+        if (slot.isSplitter) {
             totalFixedWidth += SplitterHandle::kDefaultWidth;
         } else if (slot.width > 0.0f) {
             totalFixedWidth += slot.width;
@@ -261,7 +265,7 @@ void HBox::layoutChildren() {
 
     for (auto& slot : _slots) {
         float childWidth = fillWidth;
-        if (dynamic_cast<SplitterHandle*>(slot.widget) != nullptr) {
+        if (slot.isSplitter) {
             childWidth = SplitterHandle::kDefaultWidth;
         } else if (slot.width > 0.0f) {
             childWidth = slot.width;
@@ -289,21 +293,13 @@ void HBox::render(IRenderBackend& renderer) {
         return;
     }
 
-    for (size_t i = 0; i < _slots.size(); ++i) {
-        if (isSplitterSlot(static_cast<int>(i))) {
-            continue;
-        }
-        if (_slots[i].widget != nullptr) {
-            _slots[i].widget->render(renderer);
-        }
-    }
-
-    for (size_t i = 0; i < _slots.size(); ++i) {
-        if (!isSplitterSlot(static_cast<int>(i))) {
-            continue;
-        }
-        if (_slots[i].widget != nullptr) {
-            _slots[i].widget->render(renderer);
+    // Single-pass insertion-order render. Previously this looped twice with
+    // per-slot dynamic_cast<SplitterHandle*>; splitters are cached on the
+    // Slot at insertion time. Splitters sit between panels (no z-order
+    // conflict, non-overlapping bounds) so the visual result is identical.
+    for (const Slot& slot : _slots) {
+        if (slot.widget != nullptr) {
+            slot.widget->render(renderer);
         }
     }
 }
@@ -314,7 +310,7 @@ Widget* HBox::hitTest(const math::FVector2& worldPos) {
     }
 
     for (int i = static_cast<int>(_slots.size()) - 1; i >= 0; --i) {
-        if (!isSplitterSlot(i)) {
+        if (!_slots[static_cast<size_t>(i)].isSplitter) {
             continue;
         }
         Widget* hit = _slots[static_cast<size_t>(i)].widget->hitTest(worldPos);
@@ -324,6 +320,11 @@ Widget* HBox::hitTest(const math::FVector2& worldPos) {
     }
 
     for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
+        // Skip splitters in the children list; they were already probed above.
+        // We rely on the cached isSplitter flag from the Slot, but hitTest can
+        // be reached from Widget::hitTest paths that don't go through HBox
+        // slots, so an RTTI fallback is required here. Splitters are rare
+        // (handful per HBox), so this is not a hot-path concern.
         if (dynamic_cast<SplitterHandle*>(*it) != nullptr) {
             continue;
         }

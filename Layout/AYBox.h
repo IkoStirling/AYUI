@@ -68,6 +68,11 @@ public:
 
     void rebindSplitters();
 
+    // Exposed for tests / debugging so callers can verify the cached
+    // splitter flag without paying a dynamic_cast. Hot paths use the
+    // cached flag directly via Slot::isSplitter.
+    bool isSplitterSlot(int slotIndex) const;
+
     Widget* hitTest(const math::FVector2& worldPos) override;
     void render(IRenderBackend& renderer) override;
 
@@ -79,9 +84,11 @@ private:
         Widget* widget = nullptr;
         float width = 0.0f;
         BoxSlotLimits limits;
+        // Cached at insertion time so hot paths (render / hitTest / layout)
+        // don't pay a dynamic_cast per slot per frame. See HBox::addWidget.
+        bool isSplitter = false;
     };
 
-    bool isSplitterSlot(int slotIndex) const;
     int panelSlotBefore(int slotIndex) const;
     int panelSlotAfter(int slotIndex) const;
     void bindSplitter(SplitterHandle* splitter, int splitterSlotIndex);
