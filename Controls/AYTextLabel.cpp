@@ -22,26 +22,11 @@ TextLabel::TextLabel()
     , _wordWrap(false)
     , _wrapWidth(0.0f)
 {
-    setEnabled(false);
-    setOnClicked({});
+    // R-3 (2026-07-17): no longer calls setEnabled(false) / setOnClicked({}).
+    // TextLabel extends LeafWidget which extends Widget — neither exists.
 }
 
 TextLabel::~TextLabel() = default;
-
-bool TextLabel::onMouseMove(const UIMouseEvent& e) {
-    AYUNREFERENCED_PARAM(e);
-    return false;
-}
-
-bool TextLabel::onMouseButtonDown(const UIMouseEvent& e) {
-    AYUNREFERENCED_PARAM(e);
-    return false;
-}
-
-bool TextLabel::onMouseButtonUp(const UIMouseEvent& e) {
-    AYUNREFERENCED_PARAM(e);
-    return false;
-}
 
 void TextLabel::onRender(IRenderBackend& renderer) {
     if (getText().empty()) {

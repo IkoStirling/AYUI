@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 #include "AYWidget.h"
 #include "AYButton.h"
 #include <iostream>
@@ -56,7 +56,10 @@ TEST_CASE(test_widget_tree) {
     CHECK(root->getChildren().size() == 1);
     CHECK(child1->getParent() == nullptr);
 
-    delete root;
+    // Phase UI-OWN-1: ~Widget() does not delete children. child1 was detached
+    // and must be freed explicitly; child2 is still attached and goes with root.
+    delete child1;
+    destroyWidgetTree(root);
 }
 
 TEST_CASE(test_button_events) {

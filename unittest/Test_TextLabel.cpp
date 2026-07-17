@@ -55,4 +55,13 @@ TEST_CASE(textlabel_content_change) {
     CHECK(label.getText() == L"Updated");
 }
 
+TEST_CASE(textlabel_no_button_inheritance) {
+    // R-3 (2026-07-17): proves B1 is fixed at runtime. Pre-R-3 a TextLabel
+    // would dynamic_cast<Button*> to non-null because it extended Button.
+    TextLabel label;
+    CHECK(dynamic_cast<Button*>(&label) == nullptr);
+    CHECK(dynamic_cast<InteractiveWidget*>(&label) == nullptr);
+    CHECK(dynamic_cast<LeafWidget*>(&label) != nullptr);
+}
+
 TEST_SUITE_END

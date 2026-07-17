@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
@@ -38,7 +38,7 @@ TEST_CASE(test_vbox_layout) {
     FRectangle c3Bounds = child3->getWorldBounds();
     CHECK_FLOAT_EQ(c3Bounds.minY, 52.0f, 1e-5f);
 
-    delete vbox;
+    destroyWidgetTree(vbox);
 }
 
 TEST_CASE(test_hbox_layout) {
@@ -68,7 +68,7 @@ TEST_CASE(test_hbox_layout) {
 
     CHECK_FLOAT_EQ(c1Bounds.maxY - c1Bounds.minY, 42.0f, 1e-5f);
 
-    delete hbox;
+    destroyWidgetTree(hbox);
 }
 
 TEST_CASE(test_window_hit_test) {
@@ -86,7 +86,7 @@ TEST_CASE(test_window_hit_test) {
     hit = window->hitTest(FVector2(50.0f, 50.0f));
     CHECK(hit == nullptr);
 
-    delete window;
+    destroyWidgetTree(window);
 }
 
 TEST_CASE(test_mock_renderer) {
@@ -109,7 +109,7 @@ TEST_CASE(test_mock_renderer) {
     // Plain Widget has empty onRender, so no draw calls generated
     CHECK(calls.size() == 0);
 
-    delete root;
+    destroyWidgetTree(root);
 }
 
 TEST_CASE(test_hbox_split_hit_and_resize) {

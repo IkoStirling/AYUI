@@ -1,13 +1,21 @@
 #pragma once
 
-#include "AYButton.h"
+#include "AYLeafWidget.h"
 
 namespace ayt::ui {
 
-class TextLabel : public Button {
+// R-3 (2026-07-17): TextLabel no longer extends Button. It now extends
+// LeafWidget and owns its own _text field. The previous `TextLabel : Button`
+// inheritance forced a `setEnabled(false); setOnClicked({});` hack to
+// neutralize the inherited state machine — see design.md §15.2 B1.
+class TextLabel : public LeafWidget {
 public:
     TextLabel();
     ~TextLabel() override;
+
+    // TextLabel now owns its own text (was inherited from Button pre-R-3).
+    const std::wstring& getText() const { return _text; }
+    void setText(const std::wstring& text) { _text = text; }
 
     void setFontSize(int size) { _fontSize = size; }
     int getFontSize() const { return _fontSize; }
@@ -47,11 +55,8 @@ public:
 protected:
     void onRender(IRenderBackend& renderer) override;
 
-    bool onMouseMove(const UIMouseEvent& e) override;
-    bool onMouseButtonDown(const UIMouseEvent& e) override;
-    bool onMouseButtonUp(const UIMouseEvent& e) override;
-
     std::wstring _fontFamily;
+    std::wstring _text;
     int _fontSize;
     float _textR;
     float _textG;

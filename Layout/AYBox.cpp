@@ -99,7 +99,10 @@ void VBox::layoutChildren() {
         float childHeight = (slot.height > 0.0f) ? slot.height : fillHeight;
         float childWidth = availableWidth;
 
-        childWidth -= _padding.z;
+        // Note: `availableWidth` already has `_padding.x` (left) and
+        // `_padding.z` (right) subtracted above. Do NOT subtract `_padding.z`
+        // again here — doing so causes the right padding to be deducted twice
+        // (caught by Test_LayoutLoader::test_layout_loader_partial_height_fills_parent_width).
 
         if (slot.widget->isLayoutPositionManaged()) {
             slot.widget->setPosition(math::FVector2(x, y));

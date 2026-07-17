@@ -8,6 +8,8 @@
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
 
+#include <ayio/FileWatcher.h>
+
 #include <fstream>
 #include <sstream>
 #include <cstdio>
@@ -74,6 +76,7 @@ BoxSlotLimits parseHBoxSlotLimits(const json& childJson, float& outWidth)
 UILayoutLoader::UILayoutLoader()
     : _factory(&WidgetFactory::get())
     , _i18n(&I18n::get())
+    , _watcher(std::make_unique<ayt::io::FileWatcher>())
 {
 }
 
@@ -91,8 +94,27 @@ Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
     _lastJson = ss.str();
     _lastFilePath = filepath;
 
-    // Update load time for file change detection
-    _lastLoadTime = std::chrono::steady_clock::now();
+    // R-4: register (or refresh) the watch on this file. The watcher is the
+    // canonical cross-platform filesystem notification (ReadDirectoryChangesW
+    // on Windows, inotify on POSIX). Watching is single-file: events are
+    // reported only when this exact path changes, so we don't have to filter
+    // directory events for unrelated siblings.
+    //
+    // The watcher thread is started lazily on first watch — multiple loaders
+    // each own a FileWatcher so they're independent. isReloadNeeded() on the
+    // main thread drains the queue via pollPending.
+    if (_watcher) {
+        _watcher->unwatch(_lastFilePath);   // safe even if not previously watched
+        _watcher->watch(_lastFilePath, nullptr);
+        if (!_watcherStarted) {
+            _watcher->start();
+            _watcherStarted = true;
+        }
+        // A freshly reloaded file has no pending events for itself (the load
+        // itself does not enqueue anything), but clear any stale dirty flag
+        // left by a prior isReloadNeeded() call.
+        _dirty = false;
+    }
 
     return loadFromString(_lastJson);
 }
@@ -119,25 +141,41 @@ Widget* UILayoutLoader::reload(const std::string& id) {
     return loadFromFile(_lastFilePath);
 }
 
-bool UILayoutLoader::isReloadNeeded() const {
+bool UILayoutLoader::pollWatcherAndCheckDirty() {
+    if (!_watcher) return false;
+
+    std::vector<ayt::io::FileWatchEvent> events;
+    _watcher->pollPending(events);
+    if (events.empty()) {
+        return _dirty;
+    }
+
+    // Any event whose path matches the loaded file (or the file's parent
+    // directory, for OSes that report child paths) flips _dirty. The watcher
+    // is registered for a single file so the path equality is exact, but we
+    // also accept events for the parent dir to be safe across backends.
+    for (const auto& ev : events) {
+        if (ev.path == _lastFilePath) {
+            _dirty = true;
+            break;
+        }
+    }
+    return _dirty;
+}
+
+bool UILayoutLoader::isReloadNeeded() {
     if (_lastFilePath.empty()) return false;
-
-    std::ifstream file(_lastFilePath);
-    if (!file.is_open()) return false;
-
-    // Compare file last write time with last load time
-    auto fileTime = std::chrono::steady_clock::time_point();
-    auto now = std::chrono::steady_clock::now();
-
-    // Simple heuristic: if file was modified after last load, reload is needed
-    // In production, use filesystem::last_write_time
-    return false;  // Placeholder - actual implementation requires filesystem API
+    return pollWatcherAndCheckDirty();
 }
 
 Widget* UILayoutLoader::tryReload() {
     if (!isReloadNeeded()) return nullptr;
     if (_lastFilePath.empty()) return nullptr;
-    return loadFromFile(_lastFilePath);
+
+    // Consume the dirty flag — caller will see _dirty cleared on next
+    // loadFromFile() invocation (which re-arms the watcher).
+    Widget* reloaded = loadFromFile(_lastFilePath);
+    return reloaded;
 }
 
 void UILayoutLoader::bindEvent(const std::string& widgetId, const std::string& eventType,

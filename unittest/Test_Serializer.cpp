@@ -93,7 +93,7 @@ TEST_CASE(test_serialize_vbox_with_children) {
     CHECK(json.find("label1") != std::string::npos);
     CHECK(json.find("btn1") != std::string::npos);
 
-    delete vbox;
+    destroyWidgetTree(vbox);
 }
 
 TEST_CASE(test_deserialize_basic_widget) {
@@ -157,7 +157,7 @@ TEST_CASE(test_deserialize_with_children) {
     Widget* btn1 = root->getChildren()[0];
     CHECK(btn1->getId() == "btn1");
 
-    delete root;
+    destroyWidgetTree(root);
 }
 
 TEST_CASE(test_roundtrip) {
@@ -177,8 +177,8 @@ TEST_CASE(test_roundtrip) {
     CHECK(restoredWindow != nullptr);
     CHECK(restoredWindow->getTitle() == L"Original Title");
 
-    delete window;
-    delete restored;
+    destroyWidgetTree(window);
+    destroyWidgetTree(restored);
 }
 
 TEST_SUITE_END

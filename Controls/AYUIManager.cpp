@@ -5,7 +5,7 @@
 #include "AYTextLabel.h"
 #include "AYWindow.h"
 #include "AYSplitterHandle.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 #include "AYWidgetFactory.h"
 
 #include <vector>
@@ -52,7 +52,7 @@ static void ensureBuiltInFactoriesRegistered() {
     WidgetFactory& f = WidgetFactory::get();
     if (!f.isRegistered("Button"))    f.registerCreator("Button",    []() { return new Button(); });
     if (!f.isRegistered("Image"))     f.registerCreator("Image",     []() { return new Image(); });
-    if (!f.isRegistered("TextLabel")) f.registerCreator("TextLabel", []() { return new TextLabel(); });
+    if (!f.isRegistered("TextLabel")) f.registerCreator("TextLabel", createTextLabelWidget);
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
     // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
     // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are

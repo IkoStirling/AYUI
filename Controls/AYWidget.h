@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AYMathTypes.h"
-#include "AYMathUtils.h"
+#include "aymath/MathTypes.h"
+#include "aymath/MathUtils.h"
 #include "AYIRenderBackend.h"
 
 #include <functional>

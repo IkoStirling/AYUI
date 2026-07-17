@@ -2,8 +2,10 @@
 
 #include "Test_Widget.cpp"
 #include "Test_Button.cpp"
+#include "Test_InteractiveWidget.cpp"
 #include "Test_RenderBackend.cpp"
 #include "Test_TextLabel.cpp"
+#include "Test_Thickness.cpp"
 #include "Test_Image.cpp"
 #include "Test_Window.cpp"
 #include "Test_Layout.cpp"

@@ -1,5 +1,5 @@
 #include "AYI18n.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <sstream>

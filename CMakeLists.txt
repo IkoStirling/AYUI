@@ -6,6 +6,7 @@ set(MODULE_NAME AYUI)
 set(SRC_FILES
     Controls/AYButton.cpp
     Controls/AYImage.cpp
+    Controls/AYInteractiveWidget.cpp
     Controls/AYTextLabel.cpp
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
@@ -25,6 +26,8 @@ set(HEAD_FILES
     Events/AYEvent.h
     Controls/AYButton.h
     Controls/AYImage.h
+    Controls/AYInteractiveWidget.h
+    Controls/AYLeafWidget.h
     Controls/AYTextLabel.h
     Controls/AYWidget.h
     Controls/AYUIManager.h
@@ -36,6 +39,8 @@ set(HEAD_FILES
     Loader/AYWidgetSerializer.h
     Style/AYMockRenderer.h
     Style/AYStyle.h
+    Style/AYThickness.h
+    Style/AYTextContent.h
     i18n/AYI18n.h
 )
 
@@ -61,6 +66,11 @@ else()
     target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont)
     message(STATUS "AYUI: using bundled nlohmann/json from ${AYUI_NLOHMANN_DIR}")
 endif()
+
+# R-4: AYUI's hot-reload uses ayio::FileWatcher (ReadDirectoryChangesW on
+# Windows, inotify on POSIX). Linked PRIVATE — FileWatcher is not exposed in
+# AYUI's public surface.
+target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
 
 enable_testing()
 add_subdirectory(unittest)

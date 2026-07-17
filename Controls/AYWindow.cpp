@@ -1,6 +1,6 @@
 #include "AYWindow.h"
 #include "AYIRenderBackend.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 
 #include <algorithm>
 

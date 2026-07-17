@@ -1,5 +1,5 @@
 #include "AYWidget.h"
-#include "AYMathUtils.h"
+#include "aymath/MathUtils.h"
 
 namespace ayt::ui {
 
@@ -19,6 +19,10 @@ Widget::~Widget() {
     // child side (e.g. during child destruction) finds a null parent and
     // skips back-pointers into freed memory. Children themselves are
     // destroyed by the owning container via destroyWidgetTree().
+    //
+    // Do not call onMouseLeave() here — _hoverWidget may already be freed
+    // when teardown order is caller-controlled (partial delete / UI-OWN-1).
+    _hoverWidget = nullptr;
     for (Widget* child : _children) {
         if (child) {
             child->_parent = nullptr;

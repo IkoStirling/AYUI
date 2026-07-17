@@ -1,17 +1,13 @@
 #pragma once
 
-#include "AYWidget.h"
+#include "AYInteractiveWidget.h"
 
 namespace ayt::ui {
 
-enum class ButtonState {
-    Normal,
-    Hovered,
-    Pressed,
-    Disabled
-};
-
-class Button : public CompoundWidget {
+// Button is now a thin text+padding wrapper on top of InteractiveWidget's
+// state machine. R-1 refactor (2026-07-17) lifted ButtonState + mouse handlers
+// + cursor hint + enable/click into the new base.
+class Button : public InteractiveWidget {
 public:
     Button();
     virtual ~Button();
@@ -19,36 +15,14 @@ public:
     const std::wstring& getText() const { return _text; }
     void setText(const std::wstring& text) { _text = text; }
 
-    ButtonState getState() const { return _state; }
-    void setState(ButtonState state) { _state = state; }
-
-    void setEnabled(bool enabled) { _enabled = enabled; }
-    bool isEnabled() const { return _enabled; }
-
-    void setOnClicked(std::function<void()> callback) { _onClicked = callback; }
-
-    bool onMouseMove(const UIMouseEvent& e) override;
-    bool onMouseButtonDown(const UIMouseEvent& e) override;
-    bool onMouseButtonUp(const UIMouseEvent& e) override;
-    void onMouseLeave() override;
-
-    UiCursorHint getCursorHint() const override;
-
     void setPadding(float left, float top, float right, float bottom);
 
 protected:
-    std::wstring _text;
-    ButtonState _state;
-    bool _enabled;
-    std::function<void()> _onClicked;
-
-    math::FVector4 _padding;
-    bool _isMouseOver;
-    bool _isPressed;
-
+    void onRender(IRenderBackend& renderer) override;
     math::FRectangle getTextBounds() const;
 
-    void onRender(IRenderBackend& renderer) override;
+    std::wstring _text;
+    math::FVector4 _padding{8.0f, 4.0f, 8.0f, 4.0f};
 };
 
 } // namespace ayt::ui
