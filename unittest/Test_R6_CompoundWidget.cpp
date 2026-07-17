@@ -35,8 +35,14 @@ TEST_CASE(leaf_widget_hittest_self_only) {
     hit = leaf->hitTest(FVector2(150.0f, 150.0f));
     CHECK(hit == nullptr);
 
-    delete leaf;
+    // UI-OWN-1 cleanup: leaf->addChild registered child in leaf->_children.
+    // The child was never owned independently of the leaf, so we MUST NOT
+    // `delete child` first — that double-frees because destroyWidgetTree
+    // already recurses into _children. Detach child before deleting leaf
+    // so ~Widget() doesn't reach into freed memory.
+    child->detachFromParent();
     delete child;
+    delete leaf;
 }
 
 // R-6: CompoundWidget::hitTest still descends into children (the previous
@@ -61,7 +67,9 @@ TEST_CASE(compound_widget_hittest_descends_into_children) {
     hit = root->hitTest(FVector2(250.0f, 250.0f));
     CHECK(hit == nullptr);
 
-    delete child;
+    // UI-OWN-1: root owns the child via root->_children. destroyWidgetTree
+    // recurses and deletes child + root exactly once. Do NOT also `delete
+    // child` separately — that would free the same pointer twice.
     destroyWidgetTree(root);
 }
 
@@ -92,7 +100,8 @@ TEST_CASE(compound_onmouseleave_clears_descendant_interactive_flags) {
     CHECK(btn->isMouseOver() == false);
     CHECK(btn->getState() == ButtonState::Normal);
 
-    delete btn;
+    // UI-OWN-1: btn is in root->_children. destroyWidgetTree owns the
+    // release path. Do NOT `delete btn` separately.
     destroyWidgetTree(root);
 }
 
@@ -116,7 +125,6 @@ TEST_CASE(compound_hittest_into_interactive_child) {
     CHECK(btn->isMouseOver());
     CHECK(btn->getState() == ButtonState::Hovered);
 
-    delete btn;
     destroyWidgetTree(root);
 }
 
