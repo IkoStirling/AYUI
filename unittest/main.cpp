@@ -10,6 +10,7 @@
 #include "Test_Window.cpp"
 #include "Test_Layout.cpp"
 #include "Test_I18n.cpp"
+#include "Test_Style.cpp"
 #include "Test_WidgetFactory.cpp"
 #include "Test_LayoutLoader.cpp"
 #include "Test_Serializer.cpp"
