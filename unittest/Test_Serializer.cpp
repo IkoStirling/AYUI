@@ -25,6 +25,27 @@ TEST_CASE(test_serialize_basic_widget) {
     delete widget;
 }
 
+// R-8 (B11 regression): a raw Widget with no specific subclass must export
+// `type == "Widget"` even when it has a non-empty styleId. The previous
+// implementation pre-wrote `j["type"] = widget->getStyleId()` as a
+// placeholder, which would leak the styleId as the type field for any
+// subclass branch that didn't fire — the round-trip would then fail to
+// find a registered factory and fall back to `new Widget()`, losing type
+// information silently.
+TEST_CASE(test_serialize_basic_widget_type_default) {
+    Widget* widget = new Widget();
+    widget->setId("typed_widget");
+    widget->setStyleId("custom_visual");  // non-empty to expose the B11 bug
+
+    std::string json = WidgetSerializer::serialize(widget);
+    // nlohmann::json::dump() emits `"key": "value"` (with a space after
+    // the colon). Match that exactly.
+    CHECK(json.find("\"type\": \"Widget\"") != std::string::npos);
+    CHECK(json.find("\"type\": \"custom_visual\"") == std::string::npos);
+
+    delete widget;
+}
+
 TEST_CASE(test_serialize_text_label) {
     TextLabel* label = new TextLabel();
     label->setId("my_label");

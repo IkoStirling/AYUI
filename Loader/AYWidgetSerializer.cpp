@@ -132,7 +132,23 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
 void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     if (!widget) return;
 
-    j["type"] = widget->getStyleId();  // Will be overridden by specific types
+    // R-8 (B11 fix): the previous version wrote `j["type"] = widget->getStyleId()`
+    // here as a "placeholder" on the assumption that every subclass branch
+    // below would override it. That breaks two ways:
+    //   1. A raw Widget with a non-empty styleId would export its style id
+    //      as the type field. The `else` branch at the bottom then writes
+    //      `"Widget"` back, masking the bug for the base class — but any
+    //      future subclass that forgets to register (R-10 Panel, R-7
+    //      CheckBox, etc.) would silently export its styleId as `type`,
+    //      and the round-trip in `deserialize` would either fail to find
+    //      a registered factory or instantiate the wrong class.
+    //   2. If serialization throws partway through the dynamic_cast chain
+    //      (rare but possible if a future subclass throws in a getter),
+    //      `type` is left as the styleId, which is silently wrong.
+    // Fix: don't pre-write `type` at all. The if-else chain below is
+    // exhaustive over known subclasses; the trailing `else` covers
+    // everything else as the literal "Widget". This way type is set
+    // exactly once and only by code that knows the right answer.
     j["id"] = widget->getId();
 
     // Position

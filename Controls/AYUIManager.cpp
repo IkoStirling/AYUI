@@ -168,6 +168,18 @@ void UIManager::setClientSize(float width, float height) {
 void UIManager::update(float dt) {
     AYUNREFERENCED_PARAM(dt);
     if (Widget* reloaded = _loader.tryReload()) {
+        // R-7: cancel any in-flight mouse capture BEFORE destroying the
+        // tree. The captured widget (typically a Window being dragged) is
+        // about to be freed; without this, _capturedWidget stays non-null
+        // and the next onMouseButtonUp dereferences a dangling pointer.
+        // cancelCapture() synthesizes a mouse-up on the captured widget so
+        // its transient drag state is reset cleanly.
+        if (_capturedWidget != nullptr) {
+            cancelCapture();
+        }
+        // Also clear hover so a stale _hoverWidget pointer doesn't survive
+        // the tree swap and confuse the cursor hint.
+        _hoverWidget = nullptr;
         if (_root != nullptr) {
             destroyWidgetTree(_root);
         }
