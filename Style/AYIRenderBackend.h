@@ -9,6 +9,43 @@
 namespace ayt::ui {
 
     using namespace ayt::font;
+
+// =============================================================================
+// R-9 (R12 fix): enums lifted to namespace scope
+// -----------------------------------------------------------------------------
+// BlendMode / PathFillMode / AnimationCurve used to be nested inside
+// IRenderBackend. That forced call sites to spell out the full qualification
+// (`IRenderBackend::BlendMode::Normal`) even when they were not invoking a
+// backend method. R-9 promotes them to the `ayt::ui` namespace so the
+// common call site reads `BlendMode::Normal` directly.
+//
+// Backward compatibility: each enum keeps a `using` alias inside
+// IRenderBackend so the old `IRenderBackend::BlendMode::Normal` syntax
+// still compiles. New code should prefer the namespace-scope form.
+// =============================================================================
+
+enum class BlendMode {
+    Normal,    // Alpha blending
+    Additive,  // SRC * SRC_ALPHA + DST * 1
+    Multiply,  // SRC * DST
+    Screen     // 1 - (1 - SRC) * (1 - DST)
+};
+
+enum class GradientType {
+    Linear,  // colors interpolate along a line
+    Radial   // colors radiate from the center
+};
+
+enum class PathFillMode { Fill, Stroke, FillAndStroke };
+
+enum class PathWinding { CounterClockwise, Clockwise };
+
+enum class BlurType { Gaussian, Box, Motion };
+
+enum class AnimationCurve { Linear, EaseIn, EaseOut, EaseInOut, Spring };
+
+enum class AnimationFlags { None = 0, Reverse = 1, Loop = 2, PingPong = 4 };
+
 // =============================================================================
 // IRenderBackend - Industrial-Grade UI Rendering Backend Interface
 // IRenderBackend - 工业级UI渲染后端接口
@@ -21,6 +58,17 @@ namespace ayt::ui {
 
 class IRenderBackend {
 public:
+    // R-9: enums moved to namespace scope (see top of file). The aliases
+    // below keep the old `IRenderBackend::BlendMode::Normal` syntax
+    // compiling so existing call sites don't break.
+    using BlendMode = ::ayt::ui::BlendMode;
+    using GradientType = ::ayt::ui::GradientType;
+    using PathFillMode = ::ayt::ui::PathFillMode;
+    using PathWinding = ::ayt::ui::PathWinding;
+    using BlurType = ::ayt::ui::BlurType;
+    using AnimationCurve = ::ayt::ui::AnimationCurve;
+    using AnimationFlags = ::ayt::ui::AnimationFlags;
+
     virtual ~IRenderBackend() = default;
 
     // =============================================================================
@@ -55,21 +103,6 @@ public:
        @note: 与beginCanvas配对使用
     */
     virtual void endCanvas() {}
-
-    /*
-       @name: BlendMode
-       @func: 混合模式枚举 - 定义颜色混合算法
-       @param Normal: 正常混合（Alpha混合），SRC * SRC_ALPHA + DST * (1 - SRC_ALPHA)
-       @param Additive: 加法混合，SRC * SRC_ALPHA + DST * 1，常用于发光效果
-       @param Multiply: 正片叠底，SRC * DST，常用于遮罩和阴影
-       @param Screen: 滤色混合，1 - (1 - SRC) * (1 - DST)，常用于高光效果
-    */
-    enum class BlendMode {
-        Normal,    // Alpha混合 / Alpha blending
-        Additive,  // 加法混合 / Additive blending
-        Multiply,  // 正片叠底 / Multiply blending
-        Screen     // 滤色混合 / Screen blending
-    };
 
     /*
        @name: setBlendMode
@@ -219,17 +252,6 @@ public:
     // =============================================================================
 
     /*
-       @name: GradientType
-       @func: 渐变类型枚举
-       @param Linear: 线性渐变，颜色沿直线变化
-       @param Radial: 径向渐变，颜色从圆心向外辐射变化
-    */
-    enum class GradientType {
-        Linear,  // 线性渐变 / Linear gradient
-        Radial   // 径向渐变 / Radial gradient
-    };
-
-    /*
        @name: drawGradientRect (4-color)
        @func: 绘制四色渐变矩形 - 每个角单独指定颜色
        @param bounds: 矩形边界
@@ -375,23 +397,6 @@ public:
     struct PathHandle { int id = -1; };
 
     /*
-       @name: PathFillMode
-       @func: 路径填充模式枚举
-       @param Fill: 填充路径内部
-       @param Stroke: 描边路径轮廓
-       @param FillAndStroke: 填充并描边
-    */
-    enum class PathFillMode { Fill, Stroke, FillAndStroke };
-
-    /*
-       @name: PathWinding
-       @func: 路径缠绕规则枚举
-       @param CounterClockwise: 逆时针缠绕（non-zero规则）
-       @param Clockwise: 顺时针缠绕
-    */
-    enum class PathWinding { CounterClockwise, Clockwise };
-
-    /*
        @name: createPath
        @func: 创建空路径 - 分配一个新的路径对象
        @return: 路径句柄，用于后续路径操作
@@ -520,15 +525,6 @@ public:
     // =============================================================================
     // Category 12: Blur Effect / 模糊效果
     // =============================================================================
-
-    /*
-       @name: BlurType
-       @func: 模糊类型枚举
-       @param Gaussian: 高斯模糊，产生自然的渐变模糊
-       @param Box: 盒式模糊，速度快但效果较硬
-       @param Motion: 运动模糊，模拟物体运动产生的模糊
-    */
-    enum class BlurType { Gaussian, Box, Motion };
 
     /*
        @name: drawRectBlur
@@ -690,27 +686,6 @@ public:
        @func: 动画句柄
     */
     struct AnimationHandle { int id = -1; };
-
-    /*
-       @name: AnimationCurve
-       @func: 动画曲线枚举 - 定义动画值随时间变化的速率
-       @param Linear: 线性变化，匀速动画
-       @param EaseIn: 加速曲线，动画开始时慢
-       @param EaseOut: 减速曲线，动画结束时慢
-       @param EaseInOut: 先加速后减速
-       @param Spring: 弹簧效果，带超调的振荡
-    */
-    enum class AnimationCurve { Linear, EaseIn, EaseOut, EaseInOut, Spring };
-
-    /*
-       @name: AnimationFlags
-       @func: 动画标志位 - 控制动画行为
-       @param None: 无特殊行为
-       @param Reverse: 反向播放
-       @param Loop: 循环播放
-       @param PingPong: 乒乓模式（正向播放完反向播放）
-    */
-    enum class AnimationFlags { None = 0, Reverse = 1, Loop = 2, PingPong = 4 };
 
     /*
        @name: createAnimation

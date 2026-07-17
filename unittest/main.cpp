@@ -16,6 +16,7 @@
 #include "Test_Serializer.cpp"
 #include "Test_UIManager.cpp"
 #include "Test_R6_CompoundWidget.cpp"
+#include "Test_R9_NamespaceEnum.cpp"
 
 void runTest()
 {
