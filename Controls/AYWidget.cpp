@@ -9,7 +9,6 @@ Widget::Widget()
     , _boundsDirty(true)
     , _parent(nullptr)
     , _visible(true)
-    , _hoverWidget(nullptr)
 {
 }
 
@@ -20,9 +19,9 @@ Widget::~Widget() {
     // skips back-pointers into freed memory. Children themselves are
     // destroyed by the owning container via destroyWidgetTree().
     //
-    // Do not call onMouseLeave() here — _hoverWidget may already be freed
-    // when teardown order is caller-controlled (partial delete / UI-OWN-1).
-    _hoverWidget = nullptr;
+    // R-6: removed the `_hoverWidget = nullptr` line — that field no
+    // longer lives on Widget (it was removed in favor of letting
+    // CompoundWidget::onMouseLeave do the cleanup when needed).
     for (Widget* child : _children) {
         if (child) {
             child->_parent = nullptr;
@@ -110,28 +109,13 @@ math::FRectangle Widget::getWorldBounds() const {
 }
 
 Widget* Widget::hitTest(const math::FVector2& worldPos) {
+    // R-6: base-default behavior for any non-container widget. Containers
+    // (CompoundWidget) override this to descend into children first. The
+    // old code recursed into `_children` here and maintained a per-Widget
+    // `_hoverWidget` pointer, but every widget paid the cost even when it
+    // could never host a hovered child (leaf widgets). With the override
+    // split, leaf widgets are honest: they only ever hit-test themselves.
     if (!_visible) return nullptr;
-
-    // Check children first (reverse order - last added is on top)
-    for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
-        Widget* child = *it;
-        Widget* hit = child->hitTest(worldPos);
-        if (hit) {
-            if (_hoverWidget && _hoverWidget != hit) {
-                _hoverWidget->onMouseLeave();
-            }
-            _hoverWidget = hit;
-            return hit;
-        }
-    }
-
-    // If we had a previous hover widget, notify it
-    if (_hoverWidget) {
-        _hoverWidget->onMouseLeave();
-        _hoverWidget = nullptr;
-    }
-
-    // Then check self
     math::FRectangle bounds = getWorldBounds();
     if (bounds.contains(worldPos)) {
         return this;
@@ -206,6 +190,47 @@ void CompoundWidget::performLayout() {
     layoutChildren();
     for (Widget* child : _children) {
         child->performLayout();
+    }
+}
+
+Widget* CompoundWidget::hitTest(const math::FVector2& worldPos) {
+    // R-6: containers descend into children first. We do NOT maintain a
+    // _hoverWidget field on the container anymore — UIManager owns the
+    // single source of truth for hover and calls onMouseLeave on the
+    // outgoing widget via updateHoverWidget(). The previous design kept
+    // a stale pointer here that could leak cursor hints past a mouse-up
+    // (B4); the onMouseLeave override below propagates mouse-leave to
+    // descendants when a hover transition occurs through this container.
+    if (!_visible) return nullptr;
+
+    // Check children first (reverse order — last added is on top).
+    for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
+        Widget* hit = (*it)->hitTest(worldPos);
+        if (hit) {
+            return hit;
+        }
+    }
+
+    // Then check self.
+    math::FRectangle bounds = getWorldBounds();
+    if (bounds.contains(worldPos)) {
+        return this;
+    }
+    return nullptr;
+}
+
+void CompoundWidget::onMouseLeave() {
+    // R-6: when the mouse leaves the container (or stops hovering a child
+    // because the cursor moved outside the container), propagate the
+    // leave to every descendant so transient hover/press flags on
+    // InteractiveWidget children clear up. Without this, an
+    // InteractiveWidget that was hovered while the cursor was inside
+    // the container but whose own bounds the cursor has now left would
+    // still report `_isMouseOver = true` until the next onMouseMove.
+    for (Widget* child : _children) {
+        if (child) {
+            child->onMouseLeave();
+        }
     }
 }
 

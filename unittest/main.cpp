@@ -15,6 +15,7 @@
 #include "Test_LayoutLoader.cpp"
 #include "Test_Serializer.cpp"
 #include "Test_UIManager.cpp"
+#include "Test_R6_CompoundWidget.cpp"
 
 void runTest()
 {

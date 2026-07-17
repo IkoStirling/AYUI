@@ -197,7 +197,14 @@ protected:
     std::string _styleId;
     std::string _id;
 
-    Widget* _hoverWidget;  // 当前悬停的子控件
+    // R-6: removed `Widget::_hoverWidget` field. The previous design stored
+    // "the currently hovered child" on every Widget, but the only purpose was
+    // to call onMouseLeave() on the previous child when hitTest moved away.
+    // UIManager already does that via updateHoverWidget() (it owns the single
+    // source of truth for hover). Leaf widgets never needed the field.
+    // CompoundWidget::onMouseLeave now propagates mouse-leave to all
+    // descendants so a stale hover state on a child can't survive an
+    // external mouse-out event.
 
     std::unordered_map<UIEventType, std::vector<std::function<void(UIEvent&)>>> _eventHandlers;
     IRenderBackend* _renderBackend = nullptr;
@@ -212,6 +219,18 @@ public:
     virtual ~CompoundWidget();
 
     void performLayout() override;
+
+    // R-6: CompoundWidget overrides hitTest to descend into children, and
+    // overrides onMouseLeave to notify every descendant. The previous
+    // base-default implementation worked for raw `Widget` containers but
+    // could not express "the container has no children, hit self only"
+    // cleanly — every widget stored a _hoverWidget field even when it
+    // could never have one. Splitting the two cases makes the data model
+    // honest (only containers can host a hover child) and fixes B4 (mouse
+    // leave now reaches every descendant without relying on UIManager
+    // re-picking the cursor hint after mouse-up).
+    Widget* hitTest(const math::FVector2& worldPos) override;
+    void onMouseLeave() override;
 
     virtual void layoutChildren() {}
 

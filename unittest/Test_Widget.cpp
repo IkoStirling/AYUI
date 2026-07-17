@@ -10,7 +10,12 @@ using namespace ayt::math;
 TEST_SUITE(AYUI_Widget)
 
 TEST_CASE(test_widget_tree) {
-    Widget* root = new Widget();
+    // R-6: a Widget that hosts children MUST be a CompoundWidget. After
+    // R-6, Widget::hitTest only checks self; CompoundWidget::hitTest
+    // descends into children. Using a raw Widget here would silently
+    // route child hits to the root itself, which is the bug the refactor
+    // exists to make obvious.
+    Widget* root = new CompoundWidget();
     root->setSize(FVector2(100.0f, 100.0f));
 
     Widget* child1 = new Widget();
