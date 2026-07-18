@@ -286,20 +286,97 @@ TEST_CASE(hbox_render_walks_slots_in_insertion_order) {
     CHECK(hbox->isSplitterSlot(1) == true);
     CHECK(hbox->isSplitterSlot(2) == false);
 
-    // Render should not crash and should visit every slot. SplitterHandle
-    // overrides onRender so we expect exactly one drawcall from the splitter
-    // (a colored rect); the plain Widget a/c produce no draws because their
-    // base onRender is empty. This verifies that HBox::render's single-pass
-    // walk still visits every slot in insertion order without crashing.
+    // Render should not crash and should visit every slot. With the
+    // splitter visual refactor (invisible at rest, hover reveals it),
+    // a non-hovered SplitterHandle emits ZERO draw calls — the plain
+    // Widget a/c also emit zero because their base onRender is empty.
+    // This verifies that HBox::render's single-pass walk still visits
+    // every slot in insertion order without crashing.
     MockRenderer renderer;
     hbox->render(renderer);
-    CHECK(renderer.getDrawCalls().size() == 1u);
-    CHECK(renderer.getDrawCalls().front().type == MockRenderer::DrawCall::Rect);
+    CHECK(renderer.getDrawCalls().empty());
 
     // ~HBox no longer deletes children (Phase UI-OWN-1). a, splitter, and c
     // were allocated with new Widget()/new SplitterHandle() and must be freed
     // explicitly — destroyWidgetTree handles that since they are tree-owned.
     destroyWidgetTree(hbox);
+}
+
+// SplitterHandle visual refactor: at rest the splitter is invisible
+// (no draw calls). The previous design always painted a dark grey rect
+// that competed visually with adjacent Window panels — VSCode / UE /
+// Unity hide the splitter at rest and reveal it on hover instead.
+TEST_CASE(splitter_render_invisible_at_rest) {
+    SplitterHandle* split = new SplitterHandle();
+    split->setSize(FVector2(4.0f, 100.0f));
+    split->setPosition(FVector2(0.0f, 0.0f));
+
+    MockRenderer renderer;
+    split->render(renderer);
+    CHECK(renderer.getDrawCalls().empty());
+
+    delete split;
+}
+
+// SplitterHandle visual refactor: hovering fills the splitter width with
+// the accent color AND draws a 2px grab handle down the center (so the
+// user sees "drag me"). Expected draw count = 2 (1 fill rect + 1 grab
+// handle rect).
+TEST_CASE(splitter_render_hover_emits_fill_and_grab_handle) {
+    SplitterHandle* split = new SplitterHandle();
+    split->setSize(FVector2(4.0f, 200.0f));
+    split->setPosition(FVector2(0.0f, 0.0f));
+
+    // Drive _hover=true via the public mouse API rather than poking
+    // private state. UIMouseEvent at (0,0) — only matters that it lands
+    // inside the splitter bounds for onMouseMove to flip _hover.
+    UIMouseEvent hover(FVector2(2.0f, 100.0f));
+    split->onMouseMove(hover);
+
+    MockRenderer renderer;
+    split->render(renderer);
+    CHECK(renderer.getDrawCalls().size() == 2u);
+    for (const auto& dc : renderer.getDrawCalls()) {
+        CHECK(dc.type == MockRenderer::DrawCall::Rect);
+    }
+
+    // The first draw call must cover the full splitter bounds (the
+    // accent fill). The second is the 2px grab handle inset by 4px
+    // on each end — verify the grab handle's width is much smaller
+    // than the splitter width.
+    const auto& calls = renderer.getDrawCalls();
+    CHECK(calls[0].bounds.minX <= 0.0f + 0.001f);
+    CHECK(calls[0].bounds.maxX >= 4.0f - 0.001f);
+    const float grabWidth = calls[1].bounds.maxX - calls[1].bounds.minX;
+    CHECK(grabWidth < 4.0f);
+    CHECK(grabWidth > 0.0f);
+
+    delete split;
+}
+
+// SplitterHandle visual refactor: a hovered splitter that loses mouse
+// (onMouseLeave) returns to invisible. The drag-state path must keep
+// the visual active while dragging — but leave+no-drag falls back to
+// no draws.
+TEST_CASE(splitter_render_mouse_leave_returns_to_invisible) {
+    SplitterHandle* split = new SplitterHandle();
+    split->setSize(FVector2(4.0f, 100.0f));
+    split->setPosition(FVector2(0.0f, 0.0f));
+
+    UIMouseEvent hover(FVector2(2.0f, 50.0f));
+    split->onMouseMove(hover);
+
+    MockRenderer renderer1;
+    split->render(renderer1);
+    CHECK(renderer1.getDrawCalls().size() == 2u);
+
+    split->onMouseLeave();
+
+    MockRenderer renderer2;
+    split->render(renderer2);
+    CHECK(renderer2.getDrawCalls().empty());
+
+    delete split;
 }
 
 TEST_SUITE_END

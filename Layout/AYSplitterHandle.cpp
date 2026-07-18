@@ -94,11 +94,34 @@ void SplitterHandle::onRender(IRenderBackend& renderer) {
         return;
     }
 
+    // Default state: invisible. The previous design always painted a dark
+    // grey rectangle that visually competed with the adjacent Window panels
+    // (panel_hierarchy / panel_inspector share the same dark base color),
+    // making the splitter look like a third panel instead of a drag handle.
+    // VSCode / UE / Unity hide the splitter at rest and reveal it on hover.
     const bool active = _hover || _dragging;
-    const math::FVector4 color =
-        active ? math::FVector4(0.45f, 0.55f, 0.75f, 1.0f)
-               : math::FVector4(0.28f, 0.30f, 0.34f, 1.0f);
-    renderer.drawRect(bounds, color);
+    if (!active) {
+        return;
+    }
+
+    // Hover/drag: fill the full splitter width with the accent color so the
+    // user sees the hit zone light up, then draw a 2px grab handle down the
+    // center to communicate "drag me". Inset the grab handle by 4px on each
+    // end so it doesn't touch the splitter edge.
+    renderer.drawRect(bounds, math::FVector4(0.40f, 0.48f, 0.62f, 1.0f));
+
+    const float cx = (bounds.minX + bounds.maxX) * 0.5f;
+    const float grabHalfWidth = 1.0f;
+    const float grabInsetTop = 4.0f;
+    const float grabInsetBottom = 4.0f;
+    if (bounds.maxY - bounds.minY > grabInsetTop + grabInsetBottom) {
+        renderer.drawRect(
+            math::FRectangle(cx - grabHalfWidth,
+                             bounds.minY + grabInsetTop,
+                             cx + grabHalfWidth,
+                             bounds.maxY - grabInsetBottom),
+            math::FVector4(0.85f, 0.88f, 0.92f, 0.9f));
+    }
 }
 
 } // namespace ayt::ui
