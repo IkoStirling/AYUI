@@ -28,6 +28,7 @@ set(SRC_FILES
     Controls/AYListView.cpp
     Controls/AYComboBox.cpp
     Controls/AYTabControl.cpp
+    Controls/AYCompoundFocusableWidget.cpp
     Controls/AYPanel.cpp
     Controls/AYTextLabel.cpp
     Controls/AYTreeNode.cpp
@@ -45,6 +46,7 @@ set(SRC_FILES
     Style/AYMockRenderer.cpp
     Style/AYStyle.cpp
     i18n/AYI18n.cpp
+    Controls/UIKeyCode.cpp
 )
 
 set(HEAD_FILES
@@ -67,6 +69,7 @@ set(HEAD_FILES
     Controls/AYListView.h
     Controls/AYComboBox.h
     Controls/AYTabControl.h
+    Controls/AYCompoundFocusableWidget.h
     Controls/AYSelectableWidget.h
     Controls/AYTooltip.h
     Controls/AYSeparator.h
@@ -94,6 +97,7 @@ set(HEAD_FILES
     Style/AYThickness.h
     Style/AYTextContent.h
     i18n/AYI18n.h
+    Controls/UIKeyCode.h
 )
 
 set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
@@ -113,9 +117,9 @@ target_include_directories(${MODULE_NAME} PUBLIC
 )
 
 if(nlohmann_json_FOUND)
-    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont PRIVATE nlohmann_json::nlohmann_json)
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont AYDevice PRIVATE nlohmann_json::nlohmann_json)
 else()
-    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont)
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont AYDevice)
     message(STATUS "AYUI: using bundled nlohmann/json from ${AYUI_NLOHMANN_DIR}")
 endif()
 

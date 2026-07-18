@@ -1,7 +1,70 @@
 #include "AYWidget.h"
+#include "AYCompoundFocusableWidget.h"
 #include "aymath/MathUtils.h"
 
 namespace ayt::ui {
+
+// =============================================================================
+// Phase B (S3): shared compound-descent helpers. Both CompoundWidget and
+// CompoundFocusableWidget route their performLayout/tick/hitTest/onMouseLeave
+// through these helpers — single source of truth, diamond-free inheritance.
+//
+// Each helper takes the widget as an explicit argument because the call site
+// (a derived class method) has the right `this` and we want the helper to be
+// free of virtual dispatch (the helper operates on `Widget*` directly).
+// =============================================================================
+
+void compoundDescendLayout(Widget* self) {
+    if (self == nullptr) return;
+    // layoutChildren() is virtual on CompoundWidget and on
+    // CompoundFocusableWidget. We invoke it via the base pointer; the
+    // dispatch is dynamic, so each derived class's override fires.
+    // Equivalent to CompoundWidget::performLayout pre-Phase-B.
+    if (auto* cw = dynamic_cast<CompoundWidget*>(self)) {
+        cw->layoutChildren();
+    } else if (auto* cfw = dynamic_cast<CompoundFocusableWidget*>(self)) {
+        cfw->layoutChildren();
+    }
+    for (Widget* child : self->getChildren()) {
+        child->performLayout();
+    }
+}
+
+void compoundDescendTick(Widget* self, float dt) {
+    if (self == nullptr) return;
+    self->Widget::tick(dt);
+    for (Widget* child : self->getChildren()) {
+        child->tick(dt);
+    }
+}
+
+Widget* compoundDescendHitTest(Widget* self, const math::FVector2& worldPos) {
+    if (self == nullptr) return nullptr;
+    if (!self->isVisible()) return nullptr;
+    // Check children first (reverse order — last added is on top).
+    const auto& kids = self->getChildren();
+    for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+        Widget* hit = (*it)->hitTest(worldPos);
+        if (hit) {
+            return hit;
+        }
+    }
+    // Then check self.
+    math::FRectangle bounds = self->getWorldBounds();
+    if (bounds.contains(worldPos)) {
+        return self;
+    }
+    return nullptr;
+}
+
+void compoundDescendLeave(Widget* self) {
+    if (self == nullptr) return;
+    for (Widget* child : self->getChildren()) {
+        if (child) {
+            child->onMouseLeave();
+        }
+    }
+}
 
 Widget::Widget()
     : _position(0.0f, 0.0f)
@@ -187,18 +250,12 @@ CompoundWidget::~CompoundWidget() {
 }
 
 void CompoundWidget::performLayout() {
-    layoutChildren();
-    for (Widget* child : _children) {
-        child->performLayout();
-    }
+    compoundDescendLayout(this);
 }
 
 void CompoundWidget::tick(float dt) {
     // Cascade: own tick first, then children. Mirrors performLayout.
-    Widget::tick(dt);
-    for (Widget* child : _children) {
-        child->tick(dt);
-    }
+    compoundDescendTick(this, dt);
 }
 
 Widget* CompoundWidget::hitTest(const math::FVector2& worldPos) {
@@ -209,22 +266,7 @@ Widget* CompoundWidget::hitTest(const math::FVector2& worldPos) {
     // a stale pointer here that could leak cursor hints past a mouse-up
     // (B4); the onMouseLeave override below propagates mouse-leave to
     // descendants when a hover transition occurs through this container.
-    if (!_visible) return nullptr;
-
-    // Check children first (reverse order — last added is on top).
-    for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
-        Widget* hit = (*it)->hitTest(worldPos);
-        if (hit) {
-            return hit;
-        }
-    }
-
-    // Then check self.
-    math::FRectangle bounds = getWorldBounds();
-    if (bounds.contains(worldPos)) {
-        return this;
-    }
-    return nullptr;
+    return compoundDescendHitTest(this, worldPos);
 }
 
 void CompoundWidget::onMouseLeave() {
@@ -235,11 +277,7 @@ void CompoundWidget::onMouseLeave() {
     // InteractiveWidget that was hovered while the cursor was inside
     // the container but whose own bounds the cursor has now left would
     // still report `_isMouseOver = true` until the next onMouseMove.
-    for (Widget* child : _children) {
-        if (child) {
-            child->onMouseLeave();
-        }
-    }
+    compoundDescendLeave(this);
 }
 
 void CompoundWidget::onChildAdded(Widget* child) {

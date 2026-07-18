@@ -253,6 +253,21 @@ protected:
     void onChildRemoved(Widget* child);
 };
 
+// ============================================================================
+// Phase B (S3): shared compound-descent helpers used by BOTH
+// CompoundWidget and CompoundFocusableWidget. Anonymous-namespace helpers in
+// AYWidget.cpp own the implementation; this block is the public linkage.
+//
+// Why a shared helper (and not making CompoundFocusableWidget inherit
+// CompoundWidget)? Multi-inheritance would form a diamond under Widget (both
+// bases inherit Widget directly). Single inheritance from FocusableWidget +
+// shared helpers is diamond-free and behavior-identical.
+// ============================================================================
+void compoundDescendLayout(Widget* self);
+void compoundDescendTick(Widget* self, float dt);
+Widget* compoundDescendHitTest(Widget* self, const math::FVector2& worldPos);
+void compoundDescendLeave(Widget* self);
+
 // =============================================================================
 // Single-owner destruction helper (Phase UI-OWN-1).
 // Recursively destroys a widget tree built via WidgetFactory / UILayoutLoader.
