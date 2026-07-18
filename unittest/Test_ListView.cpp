@@ -8,6 +8,44 @@
 #include "AYStyle.h"
 #include <iostream>
 
+// =============================================================================
+// Known-not-covered scenarios for C-5 ListView v1
+// =============================================================================
+// See Controls/AYListView.h top-of-file "Virtualization boundary" block for
+// the design rationale + upgrade seams. Pinned here as entry points so the
+// next implementer knows where to start.
+//
+// K1. Large list (>1000 rows) — per-frame layout cost.
+//     Repro sketch:
+//        ListView lv; lv.setItemHeight(24.0f);
+//        std::vector<std::wstring> items; for (int i = 0; i < 5000; ++i)
+//            items.push_back(L"row " + std::to_wstring(i));
+//        lv.setItems(items);
+//        // Drive a UIManager::update loop and watch frame time on scroll.
+//     Expected v1.1 fix: row pool (see AYListView.h DECISION block).
+//     The public API (setItems / setSelectedIndex / getScrollOffset)
+//     does NOT change — only the internal _rows vector + rebuildRows
+//     implementation swaps in.
+//
+// K2. Up/Down/Home/End/PageUp/PageDown keyboard navigation.
+//     v1 ships without keyboard routing on ListView. Hosts wire
+//     onKeyDown externally (e.g. ComboBox's popup will need it for
+//     v1.1 keyboard support). v1.1 fix: ListView::onKeyDown override
+//     translates arrow keys to setSelectedIndex(current + delta), capped
+//     to visible window, plus scrollToIndex so the new selection is
+//     visible. ListView does NOT inherit FocusableWidget — keyboard
+//     nav is host-side, not list-side, in v1.
+//
+// K3. Multi-selection (Ctrl+click / Shift+click range select).
+//     Not in v1. Single mode only (`_selectedIndex` is a single int).
+//     v1.1 design is a `SelectionMode { Single, Multi }` enum + a
+//     `std::vector<int> _selectedIndices` alongside `_selectedIndex`
+//     (or replacing it). When implementing, also update
+//     SelectableWidget.h to add the contract for multi-mode semantics
+//     (anchor/active distinction, range select rules).
+//
+// =============================================================================
+
 using namespace ayt::ui;
 using namespace ayt::math;
 

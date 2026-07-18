@@ -10,7 +10,9 @@
 
 namespace ayt::ui {
 
+// =============================================================================
 // C-5 ListView: a single/multi-select list of text rows.
+// =============================================================================
 //
 // Architecture (v1 — no virtualization):
 //   ListView (CompoundWidget)
@@ -32,6 +34,72 @@ namespace ayt::ui {
 //     changes (idempotent).
 //   - setItems replaces the row pool; the selection moves to track the
 //     same item text if present, else -1.
+//
+// -----------------------------------------------------------------------------
+// Virtualization boundary — when to upgrade + what to change
+// -----------------------------------------------------------------------------
+// (This is the "future implementer" note. The current implementation makes
+// an explicit trade: 1 item = 1 real widget child. This is simple and
+// correct but does not scale beyond ~1000 rows. The points below pin down
+// exactly where the upgrade boundary sits so the swap-in doesn't ripple
+// across ComboBox / TabControl / other consumers.)
+//
+// TRIGGER conditions (any one is enough to justify swapping in a row pool):
+//   - Item count > 1000 AND user-visible scroll jank (frame time spike
+//     when scrolling). Empirically the cost is per-frame layout of N
+//     children + per-frame render of N row quads.
+//   - Per-item state cost too high (each row is a full InteractiveWidget
+//     with a hover/press state machine — ~100 bytes of state + vtable
+//     pointer × N rows).
+//   - Future virtualization frameworks (imgui-style immediate-mode list,
+//     TableView with sticky headers, etc.) require a different access
+//     pattern than "widget child per row".
+//
+// WHAT MUST STAY (public API contract — do NOT change):
+//   - setItems / addItem / clearItems / getItem / getItemCount
+//   - getSelectedIndex / setSelectedIndex / getSelectedItem
+//   - setOnSelectionChanged / setOnItemActivated
+//   - setItemHeight / getItemHeight
+//   - getScrollOffset / setScrollOffset
+//   - getVerticalScrollBar() (caller may want to skin or hide it)
+//   - JSON round-trip fields (items, selectedIndex, itemHeight)
+//
+// WHAT WILL CHANGE (internal — these are the upgrade seams):
+//   1. _rows vector → a small pool of reused row widgets (typically
+//      ceil(viewport / itemHeight) + a few). Track pool position →
+//      item index via a small mapping.
+//   2. `rebuildRows()` becomes `rebuildVisibleRows()` — runs on
+//      layout pass + on scroll offset change, NOT on every setItems.
+//   3. _items stays (it's the model). The pool just renders whatever
+//      items intersect the current viewport + scrollOffset.
+//   4. hitTest and onMouseButtonUp need to convert a clicked row pool
+//      position BACK to a logical item index before calling
+//      setSelectedIndex / handleRowClick.
+//   5. scrollToIndex (currently O(1) clamping) may need to animate or
+//      snap; keep the public signature, allow callers to be unaffected.
+//
+// WHAT BREAKS the public API and must be guarded:
+//   - Row* pointers handed out via internal callbacks (only the
+//     `_onClickByRow` callback uses int index, so we're already safe —
+//     confirm by grep before changing the Row::onMouseButtonUp signature).
+//   - getChildren() returning N rows: any caller that walks children
+//     expecting row widgets will see only the pool size after the
+//     upgrade. Today the only such caller is ComboBox::onMouseButtonUp
+//     via _popup->getChildren().back() — that one grabs the popup
+//     ListView itself, not its rows, so it's safe; verify before any
+//     further ComboBox change.
+//
+// KEYBOARD NAVIGATION (also deferred, same v1.1 window as ComboBox):
+//   ListView currently does NOT override onKeyDown. Up/Down/Home/End/
+//   PageUp/PageDown navigation is the host's responsibility (e.g.
+//   ComboBox's popup will need it for v1.1 keyboard support).
+//   The future implementer should add ListView::onKeyDown that routes
+//   arrow keys to setSelectedIndex(current + delta), capped to the
+//   visible window, with scrollToIndex so the new selection is visible.
+//   Test that ListView does NOT inherit FocusableWidget by itself —
+//   keyboard nav is on the host side, not the list side, in v1.
+//
+// =============================================================================
 //
 // Click on a row selects it; double-click selects + fires _onItemActivated.
 // Keyboard navigation (Up / Down / Home / End / PageUp / PageDown) is

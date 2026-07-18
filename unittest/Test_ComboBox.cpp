@@ -9,6 +9,72 @@
 #include "AYStyle.h"
 #include <iostream>
 
+// =============================================================================
+// Known-not-covered scenarios for C-6 ComboBox v1
+// =============================================================================
+// The cases below are NOT exercised by the tests in this file. They are
+// pinned here (not as failing tests) so the next implementer can find the
+// entry points and write regression tests when fixing the underlying v1
+// limitation. See Controls/AYComboBox.h top-of-file "v1 design decisions"
+// block for the design rationale + upgrade paths.
+//
+// S1. ScrollView parent — popup overflows ScrollView's content bounds.
+//     Repro sketch:
+//        UIManager ui; ui.initialize(nullptr);
+//        auto* sv = new ScrollView();
+//        auto* cb = new ComboBox(); cb->setItems({"a","b","c"});
+//        sv->setContent(cb);
+//        ui.loadFromString("...");
+//        cb->openPopup();
+//        // Click on the popup's overflow region (outside ScrollView's
+//        // content bounds). Currently this click misses the popup because
+//        // ScrollView's CompoundWidget::hitTest does not descend past its
+//        // own content subtree, and ComboBox's hitTest detour only knows
+//        // about its own popup child (not siblings elsewhere in the tree).
+//     Expected v1.1 fix: ComboBox::setPopupParent(Widget* root) injects
+//     the popup's parent; openPopup addChildExternal's the popup to root
+//     instead of this. Then ScrollView's hitTest correctly includes the
+//     popup as a sibling.
+//
+// S2. Window drag with open popup.
+//     Repro sketch:
+//        Window w; w.setSize(...); ComboBox cb; cb.setItems({"x"});
+//        w.addChild(&cb); cb.openPopup();
+//        // Drag the window title bar; release outside the window.
+//        // UIManager clears _capturedWidget only on shutdown/reload/explicit
+//        // mouseup — mid-drag the captured pointer may still reference the
+//        // popup rows after the Window is destroyed (host frees it). Latent
+//        // UAF on the next mouse event.
+//     Expected v1.1 fix: same setPopupParent fix as S1 — when popup
+//     lives on root, the root's destroyWidgetTree releases it cleanly
+//     even mid-drag; UIManager's next pickWidgetAt finds null.
+//
+// S3. Multi-popup coexistence.
+//     Repro sketch:
+//        VBox root; ComboBox a, b; root.addChild(&a); root.addChild(&b);
+//        a.openPopup(); b.openPopup();
+//        // a's popup sits on top of b's main area (bringToFront raised
+//        // a + its popup together). Clicking on b's main area may be
+//        // swallowed by a's popup if it overlaps.
+//     Expected v1.1 fix: DropdownManager singleton tracks the
+//     "currently open" ComboBox; opening a new one closes the prior.
+//     Or render order via stack layering — handle when needed.
+//
+// S4. Keyboard navigation (Tab/Up/Down/Home/End/Enter).
+//     Not a bug — v1 ships ComboBox without keyboard routing. Verify
+//     by trying: load a UI with a ComboBox; Tab through it; ComboBox
+//     never gets focus. To enable keyboard nav in v1.1, inherit
+//     FocusableWidget INSTEAD OF CompoundWidget (parallel base, same
+//     trick TextInput uses) and override onKeyDown/onKeyUp.
+//
+// S5. Viewport clamp / auto-flip-up.
+//     Place a ComboBox near the bottom of the screen with many items;
+//     open popup; popup overflows past the viewport with no clamp.
+//     Host must position ComboBox with room below. v1.1 fix: pass
+//     viewport metrics via setViewportSize or compute from root.
+//
+// =============================================================================
+
 using namespace ayt::ui;
 using namespace ayt::math;
 
