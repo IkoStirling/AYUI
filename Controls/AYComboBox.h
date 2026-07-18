@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYCompoundFocusableWidget.h"
 #include "AYWidget.h"
 #include "AYListView.h"
 #include "AYTextLabel.h"
@@ -111,25 +112,34 @@ namespace ayt::ui {
 //   singleton — handle in that step. L4 needs viewport metrics from
 //   the host (pass in via setViewportSize or compute in performLayout).
 //
-// DECISION 3: ComboBox does NOT extend FocusableWidget (no keyboard
-// navigation in v1).
+// DECISION 3 (Phase B — B2, S3): ComboBox extends
+// CompoundFocusableWidget (single inheritance, parallel base — same
+// trick CompoundFocusableWidget uses for ListView/Menu/TabControl).
 //
-//   Why: TextInput/C-3 set the precedent that FocusableWidget is the
-//   focus-routing base, but ComboBox-as-clickable-picker is a separate
-//   interaction model from text editing. Conflating them would force
-//   caret/IME plumbing onto ComboBox.
+//   Why the rename: CompoundFocusableWidget is the shared base for
+//   "compound widget that owns keyboard focus". ComboBox-as-clickable-
+//   picker is a separate interaction model from text editing, so we do
+//   NOT inherit FocusableWidget directly (TextInput-style) — that would
+//   drag caret/IME plumbing along. CompoundFocusableWidget inherits
+//   FocusableWidget for us; ComboBox gets focus + Tab traversal + can
+//   implement its own onKeyDown without inheriting FocusableWidget's
+//   text-edit assumptions.
 //
-//   Consequence: Tab does not move focus into ComboBox; Up/Down/Home/
-//   End do not change selection; Enter does not activate. Hosts that
-//   need keyboard navigation (editor shell, any form UI) wire onKeyDown
-//   externally and check `UIManager::getFocusedWidget() == combobox`.
+//   Phase B (B2) state machine (ComboBox::onKeyDown owns ALL its keys):
 //
-//   v1.1 upgrade: make ComboBox inherit FocusableWidget INSTEAD OF
-//   CompoundWidget (parallel base, not a vertical chain — same trick
-//   TextInput uses). Override onKeyDown to translate Up/Down/Home/End
-//   into setSelectedIndex deltas; override onKeyUp for Enter activation.
-//   This does NOT change the public API; the only observable change is
-//   Tab/arrows starting to work.
+//     Closed state:
+//       Down  → open popup, target = current selection (or 0 if -1)
+//       Up    → open popup, target = last item (n - 1)
+//       other → not consumed
+//
+//     Open state:
+//       Up/Down → mutate _selectedIndex by ±1 (wraps), sync popup
+//       Enter   → close popup + fire _onSelectionChanged (commits)
+//       Escape  → close popup without firing _onSelectionChanged
+//
+//   Phase B does NOT delegate keys to the popup ListView — the popup's
+//   rows are click-only; keyboard lives on ComboBox. This keeps the
+//   key-to-state mapping in ONE place (no double-routing risk).
 //
 // DECISION 4: No typeahead, no icon column, no animation, no opens-UP.
 //
@@ -140,7 +150,7 @@ namespace ayt::ui {
 //
 // =============================================================================
 
-class ComboBox : public CompoundWidget {
+class ComboBox : public CompoundFocusableWidget {
 public:
     static constexpr float kDefaultWidth = 160.0f;
     static constexpr float kDefaultHeight = 28.0f;
@@ -209,6 +219,18 @@ public:
     bool onMouseButtonUp(const UIMouseEvent& e) override;
     void onMouseLeave() override;
 
+    // Phase B (B2): onMouseButtonDown grabs keyboard focus so the user
+    // can arrow-cycle without an explicit click-then-Tab. The actual
+    // click → toggle-popup path lives in onMouseButtonUp (returning
+    // false here lets the event flow up unchanged).
+    bool onMouseButtonDown(const UIMouseEvent& e) override;
+
+    // Phase B (B2): keyboard state machine. Owns Up/Down/Enter/Escape
+    // — does NOT delegate to the popup ListView. See DECISION 3 in the
+    // header note above for the full state table. Returns true when the
+    // key was consumed.
+    bool onKeyDown(int keyCode) override;
+
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
 
@@ -229,6 +251,17 @@ private:
     ListView*  _popup   = nullptr;
 
     bool _enabled = true;
+
+    // Phase B (B2): mute flag for the popup's selection callback. When
+    // onKeyDown's open-state path mirrors `_selectedIndex` into the popup
+    // ListView, that sync would fire the popup's _onSelectionChanged
+    // (wired in ensurePopupCreated to closePopup + fire host callback).
+    // Keyboard-driven selection is owned by ComboBox — calling closePopup
+    // here would dismiss the popup mid-arrows, and re-firing
+    // _onSelectionChanged would commit on every keypress. We set this
+    // guard before the sync and clear it after; the callback reads the
+    // flag and returns early.
+    bool _silentPopupSync = false;
 
     std::function<void(int)> _onSelectionChanged;
 };

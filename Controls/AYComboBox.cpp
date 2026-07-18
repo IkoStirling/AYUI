@@ -3,6 +3,7 @@
 #include "AYIRenderBackend.h"
 #include "AYStyle.h"
 #include "AYUIManager.h"
+#include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
@@ -91,7 +92,14 @@ void ComboBox::setSelectedIndex(int index) {
                 ? _items[_selectedIndex]
                 : L"");
     }
-    syncPopupSelection();
+    // Honor the silent-sync guard: when onKeyDown's open-state path is
+    // moving the selection, the popup's selection callback (wired in
+    // ensurePopupCreated) would close the popup + fire _onSelectionChanged
+    // — both wrong mid-arrows. Caller wraps both this call AND its own
+    // explicit popup sync with _silentPopupSync, then resets it.
+    if (!_silentPopupSync) {
+        syncPopupSelection();
+    }
 }
 
 const std::wstring& ComboBox::getSelectedItem() const {
@@ -113,6 +121,22 @@ void ComboBox::ensurePopupCreated() {
     // setOnSelectionChanged lambda — without this forwarding, the popup's
     // internal ListView selection would be invisible to ComboBox listeners.
     _popup->setOnSelectionChanged([this](int idx) {
+        // Phase B (B2): if ComboBox::onKeyDown is mirroring a keyboard
+        // move into the popup ListView, that sync would re-enter here
+        // and dismiss the popup mid-arrows. Suppress the side effects
+        // (close + callback) in that case — the keyboard caller owns
+        // the state machine. Display label still updates so the
+        // highlight stays consistent.
+        if (_silentPopupSync) {
+            _selectedIndex = idx;
+            if (_display != nullptr) {
+                _display->setText(
+                    _selectedIndex >= 0
+                        ? _items[_selectedIndex]
+                        : L"");
+            }
+            return;
+        }
         // Mirror selection into ComboBox's own _selectedIndex so
         // getSelectedIndex / getSelectedItem report the new value, and
         // update the display label. setSelectedIndex closes the popup
@@ -259,8 +283,8 @@ Widget* ComboBox::hitTest(const math::FVector2& worldPos) {
     // Phase A (A2): the popup lives on the overlay, NOT as a child of
     // ComboBox. UIManager's overlay-first hit-test funnel already routes
     // clicks inside the popup's world bounds to the popup's rows. We just
-    // hit-test self-bounds like a normal CompoundWidget.
-    return CompoundWidget::hitTest(worldPos);
+    // hit-test self-bounds like a normal CompoundFocusableWidget.
+    return CompoundFocusableWidget::hitTest(worldPos);
 }
 
 bool ComboBox::onMouseButtonUp(const UIMouseEvent& e) {
@@ -286,12 +310,90 @@ bool ComboBox::onMouseButtonUp(const UIMouseEvent& e) {
 }
 
 void ComboBox::onMouseLeave() {
-    CompoundWidget::onMouseLeave();
+    CompoundFocusableWidget::onMouseLeave();
     // Don't auto-close on leave: user may move the cursor toward the
     // popup. UIManager re-evaluates hover every move; if the cursor
     // ends up outside ComboBox AND outside popup on the next frame
     // and no button is held, the click-outside path in onMouseButtonUp
     // closes it. (Native OS dropdowns behave similarly.)
+}
+
+// =============================================================================
+// Phase B (B2) — keyboard navigation + click focus grab
+// =============================================================================
+
+bool ComboBox::onMouseButtonDown(const UIMouseEvent& e) {
+    // Phase B (B2): grab focus on press so the user can arrow-cycle
+    // without needing an explicit click-then-Tab. The actual click →
+    // toggle-popup path lives in onMouseButtonUp (returning false
+    // here lets the event flow up unchanged).
+    if (e.mouseButton == 0) {
+        UIManager::get().setFocus(this);
+    }
+    return false;
+}
+
+bool ComboBox::onKeyDown(int keyCode) {
+    // ComboBox owns ALL its keys — does NOT delegate to the popup
+    // ListView. See DECISION 3 in the header note for the state table.
+
+    if (_items.empty()) return false;
+    const int n = static_cast<int>(_items.size());
+    const bool isOpen = isPopupOpen();
+
+    switch (keyCode) {
+    case UIKey_Down:
+    case UIKey_Up: {
+        if (!isOpen) {
+            // Closed → open popup, target depends on direction.
+            // Down: target = current (or 0 if nothing selected).
+            // Up:   target = last item.
+            const int target = (keyCode == UIKey_Up)
+                ? (n - 1)
+                : (_selectedIndex < 0 ? 0
+                                      : std::min(_selectedIndex, n - 1));
+            setSelectedIndex(target);
+            openPopup();
+            return true;
+        }
+        // Open → arrows change selection. Wrap the whole popup-sync
+        // sequence in _silentPopupSync: setSelectedIndex internally
+        // calls syncPopupSelection, AND we then explicitly re-sync to
+        // ensure the highlight tracks the keyboard move. Both writes
+        // would otherwise fire the popup's _onSelectionChanged →
+        // closePopup + fire host callback, both wrong mid-arrows.
+        const int cur = (_selectedIndex < 0) ? 0 : _selectedIndex;
+        const int next = (keyCode == UIKey_Down)
+            ? (cur + 1) % n
+            : (cur <= 0 ? n - 1 : cur - 1);
+        _silentPopupSync = true;
+        setSelectedIndex(next);
+        if (_popup != nullptr) {
+            _popup->setSelectedIndex(_selectedIndex);
+        }
+        _silentPopupSync = false;
+        return true;
+    }
+    case UIKey_Enter:
+        if (isOpen) {
+            // Commit: close + fire callback.
+            closePopup();
+            if (_onSelectionChanged) {
+                _onSelectionChanged(_selectedIndex);
+            }
+            return true;
+        }
+        return false;
+    case UIKey_Escape:
+        if (isOpen) {
+            // Dismiss without committing — _selectedIndex unchanged.
+            closePopup();
+            return true;
+        }
+        return false;
+    default:
+        return false;
+    }
 }
 
 void ComboBox::performLayout() {

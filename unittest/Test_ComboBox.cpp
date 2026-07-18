@@ -7,6 +7,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include <iostream>
 
 // =============================================================================
@@ -452,6 +453,152 @@ TEST_CASE(combobox_in_scrollview_popup_overflow_clickable) {
     ui.onMouseButtonDown(80.0f, 64.0f, 0);
     ui.onMouseButtonUp(80.0f, 64.0f, 0);
     CHECK(selChanges == 1);
+
+    ui.shutdown();
+}
+
+// =============================================================================
+// Phase B (B2) — ComboBox keyboard navigation tests
+// =============================================================================
+//
+// Note: B2 tests use a fresh UIManager per case so the DropdownManager
+// state is isolated. `openPopup()` mounts the popup on the overlay; we
+// can drive keys against cb directly without UIManager routing them.
+// =============================================================================
+
+// B2: closed-state Down opens popup and lands on current selection (or 0
+// if nothing selected). Up opens and lands on last item.
+TEST_CASE(combobox_closed_arrow_keys_open_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c", L"d"});
+    cb.setSelectedIndex(2);
+
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.isPopupOpen());
+    CHECK(cb.getSelectedIndex() == 2);   // Down → current selection
+
+    cb.closePopup();
+    cb.setSelectedIndex(-1);   // no selection
+
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.isPopupOpen());
+    CHECK(cb.getSelectedIndex() == 0);   // Down → 0 when no selection
+
+    cb.closePopup();
+
+    cb.onKeyDown(UIKey_Up);
+    CHECK(cb.isPopupOpen());
+    CHECK(cb.getSelectedIndex() == 3);   // Up → last (n - 1)
+
+    cb.closePopup();
+    ui.shutdown();
+}
+
+// B2: open-state Up/Down mutates _selectedIndex by ±1 with wrap, AND
+// syncs the popup ListView's selection so the highlighted row tracks.
+TEST_CASE(combobox_open_arrow_keys_cycle_selection) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c"});
+    cb.setSelectedIndex(1);
+    cb.openPopup();
+
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.getSelectedIndex() == 2);
+    cb.onKeyDown(UIKey_Down);   // wraps to 0
+    CHECK(cb.getSelectedIndex() == 0);
+    cb.onKeyDown(UIKey_Up);     // wraps to last
+    CHECK(cb.getSelectedIndex() == 2);
+
+    cb.closePopup();
+    ui.shutdown();
+}
+
+// B2: Enter on open popup commits selection (fires callback) and closes.
+// _selectedIndex was mutated via open-state Down above.
+TEST_CASE(combobox_open_enter_commits_and_closes) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c"});
+    cb.setSelectedIndex(0);
+    cb.openPopup();
+
+    // Move selection to 2 via Down.
+    cb.onKeyDown(UIKey_Down);
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.getSelectedIndex() == 2);
+
+    int fired = -1;
+    cb.setOnSelectionChanged([&](int idx) { fired = idx; });
+
+    cb.onKeyDown(UIKey_Enter);
+    CHECK_FALSE(cb.isPopupOpen());
+    CHECK(fired == 2);
+    CHECK(cb.getSelectedIndex() == 2);
+
+    ui.shutdown();
+}
+
+// B2: Escape on open popup closes WITHOUT firing callback and WITHOUT
+// reverting _selectedIndex (per decision 5a — Escape is dismiss, not
+// revert-to-previous).
+TEST_CASE(combobox_open_escape_closes_without_selecting) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c"});
+    cb.setSelectedIndex(1);   // pre-open selection
+    cb.openPopup();
+
+    // Move selection around in open state.
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.getSelectedIndex() == 2);
+
+    int fired = -99;
+    cb.setOnSelectionChanged([&](int idx) { fired = idx; });
+
+    cb.onKeyDown(UIKey_Escape);
+    CHECK_FALSE(cb.isPopupOpen());
+    CHECK(fired == -99);   // callback NOT fired
+    CHECK(cb.getSelectedIndex() == 2);   // selection unchanged after dismiss
+
+    ui.shutdown();
+}
+
+// B2: onMouseButtonDown grabs focus via UIManager. Returns false so the
+// event continues to flow up to onMouseButtonUp (toggle path).
+TEST_CASE(combobox_focus_grab_on_click) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+
+    const FVector2 world = cb.getWorldBounds().getMin();
+    const FVector2 inside(world.x + 80.0f, world.y + 14.0f);
+    UIMouseEvent ev(inside, 0);
+
+    CHECK_FALSE(cb.onMouseButtonDown(ev));
+    CHECK(ui.getFocusedWidget() == &cb);
 
     ui.shutdown();
 }
