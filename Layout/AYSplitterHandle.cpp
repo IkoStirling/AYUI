@@ -21,7 +21,22 @@ Widget* SplitterHandle::hitTest(const math::FVector2& worldPos) {
     return getWorldBounds().contains(worldPos) ? this : nullptr;
 }
 
+bool SplitterHandle::isRevealed() const {
+    if (_dragging) {
+        return true;
+    }
+    if (_hover && _hoverElapsed >= kHoverRevealDelay) {
+        return true;
+    }
+    return false;
+}
+
 bool SplitterHandle::onMouseMove(const UIMouseEvent& e) {
+    if (!_hover) {
+        // Re-entering: restart the delay counter so a quick in/out doesn't
+        // accumulate across separate hover sessions.
+        _hoverElapsed = 0.0f;
+    }
     _hover = true;
     if (_dragging) {
         applyDrag(e.mousePos.x);
@@ -69,6 +84,9 @@ bool SplitterHandle::onMouseButtonUp(const UIMouseEvent& e) {
 void SplitterHandle::onMouseLeave() {
     if (!_dragging) {
         _hover = false;
+        // Reset the delay counter immediately so the next hover starts
+        // fresh (no carryover from the previous session).
+        _hoverElapsed = -1.0f;
     }
 }
 
@@ -88,23 +106,28 @@ void SplitterHandle::applyDrag(float mouseWorldX) {
                               _dragStartMouseX, _dragStartPrimaryWidth, _adjustLeft);
 }
 
+void SplitterHandle::tick(float dt) {
+    if (_hover && !_dragging && _hoverElapsed >= 0.0f) {
+        _hoverElapsed += dt;
+    }
+}
+
 void SplitterHandle::onRender(IRenderBackend& renderer) {
     const math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
         return;
     }
 
-    // Default state: invisible. The previous design always painted a dark
-    // grey rectangle that visually competed with the adjacent Window panels
-    // (panel_hierarchy / panel_inspector share the same dark base color),
-    // making the splitter look like a third panel instead of a drag handle.
-    // VSCode / UE / Unity hide the splitter at rest and reveal it on hover.
-    const bool active = _hover || _dragging;
-    if (!active) {
+    // Visual states:
+    //   default + drag: invisible (zero draws)
+    //   hover: invisible until the cursor has lingered for kHoverRevealDelay
+    //   hover + delay elapsed: full accent fill + 2px grab handle
+    //   drag: bypasses delay (drag is strong intent)
+    if (!isRevealed()) {
         return;
     }
 
-    // Hover/drag: fill the full splitter width with the accent color so the
+    // Revealed: fill the full splitter width with the accent color so the
     // user sees the hit zone light up, then draw a 2px grab handle down the
     // center to communicate "drag me". Inset the grab handle by 4px on each
     // end so it doesn't touch the splitter edge.

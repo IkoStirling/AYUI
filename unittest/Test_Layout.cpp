@@ -321,7 +321,9 @@ TEST_CASE(splitter_render_invisible_at_rest) {
 // SplitterHandle visual refactor: hovering fills the splitter width with
 // the accent color AND draws a 2px grab handle down the center (so the
 // user sees "drag me"). Expected draw count = 2 (1 fill rect + 1 grab
-// handle rect).
+// handle rect). The VSCode-style hover reveal delay (kHoverRevealDelay,
+// 150ms) means a freshly-hovered splitter is invisible until enough time
+// has elapsed — we tick() past the delay before rendering.
 TEST_CASE(splitter_render_hover_emits_fill_and_grab_handle) {
     SplitterHandle* split = new SplitterHandle();
     split->setSize(FVector2(4.0f, 200.0f));
@@ -332,6 +334,14 @@ TEST_CASE(splitter_render_hover_emits_fill_and_grab_handle) {
     // inside the splitter bounds for onMouseMove to flip _hover.
     UIMouseEvent hover(FVector2(2.0f, 100.0f));
     split->onMouseMove(hover);
+
+    // Right after hover, before the delay elapses: still invisible.
+    MockRenderer rendererBefore;
+    split->render(rendererBefore);
+    CHECK(rendererBefore.getDrawCalls().empty());
+
+    // Tick past the 150ms reveal delay (use 0.20s for a safety margin).
+    split->tick(0.20f);
 
     MockRenderer renderer;
     split->render(renderer);
@@ -355,9 +365,8 @@ TEST_CASE(splitter_render_hover_emits_fill_and_grab_handle) {
 }
 
 // SplitterHandle visual refactor: a hovered splitter that loses mouse
-// (onMouseLeave) returns to invisible. The drag-state path must keep
-// the visual active while dragging — but leave+no-drag falls back to
-// no draws.
+// (onMouseLeave) returns to invisible immediately — even mid-delay.
+// The drag-state path keeps the visual active while dragging.
 TEST_CASE(splitter_render_mouse_leave_returns_to_invisible) {
     SplitterHandle* split = new SplitterHandle();
     split->setSize(FVector2(4.0f, 100.0f));
@@ -365,6 +374,7 @@ TEST_CASE(splitter_render_mouse_leave_returns_to_invisible) {
 
     UIMouseEvent hover(FVector2(2.0f, 50.0f));
     split->onMouseMove(hover);
+    split->tick(0.20f);  // past the reveal delay
 
     MockRenderer renderer1;
     split->render(renderer1);
@@ -375,6 +385,44 @@ TEST_CASE(splitter_render_mouse_leave_returns_to_invisible) {
     MockRenderer renderer2;
     split->render(renderer2);
     CHECK(renderer2.getDrawCalls().empty());
+
+    delete split;
+}
+
+// SplitterHandle hover-reveal delay: hovering but not yet at the delay
+// is invisible. The tick(dt) drives _hoverElapsed forward. Re-entering
+// resets the delay counter (so back-to-back hovers don't accumulate).
+TEST_CASE(splitter_hover_reveal_delay_threshold) {
+    SplitterHandle* split = new SplitterHandle();
+    split->setSize(FVector2(4.0f, 100.0f));
+    split->setPosition(FVector2(0.0f, 0.0f));
+
+    UIMouseEvent hover(FVector2(2.0f, 50.0f));
+    split->onMouseMove(hover);
+
+    // Below threshold: invisible.
+    split->tick(SplitterHandle::kHoverRevealDelay - 0.01f);
+    CHECK(!split->isRevealed());
+    MockRenderer rendererBelow;
+    split->render(rendererBelow);
+    CHECK(rendererBelow.getDrawCalls().empty());
+
+    // Cross the threshold: revealed.
+    split->tick(0.02f);  // total = (delay - 0.01) + 0.02 = delay + 0.01
+    CHECK(split->isRevealed());
+    MockRenderer rendererAbove;
+    split->render(rendererAbove);
+    CHECK(rendererAbove.getDrawCalls().size() == 2u);
+
+    // Leave resets immediately.
+    split->onMouseLeave();
+    CHECK(!split->isRevealed());
+
+    // Re-enter: counter starts at 0 again — must NOT inherit the prior
+    // accumulated time.
+    split->onMouseMove(hover);
+    split->tick(SplitterHandle::kHoverRevealDelay - 0.01f);
+    CHECK(!split->isRevealed());
 
     delete split;
 }

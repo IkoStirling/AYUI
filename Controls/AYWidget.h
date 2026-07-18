@@ -152,6 +152,12 @@ public:
     // Layout
     virtual void performLayout() {}
 
+    // Per-frame tick. UIManager::update(dt) drives the root widget which
+    // cascades into CompoundWidget children. Default is a no-op; widgets
+    // with time-based behavior (SplitterHandle's hover reveal delay) override.
+    // Mirrors the performLayout cascade: CompoundWidget::tick walks children.
+    virtual void tick(float dt) { AYUNREFERENCED_PARAM(dt); }
+
     // Style
     void setStyleId(const std::string& id) { _styleId = id; }
     const std::string& getStyleId() const { return _styleId; }
@@ -219,6 +225,7 @@ public:
     virtual ~CompoundWidget();
 
     void performLayout() override;
+    void tick(float dt) override;
 
     // R-6: CompoundWidget overrides hitTest to descend into children, and
     // overrides onMouseLeave to notify every descendant. The previous

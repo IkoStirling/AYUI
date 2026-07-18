@@ -9,6 +9,10 @@ class HBox;
 class SplitterHandle : public Widget {
 public:
     static constexpr float kDefaultWidth = 4.0f;
+    // Hover-reveal delay: matches VSCode-style splitters that stay invisible
+    // until the cursor lingers for a short moment. Filter out fast cursor
+    // passes that would otherwise flicker the splitter on and off.
+    static constexpr float kHoverRevealDelay = 0.15f;
 
     SplitterHandle();
     ~SplitterHandle() override = default;
@@ -17,6 +21,11 @@ public:
 
     bool isDragging() const { return _dragging; }
 
+    // True when the splitter is currently in its revealed (drawn) state —
+    // either dragging, or hovering past the reveal delay. Exposed for tests
+    // so the test doesn't need to inspect private delay counters.
+    bool isRevealed() const;
+
     Widget* hitTest(const math::FVector2& worldPos) override;
     bool onMouseMove(const UIMouseEvent& e) override;
     bool onMouseButtonDown(const UIMouseEvent& e) override;
@@ -24,6 +33,7 @@ public:
     void onMouseLeave() override;
     UiCursorHint getCursorHint() const override;
     void onRender(IRenderBackend& renderer) override;
+    void tick(float dt) override;
 
 private:
     void applyDrag(float mouseWorldX);
@@ -36,6 +46,11 @@ private:
     float _dragStartMouseX = 0.0f;
     float _dragStartPrimaryWidth = 0.0f;
     bool _adjustLeft = true;
+    // Seconds elapsed since the cursor entered the splitter, or -1 when
+    // not hovering. Drains back to -1 on onMouseLeave and resets to 0
+    // each time the cursor re-enters. Drag overrides the delay (drag is
+    // a strong intent — no point waiting 150ms).
+    float _hoverElapsed = -1.0f;
 };
 
 } // namespace ayt::ui

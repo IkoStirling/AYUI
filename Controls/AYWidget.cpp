@@ -193,6 +193,14 @@ void CompoundWidget::performLayout() {
     }
 }
 
+void CompoundWidget::tick(float dt) {
+    // Cascade: own tick first, then children. Mirrors performLayout.
+    Widget::tick(dt);
+    for (Widget* child : _children) {
+        child->tick(dt);
+    }
+}
+
 Widget* CompoundWidget::hitTest(const math::FVector2& worldPos) {
     // R-6: containers descend into children first. We do NOT maintain a
     // _hoverWidget field on the container anymore — UIManager owns the

@@ -166,7 +166,6 @@ void UIManager::setClientSize(float width, float height) {
 }
 
 void UIManager::update(float dt) {
-    AYUNREFERENCED_PARAM(dt);
     if (Widget* reloaded = _loader.tryReload()) {
         // R-7: cancel any in-flight mouse capture BEFORE destroying the
         // tree. The captured widget (typically a Window being dragged) is
@@ -188,6 +187,14 @@ void UIManager::update(float dt) {
         _lastLayoutHeight = -1.0f;
         setClientSize(_clientWidth, _clientHeight);
         layout();
+    }
+
+    // Per-frame tick cascade. Drives time-based widget behavior
+    // (SplitterHandle's hover-reveal delay, future animations, etc.).
+    // Mirrors how layout() walks performLayout: a single call on the
+    // root that CompoundWidget::tick recurses through children.
+    if (_root != nullptr) {
+        _root->tick(dt);
     }
 }
 
