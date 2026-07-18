@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "aymath/MathTypes.h"
 
 #include "Test_Widget.cpp"
 #include "Test_Button.cpp"
@@ -29,6 +30,14 @@
 #include "Test_TabControl.cpp"
 #include "Test_GridPanel.cpp"
 #include "Test_TextArea.cpp"
+#include "Test_SelectableWidget.cpp"
+#include "Test_Tooltip.cpp"
+#include "Test_Separator.cpp"
+#include "Test_MenuItem.cpp"
+#include "Test_Menu.cpp"
+#include "Test_MenuBar.cpp"
+#include "Test_ToolBar.cpp"
+#include "Test_StatusBar.cpp"
 
 void runTest()
 {
@@ -36,6 +45,7 @@ void runTest()
 	ayt::test::runAllTests("AYUI");
 }
 using namespace ayt::ui;
+using namespace ayt::math;
 
 int main(int argc, char* argv[]) {
     (void)argc;

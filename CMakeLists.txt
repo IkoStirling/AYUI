@@ -17,6 +17,14 @@ set(SRC_FILES
     Controls/AYScrollView.cpp
     Controls/AYImage.cpp
     Controls/AYInteractiveWidget.cpp
+    Controls/AYSelectableWidget.cpp
+    Controls/AYTooltip.cpp
+    Controls/AYSeparator.cpp
+    Controls/AYMenuItem.cpp
+    Controls/AYMenu.cpp
+    Controls/AYMenuBar.cpp
+    Controls/AYToolBar.cpp
+    Controls/AYStatusBar.cpp
     Controls/AYListView.cpp
     Controls/AYComboBox.cpp
     Controls/AYTabControl.cpp
@@ -57,6 +65,13 @@ set(HEAD_FILES
     Controls/AYComboBox.h
     Controls/AYTabControl.h
     Controls/AYSelectableWidget.h
+    Controls/AYTooltip.h
+    Controls/AYSeparator.h
+    Controls/AYMenuItem.h
+    Controls/AYMenu.h
+    Controls/AYMenuBar.h
+    Controls/AYToolBar.h
+    Controls/AYStatusBar.h
     Controls/AYPanel.h
     Controls/AYTextLabel.h
     Controls/AYWidget.h

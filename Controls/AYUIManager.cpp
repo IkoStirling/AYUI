@@ -8,6 +8,13 @@
 #include "AYFocusableWidget.h"
 #include "AYTextInput.h"
 #include "AYTextArea.h"
+#include "AYTooltip.h"
+#include "AYSeparator.h"
+#include "AYMenuItem.h"
+#include "AYMenu.h"
+#include "AYMenuBar.h"
+#include "AYToolBar.h"
+#include "AYStatusBar.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -206,6 +213,13 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("HBox"))          f.registerCreator("HBox",          []() { return new HBox(); });
     if (!f.isRegistered("SplitterHandle")) f.registerCreator("SplitterHandle", []() { return new SplitterHandle(); });
     if (!f.isRegistered("GridPanel"))  f.registerCreator("GridPanel",  []() { return new GridPanel(); });
+    if (!f.isRegistered("Tooltip"))    f.registerCreator("Tooltip",    createTooltipWidget);
+    if (!f.isRegistered("Separator"))  f.registerCreator("Separator",  createSeparatorWidget);
+    if (!f.isRegistered("MenuItem"))   f.registerCreator("MenuItem",   createMenuItemWidget);
+    if (!f.isRegistered("Menu"))       f.registerCreator("Menu",       createMenuWidget);
+    if (!f.isRegistered("MenuBar"))    f.registerCreator("MenuBar",    createMenuBarWidget);
+    if (!f.isRegistered("ToolBar"))    f.registerCreator("ToolBar",    createToolBarWidget);
+    if (!f.isRegistered("StatusBar"))  f.registerCreator("StatusBar",  createStatusBarWidget);
 }
 
 void UIManager::initialize(IRenderBackend* backend) {

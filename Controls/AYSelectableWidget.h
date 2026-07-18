@@ -1,34 +1,60 @@
 #pragma once
 
-#include "AYWidget.h"
+// =============================================================================
+// C-11 SelectableWidget: visual-selectable row mixin.
+// =============================================================================
+//
+// Promoted from the C-5 ListView::Row contract (which was a thin
+// InteractiveWidget + bool _selected). C-11 produces 2 more consumers —
+// TabItem (C-9 shipped a stand-in; left untouched) and MenuItem (C-11).
+// Once the count is ≥ 2, the abstraction earns its place (DESIGN.md §3.2
+// note in C-11 row).
+//
+// Architecture (v1):
+//   SelectableWidget : InteractiveWidget
+//     - isSelected / setSelected(bool)
+//     - onSelectionChanged(bool newValue)
+//     - onActivated(void)                        // fires on click
+//     - onClick / onActivated helpers            // default impl: just invoke
+//
+// Subclasses override handleClick() (or the whole onMouseButtonUp) to do
+// their specific behavior:
+//   - ListView::Row: toggle selection + call list-side _onClickByRow
+//   - MenuItem: don't toggle selection (menus are one-shot activate);
+//               fire _onMenuActivate
+//
+// The base class itself does NOT auto-toggle. This keeps ListView's
+// single-selection model (the parent calls setSelected on the new row and
+// setSelected(false) on the previous one) clean — children never have to
+// worry about accidental state toggling when the parent routes clicks.
+
+#include "AYInteractiveWidget.h"
+#include <functional>
 
 namespace ayt::ui {
 
-// C-5 SelectableWidget: helper-mixin contract for any widget that owns a
-// single selection model (ListView row, TabItem, TreeNode — C-11/C-12 will
-// also reuse it).
-//
-// Mirrors the AYScrollableWidget / AYValueWidget pattern: the contract is
-// documented here as comments + a free helper so the 2nd consumer
-// (ComboBox popup = ListView) doesn't need to re-derive the API. v1
-// deliberately does NOT promote to a polymorphic base — the consumer is
-// ListView (C-5) plus ComboBox's popup (C-6) which is itself a ListView,
-// so they all share the same code path. Promote when a 3rd consumer (e.g.
-// MenuItem shortcut routing) needs the contract independently.
-//
-// Selection model contract:
-//   - Single mode: _selectedIndex = -1 means "no selection". setSelectedIndex
-//     clamps to [-1, count) and silently ignores out-of-range inputs (same
-//     as setValue on Slider).
-//   - Multi mode: out of scope for v1; declared but not implemented.
-//   - Selection transitions fire _onSelectionChanged with the NEW index.
-//   - Idempotent setSelectedIndex (same value) does NOT fire the callback.
-//   - Adding/removing items adjusts the selected index so it still points
-//     at the same item by content (i.e. setItems(["a","b","c"], sel=1) then
-//     remove "a" → sel becomes 0, not "index of 'b' after the shift" which
-//     is what users expect on native list boxes).
-//
-// Free helper kept here so callers can derive row rects without re-deriving
-// the layout math.
+class SelectableWidget : public InteractiveWidget {
+public:
+    SelectableWidget();
+    ~SelectableWidget() override;
+
+    bool isSelected() const { return _selected; }
+    void setSelected(bool s);
+
+    void setOnSelectionChanged(std::function<void(bool)> cb);
+    void setOnActivated(std::function<void()> cb);
+
+    // Called by the subclass's onMouseButtonUp. Default behavior: invoke
+    // _onActivated + _onClicked. Subclasses extend (e.g. setSelected
+    // first, then call base).
+    virtual bool handleClick();
+
+protected:
+    void fireSelectionChanged();
+
+    bool _selected = false;
+    std::function<void(bool)> _onSelectionChanged;
+    std::function<void()> _onActivated;  // fires on click
+};
 
 } // namespace ayt::ui

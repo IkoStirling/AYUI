@@ -6,6 +6,13 @@
 #include "AYProgressBar.h"
 #include "AYTextInput.h"
 #include "AYTextArea.h"
+#include "AYTooltip.h"
+#include "AYSeparator.h"
+#include "AYMenuItem.h"
+#include "AYMenu.h"
+#include "AYMenuBar.h"
+#include "AYToolBar.h"
+#include "AYStatusBar.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -63,6 +70,13 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("ListView", createListViewWidget);
         WidgetFactory::get().registerCreator("ComboBox", createComboBoxWidget);
         WidgetFactory::get().registerCreator("TabControl", createTabControlWidget);
+        WidgetFactory::get().registerCreator("Tooltip", createTooltipWidget);
+        WidgetFactory::get().registerCreator("Separator", createSeparatorWidget);
+        WidgetFactory::get().registerCreator("MenuItem", createMenuItemWidget);
+        WidgetFactory::get().registerCreator("Menu", createMenuWidget);
+        WidgetFactory::get().registerCreator("MenuBar", createMenuBarWidget);
+        WidgetFactory::get().registerCreator("ToolBar", createToolBarWidget);
+        WidgetFactory::get().registerCreator("StatusBar", createStatusBarWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("Panel", Panel);

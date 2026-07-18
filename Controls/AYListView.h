@@ -2,6 +2,7 @@
 
 #include "AYWidget.h"
 #include "AYInteractiveWidget.h"
+#include "AYSelectableWidget.h"
 #include "AYScrollBar.h"
 #include "AYScrollableWidget.h"
 #include <functional>
@@ -109,22 +110,23 @@ namespace ayt::ui {
 
 class ListView : public CompoundWidget {
 public:
-    // Row widget — InteractiveWidget so it picks up the hover/press state
-    // machine for free. Each row holds a single string. The list controls
-    // selection by toggling _selected on the row widgets.
-    class Row : public InteractiveWidget {
+    // Row widget — C-11 promoted from InteractiveWidget to
+    // SelectableWidget. Holds a single string + index. List controls
+    // selection externally via setSelected on the new row + setSelected
+    // (false) on the previous one — single-selection model.
+    class Row : public SelectableWidget {
     public:
         Row();
         ~Row() override;
+
+        using SelectableWidget::setSelected;
+        using SelectableWidget::isSelected;
 
         const std::wstring& getText() const { return _text; }
         void setText(const std::wstring& text) { _text = text; }
 
         int getIndex() const { return _index; }
         void setIndex(int idx) { _index = idx; }
-
-        bool isSelected() const { return _selected; }
-        void setSelected(bool s);
 
         bool onMouseButtonUp(const UIMouseEvent& e) override;
 
@@ -134,7 +136,6 @@ public:
     private:
         std::wstring _text;
         int _index = -1;
-        bool _selected = false;
         // Callback set by the owning ListView — fires with the row index
         // when the row is clicked (single click). The list uses this to
         // route selection changes through its single _onSelectionChanged

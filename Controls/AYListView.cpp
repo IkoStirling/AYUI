@@ -18,20 +18,12 @@ ListView::Row::Row() {
 
 ListView::Row::~Row() = default;
 
-void ListView::Row::setSelected(bool s) {
-    if (_selected == s) return;
-    _selected = s;
-    markBoundsDirty();
-}
-
 bool ListView::Row::onMouseButtonUp(const UIMouseEvent& e) {
-    if (!_enabled || e.mouseButton != 0) return false;
+    if (!isEnabled() || e.mouseButton != 0) return false;
     if (!getWorldBounds().contains(e.mousePos)) return false;
-    // Defer to InteractiveWidget::onMouseButtonUp — fires _onClicked if set
-    // (which the list leaves null on rows). The list routes its own click
-    // via _onClickByRow which we invoke AFTER base to keep state
-    // transitions consistent with CheckBox / Button.
-    InteractiveWidget::onMouseButtonUp(e);
+    // Route click to ListView via _onClickByRow. ListView toggles the
+    // selected state on the rows itself (single-selection model); Row
+    // does NOT auto-toggle so the parent stays in charge.
     if (_onClickByRow) {
         _onClickByRow(_index);
     }

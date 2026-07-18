@@ -8,6 +8,13 @@
 #include "AYProgressBar.h"
 #include "AYTextInput.h"
 #include "AYTextArea.h"
+#include "AYTooltip.h"
+#include "AYSeparator.h"
+#include "AYMenuItem.h"
+#include "AYMenu.h"
+#include "AYMenuBar.h"
+#include "AYToolBar.h"
+#include "AYStatusBar.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -279,6 +286,52 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (Tooltip* tip = dynamic_cast<Tooltip*>(widget)) {
+            if (j.contains("text")) {
+                tip->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("hoverDelay")) {
+                tip->setHoverDelay(j["hoverDelay"].get<float>());
+            }
+        }
+
+        if (Separator* sep = dynamic_cast<Separator*>(widget)) {
+            if (j.contains("orientation")) {
+                std::string o = j["orientation"].get<std::string>();
+                if (o == "vertical") {
+                    sep->setOrientation(Separator::Orientation::Vertical);
+                } else if (o == "horizontal") {
+                    sep->setOrientation(Separator::Orientation::Horizontal);
+                }
+            }
+            if (j.contains("thickness")) {
+                sep->setThickness(j["thickness"].get<float>());
+            }
+            if (j.contains("inset")) {
+                sep->setInset(j["inset"].get<float>());
+            }
+        }
+
+        if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
+            if (j.contains("text")) {
+                mi->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("shortcut")) {
+                mi->setShortcut(toWstring(j["shortcut"].get<std::string>()));
+            }
+        }
+
+        if (StatusBar* sb = dynamic_cast<StatusBar*>(widget)) {
+            if (j.contains("panels") && j["panels"].is_array()) {
+                for (const auto& pj : j["panels"]) {
+                    if (pj.contains("text")) {
+                        sb->addPanel(toWstring(
+                            pj["text"].get<std::string>()));
+                    }
+                }
+            }
+        }
+
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
             if (j.contains("spacing")) {
                 box->setSpacing(j["spacing"]);
@@ -458,6 +511,59 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         // attachment. Hosts needing round-trip fidelity should attach cells
         // programmatically after deserialize, or wait for v1.1 (see
         // Controls/AYGridPanel.h DECISION 5 + Test_GridPanel G3).
+    }
+    else if (Tooltip* tip = dynamic_cast<Tooltip*>(widget)) {
+        j["type"] = "Tooltip";
+        j["text"] = std::string(tip->getText().begin(), tip->getText().end());
+        j["hoverDelay"] = tip->getHoverDelay();
+    }
+    else if (Separator* sep = dynamic_cast<Separator*>(widget)) {
+        j["type"] = "Separator";
+        j["orientation"] =
+            (sep->getOrientation() == Separator::Orientation::Vertical)
+                ? "vertical" : "horizontal";
+        const auto& c = sep->getColor();
+        j["color"] = { {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w} };
+        j["thickness"] = sep->getThickness();
+        j["inset"] = sep->getInset();
+    }
+    else if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
+        j["type"] = "MenuItem";
+        j["text"] = std::string(mi->getText().begin(), mi->getText().end());
+        j["shortcut"] = std::string(mi->getShortcut().begin(), mi->getShortcut().end());
+        j["hasSubmenu"] = mi->hasSubmenu();
+    }
+    else if (Menu* menu = dynamic_cast<Menu*>(widget)) {
+        j["type"] = "Menu";
+        j["open"] = menu->isOpen();
+        // Children (MenuItems) are walked via the standard children[] block
+        // below, so we don't enumerate items here.
+    }
+    else if (MenuBar* mb = dynamic_cast<MenuBar*>(widget)) {
+        j["type"] = "MenuBar";
+        j["menus"] = json::array();
+        for (size_t i = 0; i < mb->getMenuCount(); ++i) {
+            json mj;
+            mj["title"] = std::string(mb->getMenuTitle(i).begin(),
+                                       mb->getMenuTitle(i).end());
+            j["menus"].push_back(mj);
+        }
+    }
+    else if (ToolBar* tb = dynamic_cast<ToolBar*>(widget)) {
+        j["type"] = "ToolBar";
+        j["itemCount"] = static_cast<int>(tb->getItemCount());
+    }
+    else if (StatusBar* sb = dynamic_cast<StatusBar*>(widget)) {
+        j["type"] = "StatusBar";
+        j["panels"] = json::array();
+        for (size_t i = 0; i < sb->getPanelCount(); ++i) {
+            TextLabel* p = sb->getPanel(i);
+            if (p != nullptr) {
+                json pj;
+                pj["text"] = std::string(p->getText().begin(), p->getText().end());
+                j["panels"].push_back(pj);
+            }
+        }
     }
     else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         j["type"] = "HBox";
