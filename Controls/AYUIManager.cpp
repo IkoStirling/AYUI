@@ -494,6 +494,82 @@ Widget* UIManager::findById(const std::string& id) const {
     return _loader.findWidgetById(id);
 }
 
+// =====================================================================
+// Phase A — DropdownManager (S2)
+// =====================================================================
+// Single-active-popup invariant: opening a new popup closes the previous
+// one. closePopup tears down the popup via destroyWidgetTree (overlay owns
+// lifetime end-to-end).
+//
+// _capturedWidget guard: if a click landed inside the popup and we close
+// it, the next event must NOT route to a freed widget. We null the
+// captured pointer whenever it points inside the popup's subtree.
+//
+// Anchor tracking: callers pass `anchor` so click-outside detection can
+// distinguish "click inside anchor's own area" (don't close) from "click
+// anywhere else" (close). Without this, a click on the ComboBox's main
+// area would be misclassified as click-outside → popup closes → opens
+// again in the same frame → flicker.
+void UIManager::openPopup(Widget* anchor, Widget* popup) {
+    if (popup == nullptr) return;
+    if (_overlayRoot == nullptr) return;
+
+    // Close any other popup first. Single-active invariant.
+    if (_activeDropdown != nullptr && _activeDropdown != popup) {
+        closePopup(_activeDropdown);
+    }
+
+    // Reparent onto the overlay. If popup already lives somewhere,
+    // detach it first (it shouldn't but defensive).
+    if (popup->getParent() != nullptr) {
+        popup->getParent()->removeChild(popup);
+    }
+    _overlayRoot->addChild(popup);   // ref-only per Widget::addChild; overlay doesn't delete
+
+    // Track as active.
+    _activeDropdown = popup;
+    _activeDropdownAnchor = anchor;
+}
+
+void UIManager::closePopup(Widget* popup) {
+    if (popup == nullptr) return;
+
+    // Drop the active-pointer bookkeeping first (idempotent — safe to
+    // call closePopup on a popup that isn't active).
+    if (_activeDropdown == popup) {
+        _activeDropdown = nullptr;
+        _activeDropdownAnchor = nullptr;
+    }
+
+    // If the captured widget is inside this popup, null it BEFORE we
+    // destroy the popup. Otherwise the next mouse event dereferences
+    // freed memory. Walk the popup's children to find any descendants
+    // matching _capturedWidget.
+    if (_capturedWidget != nullptr) {
+        if (_capturedWidget == popup ||
+            isDescendantOf(_capturedWidget, popup)) {
+            _capturedWidget = nullptr;
+        }
+    }
+
+    // Remove from overlay tree (idempotent) and free via destroyWidgetTree
+    // (overlay owns lifetime end-to-end).
+    if (popup->getParent() != nullptr) {
+        popup->getParent()->removeChild(popup);
+    }
+    destroyWidgetTree(popup);
+}
+
+bool UIManager::isDescendantOf(Widget* widget, Widget* ancestor) {
+    if (widget == nullptr || ancestor == nullptr) return false;
+    Widget* p = widget->getParent();
+    while (p != nullptr) {
+        if (p == ancestor) return true;
+        p = p->getParent();
+    }
+    return false;
+}
+
 bool UIManager::onMouseMove(float x, float y) {
     if (!_root) {
         return false;

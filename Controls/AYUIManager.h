@@ -47,6 +47,30 @@ public:
         return math::FVector2(_clientWidth, _clientHeight);
     }
 
+    // =====================================================================
+    // Phase A — DropdownManager (S2): PopupLayer API.
+    // =====================================================================
+    // openPopup reparents `popup` onto the overlay root and tracks it as
+    // the active dropdown. If a different dropdown is already active,
+    // it is closed first (single-open-popup invariant).
+    //
+    // closePopup removes the popup from the overlay, frees it via
+    // destroyWidgetTree, and clears _activeDropdown. If `_capturedWidget`
+    // points inside the popup's subtree it is reset to nullptr so the
+    // next event doesn't dereference freed memory (R-3 analogy).
+    //
+    // Ownership: caller `new`s the popup and never deletes it directly
+    // once openPopup has been called. UIManager owns lifetime end-to-end.
+    // Caller DOES NOT need to track the popup — getOverlayRoot() lets
+    // tests / hosts verify placement if they care.
+    void openPopup(Widget* anchor, Widget* popup);
+    void closePopup(Widget* popup);
+
+    // True if `widget` is `ancestor` or any descendant of `ancestor`.
+    // Walks the parent chain. Used by closePopup to null _capturedWidget
+    // if it points into the popup being closed.
+    static bool isDescendantOf(Widget* widget, Widget* ancestor);
+
     bool onMouseMove(float x, float y);
     bool onMouseButtonDown(float x, float y, int button);
     bool onMouseButtonUp(float x, float y, int button);
@@ -87,6 +111,16 @@ private:
     Widget* _hoverWidget = nullptr;
     Widget* _focusedWidget = nullptr;
     bool _shutdown = false;
+
+    // DropdownManager: at most one "active dropdown" at a time. Opening
+    // a new popup closes the previous one. `_activeDropdownAnchor` lets
+    // the click-outside detector distinguish "click in the anchor's own
+    // area" (don't close) from "click anywhere else" (close). Without
+    // anchor tracking, a click on the ComboBox's own main area would
+    // be misclassified as click-outside and the popup would flicker
+    // close-then-reopen in the same frame.
+    Widget* _activeDropdown = nullptr;
+    Widget* _activeDropdownAnchor = nullptr;
     // Phase UI-PERF-1: track the last client size we laid out against. If
     // layout() is invoked again with the same values and no explicit tree
     // mutation has occurred, skip performLayout entirely. Set to a sentinel
