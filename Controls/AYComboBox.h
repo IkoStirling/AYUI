@@ -172,7 +172,19 @@ public:
     const std::wstring& getSelectedItem() const;
 
     // Popup control.
-    bool isPopupOpen() const { return _popupOpen; }
+    // Popup control. isPopupOpen() reports the LATCH state AND verifies
+    // that the popup is still mounted — `_popupOpen` is set by openPopup
+    // and cleared by closePopup. DropdownManager may close our popup out
+    // from under us when another popup opens (single-active-popup
+    // invariant). After that we want isPopupOpen() to also return false.
+    // The `_popup->getParent() != nullptr` check detects that external-
+    // close case: if the popup's parent was cleared by destroyWidgetTree,
+    // the popup is no longer in the tree, so we report closed.
+    bool isPopupOpen() const {
+        if (!_popupOpen) return false;
+        if (_popup == nullptr) return false;
+        return _popup->getParent() != nullptr;
+    }
     void openPopup();
     void closePopup();
     void togglePopup() { if (_popupOpen) closePopup(); else openPopup(); }
@@ -185,6 +197,12 @@ public:
     void setOnSelectionChanged(std::function<void(int)> cb) {
         _onSelectionChanged = std::move(cb);
     }
+
+    // Called by UIManager::closePopup when the overlay dismisses our
+    // ListView out from under us (single-active-popup, click-outside,
+    // reload). MUST null `_popup` before the manager frees it — otherwise
+    // isPopupOpen()'s `_popup->getParent()` reads freed memory.
+    void onPopupDismissedByManager();
 
     // Hit-test + layout override.
     Widget* hitTest(const math::FVector2& worldPos) override;

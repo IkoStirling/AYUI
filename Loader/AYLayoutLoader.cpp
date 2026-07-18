@@ -7,12 +7,16 @@
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
+#include "AYComboBox.h"
+#include "AYListView.h"
 
 #include <ayio/FileWatcher.h>
 
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 #if defined(_DEBUG) && defined(_MSC_VER)
 #  include <crtdbg.h>
@@ -321,6 +325,34 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         if (j.contains("minSize") && j["minSize"].is_object()) {
             window->setMinSize(j["minSize"].value("w", 120.0f),
                                j["minSize"].value("h", 80.0f));
+        }
+    }
+
+    // ComboBox / ListView item lists (mirror WidgetSerializer deserialize).
+    if (j.contains("items") && j["items"].is_array()) {
+        std::vector<std::wstring> items;
+        items.reserve(j["items"].size());
+        for (const auto& s : j["items"]) {
+            if (!s.is_string()) continue;
+            const std::string u8 = s.get<std::string>();
+            items.emplace_back(u8.begin(), u8.end());
+        }
+        if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
+            cb->setItems(items);
+            if (j.contains("selectedIndex")) {
+                cb->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("maxPopupItems")) {
+                cb->setMaxPopupItems(j["maxPopupItems"].get<int>());
+            }
+        } else if (ListView* lv = dynamic_cast<ListView*>(widget)) {
+            lv->setItems(items);
+            if (j.contains("selectedIndex")) {
+                lv->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("itemHeight")) {
+                lv->setItemHeight(j["itemHeight"].get<float>());
+            }
         }
     }
 

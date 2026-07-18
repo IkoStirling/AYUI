@@ -176,9 +176,31 @@ void dumpSplitterLayoutOnce(Widget* root)
 
 } // namespace
 
+namespace {
+// Active instance set by initialize() / cleared by shutdown().
+// Not a owning singleton — callers still construct UIManager on the stack
+// or as a member; get() just routes popup helpers to that instance.
+UIManager* g_activeUIManager = nullptr;
+} // namespace
+
 UIManager& UIManager::get() {
-    static UIManager instance;
-    return instance;
+    if (g_activeUIManager != nullptr) {
+        return *g_activeUIManager;
+    }
+    // Fallback for code paths that call get() before initialize() —
+    // e.g. a bare `ComboBox cb; cb.openPopup();` in a unit test without
+    // its own UIManager. We lazily initialize the static fallback so
+    // it has an overlay root and behaves like a fully-initialized
+    // instance for popup mounts. Tests that don't care about UIManager
+    // routing still get a working popup layer (mounted on the fallback's
+    // overlay, freed by the fallback's destructor at program exit).
+    static UIManager s_uninitializedFallback;
+    static bool s_initialized = false;
+    if (!s_initialized) {
+        s_uninitializedFallback.initialize(nullptr);
+        s_initialized = true;
+    }
+    return s_uninitializedFallback;
 }
 
 // Register the four built-in widget factories on first use. The
@@ -240,13 +262,60 @@ void UIManager::initialize(IRenderBackend* backend) {
     _clientHeight = 0.0f;
     _shutdown = false;
 
-    // Phase A (S1): spawn the popup overlay root. Plain Widget (not
-    // CompoundWidget) since it just hosts popups as children; the
-    // children are real CompoundWidgets themselves. Sized by setClientSize.
+    // Phase A (S1): spawn the popup overlay root. Plain Widget — not
+    // CompoundWidget. With CompoundWidget::hitTest we'd need to filter
+    // self-matches in pickTopmostWidget(); plain Widget::hitTest returns
+    // `this` when inside bounds OR null when outside, which the funnel
+    // already handles (skip self-match). The actual popups are children
+    // of the overlay; the funnel manually walks _overlayRoot->getChildren()
+    // via pickTopmostWidget's child-iteration when needed.
     if (_overlayRoot == nullptr) {
         _overlayRoot = new Widget();
         _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
         _overlayRoot->setSize(math::FVector2(0.0f, 0.0f));
+    }
+
+    // Route UIManager::get() (used by ComboBox/Menu/Tooltip popup mounts)
+    // to this instance for the lifetime of initialize()..shutdown().
+    g_activeUIManager = this;
+}
+
+void UIManager::tearDownOverlayChildren() {
+    // Notify ComboBox anchors BEFORE free — otherwise a stack-local
+    // ComboBox still holds `_popup` and its destructor double-frees the
+    // ListView we destroy here. Do NOT dynamic_cast `_activeDropdownAnchor`:
+    // Tooltip::attachTo uses a Button as anchor, and tests may destroy that
+    // Button before shutdown (tooltip_owned_via_destroy_widget_tree) —
+    // RTTI on a freed object AVs ("no RTTI data").
+    const bool notifyCombo = _activeDropdownAnchorIsComboBox;
+    Widget* anchor = _activeDropdownAnchor;
+    _activeDropdown = nullptr;
+    _activeDropdownAnchor = nullptr;
+    _activeDropdownAnchorIsComboBox = false;
+    if (notifyCombo && anchor != nullptr) {
+        static_cast<ComboBox*>(anchor)->onPopupDismissedByManager();
+    }
+
+    if (_overlayRoot == nullptr) {
+        return;
+    }
+    // MUST copy: getChildren() returns const vector&. destroyWidgetTree
+    // calls detachFromParent() which erases from the live vector.
+    std::vector<Widget*> kids = _overlayRoot->getChildren();
+    for (Widget* child : kids) {
+        if (child == nullptr) {
+            continue;
+        }
+        // closePopup-equivalent capture guard (popup may own the capture).
+        if (_capturedWidget != nullptr &&
+            (_capturedWidget == child || isDescendantOf(_capturedWidget, child))) {
+            _capturedWidget = nullptr;
+        }
+        if (_hoverWidget != nullptr &&
+            (_hoverWidget == child || isDescendantOf(_hoverWidget, child))) {
+            _hoverWidget = nullptr;
+        }
+        destroyWidgetTree(child);
     }
 }
 
@@ -274,12 +343,7 @@ void UIManager::shutdown() {
     //   1) destroy overlay's children (open popups)
     //   2) destroy main root
     //   3) destroy overlay itself
-    if (_overlayRoot != nullptr) {
-        auto kids = _overlayRoot->getChildren();
-        for (Widget* child : kids) {
-            if (child != nullptr) destroyWidgetTree(child);
-        }
-    }
+    tearDownOverlayChildren();
     if (_root != nullptr) {
         destroyWidgetTree(_root);
         _root = nullptr;
@@ -290,6 +354,9 @@ void UIManager::shutdown() {
     }
 
     _backend = nullptr;
+    if (g_activeUIManager == this) {
+        g_activeUIManager = nullptr;
+    }
 }
 
 bool UIManager::loadLayout(const std::string& path) {
@@ -301,12 +368,7 @@ bool UIManager::loadLayout(const std::string& path) {
     // Phase A: drop overlay children — popups may reference widgets in
     // the about-to-be-destroyed root. Keep overlay itself (it survives
     // across loads; only its contents change).
-    if (_overlayRoot != nullptr) {
-        auto kids = _overlayRoot->getChildren();
-        for (Widget* child : kids) {
-            if (child != nullptr) destroyWidgetTree(child);
-        }
-    }
+    tearDownOverlayChildren();
     if (_root != nullptr) {
         destroyWidgetTree(_root);
         _root = nullptr;
@@ -338,12 +400,7 @@ bool UIManager::loadFromString(const std::string& json) {
         _focusedWidget = nullptr;
     }
     // Phase A: same overlay-teardown sequence as loadLayout.
-    if (_overlayRoot != nullptr) {
-        auto kids = _overlayRoot->getChildren();
-        for (Widget* child : kids) {
-            if (child != nullptr) destroyWidgetTree(child);
-        }
-    }
+    tearDownOverlayChildren();
     if (_root != nullptr) {
         destroyWidgetTree(_root);
         _root = nullptr;
@@ -409,12 +466,7 @@ void UIManager::update(float dt) {
         // Phase A (A5): tear down overlay children before _root swap so
         // any open popup is freed (it could otherwise hold references to
         // widgets in the about-to-be-destroyed root).
-        if (_overlayRoot != nullptr) {
-            auto kids = _overlayRoot->getChildren();
-            for (Widget* child : kids) {
-                if (child != nullptr) destroyWidgetTree(child);
-            }
-        }
+        tearDownOverlayChildren();
         if (_root != nullptr) {
             destroyWidgetTree(_root);
         }
@@ -441,7 +493,7 @@ void UIManager::update(float dt) {
     // band clears it. Do not synthesize onMouseMove here — that would
     // re-arm hover every tick while the cursor is idle on the band.
     if (_root != nullptr && _hasLastMouse && _capturedWidget == nullptr) {
-        Widget* hit = pickWidgetAt(_root, math::FVector2(_lastMouseX, _lastMouseY));
+        Widget* hit = pickTopmostWidget(math::FVector2(_lastMouseX, _lastMouseY));
         if (splitterDebugEnabled() && _hoverWidget != nullptr
             && _hoverWidget->isSplitterHandle() && hit != _hoverWidget) {
             std::fprintf(stderr,
@@ -529,22 +581,29 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     // Track as active.
     _activeDropdown = popup;
     _activeDropdownAnchor = anchor;
+    _activeDropdownAnchorIsComboBox =
+        (dynamic_cast<ComboBox*>(anchor) != nullptr);
 }
 
-void UIManager::closePopup(Widget* popup) {
+void UIManager::closePopup(Widget* popup, bool destroy) {
     if (popup == nullptr) return;
 
-    // Drop the active-pointer bookkeeping first (idempotent — safe to
-    // call closePopup on a popup that isn't active).
+    // Capture anchor BEFORE clearing bookkeeping — ComboBox hosts need a
+    // dismiss notification so they can null their non-owning popup pointer
+    // before we destroyWidgetTree it.
+    Widget* anchor = nullptr;
+    bool notifyCombo = false;
     if (_activeDropdown == popup) {
+        anchor = _activeDropdownAnchor;
+        notifyCombo = _activeDropdownAnchorIsComboBox;
         _activeDropdown = nullptr;
         _activeDropdownAnchor = nullptr;
+        _activeDropdownAnchorIsComboBox = false;
     }
 
     // If the captured widget is inside this popup, null it BEFORE we
     // destroy the popup. Otherwise the next mouse event dereferences
-    // freed memory. Walk the popup's children to find any descendants
-    // matching _capturedWidget.
+    // freed memory.
     if (_capturedWidget != nullptr) {
         if (_capturedWidget == popup ||
             isDescendantOf(_capturedWidget, popup)) {
@@ -552,12 +611,16 @@ void UIManager::closePopup(Widget* popup) {
         }
     }
 
-    // Remove from overlay tree (idempotent) and free via destroyWidgetTree
-    // (overlay owns lifetime end-to-end).
     if (popup->getParent() != nullptr) {
         popup->getParent()->removeChild(popup);
     }
-    destroyWidgetTree(popup);
+
+    if (destroy) {
+        if (notifyCombo && anchor != nullptr) {
+            static_cast<ComboBox*>(anchor)->onPopupDismissedByManager();
+        }
+        destroyWidgetTree(popup);
+    }
 }
 
 bool UIManager::isDescendantOf(Widget* widget, Widget* ancestor) {
@@ -568,6 +631,36 @@ bool UIManager::isDescendantOf(Widget* widget, Widget* ancestor) {
         p = p->getParent();
     }
     return false;
+}
+
+// Phase A: overlay-first hit-test funnel. Popups live on _overlayRoot as
+// siblings of _root, so the overlay must be picked BEFORE _root for a
+// click on an open ComboBox popup or Menu to land on the popup row
+// instead of falling through to whatever is underneath in _root. Empty
+// overlay is O(1): pickWidgetAt walks children, finds nothing, and we
+// fall back to _root. Tooltip::hitTest returns nullptr (pick-through) so
+// the funnel falls through correctly.
+//
+// IMPORTANT: the overlay itself is just a container. We must NOT return
+// it as the hit — only its descendants count. CompoundWidget::hitTest
+// descends into children first; if a child matches we get that child
+// directly. Only if CompoundWidget::hitTest returns the overlay itself
+// (i.e. the cursor landed inside the overlay's bounds but no popup
+// captured it) do we fall back to _root.
+Widget* UIManager::pickTopmostWidget(const math::FVector2& worldPos) {
+    // Overlay is a plain Widget (NOT CompoundWidget) so its hitTest only
+    // ever returns self. We must walk its children manually here to find
+    // the popup under the cursor. Reverse order so the LAST mounted popup
+    // wins (matching CompoundWidget::hitTest's reverse-iteration rule).
+    if (_overlayRoot != nullptr) {
+        const auto& overlayKids = _overlayRoot->getChildren();
+        for (auto it = overlayKids.rbegin(); it != overlayKids.rend(); ++it) {
+            if (Widget* hit = pickWidgetAt(*it, worldPos)) {
+                return hit;
+            }
+        }
+    }
+    return pickWidgetAt(_root, worldPos);
 }
 
 bool UIManager::onMouseMove(float x, float y) {
@@ -598,7 +691,7 @@ bool UIManager::onMouseMove(float x, float y) {
     // isRevealed() stays true forever. Recover before normal hit-test.
     endStuckSplitterDrags(_root);
 
-    Widget* hit = pickWidgetAt(_root, pos);
+    Widget* hit = pickTopmostWidget(pos);
     if (splitterDebugEnabled()
         && (_hoverWidget != hit)
         && ((_hoverWidget != nullptr && _hoverWidget->isSplitterHandle())
@@ -623,8 +716,28 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
     }
 
     math::FVector2 pos(x, y);
-    Widget* hit = pickWidgetAt(_root, pos);
+    Widget* hit = pickTopmostWidget(pos);
     updateHoverWidget(_hoverWidget, hit);
+
+    // Phase A (S2): click-outside detection for active dropdown. If the
+    // click landed outside the active popup AND outside its anchor's
+    // subtree, close the popup. The anchor check matters: a click on the
+    // ComboBox's main area while its popup is open is NOT click-outside —
+    // it's the toggle-click path (closePopup → openPopup in onMouseButtonUp).
+    // Without the anchor check, click-outside would close the popup first
+    // and the toggle-click would reopen it, producing a 1-frame flicker.
+    if (_activeDropdown != nullptr) {
+        const bool insidePopup = (hit != nullptr) && (
+            hit == _activeDropdown ||
+            isDescendantOf(hit, _activeDropdown));
+        const bool insideAnchor = (hit != nullptr) && (
+            _activeDropdownAnchor == nullptr ||
+            _activeDropdownAnchor == hit ||
+            isDescendantOf(hit, _activeDropdownAnchor));
+        if (!insidePopup && !insideAnchor) {
+            closePopup(_activeDropdown);
+        }
+    }
 
     if (hit != nullptr && hit->onMouseButtonDown(UIMouseEvent(pos, button))) {
         _capturedWidget = hit;
@@ -634,12 +747,12 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
 }
 
 bool UIManager::onMouseButtonUp(float x, float y, int button) {
-    if (!_root) {
-        return false;
-    }
-
+    // Phase A (A2): the click-outside detector already fired in
+    // onMouseButtonDown; we only need to deliver the up to whatever was
+    // captured (or whatever's under the cursor). When _root is null we
+    // can still update hover state but there's nothing to forward to.
     math::FVector2 pos(x, y);
-    Widget* target = _capturedWidget != nullptr ? _capturedWidget : pickWidgetAt(_root, pos);
+    Widget* target = _capturedWidget != nullptr ? _capturedWidget : pickTopmostWidget(pos);
     _capturedWidget = nullptr;
 
     // Deliver mouse-up BEFORE re-evaluating hover. SplitterHandle (and
@@ -655,7 +768,7 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     // cursor now (for cursor hints). Do NOT synthesize onMouseMove here:
     // SplitterHandle intentionally stays un-revealed after mouse-up until
     // the next real WM_MOUSEMOVE re-arms hover.
-    updateHoverWidget(_hoverWidget, pickWidgetAt(_root, pos));
+    updateHoverWidget(_hoverWidget, pickTopmostWidget(pos));
     return handled;
 }
 

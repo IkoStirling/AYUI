@@ -1,6 +1,7 @@
 #include "AYMenu.h"
 #include "AYIRenderBackend.h"
 #include "AYSeparator.h"
+#include "AYUIManager.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -73,7 +74,8 @@ void Menu::clearItems() {
     // Snapshot children before deleting — CompoundWidget owns by default;
     // we delete each MenuItem (and submenu) and remove them from the
     // parent's children list so re-adding more items doesn't double-free.
-    auto kids = getChildren();
+    // Copy first: getChildren() returns a reference; removeChild mutates it.
+    std::vector<Widget*> kids = getChildren();
     for (auto* kid : kids) {
         if (kid != nullptr) {
             removeChild(kid);
@@ -95,7 +97,11 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     if (host == nullptr) return;
     setVisible(true);
     setPosition(anchorPos);
-    host->addChild(this);
+    // Phase A (A2): mount on UIManager's overlay root instead of the host.
+    // This lets the menu render + hit-test above any nested layout (e.g.
+    // a MenuBar inside a Window inside a VBox) and survive host destruction
+    // cleanly via the overlay's destroyWidgetTree path.
+    UIManager::get().openPopup(host, this);
     _open = true;
     performLayout();
 }
@@ -105,9 +111,11 @@ void Menu::close() {
     setVisible(false);
     _open = false;
     if (_onClose) _onClose();
-    // Detach from host by removing ourselves from the parent's child list.
-    if (auto* parent = getParent()) {
-        parent->removeChild(this);
+    // Phase A (A2): UIManager::closePopup removes us from the overlay and
+    // frees the tree via destroyWidgetTree. After this call `this` is
+    // dangling — callers must not touch the Menu after close().
+    if (getParent() != nullptr) {
+        UIManager::get().closePopup(this);
     }
 }
 

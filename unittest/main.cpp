@@ -1,6 +1,8 @@
 #include "AYTest.h"
 #include "aymath/MathTypes.h"
 
+#include <cstdio>
+
 #include "Test_Widget.cpp"
 #include "Test_Button.cpp"
 #include "Test_CheckBox.cpp"
@@ -53,6 +55,10 @@ using namespace ayt::math;
 int main(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
+    // Unbuffered stdout so a crash mid-suite does not hide CASE/PASS lines
+    // when output is redirected to a file.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
     runTest();
     return 0;
 }

@@ -1,5 +1,6 @@
 #include "AYTooltip.h"
 #include "AYIRenderBackend.h"
+#include "AYUIManager.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -23,9 +24,18 @@ Tooltip::~Tooltip() {
 Tooltip* Tooltip::attachTo(Widget* target) {
     if (target == nullptr) return nullptr;
     Tooltip* tip = new Tooltip();
-    // Use the owning addChild path so when target is destroyed via
-    // destroyWidgetTree, the tooltip is freed too (no manual cleanup).
-    target->addChild(tip);
+    // Phase A (A2): mount the tooltip on UIManager's overlay root instead
+    // of as an owning child of `target`. The tooltip's lifetime becomes
+    // independent of the target — the caller is expected to call
+    // Tooltip::show / tick / hide, and UIManager::closePopup on overlay
+    // teardown. The tooltip is hidden by default and only becomes visible
+    // after tick() accumulates hover time past the delay (DECISION 1).
+    //
+    // The tooltip pointer returned remains owned by the caller. To detach,
+    // call closePopup via UIManager with the tip pointer. The tick()
+    // signature keeps the explicit viewport so callers can override
+    // the UIManager viewport (e.g. tests).
+    UIManager::get().openPopup(target, tip);
     tip->_target = target;
     tip->setVisible(false);
     return tip;
@@ -50,7 +60,15 @@ const std::wstring& Tooltip::getText() const {
 
 void Tooltip::tick(float dt, const math::FVector2& mousePos,
                    const math::FVector2& viewportSize) {
-    _viewportSize = viewportSize;
+    // Phase A (A2): viewport fallback. If the caller passes (0,0) (the
+    // default sentinel for "unset"), pull live metrics from UIManager so
+    // the flip-above heuristic stays correct in production. Tests that
+    // want a fixed viewport still pass an explicit size.
+    if (viewportSize.x <= 0.0f && viewportSize.y <= 0.0f) {
+        _viewportSize = UIManager::get().getClientSize();
+    } else {
+        _viewportSize = viewportSize;
+    }
     if (_target == nullptr) return;
     const math::FRectangle tBounds = _target->getWorldBounds();
 
@@ -107,12 +125,23 @@ void Tooltip::syncPosition() {
 }
 
 void Tooltip::performLayout() {
+    if (_label != nullptr) {
+        // TextLabel does not auto-measure glyphs (no text shaper in v1).
+        // Size the label from an approximate advance so flip/clamp math
+        // in syncPosition() sees a real tip height instead of the
+        // Widget default 100x50 — which made near-bottom tips fail to
+        // flip above the anchor in tests / tiny viewports.
+        const float fontPx = static_cast<float>(std::max(1, _label->getFontSize()));
+        const float approxCharW = fontPx * 0.55f;
+        const float textW = std::max(
+            fontPx,
+            approxCharW * static_cast<float>(_label->getText().size()));
+        const float textH = fontPx + 2.0f;
+        _label->setSize(math::FVector2(textW, textH));
+    }
     CompoundWidget::performLayout();
     if (_label == nullptr) return;
     const math::FVector2 labelPad(kDefaultPadding * 2.0f, kDefaultPadding * 2.0f);
-    // The label sets its own size based on text content; we just wrap it
-    // with padding so the tooltip rectangle is comfortably larger than
-    // the label's drawn rect.
     const math::FVector2 labelSize = _label->getSize();
     setSize(math::FVector2(labelSize.x + labelPad.x,
                             labelSize.y + labelPad.y));

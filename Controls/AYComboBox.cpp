@@ -2,6 +2,7 @@
 #include "AYScrollBar.h"
 #include "AYIRenderBackend.h"
 #include "AYStyle.h"
+#include "AYUIManager.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
@@ -18,11 +19,20 @@ ComboBox::ComboBox() {
 }
 
 ComboBox::~ComboBox() {
-    // _display + _popup are children — destroyWidgetTree handles them
-    // when the factory-owned tree root is deleted. Just NULL our pointers
-    // so a stray dtor path can't double-free.
+    // Phase A (A2): _display is still a child of ComboBox; destroyWidgetTree
+    // frees it when the ComboBox tree is destroyed. _popup may be mounted
+    // on the overlay OR held unmounted after a soft closePopup — either
+    // way we must not leave it on the overlay, and if it is unmounted we
+    // still own the allocation and must free it.
+    if (_popup != nullptr) {
+        if (_popup->getParent() != nullptr) {
+            UIManager::get().closePopup(_popup, /*destroy=*/true);
+        } else {
+            destroyWidgetTree(_popup);
+        }
+        _popup = nullptr;
+    }
     _display = nullptr;
-    _popup   = nullptr;
 }
 
 void ComboBox::setItems(const std::vector<std::wstring>& items) {
@@ -119,7 +129,16 @@ void ComboBox::ensurePopupCreated() {
             _onSelectionChanged(idx);
         }
     });
-    addChildExternal(_popup);
+    // Phase A (A2): the popup is NOT mounted as a child of ComboBox anymore.
+    // It will be reparented onto UIManager's overlay root via openPopup(),
+    // which lets the popup:
+    //   - render + hit-test ABOVE any sibling/parent in the host tree
+    //   - survive ComboBox destruction cleanly via the overlay's
+    //     destroyWidgetTree in UIManager::closePopup
+    //   - flip/clamp against the viewport (UIManager::getClientSize)
+    // The popup pointer is non-owning from ComboBox's perspective — the
+    // overlay owns the lifetime end-to-end. ensurePopupCreated only
+    // allocates; openPopup does the mount.
 }
 
 void ComboBox::syncPopupSelection() {
@@ -150,54 +169,102 @@ void ComboBox::openPopup() {
     }
     _popupOpen = true;
     _popup->setVisible(true);
-    bringToFront();   // popup should be on top among siblings
     syncPopupSelection();
-    // Re-layout so popup gets its real bounds.
-    layoutChildren();
+
+    // Phase A (A2): mount the popup on UIManager's overlay root, NOT as
+    // a child of this ComboBox. The overlay handles rendering + hit-test
+    // ordering (popup above the main tree) and owns the popup lifetime.
+    // DropdownManager enforces single-active-popup — if a different
+    // popup is open it will be closed first.
+    UIManager& ui = UIManager::get();
+    ui.openPopup(this, _popup);
+
+    // If no active UIManager has an overlay (unit tests that forget to
+    // initialize, or get() fallback), the popup was not mounted — report
+    // closed so callers don't think a dangling dropdown is live.
+    if (_popup == nullptr || _popup->getParent() == nullptr) {
+        _popupOpen = false;
+        return;
+    }
+
+    // Phase A (A2 L4): flip + clamp against the viewport. Position the
+    // popup below the anchor by default; if it would overflow the
+    // viewport bottom AND there's room to flip above, place it above.
+    // Always clamp x within [0, clientWidth - popup.width].
+    const math::FVector2 client = ui.getClientSize();
+    const math::FRectangle anchor = getWorldBounds();
+
+    // Set popup size first so flip math has a real height.
+    const int visibleRows = std::min(
+        static_cast<int>(_items.size()), _maxPopupItems);
+    const float popupH = std::max(
+        kDefaultHeight,
+        static_cast<float>(visibleRows) * _popup->getItemHeight() +
+            ScrollBar::kDefaultBarWidth);
+    _popup->setSize(math::FVector2(getWidth(), popupH));
+
+    const float popupW = _popup->getSize().x;
+    math::FVector2 pos(anchor.minX, anchor.maxY + kPopupGap);
+
+    // Flip upward if it would overflow the viewport bottom.
+    if (client.y > 0.0f && pos.y + popupH > client.y
+        && anchor.minY - popupH - kPopupGap >= 0.0f) {
+        pos.y = anchor.minY - popupH - kPopupGap;
+    }
+
+    // Clamp x within viewport. If popup is wider than viewport, pin to 0.
+    if (client.x > 0.0f) {
+        if (popupW > client.x) {
+            pos.x = 0.0f;
+        } else if (pos.x + popupW > client.x) {
+            pos.x = client.x - popupW;
+        } else if (pos.x < 0.0f) {
+            pos.x = 0.0f;
+        }
+    }
+
+    _popup->setPosition(pos);
+    _popup->markBoundsDirty();
+    // Overlay is a plain Widget (not CompoundWidget) so UIManager::layout
+    // does not cascade into it. Row hit-rects stay at the ListView's
+    // pre-mount size unless we lay out here — without this, popup row
+    // clicks miss and selection never fires.
+    _popup->performLayout();
+}
+
+void ComboBox::onPopupDismissedByManager() {
+    _popupOpen = false;
+    // Manager is about to destroyWidgetTree(_popup). Drop our non-owning
+    // pointer so isPopupOpen() / closePopup() cannot touch freed memory.
+    _popup = nullptr;
 }
 
 void ComboBox::closePopup() {
-    if (_popup != nullptr) {
-        _popup->setVisible(false);
-    }
     _popupOpen = false;
+    if (_popup == nullptr) return;
+
+    _popup->setVisible(false);
+
+    if (_popup->getParent() != nullptr) {
+        // Unmount only (destroy=false). Selection / row-click callbacks
+        // run on the ListView stack — destroyWidgetTree here would free
+        // `this` mid-callback (0xC0000005). Foreign dismiss paths
+        // (other popup open, click-outside) still destroy via
+        // UIManager::closePopup(p, true) + onPopupDismissedByManager.
+        UIManager::get().closePopup(_popup, /*destroy=*/false);
+    }
 }
 
 Widget* ComboBox::hitTest(const math::FVector2& worldPos) {
-    // When popup is open, give it priority so clicks on popup rows are
-    // routed to the popup list (rows are technically outside the
-    // ComboBox's main bounds).
-    if (_popupOpen && _popup != nullptr && _popup->isVisible()) {
-        Widget* hit = _popup->hitTest(worldPos);
-        if (hit != nullptr) return hit;
-    }
+    // Phase A (A2): the popup lives on the overlay, NOT as a child of
+    // ComboBox. UIManager's overlay-first hit-test funnel already routes
+    // clicks inside the popup's world bounds to the popup's rows. We just
+    // hit-test self-bounds like a normal CompoundWidget.
     return CompoundWidget::hitTest(worldPos);
 }
 
 bool ComboBox::onMouseButtonUp(const UIMouseEvent& e) {
     if (!isEnabled() || e.mouseButton != 0) return false;
-
-    // Popup open and click hits popup → forward to the popup's rows.
-    if (_popupOpen && _popup != nullptr && _popup->isVisible()) {
-        // First test whether the click is in the popup. We test against
-        // the popup's WORLD bounds because the popup is positioned in
-        // world coordinates when the ComboBox is laid out (its parent
-        // chain puts it under ComboBox).
-        if (_popup->getWorldBounds().contains(e.mousePos)) {
-            // Route to the popup's normal CompoundWidget hit-test path
-            // via its own onMouseButtonUp.
-            Widget* hit = _popup->hitTest(e.mousePos);
-            if (hit != nullptr) {
-                // _popup is a ListView; ListView's row click handler will
-                // fire and call setSelectedIndex via the popup's own
-                // _onSelectionChanged, which we route below in
-                // openPopup() wiring. The picked row's click also closes
-                // the popup.
-                hit->onMouseButtonUp(e);
-                return true;
-            }
-        }
-    }
 
     // Click on the main ComboBox area: toggle popup.
     if (getWorldBounds().contains(e.mousePos)) {
@@ -209,9 +276,10 @@ bool ComboBox::onMouseButtonUp(const UIMouseEvent& e) {
         return true;
     }
 
-    // Click outside while popup is open → close.
+    // Click outside while popup is open — UIManager's click-outside
+    // detector already closed the popup in onMouseButtonDown. Don't
+    // re-close here; just swallow the event.
     if (_popupOpen) {
-        closePopup();
         return true;
     }
     return false;
@@ -237,20 +305,10 @@ void ComboBox::layoutChildren() {
         const float textW = std::max(0.0f, getWidth() - kArrowWidth);
         _display->setSize(math::FVector2(textW, getHeight()));
     }
-    if (_popupOpen && _popup != nullptr) {
-        const math::FRectangle pb = computePopupBounds();
-        // The popup's parent is ComboBox; its world position must equal
-        // its local position (parent world = own world pos for our flat
-        // tree). Use setPosition to place it just below the main area.
-        const math::FVector2 myPos = getWorldBounds().getMin();
-        _popup->setPosition(math::FVector2(
-            0.0f, getHeight() + kPopupGap));
-        _popup->setSize(math::FVector2(
-            getWidth(), pb.maxY - pb.minY));
-        // Force the popup's bounds dirty so getWorldBounds recomputes
-        // through the new local position.
-        _popup->markBoundsDirty();
-    }
+    // Phase A (A2): popup positioning moved to openPopup(), which uses
+    // the live viewport metrics from UIManager for flip + clamp. The
+    // popup is NOT a child of this ComboBox (it lives on the overlay),
+    // so layoutChildren has nothing to do for it here.
 }
 
 void ComboBox::onRender(IRenderBackend& renderer) {

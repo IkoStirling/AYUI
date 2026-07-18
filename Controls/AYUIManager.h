@@ -17,6 +17,11 @@ public:
     // itself with _shutdown.
     ~UIManager() { shutdown(); }
 
+    // Returns the UIManager most recently activated by initialize().
+    // ComboBox / Menu / Tooltip call this to mount popups on the same
+    // instance the host constructed — NOT a hidden process-wide singleton
+    // (that caused overlay mounts to miss stack-local test/editor instances
+    // and left dangling popups on a never-shut-down static UIManager).
     static UIManager& get();
 
     void initialize(IRenderBackend* backend);
@@ -64,12 +69,22 @@ public:
     // Caller DOES NOT need to track the popup — getOverlayRoot() lets
     // tests / hosts verify placement if they care.
     void openPopup(Widget* anchor, Widget* popup);
-    void closePopup(Widget* popup);
+    // closePopup removes the popup from the overlay. If `destroy` is true
+    // (default), the popup tree is freed via destroyWidgetTree and any
+    // ComboBox anchor is notified via onPopupDismissedByManager. Pass
+    // destroy=false to unmount only — required when ComboBox dismisses
+    // from inside a ListView selection callback (destroy would UAF).
+    void closePopup(Widget* popup, bool destroy = true);
 
     // True if `widget` is `ancestor` or any descendant of `ancestor`.
     // Walks the parent chain. Used by closePopup to null _capturedWidget
     // if it points into the popup being closed.
     static bool isDescendantOf(Widget* widget, Widget* ancestor);
+
+    // Phase A: overlay-first hit-test funnel. Picks _overlayRoot first
+    // (popups), falls back to _root. Empty overlay is O(1). Internal —
+    // not part of the public API.
+    Widget* pickTopmostWidget(const math::FVector2& worldPos);
 
     bool onMouseMove(float x, float y);
     bool onMouseButtonDown(float x, float y, int button);
@@ -121,6 +136,13 @@ private:
     // close-then-reopen in the same frame.
     Widget* _activeDropdown = nullptr;
     Widget* _activeDropdownAnchor = nullptr;
+    // True when `_activeDropdownAnchor` was a ComboBox at openPopup time.
+    // tearDownOverlayChildren must NOT dynamic_cast the anchor — the
+    // Tooltip path can free the Button anchor before shutdown, and RTTI
+    // on a freed object AVs ("no RTTI data"). The flag lets us notify
+    // ComboBox safely with static_cast when the ComboBox is still alive
+    // (shutdown tears down overlay before the main root).
+    bool _activeDropdownAnchorIsComboBox = false;
     // Phase UI-PERF-1: track the last client size we laid out against. If
     // layout() is invoked again with the same values and no explicit tree
     // mutation has occurred, skip performLayout entirely. Set to a sentinel
@@ -134,6 +156,12 @@ private:
     float _lastMouseX = 0.0f;
     float _lastMouseY = 0.0f;
     bool _hasLastMouse = false;
+
+    // Destroy every popup currently mounted on `_overlayRoot`.
+    // Copies the child list first — `getChildren()` returns a reference,
+    // and `destroyWidgetTree` detaches (mutates `_children`) so iterating
+    // the live vector would invalidate the range-for and crash.
+    void tearDownOverlayChildren();
 };
 
 } // namespace ayt::ui

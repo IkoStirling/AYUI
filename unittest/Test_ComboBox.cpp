@@ -106,7 +106,14 @@ TEST_CASE(combobox_set_items_and_selection) {
 }
 
 // C-6: openPopup / closePopup toggle visibility.
+// Phase A: popup must mount on UIManager's overlay — standalone ComboBox
+// without an initialized UIManager cannot report isPopupOpen().
 TEST_CASE(combobox_open_close_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
     ComboBox cb;
     cb.setItems({L"a", L"b", L"c"});
     CHECK_FALSE(cb.isPopupOpen());
@@ -121,18 +128,31 @@ TEST_CASE(combobox_open_close_popup) {
     CHECK(cb.isPopupOpen());
     cb.togglePopup();
     CHECK_FALSE(cb.isPopupOpen());
+
+    ui.shutdown();
 }
 
 // C-6: openPopup on empty items is a no-op.
 TEST_CASE(combobox_open_popup_empty_noop) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
     ComboBox cb;
     cb.openPopup();
     CHECK_FALSE(cb.isPopupOpen());
+
+    ui.shutdown();
 }
 
 // C-6: clicking the main ComboBox toggles popup; clicking the popup row
 // updates selection and (in v1) closes the popup.
 TEST_CASE(combobox_click_main_opens_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
     ComboBox cb;
     cb.setItems({L"x", L"y", L"z"});
     cb.setSize(FVector2(160.0f, 28.0f));
@@ -143,51 +163,80 @@ TEST_CASE(combobox_click_main_opens_popup) {
     const FVector2 clickPos(world.x + 80.0f, world.y + 14.0f);
     cb.onMouseButtonUp(UIMouseEvent(clickPos, 0));
     CHECK(cb.isPopupOpen());
+
+    ui.shutdown();
 }
 
 // C-6: clicking a popup row closes the popup and updates selection.
+// Phase A (A2): the popup lives on UIManager's overlay root, not as a
+// child of ComboBox. Row clicks are routed through UIManager's overlay
+// hit-test funnel (overlay-first → falls back to root). The test
+// initializes UIManager, registers the ComboBox as a child of its
+// root via loadFromString, opens the popup, then drives the click
+// through UIManager.
 TEST_CASE(combobox_click_popup_row_selects) {
-    ComboBox cb;
-    cb.setItems({L"a", L"b", L"c"});
-    cb.setSize(FVector2(160.0f, 28.0f));
-    cb.setPosition(FVector2(0.0f, 0.0f));
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    const char* json = R"({
+        "type": "Widget",
+        "id": "root",
+        "size": { "w": 800, "h": 600 },
+        "children": [
+            {
+                "type": "ComboBox",
+                "id": "cb",
+                "items": ["a", "b", "c"],
+                "position": { "x": 0, "y": 0 },
+                "size": { "w": 160, "h": 28 }
+            }
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    ui.setClientSize(800.0f, 600.0f);
+    ui.layout();
+
+    auto* cb = dynamic_cast<ComboBox*>(ui.findById("cb"));
+    CHECK_NOT_NULL(cb);
 
     int selChanges = 0;
     int lastSelected = -2;
-    cb.setOnSelectionChanged([&](int idx) {
+    cb->setOnSelectionChanged([&](int idx) {
         ++selChanges;
         lastSelected = idx;
     });
 
-    cb.openPopup();
-    CHECK(cb.isPopupOpen());
+    cb->openPopup();
+    CHECK(cb->isPopupOpen());
 
-    // Force a layout so the popup has world bounds. simulate the layout
-    // by re-running performLayout (in real apps UIManager::update runs it).
-    cb.performLayout();
-
-    // Find the popup child and grab the row at index 1.
-    CHECK(cb.getChildren().size() >= 2u);
-    ListView* popup = dynamic_cast<ListView*>(
-        cb.getChildren().back());
+    // Popup should be a child of the overlay, not of ComboBox.
+    ListView* popup = nullptr;
+    for (Widget* w : ui.getOverlayRoot()->getChildren()) {
+        popup = dynamic_cast<ListView*>(w);
+        if (popup != nullptr) break;
+    }
     CHECK_NOT_NULL(popup);
     CHECK(popup->getItemCount() == 3u);
 
     // Row 1 lives at popup-local y = 24..48; popup-local origin sits at
     // (0, ComboBox.height + gap) relative to ComboBox world top.
-    const FVector2 cbWorld = cb.getWorldBounds().getMin();
+    const FVector2 cbWorld = cb->getWorldBounds().getMin();
     const FVector2 rowWorld(
         cbWorld.x + 80.0f,
-        cbWorld.y + cb.getHeight() + 2.0f + 36.0f); // mid of row 1
+        cbWorld.y + cb->getHeight() + 2.0f + 36.0f); // mid of row 1
 
-    // Route the click through ComboBox's onMouseButtonUp (which forwards
-    // to the popup row when popup is open).
-    cb.onMouseButtonUp(UIMouseEvent(rowWorld, 0));
+    // Drive the click through UIManager so the overlay hit-test funnel
+    // routes it to the popup row.
+    ui.onMouseButtonDown(rowWorld.x, rowWorld.y, 0);
+    ui.onMouseButtonUp(rowWorld.x, rowWorld.y, 0);
 
     CHECK(selChanges == 1);
     CHECK(lastSelected == 1);
-    CHECK(cb.getSelectedIndex() == 1);
-    CHECK(cb.getSelectedItem() == L"b");
+    CHECK(cb->getSelectedIndex() == 1);
+    CHECK(cb->getSelectedItem() == L"b");
+
+    ui.shutdown();
 }
 
 // C-6: factory + serializer round-trip preserves items + selectedIndex +
@@ -243,6 +292,168 @@ TEST_CASE(combobox_render_emits_main_and_arrow) {
         if (dc.type == MockRenderer::DrawCall::Rect) ++rectCount;
     }
     CHECK(rectCount >= 3);   // bg + 2 arrow halves
+}
+
+// =============================================================================
+// Phase A (A2) — ComboBox on overlay
+// =============================================================================
+
+// Phase A (A2): openPopup mounts the popup on UIManager's overlay root,
+// NOT as a child of the ComboBox. The popup is found via the overlay's
+// children list, not ComboBox::getChildren().
+TEST_CASE(combobox_popup_mounted_on_overlay_not_as_child) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox* cb = new ComboBox();
+    cb->setItems({L"a", L"b", L"c"});
+    cb->setSize(FVector2(160.0f, 28.0f));
+    cb->setPosition(FVector2(20.0f, 20.0f));
+
+    cb->openPopup();
+
+    // Overlay should hold the popup. ComboBox should not.
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    // ComboBox's only child is _display (TextLabel), not the popup.
+    CHECK(cb->getChildren().size() == 1u);
+    CHECK_NOT_NULL(dynamic_cast<TextLabel*>(cb->getChildren()[0]));
+
+    cb->closePopup();
+    ui.shutdown();
+}
+
+// Phase A (A2 L4): ComboBox near the bottom of the viewport flips the
+// popup above the main area. With clientHeight=200 and ComboBox at
+// y=180 height=28, the default-below position (208) + popup height
+// overflows → flip to y < 180 - popupH - gap.
+TEST_CASE(combobox_popup_flips_above_when_below_overflows) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 200.0f);
+
+    ComboBox* cb = new ComboBox();
+    cb->setItems({L"a", L"b", L"c"});
+    cb->setSize(FVector2(160.0f, 28.0f));
+    // Place near the bottom so default-below overflows.
+    cb->setPosition(FVector2(20.0f, 160.0f));
+
+    cb->openPopup();
+
+    // Popup should be mounted.
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    Widget* popup = ui.getOverlayRoot()->getChildren()[0];
+
+    // The popup's top should be ABOVE the ComboBox's top (flipped).
+    const FVector2 cbWorldMin = cb->getWorldBounds().getMin();
+    const FVector2 popupWorldMin = popup->getWorldBounds().getMin();
+    CHECK(popupWorldMin.y < cbWorldMin.y);
+
+    cb->closePopup();
+    ui.shutdown();
+}
+
+// Phase A (A2 L4): ComboBox near the right edge clamps the popup so it
+// stays within the viewport. With clientWidth=200 and ComboBox at
+// x=180 width=160, default-below would put the popup's right at 340.
+// Clamp should snap x to (200 - 160) = 40.
+TEST_CASE(combobox_popup_clamps_within_viewport) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(200.0f, 600.0f);
+
+    ComboBox* cb = new ComboBox();
+    cb->setItems({L"a", L"b", L"c"});
+    cb->setSize(FVector2(160.0f, 28.0f));
+    // Place near the right edge so default-below overflows horizontally.
+    cb->setPosition(FVector2(180.0f, 20.0f));
+
+    cb->openPopup();
+
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    Widget* popup = ui.getOverlayRoot()->getChildren()[0];
+    const FRectangle pb = popup->getWorldBounds();
+    CHECK(pb.maxX <= 200.0f);
+
+    cb->closePopup();
+    ui.shutdown();
+}
+
+// Phase A (A2 S2): DropdownManager single-active-popup invariant. Two
+// ComboBoxes in the same root — opening the second closes the first.
+TEST_CASE(combobox_dual_open_closes_first) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    ComboBox* cb1 = new ComboBox();
+    cb1->setItems({L"x", L"y"});
+    cb1->setPosition(FVector2(20.0f, 20.0f));
+    ComboBox* cb2 = new ComboBox();
+    cb2->setItems({L"p", L"q"});
+    cb2->setPosition(FVector2(20.0f, 80.0f));
+
+    cb1->openPopup();
+    CHECK(cb1->isPopupOpen());
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    cb2->openPopup();
+    CHECK(cb2->isPopupOpen());
+    CHECK(!cb1->isPopupOpen());
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    cb2->closePopup();
+    ui.shutdown();
+}
+
+// Phase A (A2 L1): ComboBox-in-ScrollView fix. ComboBox inside a
+// ScrollView now has its popup on the overlay, so the popup extends
+// past the ScrollView's content bounds. The overlay hit-test routes
+// clicks on the overflow region to the popup row.
+TEST_CASE(combobox_in_scrollview_popup_overflow_clickable) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    const char* json = R"({
+        "type": "ScrollView",
+        "id": "root",
+        "position": { "x": 0, "y": 0 },
+        "size": { "w": 400, "h": 200 },
+        "children": [
+            {
+                "type": "ComboBox",
+                "id": "cb",
+                "items": ["a", "b", "c"],
+                "position": { "x": 0, "y": 0 },
+                "size": { "w": 160, "h": 28 }
+            }
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    ui.setClientSize(400.0f, 200.0f);
+    ui.layout();
+
+    auto* cb = dynamic_cast<ComboBox*>(ui.findById("cb"));
+    CHECK_NOT_NULL(cb);
+    cb->openPopup();
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    // Click on a popup row at y=64 — that's outside the ScrollView
+    // bounds (which are y ∈ [0, 200)). With the overlay model, this
+    // click hits the popup row, not the ScrollView.
+    int selChanges = 0;
+    cb->setOnSelectionChanged([&](int) { ++selChanges; });
+
+    ui.onMouseButtonDown(80.0f, 64.0f, 0);
+    ui.onMouseButtonUp(80.0f, 64.0f, 0);
+    CHECK(selChanges == 1);
+
+    ui.shutdown();
 }
 
 TEST_SUITE_END

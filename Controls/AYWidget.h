@@ -266,9 +266,15 @@ inline void destroyWidgetTree(Widget* root) {
     if (root == nullptr) {
         return;
     }
-    // Snapshot children before recursing — _children is not mutated during
-    // destruction, but make a local copy so a misbehaving subclass that
-    // clears _children in a destructor can't corrupt the iteration.
+    // Detach from parent BEFORE delete so the parent's `_children` never
+    // holds a dangling pointer. Callers that destroy an overlay popup
+    // (or any still-parented subtree) without an explicit removeChild —
+    // e.g. UIManager::loadFromString — would otherwise leave stale
+    // entries that crash on the next walk / shutdown (0xC0000005).
+    root->detachFromParent();
+
+    // Snapshot children before recursing — detachFromParent on each child
+    // mutates this node's `_children`, so iterate a local copy.
     std::vector<Widget*> children = root->getChildren();
     for (Widget* child : children) {
         destroyWidgetTree(child);

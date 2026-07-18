@@ -84,5 +84,33 @@ TEST_CASE(menu_factory_registered) {
     destroyWidgetTree(widget);
 }
 
+// Phase A (A2): when a Menu is opened it lives on UIManager's overlay root,
+// NOT as a child of the host. After open(host, pos), the menu is found in
+// ui.getOverlayRoot()->getChildren() and host->getChildren() is empty.
+TEST_CASE(menu_open_mounts_on_overlay) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget* host = new Widget();
+    host->setSize(FVector2(100.0f, 20.0f));
+
+    Menu* menu = new Menu();
+    menu->addItem(L"Open");
+    menu->addItem(L"Save");
+    menu->open(host, FVector2(0.0f, 20.0f));
+
+    CHECK(menu->isOpen());
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    CHECK(ui.getOverlayRoot()->getChildren()[0] == menu);
+    CHECK(host->getChildren().empty());
+
+    menu->close();
+    // After close, UIManager::closePopup destroys the menu tree. Don't
+    // touch menu after this point — it's freed memory.
+    ui.shutdown();
+    delete host;
+}
+
 TEST_SUITE_END
 

@@ -735,4 +735,133 @@ TEST_CASE(test_uimanager_dropdown_closepopup_clears_capture) {
     ui.shutdown();
 }
 
+// Phase A (A2): overlay-first hit-test funnel. A click inside the popup's
+// world bounds lands on the popup (not on whatever's underneath in _root).
+TEST_CASE(test_uimanager_hit_test_overlay_first) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    // A trivial root with no interesting children — just to verify the
+    // overlay picks BEFORE the root.
+    const char* json = R"({
+        "type": "VBox",
+        "id": "root",
+        "position": { "x": 0, "y": 0 },
+        "size": { "w": 800, "h": 600 },
+        "children": [
+            { "type": "Window", "id": "anchor", "position": { "x": 10, "y": 10 }, "size": { "w": 100, "h": 20 } }
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    ui.setClientSize(800.0f, 600.0f);
+    ui.layout();
+
+    Widget* anchor = ui.findById("anchor");
+    CHECK_NOT_NULL(anchor);
+
+    Widget* popup = new Widget();
+    popup->setSize(FVector2(80.0f, 60.0f));
+    // Place the popup OVER the anchor — if the funnel were root-first
+    // a click here would hit the anchor, but with overlay-first it
+    // hits the popup.
+    popup->setPosition(FVector2(10.0f, 10.0f));
+
+    ui.openPopup(anchor, popup);
+
+    // Click in the overlap region. pickTopmostWidget (overlay-first)
+    // should return the popup; pickWidgetAt(_root, ...) would return
+    // the anchor. Drive a real mouse-down so we exercise the funnel.
+    // The plain-Widget popup's default onMouseButtonDown returns false
+    // — what's important is that the click ROUTES to the popup (not
+    // the anchor). We verify by checking _capturedWidget after the
+    // down: if the popup handled it we'd capture it; if anchor handled
+    // it we'd capture the anchor. We don't have direct access to
+    // _capturedWidget, so instead we check that the popup's parent is
+    // the overlay (still mounted) after the click — meaning click-outside
+    // did NOT fire (because click landed inside anchor's area).
+    ui.onMouseButtonDown(50.0f, 15.0f, 0);
+    ui.onMouseButtonUp(50.0f, 15.0f, 0);
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    ui.closePopup(popup);
+    ui.shutdown();
+}
+
+// Phase A (A2 S2): click-outside detection. A click that lands outside
+// both the active popup AND its anchor closes the popup. Without this,
+// a popup would stay open even after the user clicks somewhere
+// unrelated. Anchor tracking prevents the ComboBox main-area click from
+// being misclassified.
+TEST_CASE(test_uimanager_click_outside_closes_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    const char* json = R"({
+        "type": "VBox",
+        "id": "root",
+        "position": { "x": 0, "y": 0 },
+        "size": { "w": 800, "h": 600 }
+    })";
+    CHECK(ui.loadFromString(json));
+    ui.setClientSize(800.0f, 600.0f);
+    ui.layout();
+
+    Widget* anchor = new Widget();
+    Widget* popup = new Widget();
+    popup->setSize(FVector2(80.0f, 60.0f));
+    popup->setPosition(FVector2(100.0f, 100.0f));
+
+    ui.openPopup(anchor, popup);
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    // Click at (500, 500) — far from popup (100-180, 100-160). The click
+    // lands inside the VBox root's bounds but not inside any popup row.
+    // Click-outside detector must fire and close the popup.
+    ui.onMouseButtonDown(500.0f, 500.0f, 0);
+    ui.onMouseButtonUp(500.0f, 500.0f, 0);
+
+    CHECK(ui.getOverlayRoot()->getChildren().empty());
+
+    ui.shutdown();
+}
+
+// Phase A (A2 A5): loadFromString tears down overlay children before
+// replacing _root. A popup that was open when the layout reloads is
+// freed cleanly — no orphan on the overlay, no UAF if the popup's
+// std::function callbacks referenced widgets in the old root.
+TEST_CASE(test_uimanager_load_reload_closes_overlay_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    const char* json1 = R"({
+        "type": "VBox",
+        "id": "root",
+        "position": { "x": 0, "y": 0 },
+        "size": { "w": 400, "h": 300 }
+    })";
+    CHECK(ui.loadFromString(json1));
+    ui.setClientSize(400.0f, 300.0f);
+    ui.layout();
+
+    Widget* anchor = new Widget();
+    Widget* popup = new Widget();
+    popup->setSize(FVector2(80.0f, 60.0f));
+    ui.openPopup(anchor, popup);
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    // Load a new layout — overlay children should be torn down.
+    const char* json2 = R"({
+        "type": "VBox",
+        "id": "root",
+        "position": { "x": 0, "y": 0 },
+        "size": { "w": 400, "h": 300 }
+    })";
+    CHECK(ui.loadFromString(json2));
+    CHECK(ui.getOverlayRoot()->getChildren().empty());
+
+    ui.shutdown();
+}
+
 TEST_SUITE_END
