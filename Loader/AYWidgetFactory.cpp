@@ -2,6 +2,8 @@
 #include "AYButton.h"
 #include "AYCheckBox.h"
 #include "AYRadioButton.h"
+#include "AYSlider.h"
+#include "AYProgressBar.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
@@ -44,6 +46,8 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("TextLabel", createTextLabelWidget);
         WidgetFactory::get().registerCreator("CheckBox", createCheckBoxWidget);
         WidgetFactory::get().registerCreator("RadioButton", createRadioButtonWidget);
+        WidgetFactory::get().registerCreator("Slider", createSliderWidget);
+        WidgetFactory::get().registerCreator("ProgressBar", createProgressBarWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("Panel", Panel);

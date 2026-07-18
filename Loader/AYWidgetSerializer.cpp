@@ -4,6 +4,8 @@
 #include "AYButton.h"
 #include "AYCheckBox.h"
 #include "AYRadioButton.h"
+#include "AYSlider.h"
+#include "AYProgressBar.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
 #include "AYBox.h"
@@ -103,6 +105,18 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("groupId")) {
                 rb->setGroupId(j["groupId"].get<int>());
             }
+        }
+
+        if (Slider* sl = dynamic_cast<Slider*>(widget)) {
+            if (j.contains("min"))  sl->setMin(j["min"].get<float>());
+            if (j.contains("max"))  sl->setMax(j["max"].get<float>());
+            if (j.contains("value")) sl->setValue(j["value"].get<float>());
+        }
+
+        if (ProgressBar* pb = dynamic_cast<ProgressBar*>(widget)) {
+            if (j.contains("min"))  pb->setMin(j["min"].get<float>());
+            if (j.contains("max"))  pb->setMax(j["max"].get<float>());
+            if (j.contains("value")) pb->setValue(j["value"].get<float>());
         }
 
         if (Window* window = dynamic_cast<Window*>(widget)) {
@@ -219,6 +233,18 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["text"] = std::string(rb->getText().begin(), rb->getText().end());
         j["checked"] = rb->isChecked();
         j["groupId"] = rb->getGroupId();
+    }
+    else if (Slider* sl = dynamic_cast<Slider*>(widget)) {
+        j["type"] = "Slider";
+        j["min"]  = sl->getMin();
+        j["max"]  = sl->getMax();
+        j["value"] = sl->getValue();
+    }
+    else if (ProgressBar* pb = dynamic_cast<ProgressBar*>(widget)) {
+        j["type"] = "ProgressBar";
+        j["min"]  = pb->getMin();
+        j["max"]  = pb->getMax();
+        j["value"] = pb->getValue();
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";

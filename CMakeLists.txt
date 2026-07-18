@@ -7,6 +7,8 @@ set(SRC_FILES
     Controls/AYButton.cpp
     Controls/AYCheckBox.cpp
     Controls/AYRadioButton.cpp
+    Controls/AYSlider.cpp
+    Controls/AYProgressBar.cpp
     Controls/AYImage.cpp
     Controls/AYInteractiveWidget.cpp
     Controls/AYPanel.cpp
@@ -30,6 +32,8 @@ set(HEAD_FILES
     Controls/AYButton.h
     Controls/AYCheckBox.h
     Controls/AYRadioButton.h
+    Controls/AYSlider.h
+    Controls/AYProgressBar.h
     Controls/AYImage.h
     Controls/AYInteractiveWidget.h
     Controls/AYLeafWidget.h

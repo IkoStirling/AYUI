@@ -8,6 +8,8 @@
 #include "AYRadioButton.h"
 #include "AYInteractiveWidget.h"
 #include "AYLeafWidget.h"
+#include "AYProgressBar.h"
+#include "AYSlider.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
