@@ -128,6 +128,12 @@ public:
     // Mouse leave notification (called when mouse leaves this widget)
     virtual void onMouseLeave();
 
+    // Identity for layout (HBox slot width / hit priority). Prefer this over
+    // dynamic_cast<SplitterHandle*> — RTTI failure would treat a splitter as a
+    // fill-width slot, making the hover band hundreds of px wide so "leave"
+    // never fires and the accent stays lit.
+    virtual bool isSplitterHandle() const { return false; }
+
     // Visibility
     bool isVisible() const { return _visible; }
     void setVisible(bool visible) { _visible = visible; }

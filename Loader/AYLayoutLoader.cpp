@@ -379,7 +379,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             for (const auto& childJson : j["children"]) {
                 Widget* child = buildWidgetTree(childJson);
                 if (!child) continue;
-                if (dynamic_cast<SplitterHandle*>(child) != nullptr) {
+                if (child->isSplitterHandle()) {
                     hbox->addWidget(child, SplitterHandle::kDefaultWidth);
                 } else {
                     float slotWidth = 0.0f;

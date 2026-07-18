@@ -64,6 +64,13 @@ private:
     // (-1, -1) after tree mutations so the next layout() always re-runs.
     float _lastLayoutWidth = -1.0f;
     float _lastLayoutHeight = -1.0f;
+
+    // Last pointer position from onMouseMove / onMouseLeave. update()
+    // re-hit-tests against this so a missed leave (hit stayed on a fat
+    // splitter band, etc.) is corrected every frame before render.
+    float _lastMouseX = 0.0f;
+    float _lastMouseY = 0.0f;
+    bool _hasLastMouse = false;
 };
 
 } // namespace ayt::ui

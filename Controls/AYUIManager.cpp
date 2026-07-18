@@ -8,11 +8,37 @@
 #include "aymath/MathUtils.h"
 #include "AYWidgetFactory.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 namespace ayt::ui {
 
 namespace {
+
+bool splitterDebugEnabled()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* env = std::getenv("AY_UI_SPLITTER_DEBUG");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
+
+const char* widgetLabel(const Widget* w)
+{
+    if (w == nullptr) {
+        return "null";
+    }
+    if (!w->getId().empty()) {
+        return w->getId().c_str();
+    }
+    if (w->isSplitterHandle()) {
+        return "<SplitterHandle>";
+    }
+    return "<Widget>";
+}
 
 Widget* pickWidgetAt(Widget* widget, const math::FVector2& worldPos)
 {
@@ -27,10 +53,101 @@ void updateHoverWidget(Widget*& hoverWidget, Widget* nextHover)
     if (hoverWidget == nextHover) {
         return;
     }
+    const bool log = splitterDebugEnabled()
+        && ((hoverWidget != nullptr && hoverWidget->isSplitterHandle())
+            || (nextHover != nullptr && nextHover->isSplitterHandle()));
+    if (log) {
+        std::fprintf(stderr,
+            "[SplitterDebug] UIManager hover %s -> %s\n",
+            widgetLabel(hoverWidget), widgetLabel(nextHover));
+    }
     if (hoverWidget != nullptr) {
         hoverWidget->onMouseLeave();
     }
     hoverWidget = nextHover;
+}
+
+void endStuckSplitterDrags(Widget* root)
+{
+    if (root == nullptr) {
+        return;
+    }
+    std::vector<Widget*> stack;
+    stack.push_back(root);
+    while (!stack.empty()) {
+        Widget* w = stack.back();
+        stack.pop_back();
+        if (w == nullptr) {
+            continue;
+        }
+        if (auto* split = dynamic_cast<SplitterHandle*>(w)) {
+            if (split->isDragging()) {
+                if (splitterDebugEnabled()) {
+                    std::fprintf(stderr,
+                        "[SplitterDebug] UIManager: capture=0 but %s still "
+                        "dragging — forcing endDrag (stuck-drag recovery)\n",
+                        widgetLabel(split));
+                }
+                split->endDrag();
+            }
+        }
+        for (Widget* child : w->getChildren()) {
+            stack.push_back(child);
+        }
+    }
+}
+
+void dumpSplitterLayoutOnce(Widget* root)
+{
+    if (!splitterDebugEnabled() || root == nullptr) {
+        return;
+    }
+    static bool dumped = false;
+    if (dumped) {
+        return;
+    }
+    dumped = true;
+
+    std::fprintf(stderr, "[SplitterDebug] --- layout dump ---\n");
+    std::vector<Widget*> stack;
+    stack.push_back(root);
+    while (!stack.empty()) {
+        Widget* w = stack.back();
+        stack.pop_back();
+        if (w == nullptr) {
+            continue;
+        }
+        if (w->isSplitterHandle()) {
+            const math::FRectangle world = w->getWorldBounds();
+            std::fprintf(stderr,
+                "[SplitterDebug] layout id=%s world=[%.1f,%.1f)x[%.1f,%.1f) "
+                "size=(%.1f,%.1f) isSplitterHandle=1\n",
+                widgetLabel(w),
+                world.minX, world.maxX, world.minY, world.maxY,
+                w->getWidth(), w->getHeight());
+        }
+        if (HBox* box = dynamic_cast<HBox*>(w)) {
+            for (int i = 0; i < static_cast<int>(box->getChildren().size()); ++i) {
+                // slotWidth is public; isSplitterSlot too
+                (void)i;
+            }
+            // Walk slots via children order (same as insertion for HBox loader)
+            const auto& kids = box->getChildren();
+            for (size_t i = 0; i < kids.size(); ++i) {
+                std::fprintf(stderr,
+                    "[SplitterDebug] HBox '%s' child[%zu] id=%s "
+                    "isSplitterHandle=%d slotWidth=%.1f isSplitterSlot=%d\n",
+                    widgetLabel(box), i, widgetLabel(kids[i]),
+                    kids[i]->isSplitterHandle() ? 1 : 0,
+                    box->slotWidth(static_cast<int>(i)),
+                    box->isSplitterSlot(static_cast<int>(i)) ? 1 : 0);
+            }
+        }
+        for (Widget* child : w->getChildren()) {
+            stack.push_back(child);
+        }
+    }
+    std::fprintf(stderr, "[SplitterDebug] --- end layout dump ---\n");
 }
 
 } // namespace
@@ -194,7 +311,27 @@ void UIManager::update(float dt) {
     // Mirrors how layout() walks performLayout: a single call on the
     // root that CompoundWidget::tick recurses through children.
     if (_root != nullptr) {
+        dumpSplitterLayoutOnce(_root);
         _root->tick(dt);
+    }
+
+    // Re-validate hover against the last known pointer. Pure-hover leave
+    // for SplitterHandle depends on updateHoverWidget firing onMouseLeave;
+    // if a prior move left `_hover` armed because hitTest still returned
+    // the same (too-wide) handle, the next frame's re-hit with a corrected
+    // band clears it. Do not synthesize onMouseMove here — that would
+    // re-arm hover every tick while the cursor is idle on the band.
+    if (_root != nullptr && _hasLastMouse && _capturedWidget == nullptr) {
+        Widget* hit = pickWidgetAt(_root, math::FVector2(_lastMouseX, _lastMouseY));
+        if (splitterDebugEnabled() && _hoverWidget != nullptr
+            && _hoverWidget->isSplitterHandle() && hit != _hoverWidget) {
+            std::fprintf(stderr,
+                "[SplitterDebug] update() revalidate will leave %s -> %s "
+                "mouse=(%.1f,%.1f)\n",
+                widgetLabel(_hoverWidget), widgetLabel(hit),
+                _lastMouseX, _lastMouseY);
+        }
+        updateHoverWidget(_hoverWidget, hit);
     }
 }
 
@@ -239,12 +376,40 @@ bool UIManager::onMouseMove(float x, float y) {
         return false;
     }
 
+    _lastMouseX = x;
+    _lastMouseY = y;
+    _hasLastMouse = true;
+
     math::FVector2 pos(x, y);
     if (_capturedWidget != nullptr) {
+        if (splitterDebugEnabled()
+            && _capturedWidget->isSplitterHandle()) {
+            static int captureMoveLog = 0;
+            if ((captureMoveLog++ % 15) == 0) {
+                std::fprintf(stderr,
+                    "[SplitterDebug] onMouseMove CAPTURED by %s "
+                    "mouse=(%.1f,%.1f) (no hit-test; drag path)\n",
+                    widgetLabel(_capturedWidget), x, y);
+            }
+        }
         return _capturedWidget->onMouseMove(UIMouseEvent(pos, 0));
     }
 
+    // Capture lost (or never held) but a splitter still has `_dragging`:
+    // isRevealed() stays true forever. Recover before normal hit-test.
+    endStuckSplitterDrags(_root);
+
     Widget* hit = pickWidgetAt(_root, pos);
+    if (splitterDebugEnabled()
+        && (_hoverWidget != hit)
+        && ((_hoverWidget != nullptr && _hoverWidget->isSplitterHandle())
+            || (hit != nullptr && hit->isSplitterHandle()))) {
+        std::fprintf(stderr,
+            "[SplitterDebug] onMouseMove hit=%s (prevHover=%s) "
+            "mouse=(%.1f,%.1f) capturing=%d\n",
+            widgetLabel(hit), widgetLabel(_hoverWidget), x, y,
+            _capturedWidget != nullptr ? 1 : 0);
+    }
     updateHoverWidget(_hoverWidget, hit);
 
     if (hit != nullptr) {
@@ -277,27 +442,33 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     math::FVector2 pos(x, y);
     Widget* target = _capturedWidget != nullptr ? _capturedWidget : pickWidgetAt(_root, pos);
     _capturedWidget = nullptr;
-    // Re-evaluate the hovered widget now that the capture is gone —
-    // otherwise `_hoverWidget` still points at the widget we were
-    // dragging on (e.g. a splitter handle) and its cursor hint leaks
-    // past the mouse-up. Trigger the standard hover re-evaluation at
-    // the release position so the cursor hint matches the widget
-    // actually under the pointer.
-    updateHoverWidget(_hoverWidget, pickWidgetAt(_root, pos));
+
+    // Deliver mouse-up BEFORE re-evaluating hover. SplitterHandle (and
+    // similar capture targets) clear drag/hover state in onMouseButtonUp;
+    // if updateHoverWidget runs first, onMouseLeave can see a still-
+    // dragging widget and historically skipped the hover reset.
+    bool handled = false;
     if (target != nullptr) {
-        return target->onMouseButtonUp(UIMouseEvent(pos, button));
+        handled = target->onMouseButtonUp(UIMouseEvent(pos, button));
     }
-    return false;
+
+    // Capture is gone — point `_hoverWidget` at whatever is under the
+    // cursor now (for cursor hints). Do NOT synthesize onMouseMove here:
+    // SplitterHandle intentionally stays un-revealed after mouse-up until
+    // the next real WM_MOUSEMOVE re-arms hover.
+    updateHoverWidget(_hoverWidget, pickWidgetAt(_root, pos));
+    return handled;
 }
 
 void UIManager::clearHover() {
-    if (_capturedWidget != nullptr) {
-        return;
-    }
+    // Always drop the hover target. Previously this early-returned while
+    // capturing, which left SplitterHandle `_hover` stuck when the editor
+    // routed viewport moves through clearHover during an in-progress drag.
     updateHoverWidget(_hoverWidget, nullptr);
 }
 
 void UIManager::onMouseLeave() {
+    _hasLastMouse = false;
     if (_capturedWidget != nullptr) {
         return;
     }

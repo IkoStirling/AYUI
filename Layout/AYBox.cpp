@@ -141,7 +141,13 @@ void HBox::addWidget(Widget* widget, float width, const BoxSlotLimits& limits) {
     slot.widget = widget;
     slot.width = width;
     slot.limits = limits;
-    slot.isSplitter = (dynamic_cast<SplitterHandle*>(widget) != nullptr);
+    // Prefer virtual isSplitterHandle() over dynamic_cast — see Widget.h.
+    slot.isSplitter = widget->isSplitterHandle();
+    if (slot.isSplitter) {
+        // Splitters are never fill slots; pin width so a missed loader
+        // path (width=0) cannot stretch the hover band across the row.
+        slot.width = SplitterHandle::kDefaultWidth;
+    }
     _slots.push_back(slot);
 
     if (slot.isSplitter) {
@@ -162,7 +168,10 @@ void HBox::insertWidget(int index, Widget* widget, float width, const BoxSlotLim
     slot.widget = widget;
     slot.width = width;
     slot.limits = limits;
-    slot.isSplitter = (dynamic_cast<SplitterHandle*>(widget) != nullptr);
+    slot.isSplitter = widget->isSplitterHandle();
+    if (slot.isSplitter) {
+        slot.width = SplitterHandle::kDefaultWidth;
+    }
 
     if (index >= (int)_slots.size()) {
         _slots.push_back(slot);
@@ -245,6 +254,15 @@ void HBox::layoutChildren() {
         return;
     }
 
+    // Repair slot cache: a splitter mis-tagged as fill (old dynamic_cast
+    // path / width=0) would own hundreds of px and never receive leave.
+    for (Slot& slot : _slots) {
+        if (slot.widget != nullptr && slot.widget->isSplitterHandle()) {
+            slot.isSplitter = true;
+            slot.width = SplitterHandle::kDefaultWidth;
+        }
+    }
+
     float totalFixedWidth = 0.0f;
     size_t fillCount = 0;
     for (const auto& slot : _slots) {
@@ -323,12 +341,8 @@ Widget* HBox::hitTest(const math::FVector2& worldPos) {
     }
 
     for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
-        // Skip splitters in the children list; they were already probed above.
-        // We rely on the cached isSplitter flag from the Slot, but hitTest can
-        // be reached from Widget::hitTest paths that don't go through HBox
-        // slots, so an RTTI fallback is required here. Splitters are rare
-        // (handful per HBox), so this is not a hot-path concern.
-        if (dynamic_cast<SplitterHandle*>(*it) != nullptr) {
+        // Skip splitters — already probed above via the cached Slot flag.
+        if ((*it)->isSplitterHandle()) {
             continue;
         }
         Widget* hit = (*it)->hitTest(worldPos);

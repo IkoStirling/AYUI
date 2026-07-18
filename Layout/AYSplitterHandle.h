@@ -17,14 +17,25 @@ public:
     SplitterHandle();
     ~SplitterHandle() override = default;
 
+    bool isSplitterHandle() const override { return true; }
+
     void bindPanels(HBox* owner, int leftPanelSlot, int rightPanelSlot);
 
     bool isDragging() const { return _dragging; }
+
+    // Force-end an in-progress drag (clears `_dragging` + hover reveal).
+    // Used by UIManager when capture was lost without a mouse-up, which
+    // otherwise leaves isRevealed() true forever via `_dragging`.
+    void endDrag();
 
     // True when the splitter is currently in its revealed (drawn) state —
     // either dragging, or hovering past the reveal delay. Exposed for tests
     // so the test doesn't need to inspect private delay counters.
     bool isRevealed() const;
+
+    // Hit / hover / draw band clamped to kDefaultWidth (guards against a
+    // layout bug that accidentally gave the handle fill width).
+    math::FRectangle interactionBand() const;
 
     Widget* hitTest(const math::FVector2& worldPos) override;
     bool onMouseMove(const UIMouseEvent& e) override;
@@ -34,6 +45,12 @@ public:
     UiCursorHint getCursorHint() const override;
     void onRender(IRenderBackend& renderer) override;
     void tick(float dt) override;
+
+    // Clears hover/reveal counters without touching `_dragging`.
+    // Used by the editor host to force-unreveal when the cursor is
+    // no longer on any splitter band (leave events alone are not
+    // enough — capture / missed WM_MOUSEMOVE can skip onMouseLeave).
+    void clearHoverReveal();
 
 private:
     void applyDrag(float mouseWorldX);
