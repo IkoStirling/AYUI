@@ -9,6 +9,7 @@
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
+#include "AYPanel.h"
 #include "AYBox.h"
 #include "AYStyle.h"
 #include "AYMockRenderer.h"

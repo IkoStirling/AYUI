@@ -3,6 +3,7 @@
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
+#include "AYPanel.h"
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 
@@ -41,6 +42,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("TextLabel", createTextLabelWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
+        REGISTER_WIDGET("Panel", Panel);
         REGISTER_WIDGET("VBox", VBox);
         REGISTER_WIDGET("HBox", HBox);
         REGISTER_WIDGET("SplitterHandle", SplitterHandle);

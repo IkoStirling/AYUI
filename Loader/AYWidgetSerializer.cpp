@@ -3,6 +3,7 @@
 #include "AYTextLabel.h"
 #include "AYButton.h"
 #include "AYWindow.h"
+#include "AYPanel.h"
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
@@ -100,6 +101,19 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (Panel* panel = dynamic_cast<Panel*>(widget)) {
+            if (j.contains("borderEnabled")) {
+                panel->setBorderEnabled(j["borderEnabled"].get<bool>());
+            }
+            if (j.contains("padding") && j["padding"].is_object()) {
+                panel->setPadding(
+                    j["padding"].value("left", 4.0f),
+                    j["padding"].value("top", 4.0f),
+                    j["padding"].value("right", 4.0f),
+                    j["padding"].value("bottom", 4.0f));
+            }
+        }
+
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
             if (j.contains("spacing")) {
                 box->setSpacing(j["spacing"]);
@@ -183,6 +197,10 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
         j["type"] = "VBox";
         j["spacing"] = vbox->getSpacing();
+    }
+    else if (Panel* panel = dynamic_cast<Panel*>(widget)) {
+        j["type"] = "Panel";
+        j["borderEnabled"] = panel->isBorderEnabled();
     }
     else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         j["type"] = "HBox";

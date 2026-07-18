@@ -7,6 +7,7 @@ set(SRC_FILES
     Controls/AYButton.cpp
     Controls/AYImage.cpp
     Controls/AYInteractiveWidget.cpp
+    Controls/AYPanel.cpp
     Controls/AYTextLabel.cpp
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
@@ -28,6 +29,7 @@ set(HEAD_FILES
     Controls/AYImage.h
     Controls/AYInteractiveWidget.h
     Controls/AYLeafWidget.h
+    Controls/AYPanel.h
     Controls/AYTextLabel.h
     Controls/AYWidget.h
     Controls/AYUIManager.h

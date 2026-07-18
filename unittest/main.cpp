@@ -17,6 +17,7 @@
 #include "Test_UIManager.cpp"
 #include "Test_R6_CompoundWidget.cpp"
 #include "Test_R9_NamespaceEnum.cpp"
+#include "Test_Panel.cpp"
 
 void runTest()
 {
