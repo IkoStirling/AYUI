@@ -6,6 +6,8 @@
 #include "Test_RadioButton.cpp"
 #include "Test_Slider.cpp"
 #include "Test_ProgressBar.cpp"
+#include "Test_TextInput.cpp"
+#include "Test_ScrollBar.cpp"
 #include "Test_InteractiveWidget.cpp"
 #include "Test_RenderBackend.cpp"
 #include "Test_TextLabel.cpp"
