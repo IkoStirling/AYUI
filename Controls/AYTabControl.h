@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYCompoundFocusableWidget.h"
 #include "AYWidget.h"
 #include "AYListView.h"
 #include "AYPanel.h"
@@ -69,10 +70,22 @@ namespace ayt::ui {
 // DECISION 3: Single-selection in v1. No multi-tab open / split views.
 //   Deferred to v2+ alongside ListView's multi-selection upgrade.
 //
-// DECISION 4: No keyboard nav (Tab to enter, Left/Right to switch, Enter to
-// activate). ListView v1 does not override onKeyDown either; ComboBox
-// already pinned this as a shared v1.1 task. TabControl inherits the same
-// deferral.
+// DECISION 4 (Phase B — B4, S3): TabControl extends
+// CompoundFocusableWidget. Left/Right cycle _selectedIndex (wrap).
+// onMouseButtonDown only grabs focus when the click is INSIDE the
+// header rect — clicking on body content (a button, a text input, etc.)
+// must NOT steal focus from the body widget.
+//
+// Header ListView is visual-only and is excluded from Tab traversal
+// automatically by collectFocusablesDFS's
+// `dynamic_cast<FocusableWidget*>` filter (ListView extends
+// CompoundFocusableWidget in B1, but it's only "focusable" because
+// we made it so — its onKeyDown handles arrow keys, which would
+// conflict with our Left/Right here). The standard pattern is for
+// the host to NOT add the TabControl to Tab traversal — instead,
+// embed focusable widgets inside each tab's content, and let those
+// be Tab targets. TabControl's onKeyDown handles its own Left/Right
+// when the user has clicked into the header.
 //
 // DECISION 5: No closeable tabs, no reorder-by-drag, no new-tab button.
 //   All pure-visual v2+ features. Public API stays stable.
@@ -88,7 +101,7 @@ namespace ayt::ui {
 // auto-hide vbar when items <= n.
 // =============================================================================
 
-class TabControl : public CompoundWidget {
+class TabControl : public CompoundFocusableWidget {
 public:
     // Header height in logical pixels. Default 28. ListView row height also
     // defaults to 24 — hosts that want a taller header should call
@@ -127,6 +140,13 @@ public:
     void setOnSelectionChanged(std::function<void(int)> cb) {
         _onSelectionChanged = std::move(cb);
     }
+
+    // Phase B (B4): onMouseButtonDown grabs focus only when the click
+    // is within the header rect — clicking the body must NOT steal focus
+    // from whatever focusable widget lives there. onKeyDown cycles
+    // _selectedIndex Left/Right (wrap).
+    bool onMouseButtonDown(const UIMouseEvent& e) override;
+    bool onKeyDown(int keyCode) override;
 
     void performLayout() override;
 

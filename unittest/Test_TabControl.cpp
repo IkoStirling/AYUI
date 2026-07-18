@@ -3,11 +3,13 @@
 #include "AYListView.h"
 #include "AYPanel.h"
 #include "AYTextLabel.h"
+#include "AYTextInput.h"
 #include "AYUIManager.h"
 #include "AYWidgetFactory.h"
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include <iostream>
 
 // =============================================================================
@@ -247,6 +249,84 @@ TEST_CASE(tabcontrol_render_emits_header_and_body) {
     // ListView emits bg + at least 1 row + ScrollBar = multiple rects.
     // Panel emits bg + border. Expect a healthy count.
     CHECK(rectCount >= 2);
+}
+
+// =============================================================================
+// Phase B (B4) — keyboard navigation tests
+// =============================================================================
+
+// B4: Left/Right cycle _selectedIndex with wrap. setSelectedIndex
+// already remounts body + fires _onSelectionChanged.
+TEST_CASE(tabcontrol_left_right_switch_tab) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    TabControl tc;
+    TextLabel* a = new TextLabel(); a->setText(L"A");
+    TextLabel* b = new TextLabel(); b->setText(L"B");
+    TextLabel* c = new TextLabel(); c->setText(L"C");
+    tc.addTab(L"A", a);
+    tc.addTab(L"B", b);
+    tc.addTab(L"C", c);
+    tc.setSize(FVector2(300.0f, 200.0f));
+    tc.setPosition(FVector2(0.0f, 0.0f));
+
+    int changes = 0;
+    tc.setOnSelectionChanged([&](int) { ++changes; });
+
+    tc.setSelectedIndex(0);
+    tc.onKeyDown(UIKey_Right);
+    CHECK(tc.getSelectedIndex() == 1);
+    CHECK(changes == 1);
+    tc.onKeyDown(UIKey_Right);
+    CHECK(tc.getSelectedIndex() == 2);
+    CHECK(changes == 2);
+    tc.onKeyDown(UIKey_Right);   // wraps to 0
+    CHECK(tc.getSelectedIndex() == 0);
+    CHECK(changes == 3);
+    tc.onKeyDown(UIKey_Left);    // wraps to last
+    CHECK(tc.getSelectedIndex() == 2);
+    CHECK(changes == 4);
+
+    // Unhandled keys fall through (returns false).
+    CHECK_FALSE(tc.onKeyDown(UIKey_Enter));
+    CHECK_FALSE(tc.onKeyDown(UIKey_Up));
+
+    ui.shutdown();
+}
+
+// B4: onMouseButtonDown only grabs focus when the click is within the
+// header rect. Clicking the body must NOT steal focus from a focusable
+// widget that lives inside the active tab.
+TEST_CASE(tabcontrol_focus_grab_only_on_header) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    TabControl tc;
+    TextLabel* a = new TextLabel(); a->setText(L"tab A");
+    TextInput* ti = new TextInput();
+    a->addChildExternal(ti);   // a TextInput inside the tab body
+    tc.addTab(L"A", a);
+    tc.setSize(FVector2(300.0f, 200.0f));
+    tc.setPosition(FVector2(0.0f, 0.0f));
+
+    // Focus the TextInput first so we can observe whether the body click
+    // disrupts it.
+    ui.setFocus(ti);
+    CHECK(ui.getFocusedWidget() == ti);
+
+    // Click inside the BODY (y > headerHeight). Should NOT steal focus.
+    UIMouseEvent bodyClick(FVector2(150.0f, 100.0f), 0);
+    tc.onMouseButtonDown(bodyClick);
+    CHECK(ui.getFocusedWidget() == ti);
+
+    // Click inside the HEADER (y < headerHeight). Should grab focus on
+    // the TabControl.
+    UIMouseEvent headerClick(FVector2(20.0f, 5.0f), 0);
+    tc.onMouseButtonDown(headerClick);
+    CHECK(ui.getFocusedWidget() == &tc);
+
+    ui.shutdown();
 }
 
 TEST_SUITE_END

@@ -2,6 +2,7 @@
 #include "AYIRenderBackend.h"
 #include "AYSeparator.h"
 #include "AYUIManager.h"
+#include "UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -103,6 +104,14 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     // cleanly via the overlay's destroyWidgetTree path.
     UIManager::get().openPopup(host, this);
     _open = true;
+    // Phase B (B3) R3: save the focused widget BEFORE we steal focus,
+    // so close() can restore it. Order matters: openPopup may close a
+    // different active dropdown which fires onPopupDismissedByManager,
+    // but UIManager's own _focusedWidget is untouched by that — so we
+    // can capture it here, after the overlay is mounted, and the saved
+    // pointer is the live widget the user was working with.
+    _focusedWidgetBefore = UIManager::get().getFocusedWidget();
+    UIManager::get().setFocus(this);
     performLayout();
 }
 
@@ -110,10 +119,27 @@ void Menu::close() {
     if (!_open) return;
     setVisible(false);
     _open = false;
+    // Phase B (B3) R3: restore focus to whatever had it before open().
+    // The slot is cleared so a second close() (defensive) is a no-op.
+    // setFocus(null) is acceptable when nothing was focused previously.
+    if (_focusedWidgetBefore != nullptr) {
+        UIManager::get().setFocus(_focusedWidgetBefore);
+        _focusedWidgetBefore = nullptr;
+    }
     if (_onClose) _onClose();
     // Phase A (A2): UIManager::closePopup removes us from the overlay and
     // frees the tree via destroyWidgetTree. After this call `this` is
     // dangling — callers must not touch the Menu after close().
+    //
+    // CRITICAL: clear _focusedWidget BEFORE closePopup destroys the menu.
+    // UIManager::shutdown() walks _focusedWidget and dynamic_casts it to
+    // FocusableWidget to fire setFocus(false). If we left it pointing at
+    // this Menu, shutdown hits a freed-pointer RTTI lookup → access
+    // violation. setFocus(null) drops the reference while this is still
+    // alive (the subsequent closePopup call is what actually frees us).
+    if (UIManager::get().getFocusedWidget() == this) {
+        UIManager::get().setFocus(nullptr);
+    }
     if (getParent() != nullptr) {
         UIManager::get().closePopup(this);
     }
@@ -123,9 +149,9 @@ Widget* Menu::hitTest(const math::FVector2& worldPos) {
     if (!_open) return nullptr;
     const math::FRectangle b = getWorldBounds();
     if (!b.contains(worldPos)) return nullptr;
-    // Descend into children the normal way — CompoundWidget::hitTest
+    // Descend into children the normal way — CompoundFocusableWidget::hitTest
     // does this for us.
-    return CompoundWidget::hitTest(worldPos);
+    return CompoundFocusableWidget::hitTest(worldPos);
 }
 
 void Menu::layoutItems() {
@@ -143,7 +169,7 @@ void Menu::layoutItems() {
 }
 
 void Menu::performLayout() {
-    CompoundWidget::performLayout();
+    CompoundFocusableWidget::performLayout();
     layoutItems();
 }
 
@@ -173,5 +199,67 @@ void Menu::onRender(IRenderBackend& renderer) {
 }
 
 Widget* createMenuWidget() { return new Menu(); }
+
+// =============================================================================
+// Phase B (B3) — keyboard navigation + click focus grab
+// =============================================================================
+
+bool Menu::onMouseButtonDown(const UIMouseEvent& e) {
+    // Grab focus on press — open() already saved the previous focus, so
+    // if the user later closes via Escape or item activation, focus
+    // returns cleanly. Returning false lets the click flow up to the
+    // item hit-test path so row clicks still select.
+    if (e.mouseButton == 0) {
+        UIManager::get().setFocus(this);
+    }
+    return false;
+}
+
+bool Menu::onKeyDown(int keyCode) {
+    // Menu owns Up/Down/Enter/Escape. Tab is intentionally not consumed —
+    // UIManager intercepts Tab before this method sees it (R2 contract).
+    // Tab-while-menu-open focuses the NEXT focusable widget, leaving the
+    // menu — Escape is the menu-internal dismiss path.
+
+    if (_items.empty()) {
+        if (keyCode == UIKey_Escape) { close(); return true; }
+        return false;
+    }
+    const int n = static_cast<int>(_items.size());
+
+    switch (keyCode) {
+    case UIKey_Down:
+        _hoveredIndex = (_hoveredIndex + 1) % n;
+        return true;
+    case UIKey_Up:
+        _hoveredIndex = (_hoveredIndex <= 0) ? n - 1 : _hoveredIndex - 1;
+        return true;
+    case UIKey_Enter:
+        if (_hoveredIndex >= 0 && _hoveredIndex < n) {
+            activateItem(_hoveredIndex);
+            return true;
+        }
+        return false;
+    case UIKey_Escape:
+        close();
+        return true;
+    default:
+        return false;
+    }
+}
+
+void Menu::activateItem(int index) {
+    // Mirror the same side effects MenuItem's onMouseButtonUp callback
+    // triggers (see the lambda installed in addItem): record index,
+    // fire _onItemActivated, close. Centralized here so the keyboard
+    // path and the mouse path stay byte-identical without exposing
+    // MenuItem's protected handleClick().
+    if (index < 0 || index >= static_cast<int>(_items.size())) return;
+    _lastActivatedIndex = index;
+    if (_onItemActivated) {
+        _onItemActivated(index);
+    }
+    close();
+}
 
 } // namespace ayt::ui

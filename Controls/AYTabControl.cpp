@@ -1,4 +1,6 @@
 #include "AYTabControl.h"
+#include "AYUIManager.h"
+#include "UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -173,7 +175,7 @@ void TabControl::handleHeaderSelectionChanged(int listIndex) {
 // ----------------------------------------------------------------------------
 
 void TabControl::performLayout() {
-    CompoundWidget::performLayout();
+    CompoundFocusableWidget::performLayout();
     layoutChildren();
 }
 
@@ -197,6 +199,46 @@ void TabControl::layoutChildren() {
 
 Widget* createTabControlWidget() {
     return new TabControl();
+}
+
+// =============================================================================
+// Phase B (B4) — keyboard navigation + header-only focus grab
+// =============================================================================
+
+bool TabControl::onMouseButtonDown(const UIMouseEvent& e) {
+    // Phase B (B4): only grab focus when the click is INSIDE the header
+    // rect. Clicking the body — even if it doesn't hit a focusable child
+    // — must NOT steal focus from whatever's there. Returning false in
+    // either case lets the click event continue to flow (header ListView
+    // row click → selection change; body click → child hit-test).
+    if (e.mouseButton != 0) return false;
+    const math::FRectangle b = getWorldBounds();
+    // Header occupies [b.minY, b.minY + _headerHeight). Body sits below.
+    if (e.mousePos.y < b.minY + _headerHeight && e.mousePos.y >= b.minY
+        && e.mousePos.x >= b.minX && e.mousePos.x <= b.maxX) {
+        UIManager::get().setFocus(this);
+    }
+    return false;
+}
+
+bool TabControl::onKeyDown(int keyCode) {
+    if (_tabs.empty()) return false;
+    const int n = static_cast<int>(_tabs.size());
+    int next = _selectedIndex;
+    switch (keyCode) {
+    case UIKey_Right:
+        next = (_selectedIndex < 0) ? 0 : (_selectedIndex + 1) % n;
+        break;
+    case UIKey_Left:
+        next = (_selectedIndex < 0) ? n - 1
+                                    : (_selectedIndex <= 0 ? n - 1
+                                                          : _selectedIndex - 1);
+        break;
+    default:
+        return false;
+    }
+    setSelectedIndex(next);   // fires _onSelectionChanged + remounts body
+    return true;
 }
 
 } // namespace ayt::ui
