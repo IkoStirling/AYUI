@@ -140,8 +140,16 @@ void Menu::performLayout() {
 }
 
 void Menu::onRender(IRenderBackend& renderer) {
-    const math::FRectangle b = getWorldBounds();
-    if (b.maxX <= b.minX || b.maxY <= b.minY) return;
+    // Use local position + size to avoid a stale getWorldBounds when the
+    // menu has never been laid out (caller might call render() directly
+    // without first wiring into a host). For a popup later this is the
+    // right answer too — the host pushes the menu into the widget tree
+    // and CompoundWidget::performLayout stays a no-op for popup, leaving
+    // position/size intact.
+    const math::FVector2 pos = getPosition();
+    const math::FVector2 sz = getSize();
+    if (sz.x <= 0.0f || sz.y <= 0.0f) return;
+    math::FRectangle b(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y);
     // Background plate.
     renderer.drawRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f));
     // Border.
