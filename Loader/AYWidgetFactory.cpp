@@ -16,6 +16,7 @@
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 #include "AYTabControl.h"
+#include "AYGridPanel.h"
 
 namespace ayt::ui {
 
@@ -66,6 +67,7 @@ struct DefaultWidgetRegistrar {
         REGISTER_WIDGET("VBox", VBox);
         REGISTER_WIDGET("HBox", HBox);
         REGISTER_WIDGET("SplitterHandle", SplitterHandle);
+        REGISTER_WIDGET("GridPanel", GridPanel);
     }
 };
 

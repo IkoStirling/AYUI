@@ -17,6 +17,7 @@
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
 #include "AYTabControl.h"
+#include "AYGridPanel.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
@@ -237,6 +238,31 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (GridPanel* gp = dynamic_cast<GridPanel*>(widget)) {
+            int rows = j.value("rowCount", 0);
+            int cols = j.value("columnCount", 0);
+            if (rows > 0) gp->setRowCount(rows);
+            if (cols > 0) gp->setColumnCount(cols);
+            // Children are re-attached via the standard children[] walk
+            // below. With v1's lossy serializer (DECISION 5), each child
+            // is placed in the next (row, col) cell in linear order; this
+            // matches what hosts using the JSON path typically want
+            // (grid filled left-to-right, top-to-bottom).
+            if (rows > 0 && cols > 0 && j.contains("children") &&
+                j["children"].is_array()) {
+                int r = 0, c = 0;
+                for (const auto& childJson : j["children"]) {
+                    Widget* child = deserialize(childJson.dump());
+                    if (child != nullptr) {
+                        gp->setCell(r, c, child);
+                        ++c;
+                        if (c >= cols) { c = 0; ++r; }
+                        if (r >= rows) break;
+                    }
+                }
+            }
+        }
+
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
             if (j.contains("spacing")) {
                 box->setSpacing(j["spacing"]);
@@ -398,6 +424,17 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (Panel* panel = dynamic_cast<Panel*>(widget)) {
         j["type"] = "Panel";
         j["borderEnabled"] = panel->isBorderEnabled();
+    }
+    else if (GridPanel* gp = dynamic_cast<GridPanel*>(widget)) {
+        j["type"] = "GridPanel";
+        j["rowCount"] = gp->getRowCount();
+        j["columnCount"] = gp->getColumnCount();
+        // v1 simplification: cell positions (row, col) and spans are NOT
+        // serialized. Children are written via the standard children[] walk,
+        // so a round-trip preserves the widget tree but loses its grid
+        // attachment. Hosts needing round-trip fidelity should attach cells
+        // programmatically after deserialize, or wait for v1.1 (see
+        // Controls/AYGridPanel.h DECISION 5 + Test_GridPanel G3).
     }
     else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         j["type"] = "HBox";

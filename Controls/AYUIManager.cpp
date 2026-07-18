@@ -12,6 +12,7 @@
 #include "AYListView.h"
 #include "AYComboBox.h"
 #include "AYTabControl.h"
+#include "AYGridPanel.h"
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
@@ -202,6 +203,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("VBox"))          f.registerCreator("VBox",          []() { return new VBox(); });
     if (!f.isRegistered("HBox"))          f.registerCreator("HBox",          []() { return new HBox(); });
     if (!f.isRegistered("SplitterHandle")) f.registerCreator("SplitterHandle", []() { return new SplitterHandle(); });
+    if (!f.isRegistered("GridPanel"))  f.registerCreator("GridPanel",  []() { return new GridPanel(); });
 }
 
 void UIManager::initialize(IRenderBackend* backend) {

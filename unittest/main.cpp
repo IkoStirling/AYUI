@@ -27,6 +27,7 @@
 #include "Test_ListView.cpp"
 #include "Test_ComboBox.cpp"
 #include "Test_TabControl.cpp"
+#include "Test_GridPanel.cpp"
 
 void runTest()
 {
