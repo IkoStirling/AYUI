@@ -20,6 +20,7 @@
 #include "AYTextLabel.h"
 #include "AYTreeNode.h"
 #include "AYTreeView.h"
+#include "AYRichText.h"
 #include "AYImage.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
@@ -74,6 +75,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("TabControl", createTabControlWidget);
         WidgetFactory::get().registerCreator("TreeNode", createTreeNodeWidget);
         WidgetFactory::get().registerCreator("TreeView", createTreeViewWidget);
+        WidgetFactory::get().registerCreator("RichText", createRichTextWidget);
         WidgetFactory::get().registerCreator("Tooltip", createTooltipWidget);
         WidgetFactory::get().registerCreator("Separator", createSeparatorWidget);
         WidgetFactory::get().registerCreator("MenuItem", createMenuItemWidget);

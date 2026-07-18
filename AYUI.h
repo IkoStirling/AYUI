@@ -26,6 +26,7 @@
 #include "AYMenuItem.h"
 #include "AYTreeNode.h"
 #include "AYTreeView.h"
+#include "AYRichText.h"
 #include "AYMenu.h"
 #include "AYMenuBar.h"
 #include "AYToolBar.h"

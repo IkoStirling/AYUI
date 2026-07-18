@@ -23,6 +23,7 @@
 #include "AYGridPanel.h"
 #include "AYTreeNode.h"
 #include "AYTreeView.h"
+#include "AYRichText.h"
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
@@ -224,6 +225,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("StatusBar"))  f.registerCreator("StatusBar",  createStatusBarWidget);
     if (!f.isRegistered("TreeNode"))  f.registerCreator("TreeNode",  createTreeNodeWidget);
     if (!f.isRegistered("TreeView"))  f.registerCreator("TreeView",  createTreeViewWidget);
+    if (!f.isRegistered("RichText"))  f.registerCreator("RichText",  createRichTextWidget);
 }
 
 void UIManager::initialize(IRenderBackend* backend) {

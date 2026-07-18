@@ -40,6 +40,7 @@
 #include "Test_StatusBar.cpp"
 #include "Test_TreeNode.cpp"
 #include "Test_TreeView.cpp"
+#include "Test_RichText.cpp"
 
 void runTest()
 {

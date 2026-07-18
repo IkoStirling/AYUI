@@ -28,6 +28,7 @@
 #include "AYGridPanel.h"
 #include "AYTreeNode.h"
 #include "AYTreeView.h"
+#include "AYRichText.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
@@ -379,6 +380,44 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (RichText* rt = dynamic_cast<RichText*>(widget)) {
+            rt->clearRuns();
+            if (j.contains("defaultColor") && j["defaultColor"].is_object()) {
+                rt->setDefaultColor(math::FVector4(
+                    j["defaultColor"].value("r", 1.0f),
+                    j["defaultColor"].value("g", 1.0f),
+                    j["defaultColor"].value("b", 1.0f),
+                    j["defaultColor"].value("a", 1.0f)));
+            }
+            if (j.contains("defaultFontSize")) {
+                rt->setDefaultFontSize(j["defaultFontSize"].get<int>());
+            }
+            if (j.contains("wrapWidth")) {
+                rt->setWrapWidth(j["wrapWidth"].get<float>());
+            }
+            if (j.contains("runs") && j["runs"].is_array()) {
+                for (const auto& r : j["runs"]) {
+                    math::FVector4 col = math::FVector4(1, 1, 1, 1);
+                    int size = rt->getDefaultFontSize();
+                    if (r.contains("color") && r["color"].is_object()) {
+                        col = math::FVector4(
+                            r["color"].value("r", 1.0f),
+                            r["color"].value("g", 1.0f),
+                            r["color"].value("b", 1.0f),
+                            r["color"].value("a", 1.0f));
+                    }
+                    if (r.contains("fontSize")) {
+                        size = r["fontSize"].get<int>();
+                    }
+                    if (r.contains("text")) {
+                        rt->addRun(
+                            toWstring(r["text"].get<std::string>()),
+                            col, size);
+                    }
+                }
+            }
+        }
+
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
             if (j.contains("spacing")) {
                 box->setSpacing(j["spacing"]);
@@ -648,6 +687,25 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         j["selectedIndex"] = tv->getSelectedIndex();
         j["itemHeight"] = tv->getItemHeight();
+    }
+    else if (RichText* rt = dynamic_cast<RichText*>(widget)) {
+        j["type"] = "RichText";
+        const auto& dc = rt->getDefaultColor();
+        j["defaultColor"] = {
+            {"r", dc.x}, {"g", dc.y}, {"b", dc.z}, {"a", dc.w} };
+        j["defaultFontSize"] = rt->getDefaultFontSize();
+        j["wrapWidth"] = rt->getWrapWidth();
+        j["runs"] = json::array();
+        for (size_t i = 0; i < rt->getRunCount(); ++i) {
+            const RichRun& r = rt->getRun(i);
+            json rj;
+            rj["text"] = std::string(r.text.begin(), r.text.end());
+            rj["color"] = {
+                {"r", r.color.x}, {"g", r.color.y},
+                {"b", r.color.z}, {"a", r.color.w} };
+            rj["fontSize"] = r.fontSize;
+            j["runs"].push_back(rj);
+        }
     }
     else {
         j["type"] = "Widget";
