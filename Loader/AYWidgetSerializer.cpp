@@ -3,6 +3,7 @@
 #include "AYTextLabel.h"
 #include "AYButton.h"
 #include "AYCheckBox.h"
+#include "AYRadioButton.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
 #include "AYBox.h"
@@ -89,6 +90,18 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
             if (j.contains("checked")) {
                 cb->setChecked(j["checked"].get<bool>());
+            }
+        }
+
+        if (RadioButton* rb = dynamic_cast<RadioButton*>(widget)) {
+            if (j.contains("text")) {
+                rb->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("checked")) {
+                rb->setChecked(j["checked"].get<bool>());
+            }
+            if (j.contains("groupId")) {
+                rb->setGroupId(j["groupId"].get<int>());
             }
         }
 
@@ -200,6 +213,12 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "CheckBox";
         j["text"] = std::string(cb->getText().begin(), cb->getText().end());
         j["checked"] = cb->isChecked();
+    }
+    else if (RadioButton* rb = dynamic_cast<RadioButton*>(widget)) {
+        j["type"] = "RadioButton";
+        j["text"] = std::string(rb->getText().begin(), rb->getText().end());
+        j["checked"] = rb->isChecked();
+        j["groupId"] = rb->getGroupId();
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";

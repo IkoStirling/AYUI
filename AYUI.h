@@ -5,6 +5,7 @@
 #include "AYWidget.h"
 #include "AYButton.h"
 #include "AYCheckBox.h"
+#include "AYRadioButton.h"
 #include "AYInteractiveWidget.h"
 #include "AYLeafWidget.h"
 #include "AYTextLabel.h"

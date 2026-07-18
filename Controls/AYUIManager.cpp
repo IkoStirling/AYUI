@@ -2,6 +2,7 @@
 #include "AYBox.h"
 #include "AYButton.h"
 #include "AYCheckBox.h"
+#include "AYRadioButton.h"
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
@@ -172,6 +173,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("Image"))     f.registerCreator("Image",     []() { return new Image(); });
     if (!f.isRegistered("TextLabel")) f.registerCreator("TextLabel", createTextLabelWidget);
     if (!f.isRegistered("CheckBox"))  f.registerCreator("CheckBox",  createCheckBoxWidget);
+    if (!f.isRegistered("RadioButton")) f.registerCreator("RadioButton", createRadioButtonWidget);
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
     // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
     // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are
