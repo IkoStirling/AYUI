@@ -18,6 +18,7 @@
 #include "AYListView.h"
 #include "AYComboBox.h"
 #include "AYSelectableWidget.h"
+#include "AYTabControl.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"

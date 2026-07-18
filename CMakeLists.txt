@@ -18,6 +18,7 @@ set(SRC_FILES
     Controls/AYInteractiveWidget.cpp
     Controls/AYListView.cpp
     Controls/AYComboBox.cpp
+    Controls/AYTabControl.cpp
     Controls/AYPanel.cpp
     Controls/AYTextLabel.cpp
     Controls/AYWidget.cpp
@@ -51,6 +52,7 @@ set(HEAD_FILES
     Controls/AYLeafWidget.h
     Controls/AYListView.h
     Controls/AYComboBox.h
+    Controls/AYTabControl.h
     Controls/AYSelectableWidget.h
     Controls/AYPanel.h
     Controls/AYTextLabel.h

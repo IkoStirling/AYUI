@@ -11,6 +11,7 @@
 #include "AYScrollView.h"
 #include "AYListView.h"
 #include "AYComboBox.h"
+#include "AYTabControl.h"
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
@@ -189,6 +190,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("ScrollView")) f.registerCreator("ScrollView", createScrollViewWidget);
     if (!f.isRegistered("ListView")) f.registerCreator("ListView", createListViewWidget);
     if (!f.isRegistered("ComboBox")) f.registerCreator("ComboBox", createComboBoxWidget);
+    if (!f.isRegistered("TabControl")) f.registerCreator("TabControl", createTabControlWidget);
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
     // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
     // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are

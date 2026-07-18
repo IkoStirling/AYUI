@@ -15,6 +15,7 @@
 #include "AYPanel.h"
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
+#include "AYTabControl.h"
 
 namespace ayt::ui {
 
@@ -58,6 +59,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("ScrollView", createScrollViewWidget);
         WidgetFactory::get().registerCreator("ListView", createListViewWidget);
         WidgetFactory::get().registerCreator("ComboBox", createComboBoxWidget);
+        WidgetFactory::get().registerCreator("TabControl", createTabControlWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("Panel", Panel);

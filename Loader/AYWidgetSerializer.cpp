@@ -16,6 +16,7 @@
 #include "AYBox.h"
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
+#include "AYTabControl.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
@@ -181,6 +182,29 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (TabControl* tc = dynamic_cast<TabControl*>(widget)) {
+            // Round-trip: tabs[] { label, content (recursive deserialize) } +
+            // selectedIndex + headerHeight. Content widgets are owned by the
+            // caller (see DECISION 2 in AYTabControl.h); the JSON just nests
+            // them so the round-trip is lossless.
+            if (j.contains("tabs") && j["tabs"].is_array()) {
+                for (const auto& t : j["tabs"]) {
+                    std::string label = t.value("label", "");
+                    Widget* content = nullptr;
+                    if (t.contains("content") && t["content"].is_object()) {
+                        content = deserialize(t["content"].dump());
+                    }
+                    tc->addTab(toWstring(label), content);
+                }
+            }
+            if (j.contains("selectedIndex")) {
+                tc->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("headerHeight")) {
+                tc->setHeaderHeight(j["headerHeight"].get<float>());
+            }
+        }
+
         if (Window* window = dynamic_cast<Window*>(widget)) {
             if (j.contains("title")) {
                 window->setTitle(toWstring(j["title"].get<std::string>()));
@@ -340,6 +364,24 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         j["selectedIndex"] = cb->getSelectedIndex();
         j["maxPopupItems"] = cb->getMaxPopupItems();
+    }
+    else if (TabControl* tc = dynamic_cast<TabControl*>(widget)) {
+        j["type"] = "TabControl";
+        j["tabs"] = json::array();
+        for (size_t i = 0; i < tc->getTabCount(); ++i) {
+            json tabJson;
+            tabJson["label"] = std::string(tc->getTabLabel(i).begin(),
+                                           tc->getTabLabel(i).end());
+            Widget* content = tc->getTabContent(i);
+            if (content != nullptr) {
+                json contentJson;
+                serializeWidgetToJson(content, contentJson);
+                tabJson["content"] = contentJson;
+            }
+            j["tabs"].push_back(tabJson);
+        }
+        j["selectedIndex"] = tc->getSelectedIndex();
+        j["headerHeight"] = tc->getHeaderHeight();
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";
