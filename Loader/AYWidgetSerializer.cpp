@@ -2,6 +2,7 @@
 #include "AYWidgetFactory.h"
 #include "AYTextLabel.h"
 #include "AYButton.h"
+#include "AYCheckBox.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
 #include "AYBox.h"
@@ -79,6 +80,15 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         if (Button* button = dynamic_cast<Button*>(widget)) {
             if (j.contains("text")) {
                 button->setText(toWstring(j["text"].get<std::string>()));
+            }
+        }
+
+        if (CheckBox* cb = dynamic_cast<CheckBox*>(widget)) {
+            if (j.contains("text")) {
+                cb->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("checked")) {
+                cb->setChecked(j["checked"].get<bool>());
             }
         }
 
@@ -185,6 +195,11 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (Button* button = dynamic_cast<Button*>(widget)) {
         j["type"] = "Button";
         j["text"] = std::string(button->getText().begin(), button->getText().end());
+    }
+    else if (CheckBox* cb = dynamic_cast<CheckBox*>(widget)) {
+        j["type"] = "CheckBox";
+        j["text"] = std::string(cb->getText().begin(), cb->getText().end());
+        j["checked"] = cb->isChecked();
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";

@@ -1,5 +1,6 @@
 #include "AYWidgetFactory.h"
 #include "AYButton.h"
+#include "AYCheckBox.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
@@ -40,6 +41,7 @@ struct DefaultWidgetRegistrar {
         REGISTER_WIDGET("Widget", Widget);
         REGISTER_WIDGET("Button", Button);
         WidgetFactory::get().registerCreator("TextLabel", createTextLabelWidget);
+        WidgetFactory::get().registerCreator("CheckBox", createCheckBoxWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("Panel", Panel);
