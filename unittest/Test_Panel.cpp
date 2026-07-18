@@ -199,4 +199,35 @@ TEST_CASE(panel_default_style_registered) {
     CHECK_FLOAT_EQ(s->padding.y, 4.0f, 1e-5f);
 }
 
+// C-2 (style-dedup follow-up): Panel with styleId="panel_default" and a
+// wired StyleSheet must use the resolved style's colors — not the
+// hardcoded fallback. Pre-fix the makePanel bg collided with makeDefault's
+// bg, the bgIsDefault sentinel dropped it, and Panel silently fell back
+// even with a stylesheet wired in. This pins the working post-fix path.
+TEST_CASE(panel_uses_panel_default_when_wired) {
+    StyleManager::get().setStyleSheet(nullptr);
+
+    StyleSheet sheet;  // pre-registers panel_default with bg = (0.18, 0.18, 0.20, 1)
+    StyleManager::get().setStyleSheet(&sheet);
+
+    Panel panel;
+    panel.setSize({120.0f, 80.0f});
+    panel.setStyleId("panel_default");
+    panel.setBorderEnabled(false);
+
+    MockRenderer renderer;
+    panel.render(renderer);
+
+    // First draw call is the background fill — must reflect panel_default's
+    // (0.18, 0.18, 0.20, 1), NOT the hardcoded (0.20, 0.20, 0.20, 1) fallback.
+    CHECK(renderer.getDrawCalls().size() >= 1u);
+    const auto& fill = renderer.getDrawCalls().front();
+    CHECK(fill.type == MockRenderer::DrawCall::Rect);
+    CHECK_FLOAT_EQ(fill.color.x, 0.18f, 1e-5f);
+    CHECK_FLOAT_EQ(fill.color.y, 0.18f, 1e-5f);
+    CHECK_FLOAT_EQ(fill.color.z, 0.20f, 1e-5f);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
 TEST_SUITE_END

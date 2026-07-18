@@ -24,33 +24,24 @@ void Panel::onRender(IRenderBackend& renderer) {
         return;
     }
 
-    // Style lookup mirrors Button::onRender (R-5 contract). If no
-    // StyleSheet is registered the manager returns nullptr and we use the
-    // hardcoded neutral grey fallback — same pattern as Button so existing
-    // tests that don't wire StyleManager keep passing.
-    math::FVector4 bg(0.20f, 0.20f, 0.20f, 1.0f);
-    math::FVector4 borderColor(0.30f, 0.30f, 0.30f, 1.0f);
-    float borderWidth = 1.0f;
-    bool useStyle = false;
-    if (!getStyleId().empty()) {
-        if (const WidgetStyle* s = StyleManager::get().getStyle(getStyleId())) {
-            // StyleBuilder::makeDefault() background is (0.2, 0.2, 0.2, 1).
-            // If the resolved style matches makeDefault we treat it as "no
-            // explicit background" and fall back to the hardcoded fills.
-            // This keeps the visual consistent whether or not a stylesheet
-            // is wired in.
-            const WidgetStyle def = StyleBuilder::makeDefault();
-            const bool bgIsDefault = (s->backgroundColor.x == def.backgroundColor.x &&
-                                       s->backgroundColor.y == def.backgroundColor.y &&
-                                       s->backgroundColor.z == def.backgroundColor.z &&
-                                       s->backgroundColor.w == def.backgroundColor.w);
-            if (!bgIsDefault) {
-                bg = s->backgroundColor;
-                borderColor = s->border.color;
-                borderWidth = s->border.width;
-                useStyle = true;
-            }
-        }
+    // R-5: style resolution is centralized in resolveStyle() (see AYStyle.h).
+    // When hasStyle is true the resolved colors drive the draw; otherwise the
+    // hardcoded neutral grey fallback wins. Without a wired StyleSheet the
+    // StyleManager lookup returns nullptr and resolveStyle reports hasStyle
+    // = false — same contract Button uses.
+    const ResolvedStyle style = resolveStyle(getStyleId());
+
+    math::FVector4 bg;
+    math::FVector4 borderColor;
+    float borderWidth;
+    if (style.hasStyle) {
+        bg = style.backgroundColor;
+        borderColor = style.borderColor;
+        borderWidth = style.borderWidth;
+    } else {
+        bg = math::FVector4(0.20f, 0.20f, 0.20f, 1.0f);
+        borderColor = math::FVector4(0.30f, 0.30f, 0.30f, 1.0f);
+        borderWidth = 1.0f;
     }
 
     renderer.drawRect(bounds, bg);

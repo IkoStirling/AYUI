@@ -180,4 +180,83 @@ TEST_CASE(button_falls_back_when_style_id_unknown) {
     CHECK_FLOAT_EQ(renderer.getDrawCalls().front().color.x, 0.36f, 1e-5f);
 }
 
+// resolveStyle(): empty styleId → hasStyle=false (no work done).
+TEST_CASE(resolveStyle_empty_id_returns_no_style) {
+    StyleManager::get().setStyleSheet(nullptr);
+    const ResolvedStyle r = resolveStyle("");
+    CHECK(r.hasStyle == false);
+}
+
+// resolveStyle(): no StyleSheet wired → manager.getStyle returns nullptr
+// → hasStyle=false even when styleId is set.
+TEST_CASE(resolveStyle_no_stylesheet_returns_no_style) {
+    StyleManager::get().setStyleSheet(nullptr);
+    const ResolvedStyle r = resolveStyle("button_primary");
+    CHECK(r.hasStyle == false);
+}
+
+// resolveStyle(): makeDefault sentinel. StyleBuilder pre-registers
+// button_default with backgroundColor = (0.3, 0.3, 0.3, 1) which IS
+// distinct from makeDefault → should resolve. (Sanity for the bgIsDefault
+// check: ensure the compare itself works.)
+TEST_CASE(resolveStyle_button_default_resolves) {
+    StyleManager::get().setStyleSheet(nullptr);
+
+    StyleSheet sheet;  // constructor pre-registers button_default
+    StyleManager::get().setStyleSheet(&sheet);
+
+    const ResolvedStyle r = resolveStyle("button_default");
+    CHECK(r.hasStyle == true);
+    CHECK_FLOAT_EQ(r.backgroundColor.x, 0.3f, 1e-5f);
+    CHECK_FLOAT_EQ(r.backgroundColor.y, 0.3f, 1e-5f);
+    CHECK_FLOAT_EQ(r.backgroundColor.z, 0.3f, 1e-5f);
+    CHECK_FLOAT_EQ(r.backgroundColor.w, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(r.borderWidth, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(r.cornerRadius, 4.0f, 1e-5f);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
+// resolveStyle(): bgIsDefault sentinel. A style whose backgroundColor
+// exactly matches makeDefault must NOT be returned as a real style —
+// otherwise every makeDefault-derived preset would silently override
+// hardcoded colors. We register such a style explicitly here.
+TEST_CASE(resolveStyle_bg_is_default_returns_no_style) {
+    StyleManager::get().setStyleSheet(nullptr);
+
+    StyleSheet sheet;
+    WidgetStyle sentinel = StyleBuilder::makeDefault();  // bg = (0.2, 0.2, 0.2, 1)
+    sheet.setStyle("sentinel_style", sentinel);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    const ResolvedStyle r = resolveStyle("sentinel_style");
+    CHECK(r.hasStyle == false);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
+// resolveStyle(): panel_default now has a non-default backgroundColor
+// (post C-2 fix). Pre-fix it was (0.2, 0.2, 0.2, 1) which collided with
+// makeDefault and silently dropped. This test pins the new value so a
+// regression to the makeDefault collision is caught.
+TEST_CASE(resolveStyle_panel_default_resolves) {
+    StyleManager::get().setStyleSheet(nullptr);
+
+    StyleSheet sheet;  // constructor pre-registers panel_default
+    StyleManager::get().setStyleSheet(&sheet);
+
+    const ResolvedStyle r = resolveStyle("panel_default");
+    CHECK(r.hasStyle == true);
+    // makePanel sets bg to (0.18, 0.18, 0.20, 1) — distinct from makeDefault's
+    // (0.2, 0.2, 0.2, 1) so the bgIsDefault sentinel does NOT trigger.
+    CHECK_FLOAT_EQ(r.backgroundColor.x, 0.18f, 1e-5f);
+    CHECK_FLOAT_EQ(r.backgroundColor.y, 0.18f, 1e-5f);
+    CHECK_FLOAT_EQ(r.backgroundColor.z, 0.20f, 1e-5f);
+    CHECK_FLOAT_EQ(r.borderWidth, 1.0f, 1e-5f);
+    // makePanel border color is (0.3, 0.3, 0.3, 1).
+    CHECK_FLOAT_EQ(r.borderColor.x, 0.3f, 1e-5f);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
 TEST_SUITE_END

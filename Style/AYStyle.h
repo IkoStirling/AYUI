@@ -102,4 +102,36 @@ struct StyleBuilder {
     static WidgetStyle makePanel();
 };
 
+// Resolved style payload for the simple "background + border" rendering
+// pattern shared by Button / Panel / Window. Centralizes the "if styleId
+// is set AND the resolved style is not the makeDefault sentinel AND
+// something actually changed, use it" dance that used to be duplicated
+// inline in every onRender. `hasStyle` is the signal: false means the
+// caller should use its hardcoded fallback. Otherwise the four fields are
+// populated from the StyleManager lookup (or the StyleBuilder default when
+// no StyleSheet is wired in).
+struct ResolvedStyle {
+    bool hasStyle = false;
+    math::FVector4 backgroundColor;
+    math::FVector4 borderColor;
+    float borderWidth = 0.0f;
+    float cornerRadius = 0.0f;
+};
+
+// Resolve a style id against the global StyleManager. Returns a populated
+// ResolvedStyle with hasStyle=true when:
+//   - the styleId is non-empty,
+//   - the StyleManager has a StyleSheet wired in,
+//   - the resolved WidgetStyle's backgroundColor is NOT the makeDefault
+//     sentinel (0.2, 0.2, 0.2, 1).
+//
+// The third condition exists because StyleBuilder pre-registers
+// button/textlabel/window/panel makers at StyleSheet construction time
+// with non-default padding/border/cornerRadius but default backgroundColor
+// — those entries should NOT silently override a widget's hardcoded
+// fallback colors. Without this guard, a widget that never explicitly
+// set its style would silently change color when the StyleManager got
+// wired in later.
+ResolvedStyle resolveStyle(const std::string& styleId);
+
 } // namespace ayt::ui

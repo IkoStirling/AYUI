@@ -13,10 +13,6 @@ Image::Image()
 Image::~Image() {
 }
 
-void Image::performLayout() {
-    // Leaf widget: size/position come from the parent layout pass.
-}
-
 void Image::onRender(IRenderBackend& renderer) {
     if (_size.x <= 0.0f || _size.y <= 0.0f) {
         return;

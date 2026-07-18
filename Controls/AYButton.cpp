@@ -28,47 +28,21 @@ math::FRectangle Button::getTextBounds() const {
     );
 }
 
-// R-5: when the button has a styleId AND the StyleManager has that id
-// registered AND the resolved style has a non-default backgroundColor, use
-// the style color. Otherwise fall back to the hardcoded fills so existing
-// tests (button_render_preserves_hover_fill) keep passing — those tests do
-// not register a StyleSheet, so the StyleManager lookup returns nullptr and
-// the fallback path is taken.
+// R-5: style resolution is centralized in resolveStyle() (see AYStyle.h).
+// When hasStyle is true the resolved colors drive the draw; otherwise the
+// hardcoded fallback fills (state-aware) take over. This matches the
+// button_render_preserves_hover_fill contract: tests without a wired
+// StyleSheet keep the original visuals.
 void Button::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
 
-    // R-5: optional style lookup.
-    bool useStyle = false;
-    math::FVector4 styleBg(0.0f, 0.0f, 0.0f, 1.0f);
-    float styleBorderWidth = 1.0f;
-    float styleCornerRadius = 2.0f;
-    if (!getStyleId().empty()) {
-        if (const WidgetStyle* s = StyleManager::get().getStyle(getStyleId())) {
-            // StyleBuilder::makeDefault() backgroundColor is (0.2, 0.2, 0.2, 1).
-            // If the resolved style matches makeDefault we treat it as "no
-            // explicit background" and fall back to the hardcoded fills —
-            // this keeps `button_render_preserves_hover_fill` green when no
-            // StyleSheet is registered, since StyleBuilder's auto-registered
-            // makers (button_default etc.) intentionally diverge.
-            const WidgetStyle def = StyleBuilder::makeDefault();
-            const bool bgIsDefault = (s->backgroundColor.x == def.backgroundColor.x &&
-                                       s->backgroundColor.y == def.backgroundColor.y &&
-                                       s->backgroundColor.z == def.backgroundColor.z &&
-                                       s->backgroundColor.w == def.backgroundColor.w);
-            if (!bgIsDefault) {
-                styleBg = s->backgroundColor;
-                styleBorderWidth = s->border.width;
-                styleCornerRadius = s->border.cornerRadius;
-                useStyle = true;
-            }
-        }
-    }
+    const ResolvedStyle style = resolveStyle(getStyleId());
 
-    if (useStyle) {
-        renderer.drawRect(bounds, styleBg);
+    if (style.hasStyle) {
+        renderer.drawRect(bounds, style.backgroundColor);
         renderer.drawBorderRect(bounds,
                                 math::FVector4(0.12f, 0.12f, 0.12f, 1.0f),
-                                styleBorderWidth, styleCornerRadius);
+                                style.borderWidth, style.cornerRadius);
     } else {
         // Hardcoded fallback (R-1 + pre-R-1 behavior).
         math::FVector4 bg(0.28f, 0.28f, 0.30f, 1.0f);

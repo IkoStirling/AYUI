@@ -1,10 +1,15 @@
 #pragma once
 
-#include "AYWidget.h"
+#include "AYLeafWidget.h"
 
 namespace ayt::ui {
 
-class Image : public CompoundWidget {
+// Image is a leaf renderer (no children, no child layout, no hit-test
+// descent). It used to extend CompoundWidget — that was a violation of the
+// R-6 invariant ("leaf widgets MUST NOT host children"). LeafWidget is the
+// correct base; it shares the same no-op performLayout pattern Image was
+// already using.
+class Image : public LeafWidget {
 public:
     Image();
     virtual ~Image();
@@ -18,7 +23,8 @@ public:
     void setUV(const math::FRectangle& uv) { _uv = uv; }
     const math::FRectangle& getUV() const { return _uv; }
 
-    void performLayout() override;
+    // No performLayout override — inherits LeafWidget's no-op. Image is a
+    // pure leaf renderer; size/position come from the parent layout pass.
 
     void onRender(IRenderBackend& renderer) override;
 

@@ -1,5 +1,7 @@
 #include "AYTest.h"
 #include "AYImage.h"
+#include "AYLeafWidget.h"
+#include "AYWidget.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -55,6 +57,34 @@ TEST_CASE(image_partial_uv) {
     CHECK(storedUV.minY == 0.25f);
     CHECK(storedUV.maxX == 0.75f);
     CHECK(storedUV.maxY == 0.75f);
+}
+
+// Image used to extend CompoundWidget — a violation of the R-6 invariant
+// ("leaf widgets MUST NOT host children"). Image is a pure leaf renderer:
+// no children, no child layout, no hit-test descent. It now extends
+// LeafWidget (which is a Widget subclass with a no-op performLayout).
+TEST_CASE(image_extends_leafwidget_not_compoundwidget) {
+    Image image;
+    CHECK(dynamic_cast<LeafWidget*>(&image) != nullptr);
+    CHECK(dynamic_cast<CompoundWidget*>(&image) == nullptr);
+    // And transitively it's a Widget (LeafWidget extends Widget).
+    CHECK(dynamic_cast<Widget*>(&image) != nullptr);
+}
+
+// Image's performLayout is the inherited LeafWidget no-op — explicit
+// override was removed. Calling it must not crash and must not mutate
+// the existing bounds.
+TEST_CASE(image_perform_layout_inherited_noop) {
+    Image image;
+    image.setSize({64.0f, 48.0f});
+    image.setPosition({10.0f, 20.0f});
+
+    image.performLayout();
+
+    CHECK(image.getWidth() == 64.0f);
+    CHECK(image.getHeight() == 48.0f);
+    CHECK(image.getPosition().x == 10.0f);
+    CHECK(image.getPosition().y == 20.0f);
 }
 
 TEST_SUITE_END

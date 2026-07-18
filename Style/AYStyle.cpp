@@ -216,11 +216,45 @@ WidgetStyle StyleBuilder::makeWindow() {
 
 WidgetStyle StyleBuilder::makePanel() {
     WidgetStyle style = makeDefault();
-    style.backgroundColor = math::FVector4(0.2f, 0.2f, 0.2f, 1.0f);
+    // Distinct from makeDefault's (0.2, 0.2, 0.2, 1) — Panel needs to be
+    // visually separable from a plain Widget background, otherwise the
+    // resolveStyle "bgIsDefault" sentinel would silently drop every
+    // panel_default entry to the hardcoded fallback and the style would
+    // never take effect at draw time.
+    style.backgroundColor = math::FVector4(0.18f, 0.18f, 0.20f, 1.0f);
     style.border.width = 1.0f;
     style.border.color = math::FVector4(0.3f, 0.3f, 0.3f, 1.0f);
     style.padding = math::FVector4(4.0f, 4.0f, 4.0f, 4.0f);
     return style;
+}
+
+ResolvedStyle resolveStyle(const std::string& styleId) {
+    ResolvedStyle out;
+    if (styleId.empty()) {
+        return out;
+    }
+    const WidgetStyle* s = StyleManager::get().getStyle(styleId);
+    if (s == nullptr) {
+        return out;
+    }
+    // Sentinel: makeDefault's backgroundColor. If the resolved style
+    // matches, treat as "no explicit background override" so the
+    // hardcoded fallback still wins. See the long-form comment on
+    // ResolvedStyle in AYStyle.h for the rationale.
+    const WidgetStyle def = StyleBuilder::makeDefault();
+    const bool bgIsDefault = (s->backgroundColor.x == def.backgroundColor.x &&
+                              s->backgroundColor.y == def.backgroundColor.y &&
+                              s->backgroundColor.z == def.backgroundColor.z &&
+                              s->backgroundColor.w == def.backgroundColor.w);
+    if (bgIsDefault) {
+        return out;
+    }
+    out.hasStyle = true;
+    out.backgroundColor = s->backgroundColor;
+    out.borderColor = s->border.color;
+    out.borderWidth = s->border.width;
+    out.cornerRadius = s->border.cornerRadius;
+    return out;
 }
 
 } // namespace ayt::ui
