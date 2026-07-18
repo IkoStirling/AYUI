@@ -122,7 +122,7 @@ TEST_CASE(treenode_render_columns) {
     node.setDepth(1);
     node.setHasChildren(true);
     node.setExpanded(false);
-    node.setIcon(L"📁");
+    node.setIcon(L">");
     node.setLabel(L"Assets");
     node.setSelected(true);
 

@@ -26,6 +26,8 @@
 #include "AYImage.h"
 #include "AYTabControl.h"
 #include "AYGridPanel.h"
+#include "AYTreeNode.h"
+#include "AYTreeView.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
@@ -332,6 +334,51 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (TreeNode* tn = dynamic_cast<TreeNode*>(widget)) {
+            if (j.contains("label")) {
+                tn->setLabel(toWstring(j["label"].get<std::string>()));
+            }
+            if (j.contains("icon")) {
+                tn->setIcon(toWstring(j["icon"].get<std::string>()));
+            }
+            if (j.contains("hasChildren")) {
+                tn->setHasChildren(j["hasChildren"].get<bool>());
+            }
+            if (j.contains("expanded")) {
+                tn->setExpanded(j["expanded"].get<bool>());
+            }
+            if (j.contains("depth")) {
+                tn->setDepth(j["depth"].get<int>());
+            }
+        }
+
+        if (TreeView* tv = dynamic_cast<TreeView*>(widget)) {
+            if (j.contains("tree") && j["tree"].is_array()) {
+                std::vector<TreeNodeData> nodes;
+                nodes.reserve(j["tree"].size());
+                for (const auto& n : j["tree"]) {
+                    TreeNodeData d;
+                    d.label = n.contains("label")
+                        ? toWstring(n["label"].get<std::string>())
+                        : std::wstring();
+                    d.icon = n.contains("icon")
+                        ? toWstring(n["icon"].get<std::string>())
+                        : std::wstring();
+                    d.hasChildren = n.value("hasChildren", false);
+                    d.expanded   = n.value("expanded", false);
+                    d.parentIndex = n.value("parentIndex", -1);
+                    nodes.push_back(d);
+                }
+                tv->setTree(nodes);
+            }
+            if (j.contains("selectedIndex")) {
+                tv->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("itemHeight")) {
+                tv->setItemHeight(j["itemHeight"].get<float>());
+            }
+        }
+
         if (BoxBase* box = dynamic_cast<BoxBase*>(widget)) {
             if (j.contains("spacing")) {
                 box->setSpacing(j["spacing"]);
@@ -575,6 +622,32 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (Image* image = dynamic_cast<Image*>(widget)) {
         j["type"] = "Image";
         // texture handle would need separate serialization
+    }
+    else if (TreeNode* tn = dynamic_cast<TreeNode*>(widget)) {
+        j["type"] = "TreeNode";
+        j["label"] = std::string(tn->getLabel().begin(), tn->getLabel().end());
+        j["icon"]  = std::string(tn->getIcon().begin(), tn->getIcon().end());
+        j["hasChildren"] = tn->hasChildren();
+        j["expanded"] = tn->isExpanded();
+        j["depth"] = tn->getDepth();
+    }
+    else if (TreeView* tv = dynamic_cast<TreeView*>(widget)) {
+        j["type"] = "TreeView";
+        j["tree"] = json::array();
+        // Serialize from the flat view (post-collapse); callers wanting the
+        // full source tree should setTree() with the original model.
+        for (size_t i = 0; i < tv->getNodeCount(); ++i) {
+            const auto& d = tv->getNodeData(i);
+            json nj;
+            nj["label"] = std::string(d.label.begin(), d.label.end());
+            nj["icon"]  = std::string(d.icon.begin(), d.icon.end());
+            nj["hasChildren"] = d.hasChildren;
+            nj["expanded"] = d.expanded;
+            nj["parentIndex"] = d.parentIndex;
+            j["tree"].push_back(nj);
+        }
+        j["selectedIndex"] = tv->getSelectedIndex();
+        j["itemHeight"] = tv->getItemHeight();
     }
     else {
         j["type"] = "Widget";
