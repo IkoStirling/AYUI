@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYCompoundFocusableWidget.h"
 #include "AYWidget.h"
 #include "AYInteractiveWidget.h"
 #include "AYSelectableWidget.h"
@@ -90,25 +91,28 @@ namespace ayt::ui {
 //     ListView itself, not its rows, so it's safe; verify before any
 //     further ComboBox change.
 //
-// KEYBOARD NAVIGATION (also deferred, same v1.1 window as ComboBox):
-//   ListView currently does NOT override onKeyDown. Up/Down/Home/End/
-//   PageUp/PageDown navigation is the host's responsibility (e.g.
-//   ComboBox's popup will need it for v1.1 keyboard support).
-//   The future implementer should add ListView::onKeyDown that routes
-//   arrow keys to setSelectedIndex(current + delta), capped to the
-//   visible window, with scrollToIndex so the new selection is visible.
-//   Test that ListView does NOT inherit FocusableWidget by itself —
-//   keyboard nav is on the host side, not the list side, in v1.
+// -----------------------------------------------------------------------------
+// KEYBOARD NAVIGATION (Phase B — B1, S3):
+//   ListView extends CompoundFocusableWidget so the focus traversal in
+//   UIManager::focusNext/focusPrev can land on a ListView directly.
+//   ListView::onKeyDown routes Up/Down/Home/End/PageUp/PageDown/Enter
+//   to setSelectedIndex + scrollToIndex (scrollToIndex is promoted to
+//   protected so onKeyDown can drive it — R7 in
+//   recursive-squishing-turing.md).
 //
+//   Focus is acquired via onMouseButtonDown (which calls
+//   UIManager::get().setFocus(this)) or programmatically via
+//   UIManager::get().setFocus(this). Tab traversal is NOT what enters
+//   the list from outside — onKeyDown handles the in-list navigation
+//   once focus is held.
 // =============================================================================
 //
 // Click on a row selects it; double-click selects + fires _onItemActivated.
-// Keyboard navigation (Up / Down / Home / End / PageUp / PageDown) is
-// delegated to whoever holds focus — v1 ships only mouse + double-click.
-// Hosts that want keyboard navigation wire onKeyDown externally (e.g.
-// ComboBox's popup).
+// Keyboard navigation (Up / Down / Home / End / PageUp / PageDown / Enter)
+// is owned by the list itself in v1.1 — Tab will focus INTO the list,
+// then arrows cycle, Enter activates.
 
-class ListView : public CompoundWidget {
+class ListView : public CompoundFocusableWidget {
 public:
     // Row widget — C-11 promoted from InteractiveWidget to
     // SelectableWidget. Holds a single string + index. List controls
@@ -189,18 +193,36 @@ public:
     // forwarding so clicks on a list area still trigger row selection.
     bool onMouseButtonUp(const UIMouseEvent& e) override;
 
+    // Phase B (B1): onMouseButtonDown grabs keyboard focus. ListView
+    // owns its own keyboard state — Tab into a list, arrows cycle
+    // selection, Enter activates. Returning false lets the click fall
+    // through to onMouseButtonUp which routes to the row hit test.
+    bool onMouseButtonDown(const UIMouseEvent& e) override;
+
+    // Phase B (B1): keyboard navigation. Up/Down wrap; Home/End jump;
+    // PageUp/PageDown step by viewport rows; Enter fires
+    // _onItemActivated. Tab is NOT handled here — UIManager intercepts
+    // it before delegating (R2 contract). Returns true when the key
+    // was consumed.
+    bool onKeyDown(int keyCode) override;
+
 protected:
     void layoutChildren() override;
     void rebuildRows();
 
     math::FVector2 getViewportSize() const;
 
+    // Promoted from private → protected so Phase B (B1) ListView::onKeyDown
+    // can ensure the newly-selected row is visible after a keyboard move.
+    // R7 in recursive-squishing-turing.md. Subclasses / self call this
+    // to keep selection in the viewport.
+    void scrollToIndex(int index);
+
 private:
     void ensureBarCreated();
     void syncBarToOffset();
     void handleRowClick(int index);    // row callback → selection update
     void handleRowDouble(int index);   // row callback → activation
-    void scrollToIndex(int index);     // ensure row is visible
 
     std::vector<std::wstring> _items;
     std::vector<Row*>         _rows;     // sized == _items.size()

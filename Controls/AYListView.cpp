@@ -1,6 +1,8 @@
 #include "AYListView.h"
 #include "AYIRenderBackend.h"
 #include "AYStyle.h"
+#include "AYUIManager.h"
+#include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
@@ -313,6 +315,82 @@ bool ListView::onMouseButtonUp(const UIMouseEvent& e) {
         }
     }
     return false;
+}
+
+// =============================================================================
+// Phase B (B1) — keyboard navigation + click focus grab
+// =============================================================================
+
+bool ListView::onMouseButtonDown(const UIMouseEvent& e) {
+    // Phase B (B1): grab focus on press so the user can arrow-cycle
+    // without needing to explicitly click-then-Tab. ListView's existing
+    // onMouseButtonUp handles the actual row-click → selection path.
+    // We return false so the click event continues to flow up to
+    // onMouseButtonUp (no toggle duplication here — UIManager handles
+    // press-vs-up semantics externally).
+    if (e.mouseButton == 0) {
+        UIManager::get().setFocus(this);
+    }
+    return false;
+}
+
+bool ListView::onKeyDown(int keyCode) {
+    if (_items.empty()) return false;
+    const int n = static_cast<int>(_items.size());
+
+    // Enter activates the current selection (R3 in plan: fires
+    // _onItemActivated — same callback as row double-click). No
+    // selection movement.
+    if (keyCode == UIKey_Enter) {
+        const int cur = _selectedIndex;
+        if (cur >= 0 && cur < n && _onItemActivated) {
+            _onItemActivated(cur);
+            return true;
+        }
+        return false;
+    }
+
+    // Movement keys — resolve current selection (-1 → 0 for first Down,
+    // -1 → n-1 for last Up so the user always lands somewhere).
+    const int cur = (_selectedIndex < 0) ? 0 : _selectedIndex;
+    int next = cur;
+
+    // PageUp/PageDown step by ~one viewport of rows. Use a min 1 so
+    // tiny lists still step.
+    const math::FVector2 vp = getViewportSize();
+    const int pageRows = std::max(1,
+        static_cast<int>(vp.y / _itemHeight));
+
+    switch (keyCode) {
+    case UIKey_Up:
+        next = (cur <= 0) ? n - 1 : cur - 1;
+        break;
+    case UIKey_Down:
+        next = (cur + 1) % n;
+        break;
+    case UIKey_Home:
+        next = 0;
+        break;
+    case UIKey_End:
+        next = n - 1;
+        break;
+    case UIKey_PageUp:
+        next = std::max(0, cur - pageRows);
+        break;
+    case UIKey_PageDown:
+        next = std::min(n - 1, cur + pageRows);
+        break;
+    default:
+        return false;
+    }
+
+    // If selection was -1 and we got Up/Down/Home/End above, next is
+    // already 0 or n-1 (sentinel). setSelectedIndex handles -1→N
+    // transitions by firing the callback once on real change.
+    if (next != _selectedIndex) {
+        setSelectedIndex(next);   // already auto-scrolls via scrollToIndex (cpp:118)
+    }
+    return true;
 }
 
 } // namespace ayt::ui

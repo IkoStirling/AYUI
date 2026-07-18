@@ -6,6 +6,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include <iostream>
 
 // =============================================================================
@@ -188,6 +189,147 @@ TEST_CASE(listview_get_selected_item) {
 
     lv.setSelectedIndex(-1);
     CHECK(lv.getSelectedItem() == L"");
+}
+
+// =============================================================================
+// Phase B (B1) — keyboard navigation tests
+// =============================================================================
+
+// B1: Arrow keys move selection. Up wraps to end; Down wraps to start.
+TEST_CASE(listview_arrow_keys_move_selection) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d"});
+    lv.setSize(FVector2(160.0f, 200.0f));
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    lv.setSelectedIndex(1);
+
+    lv.onKeyDown(UIKey_Down);
+    CHECK(lv.getSelectedIndex() == 2);
+    lv.onKeyDown(UIKey_Down);
+    CHECK(lv.getSelectedIndex() == 3);
+    lv.onKeyDown(UIKey_Down);   // wraps
+    CHECK(lv.getSelectedIndex() == 0);
+    lv.onKeyDown(UIKey_Up);     // wraps back
+    CHECK(lv.getSelectedIndex() == 3);
+    lv.onKeyDown(UIKey_Up);
+    CHECK(lv.getSelectedIndex() == 2);
+}
+
+// B1: Home / End jump to first / last.
+TEST_CASE(listview_home_end_jumps) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv.setSelectedIndex(2);
+
+    lv.onKeyDown(UIKey_Home);
+    CHECK(lv.getSelectedIndex() == 0);
+
+    lv.onKeyDown(UIKey_End);
+    CHECK(lv.getSelectedIndex() == 4);
+}
+
+// B1: PageUp / PageDown step by viewport-rows-worth. With 10 items and
+// itemHeight=20 in a 60-px viewport, one page = 3 rows.
+TEST_CASE(listview_pageup_pagedown_move_selection_by_viewport) {
+    ListView lv;
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 10; ++i) items.push_back(L"row" + std::to_wstring(i));
+    lv.setItems(items);
+    lv.setItemHeight(20.0f);
+    lv.setSize(FVector2(160.0f, 60.0f));   // viewport shows ~3 rows
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    lv.setSelectedIndex(0);
+
+    lv.onKeyDown(UIKey_PageDown);
+    CHECK(lv.getSelectedIndex() == 3);
+    lv.onKeyDown(UIKey_PageDown);
+    CHECK(lv.getSelectedIndex() == 6);
+    lv.onKeyDown(UIKey_PageDown);   // clamps to last
+    CHECK(lv.getSelectedIndex() == 9);
+    lv.onKeyDown(UIKey_PageUp);
+    CHECK(lv.getSelectedIndex() == 6);
+    lv.onKeyDown(UIKey_PageUp);
+    CHECK(lv.getSelectedIndex() == 3);
+    lv.onKeyDown(UIKey_PageUp);     // clamps to 0
+    CHECK(lv.getSelectedIndex() == 0);
+}
+
+// B1: Enter fires _onItemActivated with current selection.
+TEST_CASE(listview_enter_key_activates) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSelectedIndex(2);
+
+    int activated = -1;
+    lv.setOnItemActivated([&](int idx) { activated = idx; });
+
+    lv.onKeyDown(UIKey_Enter);
+    CHECK(activated == 2);
+
+    // Enter with no selection does not fire.
+    activated = -1;
+    lv.setSelectedIndex(-1);
+    lv.onKeyDown(UIKey_Enter);
+    CHECK(activated == -1);
+}
+
+// B1: Arrow keys auto-scroll the selection into view via scrollToIndex
+// (promoted to protected). With itemHeight=20 and a 40-px viewport,
+// selecting index 7 (rows 140..160) forces scrollOffset.y to ~120.
+TEST_CASE(listview_arrow_keys_scroll_into_view) {
+    ListView lv;
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 10; ++i) items.push_back(L"row" + std::to_wstring(i));
+    lv.setItems(items);
+    lv.setItemHeight(20.0f);
+    lv.setSize(FVector2(160.0f, 40.0f));   // 2-row viewport
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    lv.setSelectedIndex(0);
+
+    // Move to index 7 (row y 140..160). Should scroll so row is visible.
+    lv.setSelectedIndex(7);
+    const float off = lv.getScrollOffset().y;
+    CHECK(off >= 120.0f);
+    CHECK(off <= 140.0f);   // clamp: viewBottom = 140..160 → offset 120..140
+
+    // Move back to 0 — should scroll back to top.
+    lv.setSelectedIndex(0);
+    CHECK(lv.getScrollOffset().y == 0.0f);
+}
+
+// B1: onMouseButtonDown sets focus on the list. We can't easily verify
+// UIManager::get().getFocusedWidget() == &lv from inside the list itself
+// (chicken-and-egg), but we CAN verify the call returns false (so the
+// click bubbles to onMouseButtonUp) and that focus is held afterwards.
+TEST_CASE(listview_focus_grab_on_click) {
+    UIManager um;
+    um.initialize(nullptr);
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSize(FVector2(160.0f, 200.0f));
+    lv.setPosition(FVector2(0.0f, 0.0f));
+
+    const FVector2 world = lv.getWorldBounds().getMin();
+    const FVector2 inside(world.x + 10.0f, world.y + 12.0f);
+    UIMouseEvent ev(inside, 0);
+
+    // Press — should return false (let click flow to onMouseButtonUp)
+    // AND focus the list.
+    CHECK_FALSE(lv.onMouseButtonDown(ev));
+    CHECK(um.getFocusedWidget() == &lv);
+
+    um.shutdown();
+}
+
+// B1: keyboard nav is silently ignored when the list has no items.
+TEST_CASE(listview_key_nav_on_empty_list_noop) {
+    ListView lv;   // empty
+    CHECK_FALSE(lv.onKeyDown(UIKey_Down));
+    CHECK_FALSE(lv.onKeyDown(UIKey_Up));
+    CHECK_FALSE(lv.onKeyDown(UIKey_Home));
+    CHECK_FALSE(lv.onKeyDown(UIKey_End));
+    CHECK_FALSE(lv.onKeyDown(UIKey_Enter));
+    CHECK(lv.getSelectedIndex() == -1);
 }
 
 TEST_SUITE_END
