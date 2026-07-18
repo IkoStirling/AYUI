@@ -24,6 +24,8 @@
 #include "Test_R6_CompoundWidget.cpp"
 #include "Test_R9_NamespaceEnum.cpp"
 #include "Test_Panel.cpp"
+#include "Test_ListView.cpp"
+#include "Test_ComboBox.cpp"
 
 void runTest()
 {

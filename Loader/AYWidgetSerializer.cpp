@@ -9,6 +9,8 @@
 #include "AYTextInput.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
+#include "AYListView.h"
+#include "AYComboBox.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
 #include "AYBox.h"
@@ -142,6 +144,40 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                 std::string o = j["orientation"].get<std::string>();
                 if (o == "vertical") sb->setOrientation(ScrollBar::Orientation::Vertical);
                 else if (o == "horizontal") sb->setOrientation(ScrollBar::Orientation::Horizontal);
+            }
+        }
+
+        if (ListView* lv = dynamic_cast<ListView*>(widget)) {
+            if (j.contains("items") && j["items"].is_array()) {
+                std::vector<std::wstring> items;
+                items.reserve(j["items"].size());
+                for (const auto& s : j["items"]) {
+                    items.push_back(toWstring(s.get<std::string>()));
+                }
+                lv->setItems(items);
+            }
+            if (j.contains("selectedIndex")) {
+                lv->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("itemHeight")) {
+                lv->setItemHeight(j["itemHeight"].get<float>());
+            }
+        }
+
+        if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
+            if (j.contains("items") && j["items"].is_array()) {
+                std::vector<std::wstring> items;
+                items.reserve(j["items"].size());
+                for (const auto& s : j["items"]) {
+                    items.push_back(toWstring(s.get<std::string>()));
+                }
+                cb->setItems(items);
+            }
+            if (j.contains("selectedIndex")) {
+                cb->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("maxPopupItems")) {
+                cb->setMaxPopupItems(j["maxPopupItems"].get<int>());
             }
         }
 
@@ -286,6 +322,24 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (dynamic_cast<ScrollView*>(widget) != nullptr) {
         j["type"] = "ScrollView";
+    }
+    else if (ListView* lv = dynamic_cast<ListView*>(widget)) {
+        j["type"] = "ListView";
+        j["items"] = json::array();
+        for (const auto& s : lv->getItemsRef()) {
+            j["items"].push_back(std::string(s.begin(), s.end()));
+        }
+        j["selectedIndex"] = lv->getSelectedIndex();
+        j["itemHeight"] = lv->getItemHeight();
+    }
+    else if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
+        j["type"] = "ComboBox";
+        j["items"] = json::array();
+        for (const auto& s : cb->getItemsRef()) {
+            j["items"].push_back(std::string(s.begin(), s.end()));
+        }
+        j["selectedIndex"] = cb->getSelectedIndex();
+        j["maxPopupItems"] = cb->getMaxPopupItems();
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";

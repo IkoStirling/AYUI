@@ -7,6 +7,8 @@
 #include "AYTextInput.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
+#include "AYListView.h"
+#include "AYComboBox.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
@@ -54,6 +56,8 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("TextInput", createTextInputWidget);
         WidgetFactory::get().registerCreator("ScrollBar", createScrollBarWidget);
         WidgetFactory::get().registerCreator("ScrollView", createScrollViewWidget);
+        WidgetFactory::get().registerCreator("ListView", createListViewWidget);
+        WidgetFactory::get().registerCreator("ComboBox", createComboBoxWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);
         REGISTER_WIDGET("Panel", Panel);
