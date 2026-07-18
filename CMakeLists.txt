@@ -11,6 +11,7 @@ set(SRC_FILES
     Controls/AYProgressBar.cpp
     Controls/AYFocusableWidget.cpp
     Controls/AYTextInput.cpp
+    Controls/AYTextArea.cpp
     Controls/AYScrollableWidget.cpp
     Controls/AYScrollBar.cpp
     Controls/AYScrollView.cpp
@@ -45,6 +46,7 @@ set(HEAD_FILES
     Controls/AYProgressBar.h
     Controls/AYFocusableWidget.h
     Controls/AYTextInput.h
+    Controls/AYTextArea.h
     Controls/AYScrollableWidget.h
     Controls/AYScrollBar.h
     Controls/AYScrollView.h

@@ -7,6 +7,7 @@
 #include "AYProgressBar.h"
 #include "AYFocusableWidget.h"
 #include "AYTextInput.h"
+#include "AYTextArea.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -187,6 +188,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("Slider"))    f.registerCreator("Slider",    createSliderWidget);
     if (!f.isRegistered("ProgressBar")) f.registerCreator("ProgressBar", createProgressBarWidget);
     if (!f.isRegistered("TextInput")) f.registerCreator("TextInput", createTextInputWidget);
+    if (!f.isRegistered("TextArea")) f.registerCreator("TextArea", createTextAreaWidget);
     if (!f.isRegistered("ScrollBar")) f.registerCreator("ScrollBar", createScrollBarWidget);
     if (!f.isRegistered("ScrollView")) f.registerCreator("ScrollView", createScrollViewWidget);
     if (!f.isRegistered("ListView")) f.registerCreator("ListView", createListViewWidget);

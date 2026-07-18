@@ -7,6 +7,7 @@
 #include "AYSlider.h"
 #include "AYProgressBar.h"
 #include "AYTextInput.h"
+#include "AYTextArea.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -138,6 +139,21 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
             if (j.contains("maxLength")) {
                 ti->setMaxLength(static_cast<size_t>(j["maxLength"].get<int>()));
+            }
+        }
+
+        if (TextArea* ta = dynamic_cast<TextArea*>(widget)) {
+            if (j.contains("text")) {
+                ta->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("readOnly")) {
+                ta->setReadOnly(j["readOnly"].get<bool>());
+            }
+            if (j.contains("maxLength")) {
+                ta->setMaxLength(static_cast<size_t>(j["maxLength"].get<int>()));
+            }
+            if (j.contains("lineHeight")) {
+                ta->setLineHeight(j["lineHeight"].get<float>());
             }
         }
 
@@ -364,6 +380,13 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["password"] = ti->isPasswordMode();
         j["readOnly"] = ti->isReadOnly();
         j["maxLength"] = static_cast<int>(ti->getMaxLength());
+    }
+    else if (TextArea* ta = dynamic_cast<TextArea*>(widget)) {
+        j["type"] = "TextArea";
+        j["text"] = std::string(ta->getText().begin(), ta->getText().end());
+        j["readOnly"] = ta->isReadOnly();
+        j["maxLength"] = static_cast<int>(ta->getMaxLength());
+        j["lineHeight"] = ta->getLineHeight();
     }
     else if (ScrollBar* sb = dynamic_cast<ScrollBar*>(widget)) {
         j["type"] = "ScrollBar";

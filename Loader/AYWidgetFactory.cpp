@@ -5,6 +5,7 @@
 #include "AYSlider.h"
 #include "AYProgressBar.h"
 #include "AYTextInput.h"
+#include "AYTextArea.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
 #include "AYListView.h"
@@ -56,6 +57,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("Slider", createSliderWidget);
         WidgetFactory::get().registerCreator("ProgressBar", createProgressBarWidget);
         WidgetFactory::get().registerCreator("TextInput", createTextInputWidget);
+        WidgetFactory::get().registerCreator("TextArea", createTextAreaWidget);
         WidgetFactory::get().registerCreator("ScrollBar", createScrollBarWidget);
         WidgetFactory::get().registerCreator("ScrollView", createScrollViewWidget);
         WidgetFactory::get().registerCreator("ListView", createListViewWidget);

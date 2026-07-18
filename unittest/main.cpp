@@ -28,6 +28,7 @@
 #include "Test_ComboBox.cpp"
 #include "Test_TabControl.cpp"
 #include "Test_GridPanel.cpp"
+#include "Test_TextArea.cpp"
 
 void runTest()
 {

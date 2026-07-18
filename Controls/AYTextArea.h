@@ -1,0 +1,167 @@
+#pragma once
+
+#include "AYFocusableWidget.h"
+#include "AYScrollView.h"
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace ayt::ui {
+
+// =============================================================================
+// C-10 TextArea: a multi-line plain-text editor.
+// =============================================================================
+//
+// Architecture (v1):
+//   TextArea (CompoundWidget — not FocusableWidget; see DECISION 3)
+//     └─ _scrollView: ScrollView* (vbar always on; hbar off by default)
+//         └─ _document: TextDocument* (a Widget that owns the line buffer,
+//                                     computes its own size from line count ×
+//                                     line height, draws lines + caret +
+//                                     selection highlight)
+//
+// TextDocument is a private nested widget of TextArea (not a public widget)
+// because the line / caret / selection model is TextArea-specific. Exposing
+// it would either require pulling the model up into a base class or letting
+// callers poke into TextArea's internals — both undesirable. See
+// Controls/AYTextArea.cpp for the impl.
+//
+// Line model: `vector<wstring> _lines`; the buffer is "\n"-joined for
+// getText() and split on "\n" for setText(). Empty input becomes one empty
+// line. Lines do NOT soft-wrap (DECISION 5) — a line longer than the
+// viewport scrolls horizontally. Hosts needing soft wrap should pre-wrap or
+// wait for v1.1.
+//
+// -----------------------------------------------------------------------------
+// v1 design decisions + known limitations + v1.1 upgrade paths
+// -----------------------------------------------------------------------------
+//
+// DECISION 1: No word wrap. Lines are stored as-is.
+//   Why: word wrap requires a TextShaper to measure pixels per glyph +
+//   decide break points — significant new code for a 1.0 milestone.
+//   Horizontal scrolling via the embedded ScrollView is good enough.
+//   v1.1 upgrade: enable hbar when line width > viewport, expose
+//   `setWordWrap(bool)` and re-measure lines on viewport width change.
+//
+// DECISION 2: No IME / composition.
+//   Matches TextInput v1 deferral. v1.1: host routes onTextInput to
+//   TextArea::insertChar via FocusableWidget. Composition strings go to
+//   a temporary `_composition` overlay (next to caret) — same as TextInput.
+//
+// DECISION 3: TextArea extends CompoundWidget, NOT FocusableWidget.
+//   Why: matches ComboBox DECISION 3 pattern (parallel-base trick used by
+//   TextInput doesn't apply here — TextArea is a container that hosts the
+//   scroll view + document; putting the whole TextArea behind focus would
+//   require re-implementing focus routing into the document). Instead,
+//   TextArea routes focus internally: on first click it sets focus on
+//   `_document` (the FocusableWidget). Keyboard input goes to the focused
+//   sub-widget, not to TextArea itself.
+//   v1.1 upgrade: this works in practice but causes a UIManager quirk
+//   where `getFocusedWidget()` returns the inner document, not the
+//   outer TextArea. Add `TextArea::getFocusedSubWidget()` for tests.
+//
+// DECISION 4: No undo / redo.
+//   v1 deferred. v1.1: snapshot stack of `vector<wstring>` lines + caret
+//   + selection. Ctrl+Z / Ctrl+Y wired via onKeyDown.
+//
+// DECISION 5: No drag-to-select. Single click moves caret; double-click
+//   selects the word under the caret. Shift+arrow extends the selection.
+//   v1.1 upgrade: capture mouse on button-down, extend selection on
+//   button-down → drag → button-up.
+// =============================================================================
+
+class TextArea : public CompoundWidget {
+public:
+    // Inner document widget — FocusableWidget so UIManager can route
+    // keyboard events to it (DECISION 3). Public only so the factory can
+    // construct it; hosts should not interact with it directly.
+    class TextDocument;
+
+    static constexpr float kDefaultWidth    = 320.0f;
+    static constexpr float kDefaultHeight   = 160.0f;
+    static constexpr float kDefaultLineHeight = 18.0f;
+    static constexpr float kPaddingX        = 6.0f;
+    static constexpr float kPaddingY        = 4.0f;
+
+    TextArea();
+    ~TextArea() override;
+
+    // Text payload. setText replaces the buffer (split on '\n'). getText
+    // joins with '\n'. The buffer is guaranteed to have at least one line
+    // (empty string → one empty line).
+    const std::wstring& getText() const;
+    void setText(const std::wstring& text);
+
+    // Edit. Returns true on real change. insertChar / deleteLeft /
+    // deleteRight honor selection ranges (replace) and readOnly.
+    bool insertChar(wchar_t ch);
+    bool deleteLeft();
+    bool deleteRight();
+    void clear();
+
+    // Caret is a 2D position (line, col). setCaret clamps to valid ranges
+    // and clears the selection.
+    void setCaret(int line, int col);
+    int  getCaretLine() const;
+    int  getCaretCol()  const;
+
+    // Selection is two caret positions (anchor + active). setSelection
+    // sets both, moves the caret to `active`, and orders them internally
+    // so getSelectionStart is always <= getSelectionEnd per axis.
+    void setSelection(int startLine, int startCol, int endLine, int endCol);
+    void clearSelection();
+    void selectAll();
+    bool hasSelection() const;
+
+    void setReadOnly(bool ro);
+    bool isReadOnly() const;
+
+    void setMaxLength(size_t n) { _maxLength = n; }
+    size_t getMaxLength() const { return _maxLength; }
+
+    void setLineHeight(float h);
+    float getLineHeight() const { return _lineHeight; }
+
+    void setOnTextChanged(std::function<void(const std::wstring&)> cb) {
+        _onTextChanged = std::move(cb);
+    }
+
+    // Re-expose sub-widgets for hosts / tests that want to skin or hook.
+    ScrollView*  getScrollView() const { return _scrollView; }
+    TextDocument* getDocument()  const { return _document; }
+
+    void performLayout() override;
+
+private:
+    void ensureChildrenCreated();
+    void syncDocumentSizeToContent();
+    void syncTextToDocument();
+    void fireTextChanged();
+
+    ScrollView*  _scrollView = nullptr;
+    TextDocument* _document  = nullptr;
+
+    // Joined text cache (rebuilt when lines change). Empty cache means
+    // caller must rebuild via getText().
+    mutable std::wstring _textCache;
+    mutable bool _textCacheDirty = true;
+    std::vector<std::wstring> _lines;
+
+    int _caretLine = 0;
+    int _caretCol  = 0;
+
+    int _selStartLine = 0;
+    int _selStartCol  = 0;
+    int _selEndLine   = 0;
+    int _selEndCol    = 0;
+
+    size_t _maxLength = 0;        // 0 = unlimited (combined text size)
+    bool _readOnly = false;
+    float _lineHeight = kDefaultLineHeight;
+
+    std::function<void(const std::wstring&)> _onTextChanged;
+};
+
+Widget* createTextAreaWidget();
+
+} // namespace ayt::ui

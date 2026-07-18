@@ -20,6 +20,7 @@
 #include "AYSelectableWidget.h"
 #include "AYTabControl.h"
 #include "AYGridPanel.h"
+#include "AYTextArea.h"
 #include "AYTextLabel.h"
 #include "AYImage.h"
 #include "AYWindow.h"
