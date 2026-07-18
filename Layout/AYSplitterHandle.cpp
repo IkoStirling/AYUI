@@ -75,6 +75,16 @@ bool SplitterHandle::onMouseButtonUp(const UIMouseEvent& e) {
 
     if (_dragging) {
         _dragging = false;
+        // Drag-end: the splitter just followed the cursor via
+        // applySplitterDrag — its world bounds may now sit squarely
+        // under the release position, so a plain onMouseLeave will
+        // never fire. Reset _hover + _hoverElapsed unconditionally so
+        // the splitter returns to invisible the moment the user lets
+        // go. The cursor entering the splitter band again later will
+        // re-arm hover via onMouseMove (which restarts the delay
+        // counter from 0).
+        _hover = false;
+        _hoverElapsed = -1.0f;
         return true;
     }
 

@@ -427,5 +427,41 @@ TEST_CASE(splitter_hover_reveal_delay_threshold) {
     delete split;
 }
 
+// SplitterHandle leave path via tick-only (no leave call): the UIManager
+// drives tick() every frame, but the cursor may stop moving for a while.
+// After leave, the only way for the splitter to forget _hover is via
+// onMouseLeave. If UIManager's updateHoverWidget misses firing leave
+// (e.g. hit returns the same widget for two consecutive moves because
+// some descendant claims it), the splitter would stay highlighted until
+// the next explicit leave call. This test pins the standalone leave path
+// under explicit UIMouseEvent ordering that mirrors the UIManager flow.
+TEST_CASE(splitter_leave_after_reveal_stays_invisible_across_ticks) {
+    SplitterHandle* split = new SplitterHandle();
+    split->setSize(FVector2(4.0f, 100.0f));
+    split->setPosition(FVector2(0.0f, 0.0f));
+
+    UIMouseEvent hover(FVector2(2.0f, 50.0f));
+    split->onMouseMove(hover);
+    split->tick(0.20f);  // past delay
+    CHECK(split->isRevealed());
+
+    // leave
+    split->onMouseLeave();
+    CHECK(!split->isRevealed());
+
+    // Subsequent ticks must NOT re-reveal — _hover=false and onMouseMove
+    // isn't being called again.
+    for (int i = 0; i < 5; ++i) {
+        split->tick(0.05f);
+        CHECK(!split->isRevealed());
+    }
+
+    MockRenderer renderer;
+    split->render(renderer);
+    CHECK(renderer.getDrawCalls().empty());
+
+    delete split;
+}
+
 TEST_SUITE_END
 
