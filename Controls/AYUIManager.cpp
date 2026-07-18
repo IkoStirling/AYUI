@@ -1,4 +1,5 @@
 #include "AYUIManager.h"
+#include "AYWidget.h"
 #include "AYBox.h"
 #include "AYButton.h"
 #include "AYCheckBox.h"
@@ -238,6 +239,15 @@ void UIManager::initialize(IRenderBackend* backend) {
     _clientWidth = 0.0f;
     _clientHeight = 0.0f;
     _shutdown = false;
+
+    // Phase A (S1): spawn the popup overlay root. Plain Widget (not
+    // CompoundWidget) since it just hosts popups as children; the
+    // children are real CompoundWidgets themselves. Sized by setClientSize.
+    if (_overlayRoot == nullptr) {
+        _overlayRoot = new Widget();
+        _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
+        _overlayRoot->setSize(math::FVector2(0.0f, 0.0f));
+    }
 }
 
 void UIManager::shutdown() {
@@ -259,11 +269,24 @@ void UIManager::shutdown() {
     _loader.clearEventBindings();
     _loader.clearWidgetRegistry();
 
+    // Phase A (A5): tear down overlay + main root together so a popup
+    // parented on the overlay can't survive its host. Order:
+    //   1) destroy overlay's children (open popups)
+    //   2) destroy main root
+    //   3) destroy overlay itself
+    if (_overlayRoot != nullptr) {
+        auto kids = _overlayRoot->getChildren();
+        for (Widget* child : kids) {
+            if (child != nullptr) destroyWidgetTree(child);
+        }
+    }
     if (_root != nullptr) {
-        // destroyWidgetTree recurses through children before deleting the root,
-        // so factory-allocated widgets are released exactly once.
         destroyWidgetTree(_root);
         _root = nullptr;
+    }
+    if (_overlayRoot != nullptr) {
+        destroyWidgetTree(_overlayRoot);
+        _overlayRoot = nullptr;
     }
 
     _backend = nullptr;
@@ -274,6 +297,15 @@ bool UIManager::loadLayout(const std::string& path) {
         FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
         if (fw != nullptr) fw->setFocus(false);
         _focusedWidget = nullptr;
+    }
+    // Phase A: drop overlay children — popups may reference widgets in
+    // the about-to-be-destroyed root. Keep overlay itself (it survives
+    // across loads; only its contents change).
+    if (_overlayRoot != nullptr) {
+        auto kids = _overlayRoot->getChildren();
+        for (Widget* child : kids) {
+            if (child != nullptr) destroyWidgetTree(child);
+        }
     }
     if (_root != nullptr) {
         destroyWidgetTree(_root);
@@ -304,6 +336,13 @@ bool UIManager::loadFromString(const std::string& json) {
         FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
         if (fw != nullptr) fw->setFocus(false);
         _focusedWidget = nullptr;
+    }
+    // Phase A: same overlay-teardown sequence as loadLayout.
+    if (_overlayRoot != nullptr) {
+        auto kids = _overlayRoot->getChildren();
+        for (Widget* child : kids) {
+            if (child != nullptr) destroyWidgetTree(child);
+        }
     }
     if (_root != nullptr) {
         destroyWidgetTree(_root);
@@ -340,6 +379,12 @@ void UIManager::setClientSize(float width, float height) {
         _lastLayoutWidth = -1.0f;
         _lastLayoutHeight = -1.0f;
     }
+    // Phase A: keep overlay in lock-step with viewport so popup world
+    // coords map 1:1 to screen.
+    if (_overlayRoot != nullptr) {
+        _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
+        _overlayRoot->setSize(math::FVector2(width, height));
+    }
 }
 
 void UIManager::update(float dt) {
@@ -360,6 +405,15 @@ void UIManager::update(float dt) {
             FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
             if (fw != nullptr) fw->setFocus(false);
             _focusedWidget = nullptr;
+        }
+        // Phase A (A5): tear down overlay children before _root swap so
+        // any open popup is freed (it could otherwise hold references to
+        // widgets in the about-to-be-destroyed root).
+        if (_overlayRoot != nullptr) {
+            auto kids = _overlayRoot->getChildren();
+            for (Widget* child : kids) {
+                if (child != nullptr) destroyWidgetTree(child);
+            }
         }
         if (_root != nullptr) {
             destroyWidgetTree(_root);
@@ -424,6 +478,10 @@ void UIManager::render() {
     math::FRectangle viewport(0.0f, 0.0f, _clientWidth, _clientHeight);
     _backend->beginCanvas(viewport);
     _root->render(*_backend);
+    // Phase A: render overlay AFTER the main tree so popups paint on top.
+    if (_overlayRoot != nullptr) {
+        _overlayRoot->render(*_backend);
+    }
     // Flush any batched quads accumulated during the widget tree walk.
     // Default backend implementation is a no-op; backends that override
     // addColoredQuad/addTexturedQuad for batching submit here in one go.

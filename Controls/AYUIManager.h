@@ -35,6 +35,18 @@ public:
     Widget* root() const { return _root; }
     Widget* findById(const std::string& id) const;
 
+    // =====================================================================
+    // Phase A — PopupLayer (S1) + viewport (S5)
+    // =====================================================================
+    // _overlayRoot is a sibling of _root, hosts floating widgets (ComboBox
+    // popup / Menu / Tooltip / future ContextMenu) so they are NOT clipped
+    // by the host's enclosing layout. Rendered + hit-tested AFTER _root
+    // so popups overlay any host widget.
+    Widget* getOverlayRoot() const { return _overlayRoot; }
+    math::FVector2 getClientSize() const {
+        return math::FVector2(_clientWidth, _clientHeight);
+    }
+
     bool onMouseMove(float x, float y);
     bool onMouseButtonDown(float x, float y, int button);
     bool onMouseButtonUp(float x, float y, int button);
@@ -64,6 +76,10 @@ public:
 private:
     IRenderBackend* _backend = nullptr;
     Widget* _root = nullptr;
+    // Phase A: popup overlay layer (sibling of _root). Spawned in
+    // initialize(), sized by setClientSize, torn down in shutdown().
+    // Popups mounted via the PopupLayer API will be reparented here.
+    Widget* _overlayRoot = nullptr;
     UILayoutLoader _loader;
     float _clientWidth = 1280.0f;
     float _clientHeight = 720.0f;

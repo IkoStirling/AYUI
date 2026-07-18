@@ -633,4 +633,29 @@ TEST_CASE(test_uimanager_splitter_leave_holds_through_continuous_tick) {
     ui.shutdown();
 }
 
+// Phase A (S1): getOverlayRoot() returns a non-null Widget from
+// the moment UIManager::initialize() is called.
+TEST_CASE(test_uimanager_overlay_root_created_on_initialize) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    CHECK_NOT_NULL(ui.getOverlayRoot());
+    ui.shutdown();
+}
+
+// Phase A (S5): getClientSize() returns whatever setClientSize() was
+// called with. Independent of layout state.
+TEST_CASE(test_uimanager_get_client_size_returns_set_size) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+    CHECK(ui.getClientSize().x == 800.0f);
+    CHECK(ui.getClientSize().y == 600.0f);
+    ui.setClientSize(1024.0f, 768.0f);
+    CHECK(ui.getClientSize().x == 1024.0f);
+    CHECK(ui.getClientSize().y == 768.0f);
+    ui.shutdown();
+}
+
 TEST_SUITE_END
