@@ -2,9 +2,11 @@
 
 #include "AYLayoutLoader.h"
 #include "AYIRenderBackend.h"
+#include "UIKeyCode.h"
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace ayt::ui {
 
@@ -104,6 +106,28 @@ public:
     bool  onKeyUp(int keyCode);
     bool  onTextInput(wchar_t ch);
 
+    // =====================================================================
+    // Phase B — S3 keyboard navigation
+    // =====================================================================
+    // focusNext/focusPrev walk the focusable widgets under the current
+    // focus root (Phase A overlay-aware — see implementation). They are
+    // also called by onKeyDown when Tab/Shift+Tab arrives. Manual
+    // callers (e.g. tests, host app) can invoke them directly.
+    //
+    // Modifier state is tracked internally so Shift+Tab is distinguished
+    // from Tab. Widgets never see modifier keyCodes — Shift/Ctrl/Alt are
+    // intercepted in onKeyDown/onKeyUp and update the bitmask instead.
+    void focusNext();
+    void focusPrev();
+    uint32_t getModifiers() const { return _modifiers; }
+
+    // AYDevice bridge — host wiring point. Translates
+    // AYDevice::KeyCode -> UIKeyCode via fromDeviceKey() then forwards
+    // to onKeyDown/onKeyUp. Phase B adds this; integration with
+    // AYWindowManager (calling these from WM_KEYDOWN) is a follow-up.
+    bool onDeviceKeyDown(::ayt::device::KeyCode kc);
+    bool onDeviceKeyUp(::ayt::device::KeyCode kc);
+
     bool isHoverInteractive() const;
     UiCursorHint getCursorHint() const;
     bool isCapturing() const { return _capturedWidget != nullptr; }
@@ -162,6 +186,15 @@ private:
     // and `destroyWidgetTree` detaches (mutates `_children`) so iterating
     // the live vector would invalidate the range-for and crash.
     void tearDownOverlayChildren();
+
+    // Phase B — S3 keyboard nav. Pre-order DFS (children-before-siblings)
+    // of all focusable (dynamic_cast<FocusableWidget*> != nullptr) +
+    // visible + enabled widgets under `root`. Used by focusNext/focusPrev.
+    std::vector<Widget*> collectFocusablesDFS(Widget* root) const;
+
+    // Modifier bitmask: bit 0 = Shift, bit 1 = Ctrl, bit 2 = Alt. Index
+    // aligns with `UIKey_Shift`/`Control`/`Alt` minus `UIKey_Shift`.
+    uint32_t _modifiers = 0;
 };
 
 } // namespace ayt::ui

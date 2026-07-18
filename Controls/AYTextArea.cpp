@@ -1,5 +1,6 @@
 #include "AYTextArea.h"
 #include "AYScrollBar.h"
+#include "UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -49,14 +50,19 @@ public:
         int line = _owner->_caretLine;
         int col  = _owner->_caretCol;
         switch (keyCode) {
-        case 37: --col; break;                                       // Left
-        case 39: ++col; break;                                       // Right
-        case 38: --line; break;                                      // Up
-        case 40: ++line; break;                                      // Down
-        case 36: col = 0; break;                                     // Home
-        case 35: col = static_cast<int>(_owner->_lines[line].size()); break;  // End
-        case 8:  _owner->deleteLeft(); return true;                   // Backspace
-        case 46: _owner->deleteRight(); return true;                 // Delete
+        case UIKey_Left:      --col; break;
+        case UIKey_Right:     ++col; break;
+        case UIKey_Up:        --line; break;
+        case UIKey_Down:      ++line; break;
+        case UIKey_Home:      col = 0; break;
+        case UIKey_End:       col = static_cast<int>(_owner->_lines[line].size()); break;
+        case UIKey_Backspace: _owner->deleteLeft(); return true;
+        case UIKey_Delete:    _owner->deleteRight(); return true;
+        case UIKey_Tab:
+            // UIManager.onKeyDown intercepts Tab BEFORE delegating; swallow
+            // defensively if a host bypassed UIManager so caret does not
+            // jump unexpectedly.
+            return true;
         default: return false;
         }
         _owner->setCaret(line, col);

@@ -6,6 +6,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include <iostream>
 
 // =============================================================================
@@ -284,6 +285,41 @@ TEST_CASE(textarea_render_emits_scrollview_and_document) {
     // (none here) + caret rect (no focus) + line glyph rects. Just verify
     // the cascade reaches the document.
     CHECK(rectCount >= 2);
+}
+
+// Phase B (S3) — UIKeyCode retrofit smoke test.
+// TextArea's KeySink::onKeyDown used literal ints (37/39/38/40/36/35/8/46).
+// Migrated to UIKeyCode. The integers MUST stay aligned with legacy VK so
+// any host code passing raw VK ints still routes. This pins the contract.
+TEST_CASE(textarea_uikeycode_constants_match_vk) {
+    CHECK(static_cast<int>(UIKey_Backspace) == 8);
+    CHECK(static_cast<int>(UIKey_End)       == 35);
+    CHECK(static_cast<int>(UIKey_Home)      == 36);
+    CHECK(static_cast<int>(UIKey_Left)      == 37);
+    CHECK(static_cast<int>(UIKey_Up)        == 38);
+    CHECK(static_cast<int>(UIKey_Right)     == 39);
+    CHECK(static_cast<int>(UIKey_Down)      == 40);
+    CHECK(static_cast<int>(UIKey_Delete)    == 46);
+
+    // Sanity: TextArea's key routing lives in its private TextDocument
+    // (a FocusableWidget); the document's onKeyDown switch now uses
+    // UIKeyCode::Left/Right/Up/Down/Home/End/Backspace/Delete. Driving
+    // the runtime path through ta.onKeyDown isn't possible from tests
+    // (TextDocument is a private nested class), so the runtime guarantee
+    // here is "the constants are right and the same set is used in the
+    // switch" — verified visually against AYTextArea.cpp:43-64.
+    //
+    // What we CAN exercise without going through TextDocument: TextArea
+    // is constructed and setText works post-retrofit (no compile breakage).
+    TextArea ta;
+    ta.setText(L"hello world");
+    CHECK(ta.getText() == L"hello world");
+
+    // Two-line buffer with newline — setText splits on \n into _lines.
+    // Reading back confirms the splitter still works.
+    TextArea ta2;
+    ta2.setText(L"first\nsecond");
+    CHECK(ta2.getText() == L"first\nsecond");
 }
 
 TEST_SUITE_END

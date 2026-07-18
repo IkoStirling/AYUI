@@ -2,7 +2,9 @@
 #include "AYUIManager.h"
 #include "AYMockRenderer.h"
 #include "AYButton.h"
+#include "AYTextInput.h"
 #include "AYWindow.h"
+#include "UIKeyCode.h"
 
 #include <cstdio>
 #include <fstream>
@@ -860,6 +862,164 @@ TEST_CASE(test_uimanager_load_reload_closes_overlay_popup) {
     })";
     CHECK(ui.loadFromString(json2));
     CHECK(ui.getOverlayRoot()->getChildren().empty());
+
+    ui.shutdown();
+}
+
+// =============================================================================
+// Phase B (S3) keyboard navigation — Tab traversal + Shift+Tab reverse.
+// =============================================================================
+// DFS pre-order over FocusableWidget instances under _root. TextInput is the
+// reference focusable (already FocusableWidget since C-3). Button is NOT
+// FocusableWidget, so it's skipped — same R4 rule as TabControl's header.
+
+// 5 TextInputs as children of a VBox root. Tab cycles them in DFS order.
+TEST_CASE(uimanager_tab_traverses_focusable_widgets) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+
+    const std::string json = R"({
+        "type":"VBox", "id":"root", "size":[400, 200],
+        "children":[
+            {"type":"TextInput","id":"ti1","size":[200,24]},
+            {"type":"TextInput","id":"ti2","size":[200,24]},
+            {"type":"TextInput","id":"ti3","size":[200,24]}
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+
+    Widget* t1 = ui.findById("ti1");
+    Widget* t2 = ui.findById("ti2");
+    Widget* t3 = ui.findById("ti3");
+    CHECK_NOT_NULL(t1); CHECK_NOT_NULL(t2); CHECK_NOT_NULL(t3);
+
+    // Start: no focus.
+    ui.onKeyDown(UIKey_Tab);
+    // After first Tab, focus should be ti1 (first focusable in DFS order).
+    CHECK(ui.getFocusedWidget() == t1);
+
+    ui.onKeyDown(UIKey_Tab);
+    CHECK(ui.getFocusedWidget() == t2);
+
+    ui.onKeyDown(UIKey_Tab);
+    CHECK(ui.getFocusedWidget() == t3);
+
+    ui.shutdown();
+}
+
+// Shift+Tab walks backwards through the focusable list.
+TEST_CASE(uimanager_shift_tab_traverses_reverse) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+
+    const std::string json = R"({
+        "type":"VBox", "id":"root", "size":[400, 200],
+        "children":[
+            {"type":"TextInput","id":"ti1","size":[200,24]},
+            {"type":"TextInput","id":"ti2","size":[200,24]}
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    Widget* t1 = ui.findById("ti1");
+    Widget* t2 = ui.findById("ti2");
+
+    // Set focus to ti2 first.
+    ui.setFocus(t2);
+    CHECK(ui.getFocusedWidget() == t2);
+
+    // Hold Shift, then Tab — Shift+Tab from ti2 → ti1.
+    ui.onKeyDown(UIKey_Shift);
+    ui.onKeyDown(UIKey_Tab);
+    CHECK(ui.getFocusedWidget() == t1);
+
+    // Release Shift (modifier tracking).
+    ui.onKeyUp(UIKey_Shift);
+    // Plain Tab from ti1 → ti2.
+    ui.onKeyDown(UIKey_Tab);
+    CHECK(ui.getFocusedWidget() == t2);
+
+    ui.shutdown();
+}
+
+// Invisible widgets are skipped (R3 contract — visible/!visible filter).
+TEST_CASE(uimanager_tab_skips_invisible_widgets) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+
+    const std::string json = R"({
+        "type":"VBox", "id":"root", "size":[400, 200],
+        "children":[
+            {"type":"TextInput","id":"ti1","size":[200,24]},
+            {"type":"TextInput","id":"ti2","size":[200,24]},
+            {"type":"TextInput","id":"ti3","size":[200,24]}
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    Widget* t1 = ui.findById("ti1");
+    Widget* t2 = ui.findById("ti2");
+    Widget* t3 = ui.findById("ti3");
+    t2->setVisible(false);
+
+    ui.onKeyDown(UIKey_Tab);   // → ti1
+    CHECK(ui.getFocusedWidget() == t1);
+    ui.onKeyDown(UIKey_Tab);   // ti2 invisible → skip → ti3
+    CHECK(ui.getFocusedWidget() == t3);
+
+    ui.shutdown();
+}
+
+// Wrap-around: from the last focusable, Tab goes back to the first.
+TEST_CASE(uimanager_tab_wraps_at_end) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+
+    const std::string json = R"({
+        "type":"VBox", "id":"root", "size":[400, 200],
+        "children":[
+            {"type":"TextInput","id":"ti1","size":[200,24]},
+            {"type":"TextInput","id":"ti2","size":[200,24]}
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    Widget* t1 = ui.findById("ti1");
+    Widget* t2 = ui.findById("ti2");
+
+    ui.setFocus(t2);
+    ui.onKeyDown(UIKey_Tab);   // t2 → wrap → t1
+    CHECK(ui.getFocusedWidget() == t1);
+
+    ui.shutdown();
+}
+
+// Tab traversal only walks FocusableWidget instances. A non-focusable
+// container (Panel / VBox / Button) is skipped — this is the R4 contract
+// that excludes TabControl's _header ListView from Tab focus.
+TEST_CASE(uimanager_tab_skips_non_focusable_children) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+
+    // Two TextInputs separated by a non-focusable Button. Button is skipped.
+    const std::string json = R"({
+        "type":"VBox", "id":"root", "size":[400, 200],
+        "children":[
+            {"type":"TextInput","id":"ti1","size":[200,24]},
+            {"type":"Button",   "id":"btn","size":[200,24],"text":"skip me"},
+            {"type":"TextInput","id":"ti2","size":[200,24]}
+        ]
+    })";
+    CHECK(ui.loadFromString(json));
+    Widget* t1 = ui.findById("ti1");
+    Widget* t2 = ui.findById("ti2");
+
+    ui.onKeyDown(UIKey_Tab);   // → ti1
+    CHECK(ui.getFocusedWidget() == t1);
+    ui.onKeyDown(UIKey_Tab);   // skip Button → ti2
+    CHECK(ui.getFocusedWidget() == t2);
 
     ui.shutdown();
 }

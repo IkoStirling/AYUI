@@ -5,6 +5,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -335,6 +336,46 @@ TEST_CASE(textinput_factory_and_serializer_round_trip) {
 
     destroyWidgetTree(widget);
     destroyWidgetTree(restored);
+}
+
+// Phase B (S3) — UIKeyCode retrofit smoke test.
+// The anonymous VK constants (kKey_Backspace=8, etc.) were removed from
+// TextInput and replaced with UIKeyCode enum values. The integers MUST
+// remain equal so any host code passing raw VK ints still routes correctly.
+// This test pins the contract — if the enum values ever drift, this fails.
+TEST_CASE(textinput_uikeycode_constants_match_vk) {
+    CHECK(static_cast<int>(UIKey_Backspace) == 8);
+    CHECK(static_cast<int>(UIKey_Tab)       == 9);
+    CHECK(static_cast<int>(UIKey_Enter)     == 13);
+    CHECK(static_cast<int>(UIKey_Escape)    == 27);
+    CHECK(static_cast<int>(UIKey_End)       == 35);
+    CHECK(static_cast<int>(UIKey_Home)      == 36);
+    CHECK(static_cast<int>(UIKey_Left)      == 37);
+    CHECK(static_cast<int>(UIKey_Right)     == 39);
+    CHECK(static_cast<int>(UIKey_Delete)    == 46);
+    CHECK(static_cast<int>(UIKey_A)         == 65);
+    CHECK(static_cast<int>(UIKey_Z)         == 90);
+
+    // Sanity: an existing key path still works post-retrofit. After
+    // setText the caret lands at the end (TextInput convention). Press
+    // Left to move it, Backspace to delete the char before the caret.
+    TextInput ti;
+    ti.setText(L"hello");
+    UIManager um;
+    um.initialize(nullptr);
+    um.setFocus(&ti);
+    CHECK(ti.getCaret() == 5);   // setText puts caret at end
+    ti.onKeyDown(UIKey_Left);
+    CHECK(ti.getCaret() == 4);
+    ti.onKeyDown(UIKey_Left);
+    CHECK(ti.getCaret() == 3);
+    ti.onKeyDown(UIKey_Backspace);   // delete 'l' at index 2
+    CHECK(ti.getText() == L"helo");
+    ti.onKeyDown(UIKey_Home);
+    CHECK(ti.getCaret() == 0);
+    ti.onKeyDown(UIKey_End);
+    CHECK(ti.getCaret() == 4);
+    um.shutdown();
 }
 
 TEST_SUITE_END

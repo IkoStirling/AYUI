@@ -1,5 +1,6 @@
 #include "AYUIManager.h"
 #include "AYWidget.h"
+#include "AYFocusableWidget.h"
 #include "AYBox.h"
 #include "AYButton.h"
 #include "AYCheckBox.h"
@@ -819,11 +820,31 @@ void UIManager::setFocus(Widget* widget) {
 }
 
 bool UIManager::onKeyDown(int keyCode) {
+    // Phase B (S3) keyboard nav — modifier tracking + Tab interception
+    // happen BEFORE delegating to the focused widget. Widgets must NOT
+    // see modifier keys or Tab (TextInput.swallow Tab defensively too).
+    if (keyCode == UIKey_Shift || keyCode == UIKey_Control || keyCode == UIKey_Alt) {
+        const uint32_t bit = 1u << (keyCode - UIKey_Shift);
+        _modifiers |= bit;
+        return true;
+    }
+
+    if (keyCode == UIKey_Tab) {
+        if (_modifiers & (1u << (UIKey_Shift - UIKey_Shift))) focusPrev();
+        else                                                  focusNext();
+        return true;
+    }
+
     if (_focusedWidget == nullptr) return false;
     return _focusedWidget->onKeyDown(keyCode);
 }
 
 bool UIManager::onKeyUp(int keyCode) {
+    if (keyCode == UIKey_Shift || keyCode == UIKey_Control || keyCode == UIKey_Alt) {
+        const uint32_t bit = 1u << (keyCode - UIKey_Shift);
+        _modifiers &= ~bit;
+        return true;
+    }
     if (_focusedWidget == nullptr) return false;
     return _focusedWidget->onKeyUp(keyCode);
 }
@@ -831,6 +852,65 @@ bool UIManager::onKeyUp(int keyCode) {
 bool UIManager::onTextInput(wchar_t ch) {
     if (_focusedWidget == nullptr) return false;
     return _focusedWidget->onTextInput(ch);
+}
+
+bool UIManager::onDeviceKeyDown(::ayt::device::KeyCode kc) {
+    return onKeyDown(static_cast<int>(fromDeviceKey(kc)));
+}
+
+bool UIManager::onDeviceKeyUp(::ayt::device::KeyCode kc) {
+    return onKeyUp(static_cast<int>(fromDeviceKey(kc)));
+}
+
+void UIManager::focusNext() {
+    Widget* startRoot = (_focusedWidget != nullptr
+                         && isDescendantOf(_focusedWidget, _overlayRoot))
+                        ? _overlayRoot
+                        : _root;
+    auto all = collectFocusablesDFS(startRoot);
+    if (all.empty()) return;
+
+    int idx = -1;
+    if (_focusedWidget != nullptr) {
+        auto it = std::find(all.begin(), all.end(), _focusedWidget);
+        if (it != all.end()) idx = static_cast<int>(it - all.begin());
+    }
+    const int n = static_cast<int>(all.size());
+    const int next = (idx < 0) ? 0 : (idx + 1) % n;
+    setFocus(all[next]);
+}
+
+void UIManager::focusPrev() {
+    Widget* startRoot = (_focusedWidget != nullptr
+                         && isDescendantOf(_focusedWidget, _overlayRoot))
+                        ? _overlayRoot
+                        : _root;
+    auto all = collectFocusablesDFS(startRoot);
+    if (all.empty()) return;
+
+    int idx = -1;
+    if (_focusedWidget != nullptr) {
+        auto it = std::find(all.begin(), all.end(), _focusedWidget);
+        if (it != all.end()) idx = static_cast<int>(it - all.begin());
+    }
+    const int n = static_cast<int>(all.size());
+    const int next = (idx < 0) ? (n - 1) : (idx - 1 + n) % n;
+    setFocus(all[next]);
+}
+
+std::vector<Widget*> UIManager::collectFocusablesDFS(Widget* root) const {
+    std::vector<Widget*> out;
+    if (root == nullptr) return out;
+    std::function<void(Widget*)> walk = [&](Widget* w) {
+        if (w == nullptr) return;
+        if (!w->isVisible()) return;
+        if (dynamic_cast<FocusableWidget*>(w) != nullptr) out.push_back(w);
+        // children-before-siblings (pre-order DFS). addChild declaration
+        // order is preserved by getChildren().
+        for (Widget* c : w->getChildren()) walk(c);
+    };
+    walk(root);
+    return out;
 }
 
 bool UIManager::isHoverInteractive() const {

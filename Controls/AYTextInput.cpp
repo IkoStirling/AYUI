@@ -1,28 +1,16 @@
 #include "AYTextInput.h"
 #include "AYIRenderBackend.h"
 #include "AYStyle.h"
+#include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
 
 namespace ayt::ui {
 
-// Anonymous keys for onKeyDown — match common virtual-key conventions
-// (Win32 VK_* / SDL 2 scancode convention; the host translates and calls
-// onKeyDown with these). The exact mapping is documented in
-// AYUIManager::onKeyDown; this file assumes integers on the wire.
-namespace {
-constexpr int kKey_Backspace = 8;
-constexpr int kKey_Tab       = 9;
-constexpr int kKey_Enter     = 13;
-constexpr int kKey_Escape    = 27;
-constexpr int kKey_Left      = 37;
-constexpr int kKey_Right     = 39;
-constexpr int kKey_Delete    = 46;
-constexpr int kKey_Home      = 36;
-constexpr int kKey_End       = 35;
-constexpr int kKey_A         = 65;
-} // namespace
+// Phase B (S3): TextInput uses UIKeyCode (UIKey_Backspace etc.) instead
+// of anonymous VK raw ints. Values are VK-aligned so the comparison
+// against legacy host-side int codes stays correct — see Controls/UIKeyCode.h.
 
 TextInput::TextInput() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
@@ -184,32 +172,37 @@ bool TextInput::onKeyDown(int keyCode) {
     if (!_hasFocus) return false;
     bool handled = true;
     switch (keyCode) {
-    case kKey_Backspace:
+    case UIKey_Backspace:
         deleteLeft();
         break;
-    case kKey_Delete:
+    case UIKey_Delete:
         deleteRight();
         break;
-    case kKey_Left:
+    case UIKey_Left:
         if (_caret > 0) setCaret(_caret - 1);
         break;
-    case kKey_Right:
+    case UIKey_Right:
         if (_caret < _text.size()) setCaret(_caret + 1);
         break;
-    case kKey_Home:
+    case UIKey_Home:
         setCaret(0);
         break;
-    case kKey_End:
+    case UIKey_End:
         setCaret(_text.size());
         break;
-    case kKey_Enter:
+    case UIKey_Enter:
         if (_onSubmit) _onSubmit(_text);
         break;
-    case kKey_A:
+    case UIKey_A:
         // Ctrl+A select-all is host-side (we don't track modifier
         // keys here); v1 keeps keyboard shortcut handling out of scope.
         handled = false;
         break;
+    case UIKey_Tab:
+        // UIManager.onKeyDown intercepts Tab BEFORE delegating; if we ever
+        // see Tab here it means a host bypassed UIManager. Swallow it
+        // defensively to avoid caret-eating surprises.
+        return true;
     default:
         handled = false;
         break;
