@@ -30,6 +30,7 @@ set(SRC_FILES
     Controls/AYTabControl.cpp
     Controls/AYPanel.cpp
     Controls/AYTextLabel.cpp
+    Controls/AYTreeNode.cpp
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
     Controls/AYUIManager.cpp
@@ -74,6 +75,7 @@ set(HEAD_FILES
     Controls/AYStatusBar.h
     Controls/AYPanel.h
     Controls/AYTextLabel.h
+    Controls/AYTreeNode.h
     Controls/AYWidget.h
     Controls/AYUIManager.h
     Controls/AYWindow.h

@@ -24,6 +24,7 @@
 #include "AYTooltip.h"
 #include "AYSeparator.h"
 #include "AYMenuItem.h"
+#include "AYTreeNode.h"
 #include "AYMenu.h"
 #include "AYMenuBar.h"
 #include "AYToolBar.h"

@@ -38,6 +38,7 @@
 #include "Test_MenuBar.cpp"
 #include "Test_ToolBar.cpp"
 #include "Test_StatusBar.cpp"
+#include "Test_TreeNode.cpp"
 
 void runTest()
 {
