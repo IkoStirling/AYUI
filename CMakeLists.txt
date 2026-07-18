@@ -9,6 +9,11 @@ set(SRC_FILES
     Controls/AYRadioButton.cpp
     Controls/AYSlider.cpp
     Controls/AYProgressBar.cpp
+    Controls/AYFocusableWidget.cpp
+    Controls/AYTextInput.cpp
+    Controls/AYScrollableWidget.cpp
+    Controls/AYScrollBar.cpp
+    Controls/AYScrollView.cpp
     Controls/AYImage.cpp
     Controls/AYInteractiveWidget.cpp
     Controls/AYPanel.cpp
@@ -34,6 +39,11 @@ set(HEAD_FILES
     Controls/AYRadioButton.h
     Controls/AYSlider.h
     Controls/AYProgressBar.h
+    Controls/AYFocusableWidget.h
+    Controls/AYTextInput.h
+    Controls/AYScrollableWidget.h
+    Controls/AYScrollBar.h
+    Controls/AYScrollView.h
     Controls/AYImage.h
     Controls/AYInteractiveWidget.h
     Controls/AYLeafWidget.h

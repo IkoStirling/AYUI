@@ -6,6 +6,9 @@
 #include "AYRadioButton.h"
 #include "AYSlider.h"
 #include "AYProgressBar.h"
+#include "AYTextInput.h"
+#include "AYScrollBar.h"
+#include "AYScrollView.h"
 #include "AYWindow.h"
 #include "AYPanel.h"
 #include "AYBox.h"
@@ -117,6 +120,29 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("min"))  pb->setMin(j["min"].get<float>());
             if (j.contains("max"))  pb->setMax(j["max"].get<float>());
             if (j.contains("value")) pb->setValue(j["value"].get<float>());
+        }
+
+        if (TextInput* ti = dynamic_cast<TextInput*>(widget)) {
+            if (j.contains("text")) {
+                ti->setText(toWstring(j["text"].get<std::string>()));
+            }
+            if (j.contains("password")) {
+                ti->setPasswordMode(j["password"].get<bool>());
+            }
+            if (j.contains("readOnly")) {
+                ti->setReadOnly(j["readOnly"].get<bool>());
+            }
+            if (j.contains("maxLength")) {
+                ti->setMaxLength(static_cast<size_t>(j["maxLength"].get<int>()));
+            }
+        }
+
+        if (ScrollBar* sb = dynamic_cast<ScrollBar*>(widget)) {
+            if (j.contains("orientation")) {
+                std::string o = j["orientation"].get<std::string>();
+                if (o == "vertical") sb->setOrientation(ScrollBar::Orientation::Vertical);
+                else if (o == "horizontal") sb->setOrientation(ScrollBar::Orientation::Horizontal);
+            }
         }
 
         if (Window* window = dynamic_cast<Window*>(widget)) {
@@ -245,6 +271,21 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["min"]  = pb->getMin();
         j["max"]  = pb->getMax();
         j["value"] = pb->getValue();
+    }
+    else if (TextInput* ti = dynamic_cast<TextInput*>(widget)) {
+        j["type"] = "TextInput";
+        j["text"] = std::string(ti->getText().begin(), ti->getText().end());
+        j["password"] = ti->isPasswordMode();
+        j["readOnly"] = ti->isReadOnly();
+        j["maxLength"] = static_cast<int>(ti->getMaxLength());
+    }
+    else if (ScrollBar* sb = dynamic_cast<ScrollBar*>(widget)) {
+        j["type"] = "ScrollBar";
+        j["orientation"] = (sb->getOrientation() == ScrollBar::Orientation::Vertical)
+            ? "vertical" : "horizontal";
+    }
+    else if (dynamic_cast<ScrollView*>(widget) != nullptr) {
+        j["type"] = "ScrollView";
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";

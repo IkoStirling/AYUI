@@ -56,6 +56,7 @@ enum class UiCursorHint {
     SizeHorizontal,
     SizeVertical,
     Move,
+    Beam,
 };
 
 class Widget {

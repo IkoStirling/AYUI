@@ -41,6 +41,18 @@ public:
     void onMouseLeave();
     void clearHover();
 
+    // C-3 focus + keyboard routing. setFocus replaces the currently
+    // focused widget (if any) with the new one; pass nullptr to drop
+    // focus. onKeyDown / onKeyUp route to the focused widget if it
+    // exists and is visible / not destroyed. onTextInput routes typed
+    // characters to the focused widget. Returns true if the event was
+    // consumed.
+    void  setFocus(Widget* widget);
+    Widget* getFocusedWidget() const { return _focusedWidget; }
+    bool  onKeyDown(int keyCode);
+    bool  onKeyUp(int keyCode);
+    bool  onTextInput(wchar_t ch);
+
     bool isHoverInteractive() const;
     UiCursorHint getCursorHint() const;
     bool isCapturing() const { return _capturedWidget != nullptr; }
@@ -57,6 +69,7 @@ private:
     float _clientHeight = 720.0f;
     Widget* _capturedWidget = nullptr;
     Widget* _hoverWidget = nullptr;
+    Widget* _focusedWidget = nullptr;
     bool _shutdown = false;
     // Phase UI-PERF-1: track the last client size we laid out against. If
     // layout() is invoked again with the same values and no explicit tree

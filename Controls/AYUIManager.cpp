@@ -5,6 +5,10 @@
 #include "AYRadioButton.h"
 #include "AYSlider.h"
 #include "AYProgressBar.h"
+#include "AYFocusableWidget.h"
+#include "AYTextInput.h"
+#include "AYScrollBar.h"
+#include "AYScrollView.h"
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
@@ -178,6 +182,9 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("RadioButton")) f.registerCreator("RadioButton", createRadioButtonWidget);
     if (!f.isRegistered("Slider"))    f.registerCreator("Slider",    createSliderWidget);
     if (!f.isRegistered("ProgressBar")) f.registerCreator("ProgressBar", createProgressBarWidget);
+    if (!f.isRegistered("TextInput")) f.registerCreator("TextInput", createTextInputWidget);
+    if (!f.isRegistered("ScrollBar")) f.registerCreator("ScrollBar", createScrollBarWidget);
+    if (!f.isRegistered("ScrollView")) f.registerCreator("ScrollView", createScrollViewWidget);
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
     // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
     // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are
@@ -214,6 +221,11 @@ void UIManager::shutdown() {
     // soon-to-be-freed widget) is released first.
     _capturedWidget = nullptr;
     _hoverWidget = nullptr;
+    if (_focusedWidget != nullptr) {
+        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
+        if (fw != nullptr) fw->setFocus(false);
+        _focusedWidget = nullptr;
+    }
     _loader.clearEventBindings();
     _loader.clearWidgetRegistry();
 
@@ -228,6 +240,11 @@ void UIManager::shutdown() {
 }
 
 bool UIManager::loadLayout(const std::string& path) {
+    if (_focusedWidget != nullptr) {
+        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
+        if (fw != nullptr) fw->setFocus(false);
+        _focusedWidget = nullptr;
+    }
     if (_root != nullptr) {
         destroyWidgetTree(_root);
         _root = nullptr;
@@ -253,6 +270,11 @@ bool UIManager::loadLayout(const std::string& path) {
 }
 
 bool UIManager::loadFromString(const std::string& json) {
+    if (_focusedWidget != nullptr) {
+        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
+        if (fw != nullptr) fw->setFocus(false);
+        _focusedWidget = nullptr;
+    }
     if (_root != nullptr) {
         destroyWidgetTree(_root);
         _root = nullptr;
@@ -304,6 +326,11 @@ void UIManager::update(float dt) {
         // Also clear hover so a stale _hoverWidget pointer doesn't survive
         // the tree swap and confuse the cursor hint.
         _hoverWidget = nullptr;
+        if (_focusedWidget != nullptr) {
+            FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
+            if (fw != nullptr) fw->setFocus(false);
+            _focusedWidget = nullptr;
+        }
         if (_root != nullptr) {
             destroyWidgetTree(_root);
         }
@@ -491,6 +518,42 @@ void UIManager::cancelCapture() {
     Widget* captured = _capturedWidget;
     _capturedWidget = nullptr;
     captured->onMouseButtonUp(UIMouseEvent(math::FVector2(0.0f, 0.0f), 0));
+}
+
+void UIManager::setFocus(Widget* widget) {
+    if (_focusedWidget == widget) {
+        return;
+    }
+    Widget* prev = _focusedWidget;
+    _focusedWidget = widget;
+    if (prev != nullptr) {
+        FocusableWidget* prevAsFw = dynamic_cast<FocusableWidget*>(prev);
+        if (prevAsFw != nullptr) {
+            prevAsFw->setFocus(false);
+        }
+    }
+    if (_focusedWidget != nullptr) {
+        FocusableWidget* nextAsFw =
+            dynamic_cast<FocusableWidget*>(_focusedWidget);
+        if (nextAsFw != nullptr) {
+            nextAsFw->setFocus(true);
+        }
+    }
+}
+
+bool UIManager::onKeyDown(int keyCode) {
+    if (_focusedWidget == nullptr) return false;
+    return _focusedWidget->onKeyDown(keyCode);
+}
+
+bool UIManager::onKeyUp(int keyCode) {
+    if (_focusedWidget == nullptr) return false;
+    return _focusedWidget->onKeyUp(keyCode);
+}
+
+bool UIManager::onTextInput(wchar_t ch) {
+    if (_focusedWidget == nullptr) return false;
+    return _focusedWidget->onTextInput(ch);
 }
 
 bool UIManager::isHoverInteractive() const {
