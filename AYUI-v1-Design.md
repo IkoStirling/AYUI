@@ -434,7 +434,7 @@ void Button::onRender(IRenderBackend& renderer) {
 ```
 
 **实现位置：**
-- `AYUI/Style/AYIRenderBackend.h` - 接口定义
+- `AYUI/Style/IAYRenderBackend.h` - 接口定义
 - `AYUI/Style/AYMockRenderer.h/cpp` - 测试用 mock 实现
 - `AliyatRenderer/.../AYUIRenderBackend.h/cpp` - 实际渲染器实现（绑定到 UIRenderer）
 
@@ -689,7 +689,7 @@ AYUI/
 │   ├── AYSpatialWidget.h/cpp  # 3D 空间控件基类
 │   └── AYUIPlane.h/cpp        # 3D 面片 UI
 ├── Style/
-│   ├── AYIRenderBackend.h     # 渲染器接口（UI 定义）
+│   ├── IAYRenderBackend.h     # 渲染器接口（UI 定义）
 │   ├── AYMockRenderer.h/cpp   # 测试用 mock 实现
 │   └── AYStyle.h/cpp          # 样式系统（混合方案）
 ├── Events/
