@@ -115,6 +115,30 @@ public:
     bool onTextInput(wchar_t ch) override;
     bool onKeyDown(int keyCode) override;
 
+    // =================================================================
+    // Phase C (S4): IME composition hooks. See AYFocusableWidget.h for
+    // the state-machine contract. We override here because TextInput is
+    // the canonical single-line recipient of IME composition.
+    //
+    // Byte caret (from AYDevice / GCS_CURSORPOS) is converted to a
+    // wchar_t-codepoint caret internally so replaceRange and selection
+    // operations work on _text directly. R4 in the Phase C plan: we
+    // accept that surrogate-pair codepoints arrive as two UTF-16 halves
+    // on Windows wchar_t.
+    // =================================================================
+    bool onImeCompositionStart(const std::string& text, int caret) override;
+    bool onImeCompositionUpdate(const std::string& text, int caret) override;
+    bool onImeCompositionEnd(const std::string& committed) override;
+
+    // Phase C: state-query helper for tests + UI hints. True between
+    // onImeCompositionStart and the matching onImeCompositionEnd.
+    bool isComposing() const { return _composing; }
+
+    // Phase C: a TextInput IS a text-editing widget per the
+    // UIManager::isTextEditing() helper. AYDevice::TextInput gate is
+    // flipped when this widget gains/loses focus.
+    bool isTextEditingWidget() const override { return true; }
+
     UiCursorHint getCursorHint() const override;
     void tick(float dt) override;
 
@@ -141,6 +165,26 @@ protected:
     bool _caretVisible = true;
     std::function<void(const std::wstring&)> _onTextChanged;
     std::function<void(const std::wstring&)> _onSubmit;
+
+    // =================================================================
+    // Phase C (S4): IME composition state.
+    // =================================================================
+    // _compositionPreview holds the IME's pre-edit string (UTF-16
+    // decoded from AYDevice's UTF-8 chunk). It's NOT merged into _text
+    // until End fires — render shows it visually distinct (underline)
+    // so users can see what's still being composed.
+    //
+    // _compositionCaretBytes is the byte offset from AYDevice (Win32
+    // GCS_CURSORPOS). We translate to wchar_t-codepoint offset when we
+    // actually need it (selection / replaceRange). Storing the byte
+    // offset avoids re-decoding on every Update.
+    //
+    // _composing is the flag UIManager's state machine flips on
+    // Start/End. Render uses it to decide whether to draw the
+    // underline.
+    std::wstring _compositionPreview;
+    int          _compositionCaretBytes = 0;
+    bool         _composing = false;
 };
 
 Widget* createTextInputWidget();

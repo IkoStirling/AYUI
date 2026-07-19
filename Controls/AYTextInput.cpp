@@ -1,12 +1,72 @@
 #include "AYTextInput.h"
+#include "AYUIManager.h"
 #include "AYIRenderBackend.h"
 #include "AYStyle.h"
 #include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace ayt::ui {
+
+// =============================================================================
+// Phase C (S4) — UTF-8 → std::wstring helper for IME composition.
+// =============================================================================
+//
+// Shared with AYTextArea.cpp via copy-paste (the helpers are tiny — ~30 LOC —
+// and we'd rather not couple two unrelated compilation units through a new
+// shared header just for this). Mirrors UIManager::onDeviceChar's UTF-8
+// decoder exactly so behavior is consistent between committed-char and
+// composition-char paths.
+//
+// Returns:
+//   - std::wstring with the decoded codepoints (BMP only — supplementary
+//     planes are best-effort, kept as two surrogate halves in wchar_t
+//     because Windows wchar_t is 16-bit. R4 in the Phase C plan.)
+//   - outByteToWChar (optional): mapping array, outByteToWChar[i] is the
+//     wchar_t index corresponding to UTF-8 byte i. Used to translate
+//     AYDevice's byte caret (GCS_CURSORPOS) into our wchar_t caret.
+// =============================================================================
+namespace {
+std::wstring utf8ToWString(const std::string& utf8,
+                            std::vector<size_t>* outByteToWChar = nullptr) {
+    std::wstring out;
+    out.reserve(utf8.size());
+    const auto* p = reinterpret_cast<const unsigned char*>(utf8.data());
+    const int n = static_cast<int>(utf8.size());
+    for (int i = 0; i < n; ) {
+        unsigned char c = p[i];
+        uint32_t cp = 0;
+        int bytes = 0;
+        if      ((c & 0x80u) == 0x00u) { cp = c;            bytes = 1; }
+        else if ((c & 0xE0u) == 0xC0u) { cp = c & 0x1Fu;    bytes = 2; }
+        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu;    bytes = 3; }
+        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u;    bytes = 4; }
+        else { ++i; continue; }
+        if (i + bytes > n) break;
+        bool ok = true;
+        for (int k = 1; k < bytes; ++k) {
+            if ((p[i + k] & 0xC0u) != 0x80u) { ok = false; break; }
+            cp = (cp << 6) | (p[i + k] & 0x3Fu);
+        }
+        if (outByteToWChar != nullptr) {
+            // Map every consumed byte to the same wchar_t index (the
+            // start codepoint of this UTF-8 sequence). AYDevice's caret
+            // is a byte offset into the source UTF-8 string.
+            for (int k = 0; k < bytes; ++k) {
+                outByteToWChar->push_back(out.size());
+            }
+        }
+        if (ok) {
+            out.push_back(static_cast<wchar_t>(cp));
+        }
+        i += bytes;
+    }
+    return out;
+}
+} // namespace
 
 // Phase B (S3): TextInput uses UIKeyCode (UIKey_Backspace etc.) instead
 // of anonymous VK raw ints. Values are VK-aligned so the comparison
@@ -16,7 +76,30 @@ TextInput::TextInput() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
 }
 
-TextInput::~TextInput() = default;
+TextInput::~TextInput() {
+    // Phase C (S4): before destruction, tell UIManager to drop any
+    // composition this widget is owning. Without this the manager's
+    // _compositionOwner would dangle, and a subsequent Update or End
+    // event would call onImeCompositionEnd on a freed TextInput. R1 in
+    // the Phase C plan; locked decision Q3 ("dtor cancels, clear()
+    // does NOT").
+    //
+    // CRITICAL: do NOT fire onImeCompositionEnd on `this` from here —
+    // a virtual call during destruction is undefined behavior once
+    // the subclass part is partially torn down. cancelComposition
+    // must silently drop the owner without dispatching. We add an
+    // overload below to support this. Menu hit the same pattern in
+    // Phase A (PR-5: UAF on shutdown) — keep the same lesson here.
+    //
+    // CRITICAL #2: also drop focus / hover / capture / composition
+    // ownership from UIManager if they point to `this`. Otherwise
+    // shutdown() will dynamic_cast the freed pointer later. Same UAF
+    // pattern as Phase A PR-5 (Menu::close).
+    UIManager& ui = UIManager::get();
+    if (ui.getFocusedWidget() == this) ui.setFocus(nullptr);
+    if (ui.isCapturing()) ui.cancelCapture();
+    ui.cancelComposition(this, /*fireEndOnOwner*/ false);
+}
 
 void TextInput::setText(const std::wstring& text) {
     std::wstring newText = text;
@@ -219,6 +302,71 @@ UiCursorHint TextInput::getCursorHint() const {
     return UiCursorHint::Beam;
 }
 
+// =============================================================================
+// Phase C (S4) — IME composition hooks
+// =============================================================================
+//
+// State machine: see AYFocusableWidget.h. UIManager is the only caller.
+// Each hook is a thin wrapper around the composition state + replaceRange.
+// We refuse composition on _readOnly (lock-down forms), and refuse when
+// !_hasFocus (defensive — UIManager should not route to an unfocused
+// widget, but if a host bypasses UIManager the default-onKeyDown Tab
+// defensive guard pattern applies).
+// =============================================================================
+
+bool TextInput::onImeCompositionStart(const std::string& text, int caret) {
+    if (!_hasFocus || _readOnly) return false;
+    std::vector<size_t> byteMap;
+    _compositionPreview = utf8ToWString(text, &byteMap);
+    // Translate AYDevice byte caret (GCS_CURSORPOS) into our wchar_t
+    // caret by clamping into the byteMap. caret < 0 → caret at end.
+    if (caret < 0 || static_cast<size_t>(caret) >= byteMap.size()) {
+        _compositionCaretBytes = static_cast<int>(_compositionPreview.size());
+    } else {
+        _compositionCaretBytes = static_cast<int>(byteMap[caret]);
+    }
+    _composing = true;
+    return true;
+}
+
+bool TextInput::onImeCompositionUpdate(const std::string& text, int caret) {
+    if (!_hasFocus || _readOnly) return false;
+    // Defensive: a host that bypasses UIManager might fire Update
+    // without a Start. Promote-to-Start per the documented contract.
+    if (!_composing) {
+        return onImeCompositionStart(text, caret);
+    }
+    std::vector<size_t> byteMap;
+    _compositionPreview = utf8ToWString(text, &byteMap);
+    if (caret < 0 || static_cast<size_t>(caret) >= byteMap.size()) {
+        _compositionCaretBytes = static_cast<int>(_compositionPreview.size());
+    } else {
+        _compositionCaretBytes = static_cast<int>(byteMap[caret]);
+    }
+    return true;
+}
+
+bool TextInput::onImeCompositionEnd(const std::string& committed) {
+    if (!_composing) return false;
+    // Commit replaces the current selection (or inserts at caret if no
+    // selection). reject if !_hasFocus (host bypass). reject if
+    // _readOnly (drop the candidate entirely without writing).
+    if (!_readOnly) {
+        std::wstring committedText = utf8ToWString(committed);
+        if (!committedText.empty()) {
+            // Use replaceRange to honor selection; the pre-edit candidate
+            // never made it into _text (it lives in _compositionPreview),
+            // so the current selection is whatever the user typed into
+            // BEFORE composition started.
+            replaceRange(_selStart, _selEnd, committedText);
+        }
+    }
+    _compositionPreview.clear();
+    _compositionCaretBytes = 0;
+    _composing = false;
+    return true;
+}
+
 void TextInput::tick(float dt) {
     if (!_hasFocus) {
         _caretVisible = false;
@@ -278,6 +426,44 @@ void TextInput::onRender(IRenderBackend& renderer) {
         if (!displayText.empty()) {
             renderer.drawText(textBounds, displayText, 14, textColor);
         }
+    }
+
+    // =================================================================
+    // Phase C (S4) — IME composition underline.
+    // =================================================================
+    // Drawn as a 1.5px-tall solid rectangle, sky-blue (theme key:
+    // `compositionUnderlineColor`, default sky blue). We approximate the
+    // width via `_compositionPreview.size() * approxCharWidth` — same
+    // trade-off TextInput's caret x-position uses (we don't have a
+    // precise text shaper). R3 in the Phase C plan: best-effort width
+    // is fine for unit tests that count drawRect calls; v1.2 with a
+    // real text shaper will tighten this.
+    //
+    // Y position: just below the text baseline (we don't know exact
+    // baseline either; using maxY - 2.0 keeps it visible inside the
+    // widget without overlapping the caret rectangle).
+    // =================================================================
+    if (_composing && !_compositionPreview.empty()) {
+        // Resolve the underline color via StyleManager. Fall back to the
+        // WidgetStyle default (sky blue) when no styleId is set. We
+        // bypass ResolvedStyle because that struct only carries the
+        // background/border fields — compositionUnderlineColor lives on
+        // WidgetStyle directly.
+        math::FVector4 ulColor(0.30f, 0.65f, 0.95f, 1.0f);
+        if (!getStyleId().empty()) {
+            const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
+            if (ws != nullptr) {
+                ulColor = ws->compositionUnderlineColor;
+            }
+        }
+        constexpr float approxCharWidth = 7.0f; // matches TextArea rough
+        const float ulX = bounds.minX + kPaddingX;
+        const float ulW = static_cast<float>(_compositionPreview.size()) * approxCharWidth;
+        const float ulY = bounds.maxY - 3.0f;
+        constexpr float ulH = 1.5f;
+        renderer.drawRect(
+            math::FRectangle(ulX, ulY, ulX + ulW, ulY + ulH),
+            ulColor);
     }
 
     // Caret — small vertical line at the right side of the text we

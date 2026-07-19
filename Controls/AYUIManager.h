@@ -169,7 +169,7 @@ public:
     void onDeviceCompositionStart(const std::string& text, int caret);
     void onDeviceCompositionUpdate(const std::string& text, int caret);
     void onDeviceCompositionEnd(const std::string& committed);
-    void cancelComposition(Widget* owner);
+    void cancelComposition(Widget* owner, bool fireEndOnOwner = true);
 
     // =====================================================================
     // Phase C (S4) — text-editing focus gate.

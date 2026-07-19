@@ -3,6 +3,7 @@
 #include "AYMockRenderer.h"
 #include "AYButton.h"
 #include "AYTextInput.h"
+#include "AYTextArea.h"
 #include "AYWindow.h"
 #include "UIKeyCode.h"
 
@@ -1297,6 +1298,57 @@ TEST_CASE(uimanager_empty_text_with_cursor_zero_treated_as_end_sentinel) {
     // Subsequent End is a no-op (no live composition).
     ui.onDeviceCompositionEnd("ignored");
     CHECK(sink.endCalls == 1);
+
+    ui.shutdown();
+}
+
+// =============================================================================
+// Phase C (S4) — PR-2 retrofit tests in Test_UIManager:
+//   - IME routes to TextArea's inner TextDocument, not the outer TextArea.
+//   - TextInput's late Update promotes to Start (already verified via
+//     ImeSinkWidget; this test exercises the same path against the real
+//     TextInput subclass to confirm it works end-to-end).
+// =============================================================================
+
+TEST_CASE(uimanager_ime_events_route_to_textarea_document) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 200.0f));
+    ui.root()->addChildExternal(&ta);
+    ui.setFocus(ta.getDocumentAsFocusable());
+
+    // Start fires on the document (not TextArea). TextArea::isComposing()
+    // delegates to its document.
+    ui.onDeviceCompositionStart("pinyin", 6);
+    CHECK(ta.isComposing());
+
+    // End clears state on the document.
+    ui.onDeviceCompositionEnd("");
+    CHECK_FALSE(ta.isComposing());
+
+    ui.shutdown();
+}
+
+TEST_CASE(uimanager_ime_late_update_promotes_via_textinput) {
+    // PR-2 retrofit: TextInput's onImeCompositionUpdate must promote to
+    // Start when no prior Start was seen (some hosts skip Start).
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ui.root()->addChildExternal(&ti);
+    ui.setFocus(&ti);
+
+    // Direct hook call (bypassing UIManager state machine) — same code
+    // path that UIManager::onDeviceCompositionUpdate's promote takes.
+    CHECK_FALSE(ti.isComposing());
+    ti.onImeCompositionUpdate("first", 5);
+    CHECK(ti.isComposing());
 
     ui.shutdown();
 }

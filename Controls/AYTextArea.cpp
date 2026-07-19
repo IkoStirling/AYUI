@@ -1,9 +1,55 @@
 #include "AYTextArea.h"
 #include "AYScrollBar.h"
+#include "AYUIManager.h"
+#include "AYStyle.h"
 #include "UIKeyCode.h"
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace ayt::ui {
+
+// =============================================================================
+// Phase C (S4) — UTF-8 → std::wstring helper.
+// =============================================================================
+// Mirrors AYTextInput.cpp's copy exactly. See AYTextInput.cpp for the
+// rationale on byte-to-codepoint mapping and surrogate-pair handling
+// (R4 in the Phase C plan). Keeping a parallel copy avoids a new shared
+// header for two ~30-LOC helpers that we'd otherwise couple through.
+// =============================================================================
+namespace {
+std::wstring utf8ToWString(const std::string& utf8,
+                            std::vector<size_t>* outByteToWChar = nullptr) {
+    std::wstring out;
+    out.reserve(utf8.size());
+    const auto* p = reinterpret_cast<const unsigned char*>(utf8.data());
+    const int n = static_cast<int>(utf8.size());
+    for (int i = 0; i < n; ) {
+        unsigned char c = p[i];
+        uint32_t cp = 0;
+        int bytes = 0;
+        if      ((c & 0x80u) == 0x00u) { cp = c;            bytes = 1; }
+        else if ((c & 0xE0u) == 0xC0u) { cp = c & 0x1Fu;    bytes = 2; }
+        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu;    bytes = 3; }
+        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u;    bytes = 4; }
+        else { ++i; continue; }
+        if (i + bytes > n) break;
+        bool ok = true;
+        for (int k = 1; k < bytes; ++k) {
+            if ((p[i + k] & 0xC0u) != 0x80u) { ok = false; break; }
+            cp = (cp << 6) | (p[i + k] & 0x3Fu);
+        }
+        if (outByteToWChar != nullptr) {
+            for (int k = 0; k < bytes; ++k) {
+                outByteToWChar->push_back(out.size());
+            }
+        }
+        if (ok) out.push_back(static_cast<wchar_t>(cp));
+        i += bytes;
+    }
+    return out;
+}
+} // namespace
 
 // =============================================================================
 // TextDocument — the inner FocusableWidget that owns the line buffer.
@@ -17,10 +63,36 @@ namespace ayt::ui {
 class TextArea::TextDocument : public FocusableWidget {
 public:
     TextDocument(TextArea* owner) : _owner(owner) {}
+    ~TextDocument() override {
+        // Phase C (S4): R1 dtor safety. Drop any composition this
+        // document owns before destruction so UIManager's
+        // _compositionOwner doesn't dangle. Mirrors TextInput's dtor —
+        // and like TextInput we pass fireEndOnOwner=false because a
+        // virtual dispatch on `this` during destruction is UB.
+        //
+        // CRITICAL: also drop focus / capture from UIManager if they
+        // point to `this`. Otherwise shutdown() dynamic_casts a freed
+        // pointer → "no RTTI data" AV. Same UAF pattern as Phase A
+        // PR-5 (Menu::close).
+        UIManager& ui = UIManager::get();
+        if (ui.getFocusedWidget() == this) ui.setFocus(nullptr);
+        if (ui.isCapturing()) ui.cancelCapture();
+        ui.cancelComposition(this, /*fireEndOnOwner*/ false);
+    }
 
     UiCursorHint getCursorHint() const override {
         return UiCursorHint::Beam;
     }
+
+    // Phase C: a TextDocument IS a text-editing widget so the focus
+    // gate (UIManager::onTextEditingFocusChanged) flips when focus
+    // shifts into / out of a TextArea's body.
+    bool isTextEditingWidget() const override { return true; }
+
+    // Phase C: state query — true between Start and End. Exposed so
+    // TextArea::isComposing() can delegate; tests use the public
+    // TextArea::isComposing() surface rather than poking here.
+    bool isComposing() const { return _composing; }
 
     bool onMouseButtonDown(const UIMouseEvent& e) override {
         if (e.mouseButton != 0) return false;
@@ -74,6 +146,72 @@ public:
         return _owner->insertChar(ch);
     }
 
+    // =================================================================
+    // Phase C (S4) — IME composition hooks for the document.
+    // =================================================================
+    // We mirror TextInput's logic but write into TextArea's `_lines`
+    // model. `_compositionPreview` stores the candidate; the underline
+    // is drawn on the active line in onRender.
+    //
+    // End splits the committed UTF-8 on '\n' so multi-line IME commits
+    // (some CJK IMEs allow pasting multiple lines of candidates) insert
+    // as multiple lines. Byte caret → wchar_t codepoint caret via the
+    // same utf8ToWString helper.
+    // =================================================================
+    bool onImeCompositionStart(const std::string& text, int caret) override {
+        if (!hasFocus() || _owner->isReadOnly()) return false;
+        std::vector<size_t> byteMap;
+        _compositionPreview = utf8ToWString(text, &byteMap);
+        _compositionCaretBytes = (caret < 0
+            || static_cast<size_t>(caret) >= byteMap.size())
+            ? static_cast<int>(_compositionPreview.size())
+            : static_cast<int>(byteMap[caret]);
+        _composing = true;
+        return true;
+    }
+    bool onImeCompositionUpdate(const std::string& text, int caret) override {
+        if (!hasFocus() || _owner->isReadOnly()) return false;
+        if (!_composing) return onImeCompositionStart(text, caret);
+        std::vector<size_t> byteMap;
+        _compositionPreview = utf8ToWString(text, &byteMap);
+        _compositionCaretBytes = (caret < 0
+            || static_cast<size_t>(caret) >= byteMap.size())
+            ? static_cast<int>(_compositionPreview.size())
+            : static_cast<int>(byteMap[caret]);
+        return true;
+    }
+    bool onImeCompositionEnd(const std::string& committed) override {
+        if (!_composing) return false;
+        if (!_owner->isReadOnly()) {
+            std::wstring committedText = utf8ToWString(committed);
+            if (!committedText.empty()) {
+                // Split on '\n' so multi-line IME commits become multi-
+                // line inserts. TextArea::insertChar handles the caret
+                // advance + new-line insertion.
+                std::wstring buf;
+                for (wchar_t ch : committedText) {
+                    if (ch == L'\n' || ch == L'\r') {
+                        if (!buf.empty()) {
+                            for (wchar_t bc : buf) _owner->insertChar(bc);
+                            buf.clear();
+                        }
+                        if (ch == L'\r') continue; // skip CR; \r\n → \n
+                        _owner->insertChar(L'\n');
+                    } else {
+                        buf.push_back(ch);
+                    }
+                }
+                if (!buf.empty()) {
+                    for (wchar_t bc : buf) _owner->insertChar(bc);
+                }
+            }
+        }
+        _compositionPreview.clear();
+        _compositionCaretBytes = 0;
+        _composing = false;
+        return true;
+    }
+
     void onRender(IRenderBackend& renderer) override {
         const auto& lines = _owner->_lines;
         const float lh = _owner->getLineHeight();
@@ -122,15 +260,55 @@ public:
             renderer.drawRect({{x, y}, {1.0f, lh - 2.0f}},
                               math::FVector4(1.0f, 1.0f, 1.0f, 0.95f));
         }
+
+        // Phase C (S4) — IME composition underline. Drawn under the
+        // active line, anchored at the caret column. Same sky-blue
+        // default as TextInput; honours WidgetStyle override via
+        // StyleManager lookup. Width approximated via the rough 7px
+        // char width used elsewhere in this render — R3 in the Phase C
+        // plan.
+        if (_composing && !_compositionPreview.empty()) {
+            math::FVector4 ulColor(0.30f, 0.65f, 0.95f, 1.0f);
+            const std::string sid = getStyleId();
+            if (!sid.empty()) {
+                const WidgetStyle* ws = StyleManager::get().getStyle(sid);
+                if (ws != nullptr) ulColor = ws->compositionUnderlineColor;
+            }
+            constexpr float approxCharWidth = 7.0f;
+            const float ulX = origin.x + TextArea::kPaddingX
+                              + static_cast<float>(_owner->_caretCol) * approxCharWidth;
+            const float ulW = static_cast<float>(_compositionPreview.size()) * approxCharWidth;
+            const float ulY = origin.y + static_cast<float>(_owner->_caretLine) * lh + lh - 3.0f;
+            constexpr float ulH = 1.5f;
+            renderer.drawRect(math::FRectangle(ulX, ulY, ulX + ulW, ulY + ulH),
+                              ulColor);
+        }
     }
 
 private:
     TextArea* _owner;
+
+    // Phase C (S4) composition state — same shape as TextInput.
+    std::wstring _compositionPreview;
+    int          _compositionCaretBytes = 0;
+    bool         _composing = false;
 };
 
 // =============================================================================
 // TextArea
 // =============================================================================
+
+bool TextArea::isComposing() const {
+    // _document may be null between construction and ensureChildrenCreated.
+    return _document != nullptr && _document->isComposing();
+}
+
+FocusableWidget* TextArea::getDocumentAsFocusable() const {
+    // static_cast requires the inheritance chain to be visible at this
+    // call site — TextDocument is defined in this same translation unit
+    // (line ~63) so the cast is well-defined.
+    return static_cast<FocusableWidget*>(_document);
+}
 
 TextArea::TextArea() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));

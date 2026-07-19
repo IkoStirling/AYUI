@@ -48,6 +48,11 @@ namespace ayt::ui {
 //   TextArea::insertChar via FocusableWidget. Composition strings go to
 //   a temporary `_composition` overlay (next to caret) — same as TextInput.
 //
+// Phase C (S4, PR-2) update: composition is now wired through TextDocument
+// (the inner FocusableWidget). It overrides the three onImeComposition*
+// hooks on FocusableWidget, and `isTextEditingWidget() = true` so UIManager's
+// focus gate flips AYDevice::TextInput when TextArea's document is focused.
+//
 // DECISION 3: TextArea extends CompoundWidget, NOT FocusableWidget.
 //   Why: matches ComboBox DECISION 3 pattern (parallel-base trick used by
 //   TextInput doesn't apply here — TextArea is a container that hosts the
@@ -75,6 +80,11 @@ public:
     // Inner document widget — FocusableWidget so UIManager can route
     // keyboard events to it (DECISION 3). Public only so the factory can
     // construct it; hosts should not interact with it directly.
+    //
+    // Forward-declared with its base class declared via the typedef
+    // trick below so callers can implicitly convert TextDocument* to
+    // Widget*/FocusableWidget* without dragging in the nested-class
+    // definition. The actual definition lives in AYTextArea.cpp.
     class TextDocument;
 
     static constexpr float kDefaultWidth    = 320.0f;
@@ -126,9 +136,21 @@ public:
         _onTextChanged = std::move(cb);
     }
 
+    // Phase C (S4): delegates to TextDocument::isComposing(). Tests
+    // observe the composition state without poking at the private
+    // inner widget. Implementation lives in the .cpp because
+    // TextDocument is an incomplete type at this point in the header.
+    bool isComposing() const;
+
     // Re-expose sub-widgets for hosts / tests that want to skin or hook.
     ScrollView*  getScrollView() const { return _scrollView; }
     TextDocument* getDocument()  const { return _document; }
+
+    // Phase C (S4): FocusableWidget* view of the inner document. Defined
+    // in the .cpp because the static_cast<FocusableWidget*>(TextDocument*)
+    // requires TextDocument's inheritance to be visible at the call site.
+    // NULL when not yet created.
+    FocusableWidget* getDocumentAsFocusable() const;
 
     void performLayout() override;
 

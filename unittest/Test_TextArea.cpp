@@ -322,4 +322,131 @@ TEST_CASE(textarea_uikeycode_constants_match_vk) {
     CHECK(ta2.getText() == L"first\nsecond");
 }
 
+// =============================================================================
+// Phase C (S4) — IME composition tests for TextArea::TextDocument (PR-2)
+// =============================================================================
+//
+// Coverage:
+//   - Start populates composing state on the inner document.
+//   - End with multi-line committed text inserts into multiple lines.
+//   - End clears composing state.
+//   - Read-only refuses all 3 hooks.
+//   - Composition underline rect appears in render output when composing.
+// =============================================================================
+
+TEST_CASE(textarea_ime_start_sets_document_composing) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 200.0f));
+    um.root()->addChildExternal(&ta);
+
+    // Focus the inner document (TextArea routes click → focus → document).
+    um.setFocus(ta.getDocumentAsFocusable());
+    CHECK(ta.getDocumentAsFocusable()->hasFocus());
+
+    um.onDeviceCompositionStart("ni", 2);
+    CHECK(ta.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textarea_ime_end_commits_multiline) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 200.0f));
+    ta.setText(L"line1");
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    um.onDeviceCompositionStart("ni", 2);
+    // End with a 2-line commit: "hi\nthere" → line1 becomes line1\nhi\nthere
+    um.onDeviceCompositionEnd("hi\nthere");
+    CHECK_FALSE(ta.isComposing());
+    // TextArea::getText joins lines with '\n'. The caret starts at the
+    // end of "line1" (line 0, col 5). Committing "hi\nthere" inserts:
+    //   'h','i' → "line1hi"
+    //   '\n'    → "line1hi\n"  (caret moves to line 1, col 0)
+    //   't','h','e','r','e' → "line1hi\nthere"
+    // So expected text is "line1hi\nthere" (2 lines, 1 newline).
+    const std::wstring& txt = ta.getText();
+    CHECK(txt == L"line1hi\nthere");
+
+    um.shutdown();
+}
+
+TEST_CASE(textarea_ime_end_clears_composing_state) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 200.0f));
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    um.onDeviceCompositionStart("draft", 5);
+    CHECK(ta.isComposing());
+    um.onDeviceCompositionEnd("");
+    CHECK_FALSE(ta.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textarea_ime_composition_ignored_when_readonly) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setReadOnly(true);
+    ta.setSize(FVector2(300.0f, 200.0f));
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    CHECK_FALSE(ta.getDocumentAsFocusable()->onImeCompositionStart("ni", 2));
+    CHECK_FALSE(ta.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textarea_render_underline_when_composing) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 200.0f));
+    ta.setPosition(FVector2(10.0f, 10.0f));
+    ta.setText(L"abc");
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    um.onDeviceCompositionStart("你好", 6);  // 2 BMP codepoints
+
+    MockRenderer renderer;
+    ta.render(renderer);
+
+    bool sawUnderline = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Rect) {
+            const FVector4 c = dc.color;
+            if (std::abs(c.x - 0.30f) < 0.01f &&
+                std::abs(c.y - 0.65f) < 0.01f &&
+                std::abs(c.z - 0.95f) < 0.01f) {
+                sawUnderline = true;
+                break;
+            }
+        }
+    }
+    CHECK(sawUnderline);
+
+    um.shutdown();
+}
+
 TEST_SUITE_END

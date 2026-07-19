@@ -336,6 +336,13 @@ void UIManager::shutdown() {
         if (fw != nullptr) fw->setFocus(false);
         _focusedWidget = nullptr;
     }
+    // Phase C (S4): also drop any in-flight composition. We don't fire
+    // End on the owner because by shutdown time the owner may already
+    // be part of the tree about to be destroyed, and we just cleared
+    // _focusedWidget above so cancelComposition's owner-strict check
+    // would no-op anyway. Force-clear the slot.
+    _compositionOwner = nullptr;
+    _composing = false;
     _loader.clearEventBindings();
     _loader.clearWidgetRegistry();
 
@@ -1004,31 +1011,49 @@ void UIManager::onDeviceCompositionEnd(const std::string& committed) {
     _compositionOwner = nullptr;
     _composing = false;
 
+    bool consumed = false;
     if (auto* fw = dynamic_cast<FocusableWidget*>(owner)) {
-        fw->onImeCompositionEnd(committed);
+        consumed = fw->onImeCompositionEnd(committed);
     }
-    // If the IME delivered committed text alongside End (Win32 path),
-    // re-pump through onDeviceChar so it goes through the same code
-    // path as a normal character event. Linux IBuses typically emit
-    // onDeviceChar separately and pass empty here — both are fine.
-    if (!committed.empty() && _focusedWidget == owner) {
+    // Re-pump committed bytes through onDeviceChar ONLY when the widget
+    // did NOT consume them. TextInput::onImeCompositionEnd inserts the
+    // committed text into _text directly via replaceRange; if we also
+    // re-pumped via onDeviceChar the char would land twice. The widget
+    // returns true when it consumed the commit, false when it didn't
+    // (e.g. read-only widget that just dropped the candidate). Linux
+    // IBuses typically deliver committed chars separately through
+    // onDeviceChar and pass empty here — `committed.empty()` skips
+    // re-pump, which is also correct for that flow.
+    if (consumed == false && !committed.empty() && _focusedWidget == owner) {
         onDeviceChar(committed.data(), static_cast<int>(committed.size()));
     }
 }
 
-void UIManager::cancelComposition(Widget* owner) {
+void UIManager::cancelComposition(Widget* owner, bool fireEndOnOwner) {
     if (!_composing || _compositionOwner == nullptr) return;
     if (owner != nullptr && _compositionOwner != owner) return;
     Widget* real = _compositionOwner;
     _compositionOwner = nullptr;
     _composing = false;
-    if (auto* fw = dynamic_cast<FocusableWidget*>(real)) {
-        // Commit-nothing: caller is destroying the owner, so we just
-        // want the widget to drop its composing state without inserting
-        // any committed text. The widget's dtor is about to free the
-        // text-buffer anyway.
-        fw->onImeCompositionEnd("");
+    if (fireEndOnOwner) {
+        if (auto* fw = dynamic_cast<FocusableWidget*>(real)) {
+            // Commit-nothing: caller is destroying the owner, so we just
+            // want the widget to drop its composing state without inserting
+            // any committed text. The widget's dtor is about to free the
+            // text-buffer anyway.
+            fw->onImeCompositionEnd("");
+        }
     }
+    // When fireEndOnOwner is false the caller is the owner's dtor — a
+    // virtual dispatch on `real` at this point is UB because the
+    // subclass part is mid-destruction. Just drop the slot; the widget
+    // doesn't need any cleanup because its memory is about to be freed
+    // anyway. (This mirrors the Phase A Menu::close UAF fix.)
+    //
+    // Focus / hover / capture slots are dropped by the calling widget's
+    // dtor directly (TextInput dtor calls setFocus(nullptr) before this
+    // function). We keep cancelComposition focused on composition only
+    // to avoid hidden coupling.
 }
 
 void UIManager::focusNext() {

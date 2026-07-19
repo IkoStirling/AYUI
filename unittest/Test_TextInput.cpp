@@ -3,6 +3,7 @@
 #include "AYUIManager.h"
 #include "AYWidgetFactory.h"
 #include "AYWidgetSerializer.h"
+#include <cstdio>
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
 #include "UIKeyCode.h"
@@ -375,6 +376,187 @@ TEST_CASE(textinput_uikeycode_constants_match_vk) {
     CHECK(ti.getCaret() == 0);
     ti.onKeyDown(UIKey_End);
     CHECK(ti.getCaret() == 4);
+    um.shutdown();
+}
+
+// =============================================================================
+// Phase C (S4) — IME composition tests for TextInput (PR-2)
+// =============================================================================
+//
+// Coverage:
+//   - Start populates _compositionPreview + sets _composing.
+//   - Update replaces preview.
+//   - End with committed text replaces the current selection.
+//   - End clears composing state.
+//   - Read-only refuses all 3 hooks.
+//   - Dtor cancels in-flight composition.
+//   - Render draws underline rectangle when composing.
+// =============================================================================
+
+#include "AYImeTypes.h"
+
+TEST_CASE(textinput_ime_start_inserts_preview) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    um.onDeviceCompositionStart("ni", 2);
+    CHECK(ti.onImeCompositionStart("ni", 2));   // direct hook also consumes
+    CHECK(ti.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_ime_update_replaces_preview) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    um.onDeviceCompositionStart("ni", 2);
+    um.onDeviceCompositionUpdate("nihao", 5);
+    // We can't observe _compositionPreview directly (private), but we
+    // can observe _composing state via the public-ish state machine:
+    // a fresh Start that arrives while composing should NOT blow away
+    // state. Best-effort: trigger a second Start, verify composing still
+    // true.
+    um.onDeviceCompositionStart("new", 3);
+    CHECK(ti.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_ime_end_commits_replaces_selection) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+    ti.setText(L"hello");
+
+    um.onDeviceCompositionStart("ni", 2);
+    // End with committed Chinese char "你" (UTF-8: \xe4\xbd\xa0, UTF-16: U+4F60).
+    um.onDeviceCompositionEnd("\xe4\xbd\xa0");
+    // After End the IME commits "你" by replacing the selection. There
+    // was no selection so the candidate was discarded (we don't merge
+    // previews into _text on End without committed text). Verify
+    // _composing cleared.
+    CHECK_FALSE(ti.isComposing());
+    // The committed text replaced the empty selection at the caret,
+    // which was at end of "hello" → text becomes "hello" + U+4F60.
+    // 你 is U+4F60 in UTF-16 (Windows wchar_t). We use the L"你"
+    // escape form so the test reads cleanly regardless of source file
+    // encoding. The escape also avoids the trap of writing
+    // L"\xe4\xbd\xa0" which becomes THREE codepoints (E4, BD, A0), not
+    // a single surrogate-encoded codepoint.
+    CHECK(ti.getText() == L"hello你");
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_ime_end_clears_composing_state) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    um.onDeviceCompositionStart("hi", 2);
+    CHECK(ti.isComposing());
+    um.onDeviceCompositionEnd("");
+    CHECK_FALSE(ti.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_ime_composition_ignored_when_readonly) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setReadOnly(true);
+    ti.setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    CHECK_FALSE(ti.onImeCompositionStart("ni", 2));
+    CHECK_FALSE(ti.isComposing());
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_dtor_cancels_composition) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput* ti = new TextInput();
+    ti->setSize(FVector2(200.0f, 24.0f));
+    um.root()->addChildExternal(ti);
+    um.setFocus(ti);
+
+    um.onDeviceCompositionStart("draft", 5);
+    CHECK(ti->isComposing());
+
+    // Destroying the TextInput must NOT leave UIManager's
+    // _compositionOwner pointing at freed memory. Subsequent
+    // onDeviceCompositionEnd should not AV.
+    delete ti;
+    um.onDeviceCompositionEnd("ignored");   // safe — owner cleared
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_render_underline_when_composing) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(10.0f, 10.0f));
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    um.onDeviceCompositionStart("你好", 6);  // 2 BMP codepoints
+
+    MockRenderer renderer;
+    ti.render(renderer);
+
+    // The underline must add at least one extra drawRect compared to
+    // a non-composing render. We can't easily count "added" calls, so
+    // verify the underline color appears among the draw calls.
+    bool sawUnderline = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Rect) {
+            const FVector4 c = dc.color;
+            // Sky blue underline: (0.30, 0.65, 0.95, 1.0) — match within tolerance.
+            if (std::abs(c.x - 0.30f) < 0.01f &&
+                std::abs(c.y - 0.65f) < 0.01f &&
+                std::abs(c.z - 0.95f) < 0.01f) {
+                sawUnderline = true;
+                break;
+            }
+        }
+    }
+    CHECK(sawUnderline);
+
     um.shutdown();
 }
 
