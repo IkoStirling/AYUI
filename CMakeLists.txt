@@ -37,6 +37,7 @@ set(SRC_FILES
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
     Controls/AYModal.cpp
+    Controls/AYModalDialog.cpp
     Controls/AYDimmer.cpp
     Controls/AYTabStrip.cpp
     Controls/AYUIManager.cpp
@@ -90,6 +91,7 @@ set(HEAD_FILES
     Controls/AYUIManager.h
     Controls/AYWindow.h
     Controls/AYModal.h
+    Controls/AYModalDialog.h
     Controls/AYDimmer.h
     Controls/AYTabStrip.h
     Layout/AYBox.h

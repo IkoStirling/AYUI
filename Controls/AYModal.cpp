@@ -141,11 +141,43 @@ void Modal::closeModal() {
     if (_dimmer != nullptr && _dimmer->getParent() != nullptr) {
         _dimmer->getParent()->removeChild(_dimmer);
     }
-    // Restore focus.
-    if (_focusedBefore != nullptr && _focusedBefore != this) {
-        ui.setFocus(_focusedBefore);
+    // Phase D §5.3 R3-safe focus path. We deliberately drop the focus to
+    // nullptr rather than calling ui.setFocus(_focusedBefore) because:
+    //   (a) The previously-focused widget may already be mid-destruction
+    //       if the host closed the modal during destruction order (R3
+    //       landmine — setFocus does dynamic_cast + virtual setFocus(false)
+    //       which crashes on already-destroyed widgets).
+    //   (b) Hosts that need to restore focus should wire `setOnClose`
+    //       and call setFocus themselves AFTER Modal::closeModal returns,
+    //       when they can guarantee the previous widget is still alive.
+    // The Phase C TextInput ~dtor uses the same clearFocusNoDispatch
+    // path (PR-2 commit 6e6a31a) — this is the Modal-side mirror of
+    // that fix for the fireOnClose=true path.
+    if (_focusedBefore != nullptr) {
+        if (ui.getFocusedWidget() == _focusedBefore) {
+            // R3-safe drop: only reset if the manager's pointer still
+            // points at the saved widget AND virtual call would be safe
+            // (i.e. the widget hasn't been destroyed underneath us). The
+            // widget may be alive or it may be on its way out; either
+            // way we clear the manager's pointer. clearFocusNoDispatch
+            // does NOT fire virtual on the widget, which is the R3 fix.
+            ui.clearFocusNoDispatch(_focusedBefore);
+        } else if (ui.getFocusedWidget() == this) {
+            // We were the focused widget at closeModal time but the
+            // previously-focused widget was already freed (R3 path: its
+            // dtor ran before our closeModal). Drop our pointer too.
+            ui.clearFocusNoDispatch(this);
+        }
+        _focusedBefore = nullptr;
+    } else if (ui.getFocusedWidget() == this) {
+        // No prior focus was saved (openModal was called without a
+        // preceding focus state). We still hold the manager's pointer
+        // — drop the reference so the post-closeModal state is clean.
+        // This is the Q6 focus trap completion: when a modal opens
+        // without a saved focus (rare but possible), closing should
+        // leave the manager in a clean state.
+        ui.clearFocusNoDispatch(this);
     }
-    _focusedBefore = nullptr;
 }
 
 void Modal::onDimmerClicked() {

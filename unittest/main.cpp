@@ -43,6 +43,10 @@
 #include "Test_TreeNode.cpp"
 #include "Test_TreeView.cpp"
 #include "Test_RichText.cpp"
+#include "Test_Dimmer.cpp"
+#include "Test_Modal.cpp"
+#include "Test_TabStrip.cpp"
+#include "Test_ModalDialog.cpp"
 
 void runTest()
 {

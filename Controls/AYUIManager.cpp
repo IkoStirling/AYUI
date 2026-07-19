@@ -30,6 +30,7 @@
 #include "AYTextLabel.h"
 #include "AYWindow.h"
 #include "AYModal.h"
+#include "AYModalDialog.h"
 #include "AYDimmer.h"
 #include "AYSplitterHandle.h"
 #include "aymath/MathUtils.h"
@@ -257,6 +258,11 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("Modal"))   f.registerCreator("Modal",   []() { return new Modal(); });
     // Phase D (D4) — TabStrip
     if (!f.isRegistered("TabStrip")) f.registerCreator("TabStrip", createTabStripWidget);
+    // Phase D §5.3 — ModalDialog / MessageBox template.
+    // Per Phase D PR-2 decision, Modal itself is NOT registered (kept as a
+    // private detail). ModalDialog IS registered so host JSON can spawn
+    // it directly via the layout loader without writing a creator wrapper.
+    if (!f.isRegistered("ModalDialog")) f.registerCreator("ModalDialog", createModalDialogWidget);
 }
 
 void UIManager::initialize(IRenderBackend* backend) {

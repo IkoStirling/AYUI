@@ -95,8 +95,16 @@ TextInput::~TextInput() {
     // ownership from UIManager if they point to `this`. Otherwise
     // shutdown() will dynamic_cast the freed pointer later. Same UAF
     // pattern as Phase A PR-5 (Menu::close).
+    // Phase D §5.3 patch — R3 landmine cleanup. setFocus(nullptr) does
+    // dynamic_cast<FocusableWidget*>(prev) and fires virtual setFocus(false)
+    // on the prev widget, undefined behavior during destruction because the
+    // derived-class vtable / RTTI info is partially torn down. The Phase D
+    // PR-2 fix introduced clearFocusNoDispatch for exactly this reason —
+    // ~Modal and the Manager teardown paths use it; TextInput ~ had been
+    // missed (Phase C only handled composition cleanup). Mirror the same
+    // R3 landmine avoidance here.
     UIManager& ui = UIManager::get();
-    if (ui.getFocusedWidget() == this) ui.setFocus(nullptr);
+    if (ui.getFocusedWidget() == this) ui.clearFocusNoDispatch(this);
     if (ui.isCapturing()) ui.cancelCapture();
     ui.cancelComposition(this, /*fireEndOnOwner*/ false);
 }

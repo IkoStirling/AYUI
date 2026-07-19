@@ -1383,8 +1383,8 @@ TEST_CASE(uimanager_modal_open_with_another_active_closes_old) {
     CHECK_FALSE(a->isOpen());   // single-active closed the prior
     CHECK(b->isOpen());
 
-    delete a;
-    delete b;
+    // a + b live as children of um.root(), so um.shutdown() tears them down
+    // via destroyWidgetTree. Do NOT double-delete.
     um.shutdown();
 }
 
