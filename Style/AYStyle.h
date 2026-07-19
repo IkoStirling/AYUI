@@ -44,6 +44,14 @@ struct WidgetStyle {
     float minHeight;
     float maxWidth;
     float maxHeight;
+    // Phase C (S4 + C4): text-editing-widget-specific colors.
+    // - compositionUnderlineColor: drawn under the IME pre-edit preview
+    //   by TextInput + TextArea (PR-2). Default is sky blue, distinct from
+    //   selection highlight to avoid visual confusion.
+    // - placeholderColor: drawn when TextInput's text is empty + not
+    //   focused + placeholder text set (PR-3 C4). Default is muted gray.
+    math::FVector4 compositionUnderlineColor = math::FVector4(0.30f, 0.65f, 0.95f, 1.0f);
+    math::FVector4 placeholderColor = math::FVector4(0.55f, 0.55f, 0.60f, 0.7f);
 };
 
 class StyleSheet {

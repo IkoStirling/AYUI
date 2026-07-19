@@ -46,6 +46,26 @@ bool parseWidgetStyle(const json& j, WidgetStyle& out) {
                 c[2].get<float>(), c[3].get<float>());
         }
     }
+    // Phase C: text-editing-widget colors. Default-valued (already set by
+    // StyleBuilder::makeDefault), so JSON that omits them keeps the sky
+    // blue underline + muted gray placeholder. We read them only if the
+    // author explicitly overrides — the parser stays backward-compatible.
+    if (j.contains("compositionUnderlineColor") &&
+        j["compositionUnderlineColor"].is_array() &&
+        j["compositionUnderlineColor"].size() == 4) {
+        const auto& c = j["compositionUnderlineColor"];
+        out.compositionUnderlineColor = math::FVector4(
+            c[0].get<float>(), c[1].get<float>(),
+            c[2].get<float>(), c[3].get<float>());
+    }
+    if (j.contains("placeholderColor") &&
+        j["placeholderColor"].is_array() &&
+        j["placeholderColor"].size() == 4) {
+        const auto& c = j["placeholderColor"];
+        out.placeholderColor = math::FVector4(
+            c[0].get<float>(), c[1].get<float>(),
+            c[2].get<float>(), c[3].get<float>());
+    }
     return true;
 }
 

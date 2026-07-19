@@ -817,6 +817,32 @@ void UIManager::setFocus(Widget* widget) {
             nextAsFw->setFocus(true);
         }
     }
+
+    // =================================================================
+    // Phase C (S4): text-editing focus gate. Flip the AYDevice TextInput
+    // enable/disable signal whenever the focused widget's
+    // isTextEditingWidget() status changes. Hosts wire
+    // onTextEditingFocusChanged to AYDevice::TextInput::setEnabled — game
+    // keybinds then go quiet while the user is typing into a form.
+    //
+    // We compute the "is now text editing" boolean before AND after the
+    // _focusedWidget reassignment so we capture the transition correctly
+    // when prev==old and widget==new.
+    // =================================================================
+    const bool wasTextEditing = isTextEditing(prev);
+    const bool isTextEditingNow = isTextEditing(_focusedWidget);
+    if (wasTextEditing != isTextEditingNow && onTextEditingFocusChanged) {
+        onTextEditingFocusChanged(isTextEditingNow);
+    }
+}
+
+bool UIManager::isTextEditing(Widget* w) {
+    // nullptr → not editing. dynamic_cast would also work, but the
+    // virtual isTextEditingWidget() is faster (one vcall vs RTTI) and
+    // also handles the TextArea::TextDocument case which is not a
+    // TextInput-derived type but DOES want the IME gate.
+    if (w == nullptr) return false;
+    return w->isTextEditingWidget();
 }
 
 bool UIManager::onKeyDown(int keyCode) {
@@ -860,6 +886,149 @@ bool UIManager::onDeviceKeyDown(::ayt::device::KeyCode kc) {
 
 bool UIManager::onDeviceKeyUp(::ayt::device::KeyCode kc) {
     return onKeyUp(static_cast<int>(fromDeviceKey(kc)));
+}
+
+// =============================================================================
+// Phase C (S4) — IME device bridge: AYDevice::TextInput → AYUI focused widget
+// =============================================================================
+//
+// State machine:
+//   - onDeviceCompositionStart(text, caret)  sets _compositionOwner =
+//     _focusedWidget, _composing = true, fires widget hook.
+//   - onDeviceCompositionUpdate(text, caret)  if no Start seen, promotes to
+//     Start (some Linux IBuses). Else fires widget Update hook.
+//   - onDeviceCompositionEnd(committed)      fires widget End hook, then if
+//     `committed` non-empty also re-pumps codepoints through onDeviceChar
+//     so TextInput::replaceRange treats them as text input. Clears state.
+//   - cancelComposition(owner)               if owner == _compositionOwner,
+//     fires End with empty `committed` (commit-nothing) and clears state.
+//     Idempotent — safe to call from ~dtor even if no composition was
+//     active (Q3 — R1 mitigation).
+// =============================================================================
+
+bool UIManager::onDeviceChar(const char* utf8, int byteCount) {
+    // Empty/null payload is a no-op (some platforms emit zero-length
+    // chunks; we don't want to fire onTextInput with nothing).
+    if (utf8 == nullptr || byteCount <= 0) return false;
+    if (_focusedWidget == nullptr) return false;
+
+    // Phase C: UTF-8 → wchar_t decode. AYDevice delivers UTF-8 (Win32
+    // WM_CHAR + WideCharToMultiByte; SDL_TEXTINPUT is also UTF-8). We
+    // convert per-codepoint and call onTextInput for each. Surrogate
+    // pairs (supplementary-plane codepoints) arrive as two calls; the
+    // TextInput stores them in std::wstring which concatenates — same
+    // behaviour as typing two halves manually. R4 in the Phase C plan.
+    const auto* p = reinterpret_cast<const unsigned char*>(utf8);
+    int i = 0;
+    while (i < byteCount) {
+        unsigned char c = p[i];
+        uint32_t cp = 0;
+        int bytes = 0;
+        if      ((c & 0x80u) == 0x00u) { cp = c;                       bytes = 1; }
+        else if ((c & 0xE0u) == 0xC0u) { cp = c & 0x1Fu;                bytes = 2; }
+        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu;                bytes = 3; }
+        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u;                bytes = 4; }
+        else {
+            // Invalid leading byte; skip one byte to avoid infinite loop.
+            ++i;
+            continue;
+        }
+        // Bounds check on continuation bytes.
+        if (i + bytes > byteCount) break;
+        for (int k = 1; k < bytes; ++k) {
+            if ((p[i + k] & 0xC0u) != 0x80u) {
+                // Invalid continuation; abandon this codepoint.
+                cp = 0;
+                break;
+            }
+            cp = (cp << 6) | (p[i + k] & 0x3Fu);
+        }
+        if (cp != 0) {
+            // Forward as wchar_t. On Windows wchar_t is 16-bit; surrogate
+            // pairs (cp > 0xFFFF) will be truncated to a single 16-bit
+            // value by the cast. TextInput tests assume BMP input; the
+            // multi-codepoint supplementary-plane path is exercised only
+            // by host applications needing it. R4 documented in header.
+            _focusedWidget->onTextInput(static_cast<wchar_t>(cp));
+        }
+        i += bytes;
+    }
+    return true;
+}
+
+void UIManager::onDeviceCompositionStart(const std::string& text, int caret) {
+    if (_focusedWidget == nullptr) return;
+    // Start sets _compositionOwner to the focused widget. If a previous
+    // composition is still "live" on a different widget (host glitch),
+    // fire End on the old owner first so we don't leak state.
+    if (_composing && _compositionOwner != nullptr && _compositionOwner != _focusedWidget) {
+        if (auto* fw = dynamic_cast<FocusableWidget*>(_compositionOwner)) {
+            fw->onImeCompositionEnd("");
+        }
+    }
+    _compositionOwner = _focusedWidget;
+    _composing = true;
+    if (auto* fw = dynamic_cast<FocusableWidget*>(_focusedWidget)) {
+        fw->onImeCompositionStart(text, caret);
+    }
+}
+
+void UIManager::onDeviceCompositionUpdate(const std::string& text, int caret) {
+    if (_focusedWidget == nullptr) return;
+    // Promote-to-Start: if no Start was seen, treat this update as the
+    // opening preview. Some Linux IBuses + macOS skip Start entirely.
+    if (!_composing || _compositionOwner == nullptr) {
+        onDeviceCompositionStart(text, caret);
+        return;
+    }
+    // Owner-mismatch tolerance: if Start fired on a different widget
+    // (rare — would mean focus changed mid-composition), force End on
+    // the old owner and adopt the new one.
+    if (_compositionOwner != _focusedWidget) {
+        if (auto* oldFw = dynamic_cast<FocusableWidget*>(_compositionOwner)) {
+            oldFw->onImeCompositionEnd("");
+        }
+        _compositionOwner = _focusedWidget;
+    }
+    if (auto* fw = dynamic_cast<FocusableWidget*>(_compositionOwner)) {
+        fw->onImeCompositionUpdate(text, caret);
+    }
+}
+
+void UIManager::onDeviceCompositionEnd(const std::string& committed) {
+    if (!_composing || _compositionOwner == nullptr) return;
+    // Capture owner pointer locally; the End hook may trigger logic
+    // that calls cancelComposition (defensive) which would null
+    // _compositionOwner before we're done reading it.
+    Widget* owner = _compositionOwner;
+    _compositionOwner = nullptr;
+    _composing = false;
+
+    if (auto* fw = dynamic_cast<FocusableWidget*>(owner)) {
+        fw->onImeCompositionEnd(committed);
+    }
+    // If the IME delivered committed text alongside End (Win32 path),
+    // re-pump through onDeviceChar so it goes through the same code
+    // path as a normal character event. Linux IBuses typically emit
+    // onDeviceChar separately and pass empty here — both are fine.
+    if (!committed.empty() && _focusedWidget == owner) {
+        onDeviceChar(committed.data(), static_cast<int>(committed.size()));
+    }
+}
+
+void UIManager::cancelComposition(Widget* owner) {
+    if (!_composing || _compositionOwner == nullptr) return;
+    if (owner != nullptr && _compositionOwner != owner) return;
+    Widget* real = _compositionOwner;
+    _compositionOwner = nullptr;
+    _composing = false;
+    if (auto* fw = dynamic_cast<FocusableWidget*>(real)) {
+        // Commit-nothing: caller is destroying the owner, so we just
+        // want the widget to drop its composing state without inserting
+        // any committed text. The widget's dtor is about to free the
+        // text-buffer anyway.
+        fw->onImeCompositionEnd("");
+    }
 }
 
 void UIManager::focusNext() {

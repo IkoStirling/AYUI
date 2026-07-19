@@ -135,6 +135,16 @@ public:
     // never fires and the accent stays lit.
     virtual bool isSplitterHandle() const { return false; }
 
+    // =================================================================
+    // Phase C (S4): UIManager uses this to decide whether to enable
+    // AYDevice::TextInput (the IME gate) when focus changes. Default false;
+    // TextInput + TextArea::TextDocument override true in PR-2. We prefer
+    // this virtual over dynamic_cast<TextInput*> because TextArea's IME
+    // events flow through its inner TextDocument, not the outer
+    // CompoundWidget — a plain dynamic_cast<TextInput*> would miss it.
+    // =================================================================
+    virtual bool isTextEditingWidget() const { return false; }
+
     // Visibility
     bool isVisible() const { return _visible; }
     void setVisible(bool visible) { _visible = visible; }

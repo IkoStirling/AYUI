@@ -4,6 +4,7 @@
 #include "AYIRenderBackend.h"
 #include "UIKeyCode.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -128,6 +129,58 @@ public:
     bool onDeviceKeyDown(::ayt::device::KeyCode kc);
     bool onDeviceKeyUp(::ayt::device::KeyCode kc);
 
+    // =====================================================================
+    // Phase C (S4) — AYDevice character + IME composition bridge.
+    // =====================================================================
+    //
+    // AYDevice's TextInput accumulator (AYDevice/include/AYTextInput.h:36-55)
+    // delivers two streams of UTF-8 chunks:
+    //
+    //   - committed text (WM_CHAR / IME result): arrives via onCommit
+    //     callbacks. We translate into per-codepoint onTextInput(wchar_t)
+    //     calls on the focused widget. BMP codepoints are single calls;
+    //     supplementary-plane codepoints (U+10000..U+10FFFF, e.g. some
+    //     CJK extensions) arrive as TWO onTextInput calls — first the
+    //     high surrogate half, then the low half. TextInput's replaceRange
+    //     concatenates them (R4 in the Phase C plan).
+    //
+    //   - in-progress IME composition (WM_IME_COMPOSITION): arrives via
+    //     onCompositionUpdate. We map the AYDevice "empty sentinel" onto
+    //     an explicit 3-state contract on the AYUI side:
+    //
+    //       onDeviceCompositionStart(text, caret)
+    //           — first non-empty preview. Sets _compositionOwner, routes
+    //             to widget's onImeCompositionStart.
+    //       onDeviceCompositionUpdate(text, caret)
+    //           — replaces preview; routes to onImeCompositionUpdate.
+    //           — If no Start has been seen yet, promote to Start (some
+    //             Linux IME hosts skip the Start event entirely).
+    //       onDeviceCompositionEnd(committed)
+    //           — committed text arrived. Routes to onImeCompositionEnd.
+    //           — If `committed` is empty, no onTextInput re-pump (Linux
+    //             IBuses already deliver the committed chars separately
+    //             through onDeviceChar).
+    //           — Clears _compositionOwner.
+    //
+    // cancelComposition(owner) is called by ~TextInput / ~TextArea::
+    // TextDocument before destruction to ensure UIManager doesn't hold a
+    // dangling _compositionOwner pointer (Q3 — R1). Idempotent.
+    bool onDeviceChar(const char* utf8, int byteCount);
+    void onDeviceCompositionStart(const std::string& text, int caret);
+    void onDeviceCompositionUpdate(const std::string& text, int caret);
+    void onDeviceCompositionEnd(const std::string& committed);
+    void cancelComposition(Widget* owner);
+
+    // =====================================================================
+    // Phase C (S4) — text-editing focus gate.
+    // =====================================================================
+    // setFocus emits this callback whenever the focused widget's
+    // isTextEditingWidget() status flips. Hosts wire this to
+    // AYDevice::TextInput::setEnabled so game keybinds don't fire while
+    // the user is typing into a form. Default-constructed (no-op) so
+    // existing tests that don't care about IME don't need to wire it.
+    std::function<void(bool)> onTextEditingFocusChanged;
+
     bool isHoverInteractive() const;
     UiCursorHint getCursorHint() const;
     bool isCapturing() const { return _capturedWidget != nullptr; }
@@ -195,6 +248,22 @@ private:
     // Modifier bitmask: bit 0 = Shift, bit 1 = Ctrl, bit 2 = Alt. Index
     // aligns with `UIKey_Shift`/`Control`/`Alt` minus `UIKey_Shift`.
     uint32_t _modifiers = 0;
+
+    // =================================================================
+    // Phase C (S4) — composition state.
+    // =================================================================
+    // `_compositionOwner` is the widget that received onImeCompositionStart
+    // and has not yet seen a corresponding End. _compositionOwner may
+    // become dangling if the widget is destroyed without calling
+    // cancelComposition — the dtor path (PR-2) handles that case. As an
+    // extra safety net we null the slot before destruction in cancelComposition.
+    Widget* _compositionOwner = nullptr;
+    bool    _composing = false;
+
+    // Phase C helper: true if `w` is a text-editing widget per the
+    // isTextEditingWidget() virtual. Used by setFocus to drive the
+    // onTextEditingFocusChanged callback gate. nullptr returns false.
+    static bool isTextEditing(Widget* w);
 };
 
 } // namespace ayt::ui

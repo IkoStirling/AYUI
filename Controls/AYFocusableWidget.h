@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYWidget.h"
+#include <string>
 
 namespace ayt::ui {
 
@@ -53,6 +54,27 @@ public:
     bool onKeyDown(int keyCode) override;
     bool onKeyUp(int keyCode) override;
     bool onTextInput(wchar_t ch) override;
+
+    // =================================================================
+    // Phase C (S4): IME composition hooks. UIManager routes device-side
+    // onDeviceCompositionStart/Update/End into these. Default returns
+    // false (does not consume); subclass opt-in: TextInput +
+    // TextArea::TextDocument (PR-2). All three receive UTF-8 chunks; the
+    // subclass is responsible for decoding to its internal text encoding.
+    //
+    // State machine contract (mirrored from UIManager's bridge):
+    //   Start  — first non-empty preview. Subclass sets _composing=true,
+    //            stores preview, draws underline.
+    //   Update — replaces preview; caret moves.
+    //   End    — committed text arrived. Subclass replaces selection with
+    //            committed; clears _composing. `committed` may be empty if
+    //            the IME only sent the End sentinel (some Linux IBuses);
+    //            callers re-pump via onDeviceChar in that case (UIManager
+    //            handles this).
+    // =================================================================
+    virtual bool onImeCompositionStart(const std::string& /*text*/, int /*caret*/) { return false; }
+    virtual bool onImeCompositionUpdate(const std::string& /*text*/, int /*caret*/) { return false; }
+    virtual bool onImeCompositionEnd(const std::string& /*committed*/) { return false; }
 
 protected:
     // Subclass-overridable hooks.
