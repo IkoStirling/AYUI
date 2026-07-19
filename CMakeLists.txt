@@ -36,6 +36,8 @@ set(SRC_FILES
     Controls/AYRichText.cpp
     Controls/AYWidget.cpp
     Controls/AYWindow.cpp
+    Controls/AYModal.cpp
+    Controls/AYDimmer.cpp
     Controls/AYUIManager.cpp
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
@@ -86,6 +88,8 @@ set(HEAD_FILES
     Controls/AYWidget.h
     Controls/AYUIManager.h
     Controls/AYWindow.h
+    Controls/AYModal.h
+    Controls/AYDimmer.h
     Layout/AYBox.h
     Layout/AYSplitterHandle.h
     Layout/AYGridPanel.h

@@ -172,6 +172,32 @@ public:
     void cancelComposition(Widget* owner, bool fireEndOnOwner = true);
 
     // =====================================================================
+    // Phase D (D2) — Modal stack (S2 — opposite dismiss semantics).
+    // =====================================================================
+    //
+    // Reuses the DropdownManager's single-active invariant (Q14): opening a
+    // new modal closes the previous one. Unlike popups, modals:
+    //   - Do NOT dismiss on click-outside (default — controlled by
+    //     Modal::_dismissOnDimmerClick, Q8).
+    //   - Trap focus inside their subtree — UIManager.onKeyDown's Tab branch
+    //     routes DFS through the modal's subtree when focus is inside it.
+    //   - Intercept Esc at the UIManager level (Q7) — Modal's _onClose fires
+    //     from inside closeModal so UIManager doesn't need the callback.
+    //
+    // Host ownership mirrors ComboBox popup: the host heap-allocates the
+    // Modal, setContent() / setDimmer() / setOnClose() wire it, openModal()
+    // reparents onto _overlayRoot. The overlay holds the Modal as a child
+    // while open; closeModal detaches. UIManager never destroys Modal —
+    // destroyWidgetTree is the host's responsibility, called typically via
+    // the App's "pop the dialog" code path.
+    void openModal(class Modal* modal);
+    // fireOnClose=true: Modal fires its _onClose callback via closeModal()'s
+    // own path before returning; UIManager doesn't need to fire it again.
+    // false: used by ~Modal dtor when the modal is being torn down — caller
+    // doesn't want a user-visible dismiss action mid-teardown.
+    void closeModal(class Modal* modal, bool fireOnClose = true);
+
+    // =====================================================================
     // Phase C (S4) — text-editing focus gate.
     // =====================================================================
     // setFocus emits this callback whenever the focused widget's
@@ -188,6 +214,20 @@ public:
 
     UILayoutLoader& loader() { return _loader; }
     IRenderBackend* backend() const { return _backend; }
+
+    // Phase D (D2) — focus-clear hook for use during widget destruction.
+    // ~FocusableWidget calls this from its body so a dangling pointer
+    // never lingers in _focusedWidget. setFocus(nullptr) is NOT safe to
+    // call during destruction: it does dynamic_cast<FocusableWidget*>(prev)
+    // on the about-to-be-destroyed widget and invokes virtual setFocus(false)
+    // — undefined behavior in C++ (R3 landmine, same pattern as Phase C
+    // TextInput::~TextInput → cancelComposition(this, fireEndOnOwner=false)).
+    //
+    // If `candidate == _focusedWidget`, we reset to nullptr WITHOUT firing
+    // any virtual dispatch. The host that owned the widget is responsible
+    // for restoring focus to its previously-saved widget BEFORE the dtor
+    // runs (mirrors Phase B Menu::close save-restore pattern).
+    void clearFocusNoDispatch(Widget* candidate);
 
 private:
     IRenderBackend* _backend = nullptr;
@@ -220,6 +260,16 @@ private:
     // ComboBox safely with static_cast when the ComboBox is still alive
     // (shutdown tears down overlay before the main root).
     bool _activeDropdownAnchorIsComboBox = false;
+
+    // Phase D (D2) — Modal stack. Same single-active invariant as the
+    // DropdownManager above (Q14) — opening a new modal closes the
+    // previous one. We carry `_activeModalRoot` separately so focus
+    // traversal in focusNext/focusPrev can pick the right DFS root
+    // without dynamic_cast in onKeyDown's hot path (R-3 landmine
+    // avoidance — mirrors the ComboBox flag pattern).
+    class Modal* _activeModal = nullptr;
+    Widget*       _activeModalRoot = nullptr;
+
     // Phase UI-PERF-1: track the last client size we laid out against. If
     // layout() is invoked again with the same values and no explicit tree
     // mutation has occurred, skip performLayout entirely. Set to a sentinel

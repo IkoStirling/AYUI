@@ -1,8 +1,20 @@
 #include "AYFocusableWidget.h"
+#include "AYUIManager.h"
 
 namespace ayt::ui {
 
 FocusableWidget::FocusableWidget() = default;
+
+// FocusableWidget's default destructor is intentional. Calling
+// UIManager::get() from a base-class destructor is unsafe: the static
+// `s_uninitializedFallback` is initialized lazily and torn down at
+// program exit, and cross-instance state references during destruction
+// are UB-adjacent. Cleanup paths (shutdown / loadLayout / loadFromString
+// / hot-reload / UIManager::closeModal) already use clearFocusNoDispatch
+// when they need to drop focus — base-class destructor is intentionally
+// empty. Derived dtors (Modal, Menu, TextInput, TextArea) that care
+// about preserving focus already route through closeModal()/UIManager
+// during their body (R3 / Phase A / Phase C pattern).
 FocusableWidget::~FocusableWidget() = default;
 
 void FocusableWidget::setFocus(bool focus) {

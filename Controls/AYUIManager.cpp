@@ -29,6 +29,8 @@
 #include "AYImage.h"
 #include "AYTextLabel.h"
 #include "AYWindow.h"
+#include "AYModal.h"
+#include "AYDimmer.h"
 #include "AYSplitterHandle.h"
 #include "aymath/MathUtils.h"
 #include "AYWidgetFactory.h"
@@ -250,6 +252,9 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("TreeNode"))  f.registerCreator("TreeNode",  createTreeNodeWidget);
     if (!f.isRegistered("TreeView"))  f.registerCreator("TreeView",  createTreeViewWidget);
     if (!f.isRegistered("RichText"))  f.registerCreator("RichText",  createRichTextWidget);
+    // Phase D (D2) — Modal layer
+    if (!f.isRegistered("Dimmer"))  f.registerCreator("Dimmer",  []() { return new Dimmer(); });
+    if (!f.isRegistered("Modal"))   f.registerCreator("Modal",   []() { return new Modal(); });
 }
 
 void UIManager::initialize(IRenderBackend* backend) {
@@ -297,6 +302,31 @@ void UIManager::tearDownOverlayChildren() {
         static_cast<ComboBox*>(anchor)->onPopupDismissedByManager();
     }
 
+    // Phase D (D2) — Modal layer mirror (R-3 landmine avoidance, same
+    // pattern as A2 landmine #2). tearDownOverlayChildren runs BEFORE
+    // _root is destroyed in shutdown/loadLayout/loadFromString. If a modal
+    // was active, _activeModal points at a widget about to be destroyed
+    // by the loop below. Drop the pointer NOW so a subsequent Esc or
+    // closeModal(0xFEAD-feed) doesn't dereference it.
+    if (_activeModal != nullptr) {
+        // Restore focus to whatever the modal had saved — the modal dtor
+        // path normally handles this in ~Modal, but mid-tearDown we may
+        // not go through that path (host program called loadLayout while
+        // a modal was open). Drop focus cleanly to avoid UAF.
+        if (_focusedWidget != nullptr &&
+            (_focusedWidget == _activeModal
+             || isDescendantOf(_focusedWidget, _activeModal))) {
+            _focusedWidget = nullptr;
+        }
+        if (_capturedWidget != nullptr &&
+            (_capturedWidget == _activeModal
+             || isDescendantOf(_capturedWidget, _activeModal))) {
+            _capturedWidget = nullptr;
+        }
+        _activeModal = nullptr;
+        _activeModalRoot = nullptr;
+    }
+
     if (_overlayRoot == nullptr) {
         return;
     }
@@ -331,11 +361,14 @@ void UIManager::shutdown() {
     // soon-to-be-freed widget) is released first.
     _capturedWidget = nullptr;
     _hoverWidget = nullptr;
-    if (_focusedWidget != nullptr) {
-        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
-        if (fw != nullptr) fw->setFocus(false);
-        _focusedWidget = nullptr;
-    }
+    // Phase D (D2) — use clearFocusNoDispatch instead of
+    // `dynamic_cast + setFocus(false)`. By shutdown time, widgets in
+    // _root (about to be destroyed in this function) or _overlayRoot
+    // (about to be destroyed in tearDownOverlayChildren) may be partially
+    // destroyed already. Calling a virtual function on the focused widget
+    // is undefined behavior in C++ (R3 landmine, same pattern Phase C
+    // TextInput::~TextInput → cancelComposition(this, fireEndOnOwner=false)).
+    clearFocusNoDispatch(_focusedWidget);
     // Phase C (S4): also drop any in-flight composition. We don't fire
     // End on the owner because by shutdown time the owner may already
     // be part of the tree about to be destroyed, and we just cleared
@@ -369,9 +402,13 @@ void UIManager::shutdown() {
 
 bool UIManager::loadLayout(const std::string& path) {
     if (_focusedWidget != nullptr) {
-        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
-        if (fw != nullptr) fw->setFocus(false);
-        _focusedWidget = nullptr;
+        // Phase D (D2) — clearFocusNoDispatch instead of
+        // `dynamic_cast + setFocus(false)`. By tree-mutating time (a
+        // reload/loadLayout, the about-to-die widgets in _root may be
+        // partially destroyed; invoking a virtual function on them is
+        // undefined behavior (R3 landmine, same pattern as Phase C
+        // TextInput::~TextInput). See clearFocusNoDispatch docstring.
+        clearFocusNoDispatch(_focusedWidget);
     }
     // Phase A: drop overlay children — popups may reference widgets in
     // the about-to-be-destroyed root. Keep overlay itself (it survives
@@ -403,9 +440,13 @@ bool UIManager::loadLayout(const std::string& path) {
 
 bool UIManager::loadFromString(const std::string& json) {
     if (_focusedWidget != nullptr) {
-        FocusableWidget* fw = dynamic_cast<FocusableWidget*>(_focusedWidget);
-        if (fw != nullptr) fw->setFocus(false);
-        _focusedWidget = nullptr;
+        // Phase D (D2) — clearFocusNoDispatch instead of
+        // `dynamic_cast + setFocus(false)`. By tree-mutating time (a
+        // reload/loadLayout, the about-to-die widgets in _root may be
+        // partially destroyed; invoking a virtual function on them is
+        // undefined behavior (R3 landmine, same pattern as Phase C
+        // TextInput::~TextInput). See clearFocusNoDispatch docstring.
+        clearFocusNoDispatch(_focusedWidget);
     }
     // Phase A: same overlay-teardown sequence as loadLayout.
     tearDownOverlayChildren();
@@ -631,6 +672,99 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
     }
 }
 
+// =============================================================================
+// Phase D (D2) — Modal open/close
+// =============================================================================
+//
+// Pattern mirrors openPopup/closePopup: single-active invariant (Q14),
+// capture guard (R2 — null _capturedWidget if it's inside the modal),
+// a parent-detach before reparent onto the overlay. We do NOT destroy
+// the modal at closeModal time — hosts own lifetime (DECISION mirror
+// of ComboBox popup ownership). The Modal dtor (R3) drives its own
+// deregister-on-destroy via UIManager::closeModal(this, fireOnClose=false).
+// =============================================================================
+void UIManager::openModal(Modal* modal) {
+    if (modal == nullptr) return;
+    if (_overlayRoot == nullptr) return;
+
+    // Single-active invariant (Q14): opening B closes A. We can't call
+    // closeModal(A) here because A's _onClose should NOT fire (a chain of
+    // dismiss callbacks would surprise hosts). We also can't just drop
+    // _activeModalRoot because A still holds _isOpen=true; we need to
+    // notify A via its own onForceClosedByManager path which clears
+    // A's _isOpen, frees the focusedBefore slot, and detaches its dimmer
+    // from the overlay. Same pattern as Phase A ComboBox's
+    // onPopupDismissedByManager (memory landmine #2 from A2).
+    if (_activeModal != nullptr && _activeModal != modal) {
+        Modal* prior = _activeModal;
+        Widget* priorRoot = _activeModalRoot;
+        _activeModal = nullptr;
+        _activeModalRoot = nullptr;
+        if (prior != nullptr) {
+            prior->onForceClosedByManager(priorRoot);
+        }
+    }
+
+    // R2 — capture guard. If a drag currently targets a widget inside the
+    // about-to-mount modal, null the capture to avoid dangling-pointer
+    // dispatch (drag was using old tree; modal mount changes tree).
+    if (_capturedWidget != nullptr) {
+        if (_capturedWidget == modal || isDescendantOf(_capturedWidget, modal)) {
+            _capturedWidget = nullptr;
+        }
+    }
+
+    // Reparent onto the overlay. Defensive detach if `modal` already has a
+    // parent (e.g. host mounted it under a different root).
+    if (modal->getParent() != nullptr) {
+        modal->getParent()->removeChild(modal);
+    }
+    _overlayRoot->addChild(modal);
+
+    _activeModal = modal;
+    _activeModalRoot = modal;
+}
+
+void UIManager::closeModal(Modal* modal, bool fireOnClose) {
+    // fireOnClose=true: Modal::closeModal calls _onClose + restores focus
+    //                    to _focusedBefore via setFocus. Manager does NOT
+    //                    touch _focusedWidget here.
+    // fireOnClose=false: dtor path (~Modal). No _onClose + no setFocus
+    //                     (setFocus during dtor would invoke virtual
+    //                     setFocus(false) on the about-to-be-destroyed
+    //                     Modal — UB, R3 landmine). Use clearFocusNoDispatch
+    //                     to drop _focusedWidget if it still points at
+    //                     the dying modal, mirroring Phase C TextInput
+    //                     dtor's cancelComposition(this, fireEndOnOwner=false).
+    if (modal == nullptr) return;
+    if (_activeModal != modal) return;   // not the active one — silent no-op
+
+    // Capture guard — never dispatch a future mouse event to a destroyed
+    // modal subtree (mirror Phase A closePopup R-3).
+    if (_capturedWidget != nullptr &&
+        (_capturedWidget == modal || isDescendantOf(_capturedWidget, modal))) {
+        _capturedWidget = nullptr;
+    }
+    if (_hoverWidget != nullptr &&
+        (_hoverWidget == modal || isDescendantOf(_hoverWidget, modal))) {
+        _hoverWidget = nullptr;
+    }
+
+    if (!fireOnClose) {
+        // dtor path: manager drops _focusedWidget if it pointed at us,
+        // without firing any virtual dispatch.
+        clearFocusNoDispatch(modal);
+    }
+    // fireOnClose path: Modal::closeModal restores focus via setFocus
+    // _focusedBefore. We don't touch _focusedWidget here.
+
+    if (modal->getParent() != nullptr) {
+        modal->getParent()->removeChild(modal);
+    }
+    _activeModal = nullptr;
+    _activeModalRoot = nullptr;
+}
+
 bool UIManager::isDescendantOf(Widget* widget, Widget* ancestor) {
     if (widget == nullptr || ancestor == nullptr) return false;
     Widget* p = widget->getParent();
@@ -727,6 +861,33 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
     Widget* hit = pickTopmostWidget(pos);
     updateHoverWidget(_hoverWidget, hit);
 
+    // Phase D (D2) — Modal input block. When a modal is active, the only
+    // hits we forward are inside the modal subtree. Clicks anywhere else
+    // (the dimmer, the area BEHIND the dimmer — which the dimmer already
+    // swallows) are eaten: we never call the widget under the dimmer, never
+    // close the modal here (Modal::onDimmerClicked owns the dismiss policy
+    // via Q8). The dimmer itself records _capturedWidget on button-down so
+    // subsequent onMouseMove / onMouseButtonUp still route through the
+    // dimmer (which is on the overlay → hit == dimmer → onMouseButtonDown
+    // returns true → capture set).
+    if (_activeModal != nullptr) {
+        const bool insideModal = (hit != nullptr) && (
+            hit == _activeModal ||
+            isDescendantOf(hit, _activeModal));
+        if (!insideModal) {
+            // Outside the modal subtree — the dimmer (mounted as a sibling
+            // of the modal under _overlayRoot) consumed the pick via its
+            // own onMouseButtonDown returning true. We just don't route
+            // the event to the modal; the dimmer's sink already fired
+            // closeModal via Q8.
+            if (hit != nullptr && hit->onMouseButtonDown(UIMouseEvent(pos, button))) {
+                _capturedWidget = hit;
+                return true;
+            }
+            return false;
+        }
+    }
+
     // Phase A (S2): click-outside detection for active dropdown. If the
     // click landed outside the active popup AND outside its anchor's
     // subtree, close the popup. The anchor check matters: a click on the
@@ -805,6 +966,17 @@ void UIManager::cancelCapture() {
     captured->onMouseButtonUp(UIMouseEvent(math::FVector2(0.0f, 0.0f), 0));
 }
 
+// Phase D (D2) — clearFocusNoDispatch. R3 landmine avoidance. NOT a
+// general-purpose API: only ~FocusableWidget and dtor scenarios may call
+// this. The candidate is typically `this` of a widget about to be
+// destroyed; if the manager's focus pointer happens to point at it, we
+// reset to nullptr WITHOUT firing any virtual dispatch.
+void UIManager::clearFocusNoDispatch(Widget* candidate) {
+    if (_focusedWidget == candidate) {
+        _focusedWidget = nullptr;
+    }
+}
+
 void UIManager::setFocus(Widget* widget) {
     if (_focusedWidget == widget) {
         return;
@@ -865,6 +1037,17 @@ bool UIManager::onKeyDown(int keyCode) {
     if (keyCode == UIKey_Tab) {
         if (_modifiers & (1u << (UIKey_Shift - UIKey_Shift))) focusPrev();
         else                                                  focusNext();
+        return true;
+    }
+
+    // Phase D (D2) — Esc closes the active modal (Q7). UIManager is the
+    // single owner of this policy: even if focus is on a TextInput inside
+    // the modal, Esc on the modal close path wins. Modal::closeModal
+    // dispatches _onClose (if set) and restores focus to the prior widget.
+    if (keyCode == UIKey_Escape && _activeModal != nullptr) {
+        // closeModal fires the modal's _onClose via Modal::closeModal's own
+        // path; the Modal owns the user-visible dismiss side-effect.
+        _activeModal->closeModal();
         return true;
     }
 
@@ -1057,10 +1240,21 @@ void UIManager::cancelComposition(Widget* owner, bool fireEndOnOwner) {
 }
 
 void UIManager::focusNext() {
-    Widget* startRoot = (_focusedWidget != nullptr
-                         && isDescendantOf(_focusedWidget, _overlayRoot))
-                        ? _overlayRoot
-                        : _root;
+    // Phase D (D2) — Q6 focus trap. When a modal is active and focus is
+    // inside it, Tab stays inside the modal subtree. The modal's content
+    // tree is the DFS root — picking the modal widget itself (not the
+    // overlay) keeps the focus cycle inside the modal content even if the
+    // modal is wrapped in a dimmer or another overlay sibling.
+    Widget* startRoot = _root;
+    if (_focusedWidget != nullptr) {
+        if (_activeModal != nullptr
+            && (_focusedWidget == _activeModal
+                || isDescendantOf(_focusedWidget, _activeModal))) {
+            startRoot = _activeModal;
+        } else if (isDescendantOf(_focusedWidget, _overlayRoot)) {
+            startRoot = _overlayRoot;
+        }
+    }
     auto all = collectFocusablesDFS(startRoot);
     if (all.empty()) return;
 
@@ -1075,10 +1269,16 @@ void UIManager::focusNext() {
 }
 
 void UIManager::focusPrev() {
-    Widget* startRoot = (_focusedWidget != nullptr
-                         && isDescendantOf(_focusedWidget, _overlayRoot))
-                        ? _overlayRoot
-                        : _root;
+    Widget* startRoot = _root;
+    if (_focusedWidget != nullptr) {
+        if (_activeModal != nullptr
+            && (_focusedWidget == _activeModal
+                || isDescendantOf(_focusedWidget, _activeModal))) {
+            startRoot = _activeModal;
+        } else if (isDescendantOf(_focusedWidget, _overlayRoot)) {
+            startRoot = _overlayRoot;
+        }
+    }
     auto all = collectFocusablesDFS(startRoot);
     if (all.empty()) return;
 
