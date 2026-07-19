@@ -4,6 +4,19 @@
 
 namespace ayt::ui {
 
+// =============================================================================
+// Phase D (D1) — Resize hit-zone enum (Q1).
+// =============================================================================
+//
+// v1 ships ONLY the bottom-right (SE) corner. The enum is a deliberate hook so
+// the future "all 4 corners + 4 edges" upgrade is a one-line branch addition
+// inside hitTestResizeEdge without touching the public API.
+// =============================================================================
+enum class ResizeEdge {
+    None,
+    BottomRight,
+};
+
 class Window : public CompoundWidget {
 public:
     Window();
@@ -26,6 +39,15 @@ public:
 
     void setOnClose(std::function<void()> callback) { _onClose = callback; }
 
+    // Phase D (D1) — Resize callback (Q4). Fires only on button-up after a
+    // real size change. Drag-internal setSize calls do NOT fire (avoids
+    // notification noise). Signature: (oldSize, newSize). Pass by value so
+    // hosts get stable snapshots regardless of timing.
+    void setOnResize(std::function<void(const math::FVector2& /*oldSize*/,
+                                         const math::FVector2& /*newSize*/)> cb) {
+        _onResize = std::move(cb);
+    }
+
     void setMinSize(float width, float height);
     void setMinSize(const math::FVector2& size);
     const math::FVector2& getMinSize() const { return _minSize; }
@@ -41,6 +63,8 @@ public:
     float getTitleBarHeight() const { return _titleBarHeight; }
 
     bool isDragging() const { return _isDragging; }
+    bool isResizing() const { return _isResizing; }
+    ResizeEdge getActiveResizeEdge() const { return _resizeEdge; }
 
     void onMouseLeave() override;
 
@@ -50,9 +74,15 @@ public:
 
     void layoutChildren() override;
 
+    // Test seam — exposes the SE hit-zone computation. Not virtual (single
+    // owner; no widget subclass should override). Returns ResizeEdge::None
+    // when _resizable=false or outside the SE band.
+    ResizeEdge hitTestResizeEdge(const math::FVector2& worldPos) const;
+
 protected:
     math::FVector2 localPositionFromMouse(const math::FVector2& mouseWorldPos) const;
     void clampPositionWithinParent();
+    void renderResizeGrip(IRenderBackend& renderer) const;
 
     std::wstring _title;
     bool _movable;
@@ -60,12 +90,19 @@ protected:
     bool _closable;
     bool _modal;
     std::function<void()> _onClose;
+    std::function<void(const math::FVector2&, const math::FVector2&)> _onResize;
     float _titleBarHeight;
     math::FVector2 _minSize;
 
     bool _isDragging;
     bool _titleBarHover = false;
     math::FVector2 _dragOffset;
+
+    // Phase D (D1) — resize state.
+    ResizeEdge _resizeEdge = ResizeEdge::None;
+    bool _isResizing = false;
+    math::FVector2 _resizeStartSize{};
+    math::FVector2 _resizeStartMousePos{};
 };
 
 } // namespace ayt::ui

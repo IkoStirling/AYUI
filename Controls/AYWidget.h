@@ -2,7 +2,7 @@
 
 #include "aymath/MathTypes.h"
 #include "aymath/MathUtils.h"
-#include "AYIRenderBackend.h"
+#include "IAYRenderBackend.h"
 
 #include <functional>
 #include <vector>
@@ -55,6 +55,10 @@ enum class UiCursorHint {
     Hand,
     SizeHorizontal,
     SizeVertical,
+    // Phase D (D1) — diagonal cursor for SE/NW resize corners.
+    // The base widget returns Default; concrete resize edges return SizeNwse
+    // for the SE corner. Future 4-corner resize can branch on edge.
+    SizeNwse,
     Move,
     Beam,
 };
