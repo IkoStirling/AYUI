@@ -255,6 +255,8 @@ static void ensureBuiltInFactoriesRegistered() {
     // Phase D (D2) — Modal layer
     if (!f.isRegistered("Dimmer"))  f.registerCreator("Dimmer",  []() { return new Dimmer(); });
     if (!f.isRegistered("Modal"))   f.registerCreator("Modal",   []() { return new Modal(); });
+    // Phase D (D4) — TabStrip
+    if (!f.isRegistered("TabStrip")) f.registerCreator("TabStrip", createTabStripWidget);
 }
 
 void UIManager::initialize(IRenderBackend* backend) {

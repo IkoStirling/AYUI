@@ -28,6 +28,20 @@ math::FRectangle Button::getTextBounds() const {
     );
 }
 
+// Phase D (D4) — preferred-size heuristic for TabStrip-driven layout. Each
+// character is approximated as 8 pixels wide at the 14pt font the Button
+// draws, plus horizontal padding on both sides. Height defaults to the
+// kMinButtonHeight if the widget hasn't been sized yet, otherwise reports
+// the current height so vertical-grow containers don't keep extending it.
+// v1.1 swap: real text shaper once AYFont.measureText is exposed publicly.
+math::FVector2 Button::getPreferredSize() const {
+    constexpr float kAvgCharWidth = 8.0f;
+    constexpr float kMinButtonHeight = 24.0f;
+    const float textW = static_cast<float>(_text.size()) * kAvgCharWidth;
+    const float preferredH = std::max(kMinButtonHeight, getHeight());
+    return math::FVector2(textW + _padding.x + _padding.z, preferredH);
+}
+
 // R-5: style resolution is centralized in resolveStyle() (see AYStyle.h).
 // When hasStyle is true the resolved colors drive the draw; otherwise the
 // hardcoded fallback fills (state-aware) take over. This matches the

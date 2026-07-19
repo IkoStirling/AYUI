@@ -17,6 +17,12 @@ public:
 
     void setPadding(float left, float top, float right, float bottom);
 
+    // Phase D (D4) — preferred-size heuristic used by TabStrip when laying
+    // out tab buttons. Each char ~8px + horizontal padding on each side.
+    // This is intentionally rough; v1.1 swaps in a real text shaper. The
+    // height is the larger of the current widget height and kMinButtonHeight.
+    math::FVector2 getPreferredSize() const;
+
 protected:
     void onRender(IRenderBackend& renderer) override;
     math::FRectangle getTextBounds() const;

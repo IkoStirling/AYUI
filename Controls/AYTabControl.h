@@ -2,7 +2,7 @@
 
 #include "AYCompoundFocusableWidget.h"
 #include "AYWidget.h"
-#include "AYListView.h"
+#include "AYTabStrip.h"
 #include "AYPanel.h"
 #include <functional>
 #include <string>
@@ -14,47 +14,39 @@ namespace ayt::ui {
 // C-9 TabControl: a tab strip + content area.
 // =============================================================================
 //
-// Architecture (v1):
-//   TabControl (CompoundWidget)
-//     ├─ _header: ListView* (single-row header; each tab = one list row)
-//     └─ _body:   Panel*   (current tab's content host; addChildExternal
-//                          is what callers use to put widgets inside)
-//
-// Header reuses C-5 ListView directly — picking a tab is exactly a single-
-// selection list. The list's _onSelectionChanged is forwarded to TabControl's
-// _onSelectionChanged, and additionally remounts the body content for the new
-// tab (see TabControl::handleHeaderSelectionChanged).
+// Architecture (Phase D PR-3):
+//   TabControl (CompoundFocusableWidget)
+//     ├─ _tabStrip: TabStrip*   (Phase D4 — horizontal row of Button tabs
+//                              with sky-blue accent underline; replaces
+//                              the old vertical ListView header)
+//     └─ _body:    Panel*      (current tab's content host; addChildExternal
+//                              is what callers use to put widgets inside)
 //
 // Body is a Panel (C-1) so it can host arbitrary children and paint a styled
 // background. The active tab's content is reparented (addChildExternal) into
 // _body on selection change; previous tab's content is detached (not freed —
 // callers own it; see destroy policy note below).
 //
-// Layout (v1):
+// Layout:
 //   ┌──────────────────────────────────┐  ← TabControl bounds
-//   │ ┌──────────┐ ┌────┐ ┌────┐ ... │  ← _header (height = _headerHeight)
+//   │ ┌──────┐ ┌──────┐ ┌──────┐ ...  │  ← _tabStrip (height = _headerHeight)
 //   ├──────────────────────────────────┤
 //   │                                  │
 //   │     active tab's content         │  ← _body (fills remaining height)
 //   │                                  │
 //   └──────────────────────────────────┘
 //
-// The header is forced to its one visible row; the ListView's vertical
-// scrollbar is hidden via setScrollEnabled(false) on the scroll state (v1:
-// ListView's scrollbar is always created — the host can hide it by setting
-// _vbar->setVisible(false) if visible-vbar becomes noisy).
-//
 // -----------------------------------------------------------------------------
 // v1 design decisions + known limitations + v1.1 upgrade paths
 // -----------------------------------------------------------------------------
 //
-// DECISION 1: Header IS a ListView (not a horizontal strip of buttons).
-//   Why: list reuse gives us single-selection semantics, click handling, and
-//   visual styling for free. We trade the natural "horizontal tab strip"
-//   look for code simplicity — v1 keeps the header as a one-row vertical
-//   ListView (each tab is a row). A future v1.1 horizontal header can be a
-//   separate `TabStrip` widget that re-uses ListView under the hood but
-//   rotates its layout. The public API does not change.
+// DECISION 1 (Phase D PR-3): Header IS a TabStrip (horizontal Button row),
+//   not a vertical ListView. The old ListView header shipped in C-9
+//   (2026-07-18) was visually wrong for production (one tall column of
+//   text rows). D4 replaces it with a Phase D widget that lays a row of
+//   plain `Button` (C-1) tabs out left-to-right with an accent underline
+//   beneath the active tab. Q10: tabs are `Button : InteractiveWidget`,
+//   selected-accent underline drawn by TabStrip::onRender.
 //
 // DECISION 2: Body is a Panel, NOT a slot-stack of pre-loaded contents.
 //   Why: TabControl does not own the lifetime of tab content — hosts create
@@ -76,39 +68,22 @@ namespace ayt::ui {
 // header rect — clicking on body content (a button, a text input, etc.)
 // must NOT steal focus from the body widget.
 //
-// Header ListView is visual-only and is excluded from Tab traversal
-// automatically by collectFocusablesDFS's
-// `dynamic_cast<FocusableWidget*>` filter (ListView extends
-// CompoundFocusableWidget in B1, but it's only "focusable" because
-// we made it so — its onKeyDown handles arrow keys, which would
-// conflict with our Left/Right here). The standard pattern is for
-// the host to NOT add the TabControl to Tab traversal — instead,
-// embed focusable widgets inside each tab's content, and let those
-// be Tab targets. TabControl's onKeyDown handles its own Left/Right
-// when the user has clicked into the header.
-//
 // DECISION 5: No closeable tabs, no reorder-by-drag, no new-tab button.
 //   All pure-visual v2+ features. Public API stays stable.
 //
-// DECISION 6: HeaderListView vbar visible by default (ListView always
-// creates one). v1 does not auto-hide it because list viewports are tiny
-// for tabs (1-2 rows fit). When the host adds >_visibleRows tabs the vbar
-// becomes visible and looks ugly — hosts should call
-// `tc.getHeaderListView()->getVerticalScrollBar()->setVisible(false)`
-// before showing. We document this instead of auto-hiding because auto-hide
-// would also need to clamp _visibleRows (otherwise content past the visible
-// row is unreachable). v1.1 fix: add ListView::setVisibleRowCount(n) +
-// auto-hide vbar when items <= n.
+// DECISION 6 (Phase D PR-3 Q12): v1 clips overflow — tabs longer than
+// the strip width draw past the right edge without scrolling. Hosts polling
+// `getTabStrip()->isOverflown()` can decide to show a "more tabs" badge
+// or defer the v1.1 ScrollView wrap until it ships.
+//
 // =============================================================================
 
 class TabControl : public CompoundFocusableWidget {
 public:
-    // Header height in logical pixels. Default 28. ListView row height also
-    // defaults to 24 — hosts that want a taller header should call
-    // `getHeaderListView()->setItemHeight(headerHeight)` AND
-    // `setHeaderHeight(headerHeight)`.
+    // Header height in logical pixels. Default 28 — also the TabStrip
+    // kDefaultTabHeight. Hosts that want a taller header should call
+    // `setHeaderHeight(h)` (it forwards to _tabStrip->setTabHeight(h)).
     static constexpr float kDefaultHeaderHeight = 28.0f;
-    static constexpr float kDefaultRowHeight    = 28.0f;
 
     TabControl();
     ~TabControl() override;
@@ -129,13 +104,19 @@ public:
     void setSelectedIndex(int index);
     const std::wstring& getSelectedLabel() const;
 
-    // Access to the underlying ListView (header) and Panel (body). Hosts use
-    // these to skin the header (font, itemHeight) or pre-load the body.
-    ListView* getHeaderListView() const { return _header; }
-    Panel*    getBodyPanel() const      { return _body; }
+    // Access to the underlying TabStrip (header) and Panel (body). Hosts use
+    // these to skin the header (setTabHeight, setSpacing) or pre-load the body.
+    //
+    // Phase D PR-3: getHeaderListView() REMOVED. Hosts that pre-D4 code
+    // called `tc.getHeaderListView()->setItems(...)` etc. must migrate
+    // to `tc.getTabStrip()->...` (the TabStrip API is different —
+    // addTab(label) per-tab, no items vector). The 1 inline call site
+    // inside Test_TabControl was rewritten.
+    TabStrip* getTabStrip() const { return _tabStrip; }
+    Panel*    getBodyPanel() const { return _body; }
 
-    void setHeaderHeight(float h) { _headerHeight = h; }
-    float getHeaderHeight() const { return _headerHeight; }
+    void setHeaderHeight(float h);
+    float getHeaderHeight() const;
 
     void setOnSelectionChanged(std::function<void(int)> cb) {
         _onSelectionChanged = std::move(cb);
@@ -144,7 +125,8 @@ public:
     // Phase B (B4): onMouseButtonDown grabs focus only when the click
     // is within the header rect — clicking the body must NOT steal focus
     // from whatever focusable widget lives there. onKeyDown cycles
-    // _selectedIndex Left/Right (wrap).
+    // _selectedIndex Left/Right (wrap). D4 forwards Left/Right to the
+    // inner TabStrip for the underline + button visuals to update too.
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onKeyDown(int keyCode) override;
 
@@ -159,17 +141,16 @@ private:
         Widget* content = nullptr;   // not owned
     };
 
-    void ensureHeaderAndBodyCreated();
-    void syncHeaderItems();
+    void ensureStripAndBodyCreated();
+    void handleStripSelectionChanged(int stripIndex);
     void remountBodyContent(int newIndex);
-    void handleHeaderSelectionChanged(int listIndex);
 
     std::vector<TabEntry> _tabs;
-    int  _selectedIndex = -1;
+    int   _selectedIndex = -1;
     float _headerHeight = kDefaultHeaderHeight;
 
-    ListView* _header = nullptr;
-    Panel*    _body   = nullptr;
+    TabStrip* _tabStrip = nullptr;
+    Panel*    _body     = nullptr;
 
     std::function<void(int)> _onSelectionChanged;
 };

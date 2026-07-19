@@ -56,7 +56,7 @@ TEST_CASE(tabcontrol_initial_state) {
     TabControl tc;
     CHECK(tc.getTabCount() == 0u);
     CHECK(tc.getSelectedIndex() == -1);
-    CHECK(tc.getHeaderListView() != nullptr);
+    CHECK(tc.getTabStrip() != nullptr);
     CHECK(tc.getBodyPanel() != nullptr);
     CHECK_FLOAT_EQ(tc.getHeaderHeight(), 28.0f, 1e-5f);
 }
@@ -75,9 +75,9 @@ TEST_CASE(tabcontrol_add_tab_auto_selects_first) {
     CHECK(tc.getTabCount() == 2u);
     CHECK(tc.getSelectedIndex() == 0);   // adding later tab doesn't steal selection
 
-    // Headers' ListView mirrors the tab labels.
-    CHECK(tc.getHeaderListView()->getItemCount() == 2u);
-    CHECK(tc.getHeaderListView()->getItem(1) == L"B");
+    // TabStrip mirrors the tab labels.
+    CHECK(tc.getTabStrip()->getTabCount() == 2u);
+    CHECK(tc.getTabStrip()->getTabLabel(1) == L"B");
 
     // Active content (a) is mounted in _body.
     CHECK(tc.getBodyPanel()->getChildren().size() == 1u);
@@ -249,6 +249,41 @@ TEST_CASE(tabcontrol_render_emits_header_and_body) {
     // ListView emits bg + at least 1 row + ScrollBar = multiple rects.
     // Panel emits bg + border. Expect a healthy count.
     CHECK(rectCount >= 2);
+}
+
+// Phase D (D4) — Phase D PR-3 swaps the vertical ListView header for a
+// horizontal TabStrip (row of Buttons). After layout, the strip's child
+// Button positions must lay out left-to-right with strictly increasing X.
+TEST_CASE(tabcontrol_tab_strip_layout_is_horizontal) {
+    TabControl tc;
+    TextLabel* a = new TextLabel(); a->setText(L"A content");
+    TextLabel* b = new TextLabel(); b->setText(L"B content");
+    TextLabel* c = new TextLabel(); c->setText(L"C content");
+    tc.addTab(L"Alpha", a);
+    tc.addTab(L"Beta",  b);
+    tc.addTab(L"Gamma", c);
+    tc.setSize(FVector2(400.0f, 120.0f));
+    tc.setPosition(FVector2(0.0f, 0.0f));
+    tc.performLayout();
+
+    TabStrip* strip = tc.getTabStrip();
+    CHECK_NOT_NULL(strip);
+    // 3 tabs → 3 Button children inside the strip.
+    CHECK_INT_EQ(static_cast<int>(strip->getChildren().size()), 3);
+
+    // Buttons are strictly left-to-right with non-decreasing X.
+    FVector2 prev(-1.0f, -1.0f);
+    for (Widget* w : strip->getChildren()) {
+        const FVector2 p = w->getPosition();
+        if (prev.x >= 0.0f) {
+            CHECK(p.x > prev.x);
+        }
+        prev = p;
+    }
+
+    destroyWidgetTree(a);
+    destroyWidgetTree(b);
+    destroyWidgetTree(c);
 }
 
 // =============================================================================
