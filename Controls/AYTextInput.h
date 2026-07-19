@@ -111,7 +111,17 @@ public:
         _onSubmit = std::move(cb);
     }
 
+    // =================================================================
+    // Phase C (C4) — placeholder text. Drawn when the buffer is empty
+    // AND the widget is not focused. Style override via
+    // `placeholderColor` (WidgetStyle key added in PR-1). Default muted
+    // gray, semitransparent.
+    // =================================================================
+    void setPlaceholder(const std::wstring& text) { _placeholder = text; }
+    const std::wstring& getPlaceholder() const { return _placeholder; }
+
     bool onMouseButtonDown(const UIMouseEvent& e) override;
+    bool onMouseButtonUp(const UIMouseEvent& e) override;
     bool onTextInput(wchar_t ch) override;
     bool onKeyDown(int keyCode) override;
 
@@ -133,6 +143,22 @@ public:
     // Phase C: state-query helper for tests + UI hints. True between
     // onImeCompositionStart and the matching onImeCompositionEnd.
     bool isComposing() const { return _composing; }
+
+    // =================================================================
+    // Phase C (C5) — mouse drag-to-select.
+    // =================================================================
+    // onMouseButtonDown returns true (so UIManager captures the widget)
+    // and records the click as the drag anchor. onMouseMove (when this
+    // is the captured widget) extends the selection from anchor to
+    // current position. onMouseButtonUp clears _dragging.
+    //
+    // Width approximation: we don't have a precise text shaper, so the
+    // caret x position uses a 7px-per-char approximation (same as
+    // TextArea's rendering). R3 applies here too.
+    // =================================================================
+    bool onMouseMove(const UIMouseEvent& e) override;
+
+    bool isDragging() const { return _dragging; }
 
     // Phase C: a TextInput IS a text-editing widget per the
     // UIManager::isTextEditing() helper. AYDevice::TextInput gate is
@@ -185,6 +211,25 @@ protected:
     std::wstring _compositionPreview;
     int          _compositionCaretBytes = 0;
     bool         _composing = false;
+
+    // Phase C (C4) placeholder.
+    std::wstring _placeholder;
+
+    // =================================================================
+    // Phase C (C5) — drag-select state.
+    // =================================================================
+    // _dragging is set by onMouseButtonDown (returns true so UIManager
+    // captures) and cleared by onMouseButtonUp. While _dragging is true,
+    // onMouseMove extends _selStart.._selEnd from _dragAnchorCol to the
+    // current approximate column.
+    //
+    // _dragAnchorWorld is the world-space mouse position at button-down.
+    // We translate to a column via the same 7px approximation used in
+    // the renderer. C5 of Phase C; mirrors Phase B's B1 onKeyDown
+    // approximation philosophy.
+    bool           _dragging = false;
+    math::FVector2 _dragAnchorWorld = math::FVector2(0.0f, 0.0f);
+    size_t         _dragAnchorCol = 0;
 };
 
 Widget* createTextInputWidget();

@@ -132,6 +132,22 @@ public:
     void setLineHeight(float h);
     float getLineHeight() const { return _lineHeight; }
 
+    // =================================================================
+    // Phase C (C6) — word-wrap toggle.
+    // =================================================================
+    // When enabled, lines longer than (viewportWidth - 2*kPaddingX) /
+    // approxCharWidth get greedy word-broken for rendering. The
+    // underlying _lines buffer still splits on '\n' (no soft '\n'
+    // insertion); wrapped-line index computation happens in render.
+    // syncDocumentSizeToContent recomputes document height to match the
+    // visual line count after a toggle.
+    //
+    // Width approximation uses the same 7px-per-char factor as the
+    // renderer and selection highlight — R3 best-effort. v1.2 with a
+    // real text shaper will tighten this.
+    void setWordWrap(bool w) { _wordWrap = w; syncDocumentSizeToContent(); }
+    bool isWordWrap() const { return _wordWrap; }
+
     void setOnTextChanged(std::function<void(const std::wstring&)> cb) {
         _onTextChanged = std::move(cb);
     }
@@ -180,6 +196,7 @@ private:
     size_t _maxLength = 0;        // 0 = unlimited (combined text size)
     bool _readOnly = false;
     float _lineHeight = kDefaultLineHeight;
+    bool _wordWrap = false;       // Phase C (C6)
 
     std::function<void(const std::wstring&)> _onTextChanged;
 };

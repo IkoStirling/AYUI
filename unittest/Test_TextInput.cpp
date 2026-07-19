@@ -560,4 +560,209 @@ TEST_CASE(textinput_render_underline_when_composing) {
     um.shutdown();
 }
 
+// =============================================================================
+// Phase C (C4) — Placeholder text tests for TextInput (PR-3)
+// =============================================================================
+//
+//   - Placeholder drawn when text empty + not focused.
+//   - Placeholder hidden when focused.
+//   - Placeholder hidden when text is non-empty.
+//   - getPlaceholder/setPlaceholder round-trip.
+// =============================================================================
+
+TEST_CASE(textinput_placeholder_drawn_when_empty_unfocused) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(10.0f, 10.0f));
+    ti.setPlaceholder(L"Type here...");
+    um.root()->addChildExternal(&ti);
+    // NOT focused.
+
+    MockRenderer renderer;
+    ti.render(renderer);
+
+    bool sawPlaceholder = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Text) {
+            if (dc.text == L"Type here...") {
+                sawPlaceholder = true;
+                break;
+            }
+        }
+    }
+    CHECK(sawPlaceholder);
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_placeholder_hidden_when_focused) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPlaceholder(L"Type here...");
+    um.root()->addChildExternal(&ti);
+    um.setFocus(&ti);
+
+    MockRenderer renderer;
+    ti.render(renderer);
+
+    bool sawPlaceholder = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Text) {
+            if (dc.text == L"Type here...") {
+                sawPlaceholder = true;
+                break;
+            }
+        }
+    }
+    CHECK_FALSE(sawPlaceholder);
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_placeholder_hidden_when_text_nonempty) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setText(L"hello");
+    ti.setPlaceholder(L"Type here...");
+    um.root()->addChildExternal(&ti);
+
+    MockRenderer renderer;
+    ti.render(renderer);
+
+    bool sawPlaceholder = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Text) {
+            if (dc.text == L"Type here...") {
+                sawPlaceholder = true;
+                break;
+            }
+        }
+    }
+    CHECK_FALSE(sawPlaceholder);
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_placeholder_roundtrip) {
+    TextInput ti;
+    CHECK(ti.getPlaceholder().empty());
+    ti.setPlaceholder(L"name");
+    CHECK(ti.getPlaceholder() == L"name");
+    ti.setPlaceholder(L"");
+    CHECK(ti.getPlaceholder().empty());
+}
+
+// =============================================================================
+// Phase C (C5) — Drag-select tests for TextInput (PR-3)
+// =============================================================================
+//
+// Coverage:
+//   - Drag from col 1 to col 4 selects [1,4).
+//   - Drag right-to-left selects reversed range.
+//   - Drag release keeps selection.
+//   - isDragging() toggles correctly.
+// =============================================================================
+
+TEST_CASE(textinput_drag_select_extends_selection) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(10.0f, 10.0f));
+    ti.setText(L"hello world");
+    um.root()->addChildExternal(&ti);
+
+    // Drive TextInput's hooks directly (not through UIManager's hit-test,
+    // which would require a layout pass — the drag-select logic is in
+    // TextInput::onMouseButtonDown/Move/Up which is what we want to test).
+    // UIManager's role (capturing the widget) is verified by the broader
+    // UIManager test suite.
+    constexpr float kApproxCharWidth = 7.0f;
+    const float clickX = 10.0f + TextInput::kPaddingX + 1.0f * kApproxCharWidth + 1.0f;
+    const float clickY = 10.0f + 12.0f;
+
+    UIMouseEvent down(FVector2(clickX, clickY), 0);
+    CHECK(ti.onMouseButtonDown(down));
+    CHECK(ti.hasFocus());
+    CHECK(ti.isDragging());
+
+    UIMouseEvent mv(FVector2(10.0f + TextInput::kPaddingX + 4.0f * kApproxCharWidth + 1.0f, clickY), 0);
+    CHECK(ti.onMouseMove(mv));
+    CHECK(ti.hasSelection());
+    CHECK(ti.getSelectionStart() == 1u);
+    CHECK(ti.getSelectionEnd() == 4u);
+
+    UIMouseEvent up(mv.mousePos, 0);
+    CHECK_FALSE(ti.onMouseButtonUp(up));
+    CHECK_FALSE(ti.isDragging());
+
+    um.shutdown();
+}
+
+TEST_CASE(textinput_drag_right_to_left_selects_reversed) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(10.0f, 10.0f));
+    ti.setText(L"hello world");
+    um.root()->addChildExternal(&ti);
+
+    constexpr float kApproxCharWidth = 7.0f;
+    const float x4 = 10.0f + TextInput::kPaddingX + 4.0f * kApproxCharWidth + 1.0f;
+    const float y  = 10.0f + 12.0f;
+    ti.onMouseButtonDown(UIMouseEvent(FVector2(x4, y), 0));
+
+    const float x1 = 10.0f + TextInput::kPaddingX + 1.0f * kApproxCharWidth + 1.0f;
+    ti.onMouseMove(UIMouseEvent(FVector2(x1, y), 0));
+    CHECK(ti.hasSelection());
+    CHECK(ti.getSelectionStart() == 1u);
+    CHECK(ti.getSelectionEnd() == 4u);
+
+    ti.onMouseButtonUp(UIMouseEvent(FVector2(x1, y), 0));
+    um.shutdown();
+}
+
+TEST_CASE(textinput_drag_release_keeps_selection) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(10.0f, 10.0f));
+    ti.setText(L"hello world");
+    um.root()->addChildExternal(&ti);
+
+    constexpr float kApproxCharWidth = 7.0f;
+    const float x0 = 10.0f + TextInput::kPaddingX + 0.0f * kApproxCharWidth + 1.0f;
+    const float x3 = 10.0f + TextInput::kPaddingX + 3.0f * kApproxCharWidth + 1.0f;
+    const float y  = 10.0f + 12.0f;
+    ti.onMouseButtonDown(UIMouseEvent(FVector2(x0, y), 0));
+    ti.onMouseMove(UIMouseEvent(FVector2(x3, y), 0));
+    ti.onMouseButtonUp(UIMouseEvent(FVector2(x3, y), 0));
+    CHECK_FALSE(ti.isDragging());
+    CHECK(ti.hasSelection());
+    CHECK(ti.getSelectionStart() == 0u);
+    CHECK(ti.getSelectionEnd() == 3u);
+
+    um.shutdown();
+}
+
 TEST_SUITE_END

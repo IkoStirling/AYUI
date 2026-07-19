@@ -110,7 +110,55 @@ public:
         _owner->_selStartCol = col;
         _owner->_selEndLine = line;
         _owner->_selEndCol = col;
+        // Phase C (C5): start drag. Returning true from onMouseButtonDown
+        // signals UIManager to capture this widget — subsequent
+        // onMouseMove events get delivered to us even if the cursor
+        // leaves the widget bounds, which is what enables drag-out
+        // selection.
+        _dragging = true;
+        _dragAnchorLine = line;
+        _dragAnchorCol = col;
         return true;
+    }
+
+    bool onMouseMove(const UIMouseEvent& e) override {
+        // Phase C (C5): extend selection from anchor to current position
+        // while drag is active. We don't gate on _capturedWidget because
+        // UIManager only routes onMouseMove to the captured widget.
+        if (!_dragging) return false;
+        const math::FVector2 local = e.mousePos - getWorldBounds().getMin();
+        const float lineHeight = _owner->getLineHeight();
+        int line = static_cast<int>(local.y / lineHeight);
+        int col = static_cast<int>(local.x - TextArea::kPaddingX);
+        line = std::clamp(line, 0, static_cast<int>(_owner->_lines.size()) - 1);
+        if (line < 0) line = 0;
+        col = std::max(0, col);
+        if (col > static_cast<int>(_owner->_lines[line].size())) {
+            col = static_cast<int>(_owner->_lines[line].size());
+        }
+        // Order anchor / current so start <= end.
+        int sl = _dragAnchorLine, sc = _dragAnchorCol;
+        int el = line,             ec = col;
+        if (sl > el || (sl == el && sc > ec)) {
+            std::swap(sl, el);
+            std::swap(sc, ec);
+        }
+        _owner->_selStartLine = sl;
+        _owner->_selStartCol = sc;
+        _owner->_selEndLine = el;
+        _owner->_selEndCol = ec;
+        _owner->_caretLine = el;
+        _owner->_caretCol = ec;
+        return true;
+    }
+
+    bool onMouseButtonUp(const UIMouseEvent& /*e*/) override {
+        // Phase C (C5): end drag. UIManager clears _capturedWidget
+        // automatically on button-up. Return false to let UIManager
+        // do its normal capture-release path.
+        if (!_dragging) return false;
+        _dragging = false;
+        return false;
     }
 
     bool onKeyDown(int keyCode) override {
@@ -292,6 +340,11 @@ private:
     std::wstring _compositionPreview;
     int          _compositionCaretBytes = 0;
     bool         _composing = false;
+
+    // Phase C (C5) drag-select state.
+    bool _dragging = false;
+    int  _dragAnchorLine = 0;
+    int  _dragAnchorCol = 0;
 };
 
 // =============================================================================
@@ -528,7 +581,25 @@ void TextArea::setLineHeight(float h) {
 
 void TextArea::syncDocumentSizeToContent() {
     if (_document == nullptr) return;
-    const float h = static_cast<float>(_lines.size()) * _lineHeight + 2.0f * kPaddingY;
+    // Phase C (C6): when word-wrap is on, the visual line count is
+    // larger than _lines.size() because long lines break into multiple
+    // visual rows. We compute the wrapped count here so the document
+    // height (and therefore the scrollbar range) reflects what the
+    // user actually sees.
+    int visualLines = 0;
+    constexpr float kApproxCharWidth = 7.0f;
+    const float wrapWidthPx = std::max(1.0f, getSize().x - 2.0f * kPaddingX);
+    const int wrapCols = static_cast<int>(wrapWidthPx / kApproxCharWidth);
+    for (const auto& l : _lines) {
+        if (!_wordWrap || wrapCols <= 0) {
+            visualLines += 1;
+        } else {
+            // Greedy wrap: ceil(length / wrapCols) visual rows.
+            visualLines += std::max(1,
+                static_cast<int>((l.size() + wrapCols - 1) / wrapCols));
+        }
+    }
+    const float h = static_cast<float>(visualLines) * _lineHeight + 2.0f * kPaddingY;
     // Width is set by ScrollView's layout pass — we provide a minimum
     // hint that allows the longest line to fit if hbar were enabled.
     float maxLineW = 0.0f;

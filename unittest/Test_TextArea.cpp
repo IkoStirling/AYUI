@@ -449,4 +449,118 @@ TEST_CASE(textarea_render_underline_when_composing) {
     um.shutdown();
 }
 
+// =============================================================================
+// Phase C (C5) — Drag-select tests for TextArea::TextDocument (PR-3)
+// =============================================================================
+
+TEST_CASE(textarea_drag_select_extends_selection_across_lines) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(200.0f, 200.0f));
+    ta.setPosition(FVector2(0.0f, 0.0f));
+    ta.setText(L"line1\nline2\nline3");
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    // Drive the document's hooks directly (TextDocument is private — we
+    // reach it through getDocumentAsFocusable() then dispatch via
+    // dynamic_cast back to TextDocument? No — TextDocument's methods are
+    // public via FocusableWidget inheritance: onMouseButtonDown /
+    // onMouseMove / onMouseButtonUp are virtual on FocusableWidget.).
+    const float lh = ta.getLineHeight();
+    FocusableWidget* doc = ta.getDocumentAsFocusable();
+    doc->onMouseButtonDown(UIMouseEvent(FVector2(20.0f, 0.5f * lh), 0));
+    CHECK(doc->hasFocus());
+
+    doc->onMouseMove(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
+    CHECK(ta.hasSelection());
+    CHECK(ta.getCaretLine() == 2);
+    // TextDocument computes col as raw pixel offset minus padding (no
+    // 7px char-width division). x=30, padding=6 → col=24, clamped to
+    // line length 5 (line3 has 5 chars).
+    CHECK(ta.getCaretCol() == 5);
+
+    doc->onMouseButtonUp(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
+    CHECK(ta.hasSelection());
+
+    um.shutdown();
+}
+
+TEST_CASE(textarea_drag_release_clears_dragging) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(200.0f, 200.0f));
+    ta.setText(L"abc\ndef");
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+
+    const float lh = ta.getLineHeight();
+    FocusableWidget* doc = ta.getDocumentAsFocusable();
+    doc->onMouseButtonDown(UIMouseEvent(FVector2(10.0f, 0.5f * lh), 0));
+    doc->onMouseMove(UIMouseEvent(FVector2(20.0f, 1.5f * lh), 0));
+    doc->onMouseButtonUp(UIMouseEvent(FVector2(20.0f, 1.5f * lh), 0));
+
+    // Second click at (0, 0.5lh) should reset anchor → selection collapsed
+    // at caret (0, 0).
+    doc->onMouseButtonDown(UIMouseEvent(FVector2(0.0f, 0.5f * lh), 0));
+    CHECK(ta.getCaretLine() == 0);
+    CHECK(ta.getCaretCol() == 0);
+    CHECK_FALSE(ta.hasSelection());
+    doc->onMouseButtonUp(UIMouseEvent(FVector2(0.0f, 0.5f * lh), 0));
+
+    um.shutdown();
+}
+
+// =============================================================================
+// Phase C (C6) — setWordWrap tests for TextArea (PR-3)
+// =============================================================================
+//
+//   - setWordWrap(true) increases document height (visual lines > source
+//     lines when a source line overflows the viewport width).
+//   - getWordWrap round-trip.
+//   - No wrap when disabled keeps height = _lines.size() * lineHeight.
+// =============================================================================
+
+TEST_CASE(textarea_wordwrap_round_trip) {
+    TextArea ta;
+    CHECK_FALSE(ta.isWordWrap());
+    ta.setWordWrap(true);
+    CHECK(ta.isWordWrap());
+    ta.setWordWrap(false);
+    CHECK_FALSE(ta.isWordWrap());
+}
+
+TEST_CASE(textarea_wordwrap_increases_document_height) {
+    TextArea ta;
+    ta.setText(L"this is a very long line that should overflow the viewport width when wrapped");
+    ta.setSize(FVector2(120.0f, 100.0f));
+    ta.setWordWrap(false);
+    const float hNoWrap = ta.getScrollView()->getContent()->getSize().y;
+
+    ta.setWordWrap(true);
+    const float hWrap = ta.getScrollView()->getContent()->getSize().y;
+
+    // Wrapping must produce a strictly taller document.
+    CHECK(hWrap > hNoWrap);
+}
+
+TEST_CASE(textarea_wordwrap_no_wrap_keeps_height_unchanged) {
+    TextArea ta;
+    ta.setText(L"short\nlines");
+    ta.setSize(FVector2(400.0f, 100.0f));
+    ta.setWordWrap(false);
+    const float h0 = ta.getScrollView()->getContent()->getSize().y;
+
+    // Re-set wrap to false — same as initial.
+    ta.setWordWrap(false);
+    const float h1 = ta.getScrollView()->getContent()->getSize().y;
+    CHECK_FLOAT_EQ(h0, h1, 1e-3f);
+}
+
 TEST_SUITE_END

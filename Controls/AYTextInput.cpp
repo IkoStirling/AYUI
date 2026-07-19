@@ -236,14 +236,76 @@ void TextInput::replaceRange(size_t a, size_t b, const std::wstring& replacement
 bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     if (e.mouseButton != 0) return false;
     if (!getWorldBounds().contains(e.mousePos)) return false;
-    // Click anywhere grants focus. Selection-by-coordinate is out of
-    // scope for v1 (we don't know glyph widths precisely).
+    // Click anywhere grants focus. Reset blink so the caret is visible
+    // immediately after click.
     setFocus(true);
-    clearSelection();
-    // Reset blink so the caret is visible immediately after click.
+    // Phase C (C5) — drag-select. Record the click as the drag anchor
+    // and return true so UIManager captures this widget. Subsequent
+    // onMouseMove events (delivered because of capture) extend the
+    // selection from the anchor to the current column.
+    _dragging = true;
+    _dragAnchorWorld = e.mousePos;
+    // Approximate the anchor column from the click x relative to the
+    // text area start. We use the same 7px char width as the renderer
+    // (R3 approximation). Clamp to text length.
+    constexpr float kApproxCharWidth = 7.0f;
+    const math::FRectangle b = getWorldBounds();
+    const float localX = e.mousePos.x - (b.minX + kPaddingX);
+    long approxCol = static_cast<long>(localX / kApproxCharWidth);
+    if (approxCol < 0) approxCol = 0;
+    if (static_cast<size_t>(approxCol) > _text.size()) {
+        approxCol = static_cast<long>(_text.size());
+    }
+    _dragAnchorCol = static_cast<size_t>(approxCol);
+    // Initial selection is the anchor (collapsed) — onMouseMove will
+    // extend it once the mouse moves.
+    _selStart = _dragAnchorCol;
+    _selEnd = _dragAnchorCol;
+    _caret = _dragAnchorCol;
     _caretBlinkTimer = 0.0f;
     _caretVisible = true;
     return true;
+}
+
+bool TextInput::onMouseMove(const UIMouseEvent& e) {
+    // Phase C (C5): only meaningful while drag is active and we own the
+    // capture. We don't gate on _capturedWidget because UIManager only
+    // delivers onMouseMove to the captured widget — if we're getting
+    // called, we're captured.
+    if (!_dragging) return false;
+    constexpr float kApproxCharWidth = 7.0f;
+    const math::FRectangle b = getWorldBounds();
+    const float localX = e.mousePos.x - (b.minX + kPaddingX);
+    long curCol = static_cast<long>(localX / kApproxCharWidth);
+    if (curCol < 0) curCol = 0;
+    if (static_cast<size_t>(curCol) > _text.size()) {
+        curCol = static_cast<long>(_text.size());
+    }
+    const size_t anchor = _dragAnchorCol;
+    const size_t cur = static_cast<size_t>(curCol);
+    if (cur < anchor) {
+        _selStart = cur;
+        _selEnd = anchor;
+    } else {
+        _selStart = anchor;
+        _selEnd = cur;
+    }
+    _caret = _selEnd;
+    _caretBlinkTimer = 0.0f;
+    _caretVisible = true;
+    return true;
+}
+
+bool TextInput::onMouseButtonUp(const UIMouseEvent& e) {
+    // Phase C (C5): end the drag. The selection built up during the
+    // drag stays in place; user can then copy / replace / etc.
+    if (e.mouseButton != 0) return false;
+    if (!_dragging) return false;
+    _dragging = false;
+    // Returning false here lets UIManager do its normal capture-release
+    // bookkeeping. UIManager clears _capturedWidget unconditionally on
+    // onMouseButtonUp (line ~764), so we don't need to fight it.
+    return false;
 }
 
 bool TextInput::onTextInput(wchar_t ch) {
@@ -426,6 +488,28 @@ void TextInput::onRender(IRenderBackend& renderer) {
         if (!displayText.empty()) {
             renderer.drawText(textBounds, displayText, 14, textColor);
         }
+    }
+
+    // =================================================================
+    // Phase C (C4) — placeholder text. Drawn when:
+    //   - _text is empty,
+    //   - widget is NOT focused (focused state shows the cursor, not a hint),
+    //   - _placeholder is non-empty.
+    //
+    // Style: WidgetStyle::placeholderColor (default muted gray, ~0.7 alpha).
+    // The placeholder text is drawn at the same font size as the real
+    // text, but at the left padding offset.
+    // =================================================================
+    if (_text.empty() && !_hasFocus && !_placeholder.empty()) {
+        math::FVector4 phColor(0.55f, 0.55f, 0.60f, 0.7f);
+        if (!getStyleId().empty()) {
+            const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
+            if (ws != nullptr) phColor = ws->placeholderColor;
+        }
+        math::FRectangle textBounds(
+            bounds.minX + kPaddingX, bounds.minY,
+            bounds.maxX - kPaddingX, bounds.maxY);
+        renderer.drawText(textBounds, _placeholder, 14, phColor);
     }
 
     // =================================================================
