@@ -76,14 +76,15 @@ public:
     // destroyWidgetTree() to recursively destroy a heap-allocated tree that
     // was built via WidgetFactory / UILayoutLoader.
     void addChild(Widget* child);
-    // addChildExternal: same semantics as addChild today (reference only,
-    // never deleted by parent). Kept as a separate name to document caller
-    // intent for stack-allocated or externally-owned children (e.g. test
-    // fixtures). The parent will never delete the child regardless of which
-    // method was used to attach it.
+    // addChildExternal: attach without transferring destroy ownership.
+    // destroyWidgetTree() must detach these without delete — stack fixtures
+    // and host-owned Modal/Dimmer rely on this (batch SEGV if violated).
     void addChildExternal(Widget* child);
     void removeChild(Widget* child);
     void detachFromParent();
+
+    // True when attached via addChildExternal (host owns lifetime).
+    bool isExternallyOwned() const { return _externallyOwned; }
 
     // Spatial properties
     const math::FVector2& getPosition() const { return _position; }
@@ -218,6 +219,10 @@ protected:
     Widget* _parent;
     std::vector<Widget*> _children;
 
+    // Set by addChildExternal; cleared on detach. destroyWidgetTree skips
+    // delete for these nodes (host/stack owns them).
+    bool _externallyOwned = false;
+
     bool _visible;
     bool _layoutPositionManaged = true;
     bool _layoutSizeManaged = true;
@@ -295,6 +300,9 @@ inline void destroyWidgetTree(Widget* root) {
     if (root == nullptr) {
         return;
     }
+    // Capture before detachFromParent → removeChild clears the flag.
+    const bool externalRoot = root->isExternallyOwned();
+
     // Detach from parent BEFORE delete so the parent's `_children` never
     // holds a dangling pointer. Callers that destroy an overlay popup
     // (or any still-parented subtree) without an explicit removeChild —
@@ -306,7 +314,19 @@ inline void destroyWidgetTree(Widget* root) {
     // mutates this node's `_children`, so iterate a local copy.
     std::vector<Widget*> children = root->getChildren();
     for (Widget* child : children) {
+        if (child == nullptr) {
+            continue;
+        }
+        // Host/stack-owned (addChildExternal): detach only — never delete.
+        // Factory/heap subtrees remain recursively destroyed.
+        if (child->isExternallyOwned()) {
+            child->detachFromParent();
+            continue;
+        }
         destroyWidgetTree(child);
+    }
+    if (externalRoot) {
+        return;
     }
     delete root;
 }

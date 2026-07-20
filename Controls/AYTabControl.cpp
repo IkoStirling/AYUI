@@ -221,7 +221,9 @@ bool TabControl::onMouseButtonDown(const UIMouseEvent& e) {
     // Header occupies [b.minY, b.minY + _headerHeight). Body sits below.
     if (e.mousePos.y < b.minY + _headerHeight && e.mousePos.y >= b.minY
         && e.mousePos.x >= b.minX && e.mousePos.x <= b.maxX) {
-        UIManager::get().setFocus(this);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->setFocus(this);
+        }
     }
     return false;
 }

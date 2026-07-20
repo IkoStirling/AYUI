@@ -26,9 +26,16 @@ ComboBox::~ComboBox() {
     // way we must not leave it on the overlay, and if it is unmounted we
     // still own the allocation and must free it.
     if (_popup != nullptr) {
-        if (_popup->getParent() != nullptr) {
-            UIManager::get().closePopup(_popup, /*destroy=*/true);
-        } else {
+        if (UIManager* ui = UIManager::tryGet()) {
+            if (_popup->getParent() != nullptr) {
+                ui->closePopup(_popup, /*destroy=*/true);
+            } else {
+                destroyWidgetTree(_popup);
+            }
+        } else if (_popup->getParent() == nullptr) {
+            // Manager already shut down; mounted popups were torn down with
+            // the overlay (and onPopupDismissedByManager nulls _popup when
+            // we were the anchor). Only free a soft-closed unmounted popup.
             destroyWidgetTree(_popup);
         }
         _popup = nullptr;
@@ -200,7 +207,14 @@ void ComboBox::openPopup() {
     // ordering (popup above the main tree) and owns the popup lifetime.
     // DropdownManager enforces single-active-popup — if a different
     // popup is open it will be closed first.
-    UIManager& ui = UIManager::get();
+    //
+    // Phase D §5.3 — tryGet() guards against the batch SEGV: when this
+    // ComboBox opens during a test that has already torn its UIManager
+    // down, get()'s static fallback would pin the popup on a process-
+    // lifetime static and crash when that static dtor runs.
+    UIManager* uiPtr = UIManager::tryGet();
+    if (uiPtr == nullptr) return;
+    UIManager& ui = *uiPtr;
     ui.openPopup(this, _popup);
 
     // If no active UIManager has an overlay (unit tests that forget to
@@ -275,7 +289,7 @@ void ComboBox::closePopup() {
         // `this` mid-callback (0xC0000005). Foreign dismiss paths
         // (other popup open, click-outside) still destroy via
         // UIManager::closePopup(p, true) + onPopupDismissedByManager.
-        UIManager::get().closePopup(_popup, /*destroy=*/false);
+        UIManager::get().closePopup(_popup, /*destroy=*/false);   // safe: openPopup site above
     }
 }
 
@@ -328,7 +342,9 @@ bool ComboBox::onMouseButtonDown(const UIMouseEvent& e) {
     // toggle-popup path lives in onMouseButtonUp (returning false
     // here lets the event flow up unchanged).
     if (e.mouseButton == 0) {
-        UIManager::get().setFocus(this);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->setFocus(this);
+        }
     }
     return false;
 }

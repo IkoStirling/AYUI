@@ -35,8 +35,14 @@ Tooltip* Tooltip::attachTo(Widget* target) {
     // call closePopup via UIManager with the tip pointer. The tick()
     // signature keeps the explicit viewport so callers can override
     // the UIManager viewport (e.g. tests).
-    UIManager::get().openPopup(target, tip);
+    // Phase D §5.3 — set _target BEFORE any UIManager call so that
+    // tooltip_initial_state tests (which construct a Tooltip without an
+    // active UIManager) still getTarget() == the attaching widget.
     tip->_target = target;
+    UIManager* uiPtr = UIManager::tryGet();
+    if (uiPtr == nullptr) return tip;   // tooltip usable without overlay
+    UIManager& ui = *uiPtr;
+    ui.openPopup(target, tip);
     tip->setVisible(false);
     return tip;
 }
@@ -65,7 +71,11 @@ void Tooltip::tick(float dt, const math::FVector2& mousePos,
     // the flip-above heuristic stays correct in production. Tests that
     // want a fixed viewport still pass an explicit size.
     if (viewportSize.x <= 0.0f && viewportSize.y <= 0.0f) {
-        _viewportSize = UIManager::get().getClientSize();
+        if (UIManager* ui = UIManager::tryGet()) {
+            _viewportSize = ui->getClientSize();
+        } else {
+            return;   // no active manager — skip tick
+        }
     } else {
         _viewportSize = viewportSize;
     }

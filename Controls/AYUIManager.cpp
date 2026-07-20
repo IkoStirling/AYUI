@@ -187,23 +187,34 @@ namespace {
 UIManager* g_activeUIManager = nullptr;
 } // namespace
 
+UIManager* UIManager::tryGet() {
+    return g_activeUIManager;
+}
+
 UIManager& UIManager::get() {
     if (g_activeUIManager != nullptr) {
         return *g_activeUIManager;
     }
     // Fallback for code paths that call get() before initialize() —
     // e.g. a bare `ComboBox cb; cb.openPopup();` in a unit test without
-    // its own UIManager. We lazily initialize the static fallback so
-    // it has an overlay root and behaves like a fully-initialized
-    // instance for popup mounts. Tests that don't care about UIManager
-    // routing still get a working popup layer (mounted on the fallback's
-    // overlay, freed by the fallback's destructor at program exit).
+    // its own UIManager. Lazily bootstrap an overlay-capable instance.
+    //
+    // CRITICAL (batch SEGV / R3): initialize() registers `this` as
+    // g_activeUIManager. If we leave the process-lifetime fallback as
+    // "active", Widget dtors after a real UIManager::shutdown() call
+    // get() and stash stack Widget* (focus/composition) onto the
+    // fallback — those pointers die with the fixture, then
+    // ~s_uninitializedFallback / the next scrub SEGV. So:
+    //   1) detach fallback from g_active immediately after bootstrap
+    //   2) drop any leftover transient Widget* on every fallback serve
     static UIManager s_uninitializedFallback;
-    static bool s_initialized = false;
-    if (!s_initialized) {
+    static bool s_bootstrapped = false;
+    if (!s_bootstrapped) {
         s_uninitializedFallback.initialize(nullptr);
-        s_initialized = true;
+        g_activeUIManager = nullptr;
+        s_bootstrapped = true;
     }
+    s_uninitializedFallback.dropTransientWidgetPointers();
     return s_uninitializedFallback;
 }
 
@@ -275,6 +286,15 @@ void UIManager::initialize(IRenderBackend* backend) {
     _clientWidth = 0.0f;
     _clientHeight = 0.0f;
     _shutdown = false;
+
+    // Canvas root for hosts/tests that attach widgets without loadFromString.
+    // Without this, `um.root()->addChildExternal(...)` is nullptr UB and can
+    // "pass" CHECKs then SEGV later in batch (corrupt heap / static teardown).
+    if (_root == nullptr) {
+        _root = new Widget();
+        _root->setPosition(math::FVector2(0.0f, 0.0f));
+        _root->setSize(math::FVector2(0.0f, 0.0f));
+    }
 
     // Phase A (S1): spawn the popup overlay root. Plain Widget — not
     // CompoundWidget. With CompoundWidget::hitTest we'd need to filter
@@ -727,7 +747,8 @@ void UIManager::openModal(Modal* modal) {
     if (modal->getParent() != nullptr) {
         modal->getParent()->removeChild(modal);
     }
-    _overlayRoot->addChild(modal);
+    // Host owns Modal lifetime (stack or heap) — never destroyWidgetTree it.
+    _overlayRoot->addChildExternal(modal);
 
     _activeModal = modal;
     _activeModalRoot = modal;
@@ -979,6 +1000,36 @@ void UIManager::cancelCapture() {
 // this. The candidate is typically `this` of a widget about to be
 // destroyed; if the manager's focus pointer happens to point at it, we
 // reset to nullptr WITHOUT firing any virtual dispatch.
+void UIManager::dropTransientWidgetPointers() {
+    // Do NOT destroy overlay/root trees here — bare ComboBox tests may
+    // still hold non-owning pointers into fallback-mounted popups for the
+    // duration of a single case. Only null raw bookkeeping slots that
+    // commonly outlive stack fixtures across shutdown → get() → exit.
+    _focusedWidget = nullptr;
+    _capturedWidget = nullptr;
+    _hoverWidget = nullptr;
+    _compositionOwner = nullptr;
+    _composing = false;
+    _activeModal = nullptr;
+    _activeModalRoot = nullptr;
+    // Keep _activeDropdown / anchor identity for closePopup paths that
+    // still run against the fallback within the same test; nulling those
+    // mid-open would strand overlay children. They are cleared when
+    // closePopup / tearDownOverlayChildren runs.
+}
+
+void UIManager::clearCaptureNoDispatch(Widget* candidate) {
+    if (_capturedWidget == candidate) {
+        _capturedWidget = nullptr;
+    }
+}
+
+void UIManager::clearHoverNoDispatch(Widget* candidate) {
+    if (_hoverWidget == candidate) {
+        _hoverWidget = nullptr;
+    }
+}
+
 void UIManager::clearFocusNoDispatch(Widget* candidate) {
     if (_focusedWidget == candidate) {
         _focusedWidget = nullptr;
@@ -1264,6 +1315,11 @@ void UIManager::focusNext() {
         }
     }
     auto all = collectFocusablesDFS(startRoot);
+    // Trap cycles content only — Modal chrome itself is FocusableWidget but
+    // must not sit in the Tab ring (would break wrap: …→inC→Modal→…).
+    if (_activeModal != nullptr && startRoot == static_cast<Widget*>(_activeModal)) {
+        all.erase(std::remove(all.begin(), all.end(), _activeModal), all.end());
+    }
     if (all.empty()) return;
 
     int idx = -1;
@@ -1288,6 +1344,9 @@ void UIManager::focusPrev() {
         }
     }
     auto all = collectFocusablesDFS(startRoot);
+    if (_activeModal != nullptr && startRoot == static_cast<Widget*>(_activeModal)) {
+        all.erase(std::remove(all.begin(), all.end(), _activeModal), all.end());
+    }
     if (all.empty()) return;
 
     int idx = -1;

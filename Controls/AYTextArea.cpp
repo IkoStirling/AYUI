@@ -74,10 +74,14 @@ public:
         // point to `this`. Otherwise shutdown() dynamic_casts a freed
         // pointer → "no RTTI data" AV. Same UAF pattern as Phase A
         // PR-5 (Menu::close).
-        UIManager& ui = UIManager::get();
-        if (ui.getFocusedWidget() == this) ui.setFocus(nullptr);
-        if (ui.isCapturing()) ui.cancelCapture();
-        ui.cancelComposition(this, /*fireEndOnOwner*/ false);
+        if (UIManager* ui = UIManager::tryGet()) {
+            if (ui->getFocusedWidget() == this) {
+                ui->clearFocusNoDispatch(this);
+            }
+            ui->clearCaptureNoDispatch(this);
+            ui->clearHoverNoDispatch(this);
+            ui->cancelComposition(this, /*fireEndOnOwner*/ false);
+        }
     }
 
     UiCursorHint getCursorHint() const override {

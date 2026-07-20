@@ -27,6 +27,12 @@ public:
     // and left dangling popups on a never-shut-down static UIManager).
     static UIManager& get();
 
+    // Non-owning: the manager currently registered by initialize(), or
+    // nullptr after shutdown() / before any initialize(). Widget destructors
+    // MUST prefer tryGet() over get() — get()'s static fallback must not
+    // absorb stack Widget* after the real manager has shut down (batch SEGV).
+    static UIManager* tryGet();
+
     void initialize(IRenderBackend* backend);
     void shutdown();
 
@@ -229,7 +235,16 @@ public:
     // runs (mirrors Phase B Menu::close save-restore pattern).
     void clearFocusNoDispatch(Widget* candidate);
 
+    // Same R3 contract as clearFocusNoDispatch: drop capture/hover if they
+    // point at `candidate` without synthesizing mouse-up or other virtuals.
+    void clearCaptureNoDispatch(Widget* candidate);
+    void clearHoverNoDispatch(Widget* candidate);
+
 private:
+    // Used by get()'s static fallback: null bookkeeping Widget* so process
+    // exit / cross-test get() cannot dereference fixtures that already died.
+    void dropTransientWidgetPointers();
+
     IRenderBackend* _backend = nullptr;
     Widget* _root = nullptr;
     // Phase A: popup overlay layer (sibling of _root). Spawned in

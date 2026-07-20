@@ -103,10 +103,17 @@ TextInput::~TextInput() {
     // ~Modal and the Manager teardown paths use it; TextInput ~ had been
     // missed (Phase C only handled composition cleanup). Mirror the same
     // R3 landmine avoidance here.
-    UIManager& ui = UIManager::get();
-    if (ui.getFocusedWidget() == this) ui.clearFocusNoDispatch(this);
-    if (ui.isCapturing()) ui.cancelCapture();
-    ui.cancelComposition(this, /*fireEndOnOwner*/ false);
+    // Prefer tryGet(): after UIManager::shutdown(), get() would hit the
+    // static fallback and could stash `this` (about to die) as focus /
+    // composition owner — batch SEGV at process exit / next suite.
+    if (UIManager* ui = UIManager::tryGet()) {
+        if (ui->getFocusedWidget() == this) {
+            ui->clearFocusNoDispatch(this);
+        }
+        ui->clearCaptureNoDispatch(this);
+        ui->clearHoverNoDispatch(this);
+        ui->cancelComposition(this, /*fireEndOnOwner*/ false);
+    }
 }
 
 void TextInput::setText(const std::wstring& text) {

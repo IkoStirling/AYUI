@@ -102,7 +102,14 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     // This lets the menu render + hit-test above any nested layout (e.g.
     // a MenuBar inside a Window inside a VBox) and survive host destruction
     // cleanly via the overlay's destroyWidgetTree path.
-    UIManager::get().openPopup(host, this);
+    //
+    // Phase D §5.3 — tryGet guards against batch SEGV: opening a Menu in
+    // a test whose UIManager is already shut down would otherwise pin
+    // the Menu on the static fallback and crash on fallback dtor.
+    UIManager* uiPtr = UIManager::tryGet();
+    if (uiPtr == nullptr) return;
+    UIManager& ui = *uiPtr;
+    ui.openPopup(host, this);
     _open = true;
     // Phase B (B3) R3: save the focused widget BEFORE we steal focus,
     // so close() can restore it. Order matters: openPopup may close a
@@ -110,8 +117,8 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     // but UIManager's own _focusedWidget is untouched by that — so we
     // can capture it here, after the overlay is mounted, and the saved
     // pointer is the live widget the user was working with.
-    _focusedWidgetBefore = UIManager::get().getFocusedWidget();
-    UIManager::get().setFocus(this);
+    _focusedWidgetBefore = ui.getFocusedWidget();
+    ui.setFocus(this);
     performLayout();
 }
 
@@ -122,26 +129,32 @@ void Menu::close() {
     // Phase B (B3) R3: restore focus to whatever had it before open().
     // The slot is cleared so a second close() (defensive) is a no-op.
     // setFocus(null) is acceptable when nothing was focused previously.
-    if (_focusedWidgetBefore != nullptr) {
-        UIManager::get().setFocus(_focusedWidgetBefore);
-        _focusedWidgetBefore = nullptr;
-    }
-    if (_onClose) _onClose();
-    // Phase A (A2): UIManager::closePopup removes us from the overlay and
-    // frees the tree via destroyWidgetTree. After this call `this` is
-    // dangling — callers must not touch the Menu after close().
     //
-    // CRITICAL: clear _focusedWidget BEFORE closePopup destroys the menu.
-    // UIManager::shutdown() walks _focusedWidget and dynamic_casts it to
-    // FocusableWidget to fire setFocus(false). If we left it pointing at
-    // this Menu, shutdown hits a freed-pointer RTTI lookup → access
-    // violation. setFocus(null) drops the reference while this is still
-    // alive (the subsequent closePopup call is what actually frees us).
-    if (UIManager::get().getFocusedWidget() == this) {
-        UIManager::get().setFocus(nullptr);
-    }
-    if (getParent() != nullptr) {
-        UIManager::get().closePopup(this);
+    // Phase D §5.3 — tryGet() guards: after a host shuts its manager down,
+    // close() can still fire as part of stack unwind; the static fallback
+    // would otherwise store _focusedWidgetBefore on the fallback.
+    if (UIManager* ui = UIManager::tryGet()) {
+        if (_focusedWidgetBefore != nullptr) {
+            ui->setFocus(_focusedWidgetBefore);
+            _focusedWidgetBefore = nullptr;
+        }
+        if (_onClose) _onClose();
+        // Phase A (A2): UIManager::closePopup removes us from the overlay and
+        // frees the tree via destroyWidgetTree. After this call `this` is
+        // dangling — callers must not touch the Menu after close().
+        //
+        // CRITICAL: clear _focusedWidget BEFORE closePopup destroys the menu.
+        // UIManager::shutdown() walks _focusedWidget and dynamic_casts it to
+        // FocusableWidget to fire setFocus(false). If we left it pointing at
+        // this Menu, shutdown hits a freed-pointer RTTI lookup → access
+        // violation. setFocus(null) drops the reference while this is still
+        // alive (the subsequent closePopup call is what actually frees us).
+        if (ui->getFocusedWidget() == this) {
+            ui->setFocus(nullptr);
+        }
+        if (getParent() != nullptr) {
+            ui->closePopup(this);
+        }
     }
 }
 
@@ -210,7 +223,9 @@ bool Menu::onMouseButtonDown(const UIMouseEvent& e) {
     // returns cleanly. Returning false lets the click flow up to the
     // item hit-test path so row clicks still select.
     if (e.mouseButton == 0) {
-        UIManager::get().setFocus(this);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->setFocus(this);
+        }
     }
     return false;
 }

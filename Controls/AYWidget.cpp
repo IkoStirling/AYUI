@@ -76,11 +76,15 @@ Widget::Widget()
 }
 
 Widget::~Widget() {
-    // Phase UI-OWN-1: Widget never owns its children. The parent detaches
-    // child _parent pointers here so that any subsequent access from the
-    // child side (e.g. during child destruction) finds a null parent and
-    // skips back-pointers into freed memory. Children themselves are
-    // destroyed by the owning container via destroyWidgetTree().
+    // Detach from parent FIRST. Otherwise `delete child` while still in
+    // parent's `_children` (common with addChildExternal + host delete)
+    // leaves a dangling entry → next tree walk / composition / layout SEGV.
+    detachFromParent();
+
+    // Phase UI-OWN-1: Widget never owns its children. Clear child→parent
+    // back-pointers so survivors don't point into freed memory. Children
+    // themselves are destroyed by the owning container via
+    // destroyWidgetTree() (or host delete for external kids).
     //
     // R-6: removed the `_hoverWidget = nullptr` line — that field no
     // longer lives on Widget (it was removed in favor of letting
@@ -88,6 +92,7 @@ Widget::~Widget() {
     for (Widget* child : _children) {
         if (child) {
             child->_parent = nullptr;
+            child->_externallyOwned = false;
         }
     }
     _children.clear();
@@ -97,15 +102,20 @@ void Widget::addChild(Widget* child) {
     if (child && child->_parent != this) {
         child->detachFromParent();
         child->_parent = this;
+        child->_externallyOwned = false;
         _children.push_back(child);
     }
 }
 
 void Widget::addChildExternal(Widget* child) {
-    // Reference-only attach, identical to addChild today. Kept as a separate
-    // name so callers (tests, stacks) can document intent. Lifetime of the
-    // child remains the caller's responsibility.
-    addChild(child);
+    // Reference-only attach: host owns lifetime. destroyWidgetTree must
+    // detach without delete (stack Modal/TextInput fixtures, Dimmer, etc.).
+    if (child && child->_parent != this) {
+        child->detachFromParent();
+        child->_parent = this;
+        child->_externallyOwned = true;
+        _children.push_back(child);
+    }
 }
 
 void Widget::removeChild(Widget* child) {
@@ -113,6 +123,7 @@ void Widget::removeChild(Widget* child) {
     for (auto it = _children.begin(); it != _children.end(); ++it) {
         if (*it == child) {
             child->_parent = nullptr;
+            child->_externallyOwned = false;
             _children.erase(it);
             return;
         }

@@ -39,7 +39,9 @@ Modal::~Modal() {
     // is "lose the focus" — a stricter pattern. Hosts that care about
     // restoration MUST closeModal() before deleting.
     if (_isOpen) {
-        UIManager::get().closeModal(this, /*fireOnClose*/ false);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->closeModal(this, /*fireOnClose*/ false);
+        }
         _isOpen = false;
     }
     _focusedBefore = nullptr;
@@ -87,7 +89,15 @@ void Modal::setContent(Widget* content) {
 
 void Modal::openModal() {
     if (_isOpen) return;   // idempotent
-    UIManager& ui = UIManager::get();
+    // Phase D §5.3 — tryGet() instead of get(). get()'s fallback
+    // bootstraps a fresh overlay if no active manager, which would pin
+    // this Modal as _activeModal of the process-lifetime static
+    // fallback. Prefer early-return over that path.
+    UIManager* uiPtr = UIManager::tryGet();
+    if (uiPtr == nullptr) {
+        return;   // no active manager — defer open until one exists
+    }
+    UIManager& ui = *uiPtr;
 
     // Q14 — single-active invariant. If another modal is open, close it
     // first. UIManager::openModal owns this rule.
@@ -124,7 +134,7 @@ void Modal::openModal() {
         // attached `this` to the overlay; the dimmer is a SIBLING under
         // _overlayRoot so its hitTest wins for clicks outside the modal
         // content rect. We use the public getOverlayRoot() accessor.
-        UIManager::get().getOverlayRoot()->addChildExternal(_dimmer);
+        ui.getOverlayRoot()->addChildExternal(_dimmer);
     }
 
     _isOpen = true;
@@ -133,7 +143,17 @@ void Modal::openModal() {
 
 void Modal::closeModal() {
     if (!_isOpen) return;
-    UIManager& ui = UIManager::get();
+    // Phase D §5.3 — tryGet fallback. If the manager has already been
+    // shut down (g_activeUIManager == nullptr), the static fallback in
+    // get() would bootstrap a fresh overlay AND keep this Modal pinned
+    // there as the focused widget — leading to batch SEGV at process
+    // exit. closeModal simply becomes a no-op in that case.
+    UIManager* uiPtr = UIManager::tryGet();
+    if (uiPtr == nullptr) {
+        _isOpen = false;
+        return;
+    }
+    UIManager& ui = *uiPtr;
     // Detach first; if _isOpen gate is reset before closeModal call we
     // could infinite-loop.
     _isOpen = false;
@@ -178,6 +198,12 @@ void Modal::closeModal() {
         // leave the manager in a clean state.
         ui.clearFocusNoDispatch(this);
     }
+
+    // Host dismissal notify (Esc / dimmer / OK / Cancel). Not fired from
+    // ~Modal (closeModal(..., fireOnClose=false)) or force-close-by-manager.
+    if (_onClose) {
+        _onClose();
+    }
 }
 
 void Modal::onDimmerClicked() {
@@ -208,7 +234,9 @@ void Modal::onForceClosedByManager(Widget* priorRoot) {
         getParent()->removeChild(this);
     }
     if (_focusedBefore != nullptr && _focusedBefore != this) {
-        UIManager::get().setFocus(_focusedBefore);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->setFocus(_focusedBefore);
+        }
     }
     _focusedBefore = nullptr;
 }

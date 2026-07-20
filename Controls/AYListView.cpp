@@ -329,7 +329,9 @@ bool ListView::onMouseButtonDown(const UIMouseEvent& e) {
     // onMouseButtonUp (no toggle duplication here — UIManager handles
     // press-vs-up semantics externally).
     if (e.mouseButton == 0) {
-        UIManager::get().setFocus(this);
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->setFocus(this);
+        }
     }
     return false;
 }
