@@ -61,7 +61,29 @@ public:
     void setClientSize(float width, float height);
     void update(float dt);
     void layout();
+
+    // AI-1 (2026-07-20): render() split into populateFrame() + flushFrame()
+    // so AYRenderer's RenderPass dispatch can own the per-frame flush
+    // boundary. populateFrame walks the widget tree and accumulates
+    // batches on the backend (beginFrame/beginCanvas + render root +
+    // overlay + drag ghost); flushFrame closes the IRenderBackend
+    // lifecycle (endCanvas + endFrame). render() remains as the
+    // back-compat single-call wrapper.
+    //
+    // The split lets AYEditor's renderCompositeFrame pipeline do:
+    //   uiPass(populateFrame)  -- populate (no flush, no endFrame)
+    //   Renderer::render(scene) -- dispatches [ForwardOpaque,
+    //                                  Transparent, UIPass] where
+    //                                  UIPass::execute calls
+    //                                  backend->flushBatches() to
+    //                                  submit any pending text batches
+    //                                  accumulated during populate.
+    //   uiPass(flushFrame)     -- close lifecycle (endCanvas +
+    //                                  endFrame; endFrame flushes
+    //                                  pendingRects in the backend).
     void render();
+    void populateFrame();
+    void flushFrame();
 
     Widget* root() const { return _root; }
     Widget* findById(const std::string& id) const;

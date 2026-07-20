@@ -644,6 +644,16 @@ void UIManager::layout() {
 }
 
 void UIManager::render() {
+    // AI-1 (2026-07-20): single-call wrapper preserves the legacy
+    // contract for callers that want the full populate+flush in one
+    // call (tests, standalone demo drivers). AYEditor's composite
+    // path uses populateFrame + flushFrame directly to interleave
+    // the RenderPass dispatch between populate and flush.
+    populateFrame();
+    flushFrame();
+}
+
+void UIManager::populateFrame() {
     if (!_backend || !_root) {
         return;
     }
@@ -661,10 +671,24 @@ void UIManager::render() {
     // border + payload text; _dragGhost->render() would be a no-op
     // (base Widget has empty onRender).
     paintGhost(*_backend);
-    // Flush any batched quads accumulated during the widget tree walk.
-    // Default backend implementation is a no-op; backends that override
-    // addColoredQuad/addTexturedQuad for batching submit here in one go.
-    _backend->flushBatches();
+    // AI-1: NO flushBatches here. The flushBatches call (which on the
+    // bgfx UIRenderBackend flushes pending text batches via
+    // flushPendingText()) moved to UIPass::execute so the RenderPass
+    // pipeline owns the UI submission boundary. Rects are still
+    // flushed in flushFrame() → backend->endFrame() →
+    // flushColoredRects().
+}
+
+void UIManager::flushFrame() {
+    if (!_backend || !_root) {
+        return;
+    }
+
+    // AI-1: flushBatches() removed here (moved to UIPass::execute).
+    // endCanvas + endFrame remain — endFrame() inside the backend
+    // flushes pendingRects via flushColoredRects(), then any
+    // remaining text via flushPendingText() (no-op now since UIPass
+    // already flushed text).
     _backend->endCanvas();
     _backend->endFrame();
 }
@@ -694,8 +718,14 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     if (_overlayRoot == nullptr) return;
 
     // Close any other popup first. Single-active invariant.
+    // Menus are soft-dismissed (MenuBar keeps durable Menu*); ComboBox
+    // and other popups still take the hard-destroy path.
     if (_activeDropdown != nullptr && _activeDropdown != popup) {
-        closePopup(_activeDropdown);
+        if (Menu* menu = dynamic_cast<Menu*>(_activeDropdown)) {
+            menu->dismissFromManager();
+        } else {
+            closePopup(_activeDropdown);
+        }
     }
 
     // Reparent onto the overlay. If popup already lives somewhere,
@@ -735,6 +765,22 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
         if (_capturedWidget == popup ||
             isDescendantOf(_capturedWidget, popup)) {
             _capturedWidget = nullptr;
+        }
+    }
+
+    // Same contract for focus / hover — destroying (or even soft-
+    // unmounting) a focused Menu left _focusedWidget dangling and the
+    // next setFocus() blew up with std::__non_rtti_object.
+    if (_focusedWidget != nullptr) {
+        if (_focusedWidget == popup ||
+            isDescendantOf(_focusedWidget, popup)) {
+            clearFocusNoDispatch(_focusedWidget);
+        }
+    }
+    if (_hoverWidget != nullptr) {
+        if (_hoverWidget == popup ||
+            isDescendantOf(_hoverWidget, popup)) {
+            clearHoverNoDispatch(_hoverWidget);
         }
     }
 
@@ -1005,7 +1051,11 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
             _activeDropdownAnchor == hit ||
             isDescendantOf(hit, _activeDropdownAnchor));
         if (!insidePopup && !insideAnchor) {
-            closePopup(_activeDropdown);
+            if (Menu* menu = dynamic_cast<Menu*>(_activeDropdown)) {
+                menu->dismissFromManager();
+            } else {
+                closePopup(_activeDropdown);
+            }
         }
     }
 
