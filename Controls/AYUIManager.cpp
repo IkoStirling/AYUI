@@ -378,11 +378,50 @@ void UIManager::tearDownOverlayChildren() {
     }
 }
 
+// ============================================================================
+// Polish (P3) — Menu accelerator registration.
+// ============================================================================
+// MenuBar ctor calls registerMenuBar(this) (only when tryGet() returns
+// non-null; tests construct MenuBars without a UIManager and rely on
+// findAccel being inert in that case). unregisterMenuBar runs from
+// MenuBar's dtor. We do NOT own these pointers — they're borrowed. If
+// the host neglects to call shutdown() and just deletes MenuBars, the
+// dtors will null themselves out via unregisterMenuBar.
+// ============================================================================
+
+void UIManager::registerMenuBar(MenuBar* bar) {
+    if (bar == nullptr) return;
+    // Skip duplicates (idempotent). Tests that construct MenuBars in a
+    // scope + drop them repeatedly should not pile up stale entries.
+    for (MenuBar* existing : _menuBars) {
+        if (existing == bar) return;
+    }
+    _menuBars.push_back(bar);
+}
+
+void UIManager::unregisterMenuBar(MenuBar* bar) {
+    if (bar == nullptr) return;
+    for (auto it = _menuBars.begin(); it != _menuBars.end(); ++it) {
+        if (*it == bar) {
+            _menuBars.erase(it);
+            return;
+        }
+    }
+}
+
 void UIManager::shutdown() {
     if (_shutdown) {
         return;
     }
     _shutdown = true;
+
+    // Polish (P3): clear the MenuBar registry before destroying the tree.
+    // MenuBar dtors will unregister themselves too, but we walk-and-clear
+    // first to defend against a path where a MenuBar's dtor runs BEFORE
+    // Menu widgets underneath it (a CompoundWidget destruction pattern);
+    // without this clear, the dtor chain could touch stale _menuBars
+    // entries mid-shutdown.
+    _menuBars.clear();
 
     // Order matters: clear captures/registry BEFORE destroying the tree so
     // any std::function holding a Widget* (or capturing by reference into a
@@ -1380,6 +1419,52 @@ bool UIManager::onKeyDown(int keyCode) {
         const uint32_t bit = 1u << (keyCode - UIKey_Shift);
         _modifiers |= bit;
         return true;
+    }
+
+    // Polish (P3): menu accelerator dispatch. Runs BEFORE the focused-
+    // widget path so Ctrl+S triggers Save even when focus is on a TextInput
+    // inside the same window — same behavior as every text editor IDE.
+    //
+    // Mods/keyCode must match a MenuItem's parsed (mods, keyCode) for
+    // ANY currently registered MenuBar. Because we iterate `_menuBars`
+    // rather than pick a single one, hosts can have multiple bars (main
+    // + future context bar) and both react — but for v1.1 we expect one
+    // bar per top-level window so the iteration cost is negligible.
+    //
+    // The keyCode passed in here is the non-modifier key (after Tab +
+    // modifier keys have already been intercepted above). So we don't
+    // need to re-check Shift/Control/Alt membership here.
+    if (!_menuBars.empty()) {
+        // Derive the (mods, keyCode) bitmask the same way MenuBar's
+        // registry computes it: mods in 3 LSB bits, key in upper bits.
+        const uint8_t mods = static_cast<uint8_t>(_modifiers & 0x07u);
+        for (MenuBar* bar : _menuBars) {
+            if (bar == nullptr) continue;
+            MenuItem* hit = bar->findAccel(mods, keyCode);
+            if (hit != nullptr) {
+                // Polish (P3) invariant: item is alive because MenuBar
+                // owns its Menu which owns MenuItems. Empty `_menuBars`
+                // (post-dtor race in shutdown) is guarded above.
+                //
+                // Fire via the protected helper, NOT _onActivate(): the
+                // helper is what MenuItem's click path uses and goes
+                // through the same handleClick() so observers see one
+                // consistent event stream.
+                //
+                // ORDER MATTERS (R3 landmine): handleClick must run BEFORE
+                // closeOpenMenu because closeOpenMenu destroys the open
+                // Menu via closePopup→destroyWidgetTree, which frees
+                // `hit` (the MenuItem is owned by Menu). Calling
+                // handleClick after closeOpenMenu is UAF.
+                hit->handleClick();
+                // Close any menu that might have been open — the
+                // canonical "Save in File menu" pattern is to dismiss
+                // the menu as soon as the accelerator fires. This
+                // mirrors how VS Code's Ctrl+S dismisses its menu.
+                bar->closeOpenMenu();
+                return true;
+            }
+        }
     }
 
     if (keyCode == UIKey_Tab) {

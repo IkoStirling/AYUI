@@ -12,6 +12,8 @@
 
 namespace ayt::ui {
 
+class MenuBar;
+
 class UIManager {
 public:
     UIManager() = default;
@@ -35,6 +37,20 @@ public:
     static UIManager* tryGet();
 
     void initialize(IRenderBackend* backend);
+    // =====================================================================
+    // Polish (P3) — accelerator registry access.
+    // =====================================================================
+    // MenuBars register themselves via this hook in their ctor and unregister
+    // in their dtor. UIManager::onKeyDown consults the registered set at the
+    // top of dispatch: if any MenuBar has a MenuItem whose (mods, key) match,
+    // the item's onActivate callback fires and any open menu closes BEFORE
+    // the focused widget sees the key. We keep a vector rather than a single
+    // pointer so hosts can host multiple MenuBars (main + context bar) and
+    // both react to accelerators.
+    // =====================================================================
+    void registerMenuBar(class MenuBar* bar);
+    void unregisterMenuBar(class MenuBar* bar);
+
     void shutdown();
 
     bool loadLayout(const std::string& path);
@@ -284,6 +300,13 @@ public:
     void ensureGhostCreated();
     void updateGhostPosition(const math::FVector2& pos);
     void paintGhost(IRenderBackend& renderer);
+
+    // Polish (P3): MenuBar accelerator hook. Called by MenuBar's ctor
+    // (when a UIManager instance is reachable) and dtor (via tryGet). The
+    // vector holds non-owning pointers — destruction order is the host's
+    // job. We cap how often this list can grow (it's a std::vector, push
+    // back is amortized constant).
+    std::vector<MenuBar*> _menuBars;
 
 private:
     // Used by get()'s static fallback: null bookkeeping Widget* so process

@@ -1,5 +1,6 @@
 #include "AYMenuBar.h"
 #include "AYButton.h"
+#include "AYUIManager.h"
 #include "IAYRenderBackend.h"
 #include "aymath/MathUtils.h"
 #include <algorithm>
@@ -8,9 +9,24 @@ namespace ayt::ui {
 
 MenuBar::MenuBar() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
+    // Polish (P3): register with the active UIManager so onKeyDown can
+    // dispatch accelerator keys. We tryGet (rather than get) so a
+    // MenuBar constructed WITHOUT a UIManager (pure unit-test fixtures)
+    // is silently inactive — its findAccel path still works for direct
+    // calls, just no global dispatch.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->registerMenuBar(this);
+    }
 }
 
 MenuBar::~MenuBar() {
+    // Polish (P3): deregister from UIManager BEFORE destroying child
+    // tree. If we unregistered AFTER, the child's destruction could
+    // touch _menuBars (the registry) in some CompoundWidget destruction
+    // path and find a dangling pointer to ourselves.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->unregisterMenuBar(this);
+    }
     // Children include anchor buttons + open menus. CompoundWidget
     // destructor frees them all.
     _menus.clear();
@@ -52,10 +68,18 @@ const std::wstring& MenuBar::getMenuTitle(size_t index) const {
 }
 
 void MenuBar::closeOpenMenu() {
-    if (_openIdx < 0) return;
-    if (_openIdx < static_cast<int>(_menus.size())) {
-        if (_menus[_openIdx].menu && _menus[_openIdx].menu->isOpen()) {
-            _menus[_openIdx].menu->close();
+    // Polish (P3) invariant: accelerator dispatch (and any other "menu
+    // should dismiss" call) must close ANY menu currently in the open
+    // state, not just the one tracked by _openIdx. Rationale: a host
+    // (or a test) can open a Menu directly via `menu->open(&bar, pos)`
+    // bypassing the anchor-click path, which leaves _openIdx < 0 even
+    // though the menu is visually open. Walking _menus and closing any
+    // that reports isOpen()==true is O(M) where M = number of menus
+    // (~3-7 in practice) and matches the "any open menu should dismiss"
+    // policy without requiring every caller to also update _openIdx.
+    for (MenuEntry& e : _menus) {
+        if (e.menu != nullptr && e.menu->isOpen()) {
+            e.menu->close();
         }
     }
     _openIdx = -1;
@@ -66,6 +90,44 @@ Widget* MenuBar::hitTest(const math::FVector2& worldPos) {
     // anchors. When a menu is open, the menu itself is also a sibling
     // child and CompoundWidget walks children in order — back-to-front.
     return CompoundWidget::hitTest(worldPos);
+}
+
+// ============================================================================
+// Polish (P3) — accelerator lookup.
+// ============================================================================
+// We do NOT maintain a separate registry map. Instead, findAccel does a
+// linear walk through every MenuItem in every Menu this MenuBar owns.
+// Justification: a MenuBar typically has 3-7 top-level menus with 5-15
+// items each (~50 items max in the worst case — IDE "Window" menu).
+// 50 items × 2 int comparisons per onKeyDown call is negligible vs the
+// alternative (a reverse-channel signal from MenuItem::setShortcut up
+// to MenuBar, requiring MenuItem to track its owning MenuBar — and
+// potentially dynamic_cast every setShortcut call). The lazy approach
+// also means stale-item problems (item destroyed, registry still
+// pointing at freed memory) are impossible: we read _items from the
+// still-alive Menu each call.
+//
+// Collision policy: first match wins. addItem order is host's call
+// order so the "first" item with a given (mods, key) is the one the
+// host added first — predictable for debugging.
+// ============================================================================
+
+MenuItem* MenuBar::findAccel(uint8_t mods, int keyCode) const {
+    if (keyCode == 0) return nullptr;
+    for (const MenuEntry& e : _menus) {
+        if (e.menu == nullptr) continue;
+        const size_t n = e.menu->getItemCount();
+        for (size_t i = 0; i < n; ++i) {
+            MenuItem* it = e.menu->getItem(static_cast<int>(i));
+            if (it == nullptr) continue;
+            if (it->getAccelKey() != 0 &&
+                it->getAccelKey() == keyCode &&
+                it->getAccelMods() == mods) {
+                return it;
+            }
+        }
+    }
+    return nullptr;
 }
 
 void MenuBar::onAnchorClicked(int index) {
