@@ -42,6 +42,7 @@
 #include "Test_ToolBar.cpp"
 #include "Test_ToolBarSeparator.cpp"
 #include "Test_StatusBar.cpp"
+#include "Test_StatusBar_G8.cpp"
 #include "Test_TreeNode.cpp"
 #include "Test_TreeView.cpp"
 #include "Test_RichText.cpp"
