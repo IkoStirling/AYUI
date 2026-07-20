@@ -53,6 +53,7 @@ set(SRC_FILES
     Loader/AYWidgetSerializer.cpp
     Style/AYMockRenderer.cpp
     Style/AYStyle.cpp
+    Style/AYTheme.cpp
     i18n/AYI18n.cpp
     Controls/UIKeyCode.cpp
 )
@@ -111,6 +112,7 @@ set(HEAD_FILES
     Loader/AYWidgetSerializer.h
     Style/AYMockRenderer.h
     Style/AYStyle.h
+    Style/AYTheme.h
     Style/AYThickness.h
     Style/AYTextContent.h
     i18n/AYI18n.h

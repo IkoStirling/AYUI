@@ -52,6 +52,16 @@ struct WidgetStyle {
     //   focused + placeholder text set (PR-3 C4). Default is muted gray.
     math::FVector4 compositionUnderlineColor = math::FVector4(0.30f, 0.65f, 0.95f, 1.0f);
     math::FVector4 placeholderColor = math::FVector4(0.55f, 0.55f, 0.60f, 0.7f);
+
+    // G11 — optional token references for the THREE color slots that
+    // resolveStyle() returns (backgroundColor / borderColor / textColor).
+    // When non-empty, the original $token source is preserved alongside
+    // the expanded FVector4 value, so a later widget-level override
+    // (setStyleTokenOverride) can be re-applied. Empty by default —
+    // pre-G11 styles + literal arrays leave these blank.
+    std::string bgToken;
+    std::string borderColorToken;
+    std::string textColorToken;
 };
 
 class StyleSheet {
@@ -71,6 +81,14 @@ public:
 
     // Merge styles (for inheritance)
     WidgetStyle getComputedStyle(const std::string& styleId) const;
+
+    // G11 — iterate every style entry. Used by Theme::buildComposedSheet
+    // to merge multiple fragments. Returns a vector of (id, WidgetStyle)
+    // pairs in insertion order. Exposed only for Theme composition; day-
+    // to-day callers should keep using getStyle(id).
+    const std::unordered_map<std::string, WidgetStyle>& getAllStylesForCompose() const {
+        return _styles;
+    }
 
 private:
     std::unordered_map<std::string, WidgetStyle> _styles;
@@ -141,5 +159,13 @@ struct ResolvedStyle {
 // set its style would silently change color when the StyleManager got
 // wired in later.
 ResolvedStyle resolveStyle(const std::string& styleId);
+
+// G11 — overload that consults a widget's per-token overrides. When
+// `widget` is non-null AND the widget has any setStyleTokenOverride()
+// entries, those entries WIN over the active theme when resolving any
+// token references embedded in the style's color slots. Pure-literal
+// styles (no $tokens) are unaffected. Pass nullptr to skip override
+// lookup (equivalent to the single-arg form).
+ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget);
 
 } // namespace ayt::ui

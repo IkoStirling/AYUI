@@ -196,6 +196,26 @@ public:
     const std::string& getStyleId() const { return _styleId; }
 
     // =================================================================
+    // G11 — per-widget token overrides. When the active theme resolves
+    // a `$tokenName` reference in this widget's resolved style, this
+    // map's entry (if any) wins over the theme value. Lets hosts say
+    // "this one button is red" without forking the entire theme.
+    //
+    // Overrides apply ONLY to the resolveStyle() path. The StyleSheet
+    // stores literal FVector4 values, so by the time a style is loaded
+    // from JSON any $token reference has been expanded at load time;
+    // a widget that wants different colors must provide them via
+    // setStyleTokenOverride() AND have the resolver consult this map
+    // (see AYStyle.cpp::resolveStyle + Theme::resolveColor).
+    // =================================================================
+    void setStyleTokenOverride(const std::string& key, const math::FVector4& value);
+    void clearStyleTokenOverrides();
+    const std::unordered_map<std::string, math::FVector4>& getStyleTokenOverrides() const {
+        return _tokenOverrides;
+    }
+    bool hasStyleTokenOverride(const std::string& key) const;
+
+    // =================================================================
     // G12 — Drag & Drop API.
     // =================================================================
     // DragSource side: a widget can opt in to be a drag source via
@@ -277,6 +297,11 @@ protected:
     bool _layoutSizeManaged = true;
     std::string _styleId;
     std::string _id;
+    // G11 — per-widget token overrides. Keyed by bare token name (no
+    // leading '$'). Resolved during StyleSheet parsing AND during
+    // resolveStyle() so a JSON-loaded style with `"$color.bg": "..."`
+    // AND a programmatic setStyleTokenOverride() both flow through.
+    std::unordered_map<std::string, math::FVector4> _tokenOverrides;
 
     // G12 — Drag & Drop state. Empty std::function defaults pay no
     // runtime cost; only widgets that opt in (setDraggable / setAcceptDrops

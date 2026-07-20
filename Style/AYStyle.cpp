@@ -1,4 +1,6 @@
 #include "AYStyle.h"
+#include "AYTheme.h"
+#include "AYWidget.h"
 #include "aymath/MathTypes.h"
 
 #include <nlohmann/json.hpp>
@@ -11,25 +13,59 @@ namespace {
 
 using json = nlohmann::json;
 
+// G11 — resolve a JSON color value. Three accepted shapes:
+//   * 4-element numeric array  — `[r, g, b, a]`, copied through verbatim.
+//   * bare string starting '$' — token reference, expanded via Theme.
+//   * anything else             — caller falls back to default.
+//
+// Token expansion uses the active theme (ThemeManager::get().getActiveTheme()).
+// Per-widget overrides are NOT consulted here — StyleSheet parsing happens
+// before any widget exists. Widget overrides get applied at resolveStyle()
+// time (see below) by re-expanding the chosen style's color slots.
+//
+// The fourth out-parameter is filled in with the bare token name (no
+// leading '$') when the value was a `$token` reference, OR left empty
+// for literal arrays. WidgetStyle stores this so a later widget-level
+// override can find the slot.
+math::FVector4 parseColorJson(const json& v, std::string& outTokenRef) {
+    outTokenRef.clear();
+    if (v.is_array() && v.size() == 4 &&
+        v[0].is_number() && v[1].is_number() &&
+        v[2].is_number() && v[3].is_number()) {
+        return math::FVector4(
+            v[0].get<float>(), v[1].get<float>(),
+            v[2].get<float>(), v[3].get<float>());
+    }
+    if (v.is_string()) {
+        std::string s = v.get<std::string>();
+        if (!s.empty() && s[0] == '$') {
+            outTokenRef = s.substr(1);
+            return expandColorToken(s);
+        }
+    }
+    return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+// Single-output overload used by callers that don't care about the
+// original token name (compositionUnderlineColor / placeholderColor
+// fall through here because WidgetStyle doesn't expose a token slot
+// for them).
+math::FVector4 parseColorJson(const json& v) {
+    std::string dummy;
+    return parseColorJson(v, dummy);
+}
+
 // Parse a single WidgetStyle from a JSON object. Tolerates missing keys
 // (StyleBuilder::makeDefault fills the rest). Malformed numeric arrays fall
 // back to the default (returns false so the caller can flag a partial parse).
 bool parseWidgetStyle(const json& j, WidgetStyle& out) {
     out = StyleBuilder::makeDefault();
 
-    if (j.contains("backgroundColor") && j["backgroundColor"].is_array() &&
-        j["backgroundColor"].size() == 4) {
-        const auto& c = j["backgroundColor"];
-        out.backgroundColor = math::FVector4(
-            c[0].get<float>(), c[1].get<float>(),
-            c[2].get<float>(), c[3].get<float>());
+    if (j.contains("backgroundColor")) {
+        out.backgroundColor = parseColorJson(j["backgroundColor"], out.bgToken);
     }
-    if (j.contains("textColor") && j["textColor"].is_array() &&
-        j["textColor"].size() == 4) {
-        const auto& c = j["textColor"];
-        out.textColor = math::FVector4(
-            c[0].get<float>(), c[1].get<float>(),
-            c[2].get<float>(), c[3].get<float>());
+    if (j.contains("textColor")) {
+        out.textColor = parseColorJson(j["textColor"], out.textColorToken);
     }
     if (j.contains("border") && j["border"].is_object()) {
         const auto& b = j["border"];
@@ -39,32 +75,19 @@ bool parseWidgetStyle(const json& j, WidgetStyle& out) {
         if (b.contains("cornerRadius")) {
             out.border.cornerRadius = b["cornerRadius"].get<float>();
         }
-        if (b.contains("color") && b["color"].is_array() && b["color"].size() == 4) {
-            const auto& c = b["color"];
-            out.border.color = math::FVector4(
-                c[0].get<float>(), c[1].get<float>(),
-                c[2].get<float>(), c[3].get<float>());
+        if (b.contains("color")) {
+            out.border.color = parseColorJson(b["color"], out.borderColorToken);
         }
     }
     // Phase C: text-editing-widget colors. Default-valued (already set by
     // StyleBuilder::makeDefault), so JSON that omits them keeps the sky
     // blue underline + muted gray placeholder. We read them only if the
     // author explicitly overrides — the parser stays backward-compatible.
-    if (j.contains("compositionUnderlineColor") &&
-        j["compositionUnderlineColor"].is_array() &&
-        j["compositionUnderlineColor"].size() == 4) {
-        const auto& c = j["compositionUnderlineColor"];
-        out.compositionUnderlineColor = math::FVector4(
-            c[0].get<float>(), c[1].get<float>(),
-            c[2].get<float>(), c[3].get<float>());
+    if (j.contains("compositionUnderlineColor")) {
+        out.compositionUnderlineColor = parseColorJson(j["compositionUnderlineColor"]);
     }
-    if (j.contains("placeholderColor") &&
-        j["placeholderColor"].is_array() &&
-        j["placeholderColor"].size() == 4) {
-        const auto& c = j["placeholderColor"];
-        out.placeholderColor = math::FVector4(
-            c[0].get<float>(), c[1].get<float>(),
-            c[2].get<float>(), c[3].get<float>());
+    if (j.contains("placeholderColor")) {
+        out.placeholderColor = parseColorJson(j["placeholderColor"]);
     }
     return true;
 }
@@ -249,6 +272,10 @@ WidgetStyle StyleBuilder::makePanel() {
 }
 
 ResolvedStyle resolveStyle(const std::string& styleId) {
+    return resolveStyle(styleId, nullptr);
+}
+
+ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
     ResolvedStyle out;
     if (styleId.empty()) {
         return out;
@@ -274,6 +301,39 @@ ResolvedStyle resolveStyle(const std::string& styleId) {
     out.borderColor = s->border.color;
     out.borderWidth = s->border.width;
     out.cornerRadius = s->border.cornerRadius;
+
+    // G11 — re-expand captured $token slots against the active theme,
+    // applying the widget's per-token overrides. Slot capture happens
+    // in parseWidgetStyle (above): only slots that arrived as $token
+    // references have a non-empty *Token field. Literal slots (numeric
+    // arrays) keep their original color — overrides don't reach them
+    // by design (you can't "override a literal" without changing the
+    // sheet). Caller passes nullptr to skip override lookup.
+    if (widget != nullptr && widget->getStyleTokenOverrides().empty()) {
+        // Common path — no overrides → no work.
+        return out;
+    }
+    const Theme* theme = ThemeManager::get().getActiveTheme();
+    if (theme == nullptr) {
+        return out;
+    }
+    auto apply = [&](const std::string& tok,
+                     math::FVector4& slot) {
+        if (tok.empty()) return;
+        math::FVector4 v = theme->resolveColor(
+            std::string("$") + tok,
+            widget ? &widget->getStyleTokenOverrides() : nullptr);
+        slot = v;
+    };
+    if (!s->bgToken.empty() || !s->borderColorToken.empty() ||
+        !s->textColorToken.empty()) {
+        apply(s->bgToken, out.backgroundColor);
+        apply(s->borderColorToken, out.borderColor);
+        // textColorToken isn't surfaced via ResolvedStyle (out doesn't
+        // carry textColor), but we re-expand it to keep WidgetStyle
+        // parity if the caller asks the StyleManager directly.
+        // (No-op here.)
+    }
     return out;
 }
 

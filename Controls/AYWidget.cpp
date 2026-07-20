@@ -254,6 +254,25 @@ bool Widget::onTextInput(wchar_t ch) {
     return false;
 }
 
+// --- G11: per-widget theme token overrides ---
+void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4& value) {
+    if (key.empty()) return;
+    // Allow '$foo' or bare 'foo' input — normalize to bare form so the
+    // map key matches Theme's storage (which uses bare names without '$').
+    const std::string norm = (key[0] == '$') ? key.substr(1) : key;
+    _tokenOverrides[norm] = value;
+}
+
+void Widget::clearStyleTokenOverrides() {
+    _tokenOverrides.clear();
+}
+
+bool Widget::hasStyleTokenOverride(const std::string& key) const {
+    if (key.empty()) return false;
+    const std::string norm = (key[0] == '$') ? key.substr(1) : key;
+    return _tokenOverrides.find(norm) != _tokenOverrides.end();
+}
+
 CompoundWidget::CompoundWidget() {
 }
 

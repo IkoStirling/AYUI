@@ -90,6 +90,38 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         widget->setVisible(j.value("visible", true));
         widget->setStyleId(j.value("style", ""));
 
+        // G11 — per-widget theme token overrides. JSON shape:
+        //   "styleOverrides": {
+        //     "color.bg.surface": [r, g, b, a],
+        //     "color.accent":    [r, g, b, a]
+        //   }
+        // Each entry calls setStyleTokenOverride(key, value). An empty
+        // array clears ALL prior overrides (so a widget that wants to
+        // drop its overrides can write `"styleOverrides": []` or omit
+        // the key — both paths leave _tokenOverrides empty).
+        if (j.contains("styleOverrides")) {
+            const auto& so = j["styleOverrides"];
+            if (so.is_array()) {
+                // Sentinel: empty array = explicit clear.
+                widget->clearStyleTokenOverrides();
+            } else if (so.is_object()) {
+                for (auto it = so.begin(); it != so.end(); ++it) {
+                    if (it.value().is_array() && it.value().size() == 4 &&
+                        it.value()[0].is_number() &&
+                        it.value()[1].is_number() &&
+                        it.value()[2].is_number() &&
+                        it.value()[3].is_number()) {
+                        math::FVector4 c(
+                            it.value()[0].get<float>(),
+                            it.value()[1].get<float>(),
+                            it.value()[2].get<float>(),
+                            it.value()[3].get<float>());
+                        widget->setStyleTokenOverride(it.key(), c);
+                    }
+                }
+            }
+        }
+
         if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
             if (j.contains("text")) {
                 label->setText(toWstring(j["text"].get<std::string>()));
@@ -530,6 +562,19 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
 
     j["visible"] = widget->isVisible();
     j["style"] = widget->getStyleId();
+
+    // G11 — emit per-widget token overrides (when any are set) so the
+    // round-trip via deserialize restores them. Empty map = omit the
+    // key entirely (deserializer treats absent == empty).
+    const auto& overrides = widget->getStyleTokenOverrides();
+    if (!overrides.empty()) {
+        json so = json::object();
+        for (const auto& kv : overrides) {
+            const auto& c = kv.second;
+            so[kv.first] = { c.x, c.y, c.z, c.w };
+        }
+        j["styleOverrides"] = so;
+    }
 
     // Type-specific
     if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
