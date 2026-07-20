@@ -40,6 +40,7 @@
 #include "Test_Menu.cpp"
 #include "Test_MenuBar.cpp"
 #include "Test_ToolBar.cpp"
+#include "Test_ToolBarSeparator.cpp"
 #include "Test_StatusBar.cpp"
 #include "Test_TreeNode.cpp"
 #include "Test_TreeView.cpp"

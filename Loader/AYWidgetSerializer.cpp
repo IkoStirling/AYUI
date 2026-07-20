@@ -14,6 +14,7 @@
 #include "AYMenu.h"
 #include "AYMenuBar.h"
 #include "AYToolBar.h"
+#include "AYToolBarSeparator.h"
 #include "AYStatusBar.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
@@ -339,6 +340,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        // G7 — ToolBarSeparator inherits all field handling from the
+        // Separator branch above (orientation/thickness/inset). The
+        // toolbar palette is set in the constructor; no extra fields
+        // need to be deserialized here.
+
         if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
             if (j.contains("text")) {
                 mi->setText(toWstring(j["text"].get<std::string>()));
@@ -641,14 +647,29 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["hoverDelay"] = tip->getHoverDelay();
     }
     else if (Separator* sep = dynamic_cast<Separator*>(widget)) {
-        j["type"] = "Separator";
-        j["orientation"] =
-            (sep->getOrientation() == Separator::Orientation::Vertical)
-                ? "vertical" : "horizontal";
-        const auto& c = sep->getColor();
-        j["color"] = { {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w} };
-        j["thickness"] = sep->getThickness();
-        j["inset"] = sep->getInset();
+        // G7 — ToolBarSeparator is a Separator subclass. Check it FIRST
+        // so it serializes as "ToolBarSeparator" (its factory type), not
+        // as "Separator". Same fields apply — palette is constructor-set.
+        if (ToolBarSeparator* tbs = dynamic_cast<ToolBarSeparator*>(widget)) {
+            j["type"] = "ToolBarSeparator";
+            j["orientation"] =
+                (tbs->getOrientation() == Separator::Orientation::Vertical)
+                    ? "vertical" : "horizontal";
+            const auto& c = tbs->getColor();
+            j["color"] = { {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w} };
+            j["thickness"] = tbs->getThickness();
+            j["inset"] = tbs->getInset();
+        }
+        else {
+            j["type"] = "Separator";
+            j["orientation"] =
+                (sep->getOrientation() == Separator::Orientation::Vertical)
+                    ? "vertical" : "horizontal";
+            const auto& c = sep->getColor();
+            j["color"] = { {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w} };
+            j["thickness"] = sep->getThickness();
+            j["inset"] = sep->getInset();
+        }
     }
     else if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
         j["type"] = "MenuItem";

@@ -12,6 +12,7 @@
 #include "AYMenu.h"
 #include "AYMenuBar.h"
 #include "AYToolBar.h"
+#include "AYToolBarSeparator.h"
 #include "AYStatusBar.h"
 #include "AYScrollBar.h"
 #include "AYScrollView.h"
@@ -82,6 +83,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("Menu", createMenuWidget);
         WidgetFactory::get().registerCreator("MenuBar", createMenuBarWidget);
         WidgetFactory::get().registerCreator("ToolBar", createToolBarWidget);
+    WidgetFactory::get().registerCreator("ToolBarSeparator", createToolBarSeparatorWidget);
         WidgetFactory::get().registerCreator("StatusBar", createStatusBarWidget);
         REGISTER_WIDGET("Image", Image);
         REGISTER_WIDGET("Window", Window);

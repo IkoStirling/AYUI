@@ -1,4 +1,5 @@
 #include "AYToolBar.h"
+#include "AYToolBarSeparator.h"
 #include "AYButton.h"
 #include "AYScrollView.h"
 #include "AYScrollBar.h"
@@ -84,11 +85,11 @@ class Button* ToolBar::addButton(const std::wstring& text,
 
 void ToolBar::addSeparator() {
     ensureScrollWrap();
-    auto* sep = new Separator();
-    sep->setOrientation(Separator::Orientation::Vertical);
-    sep->setSize(math::FVector2(1.0f, kDefaultHeight - 2.0f * kPadding));
-    sep->setLayoutPositionManaged(false);
-    sep->setLayoutSizeManaged(false);
+    // G7 — use the dedicated ToolBarSeparator so it has the toolbar
+    // palette pre-applied (vs a raw Separator which would render with
+    // the neutral gray). The factory-registered type also lets hosts
+    // walk the toolbar tree by widget type.
+    auto* sep = new ToolBarSeparator();
     _contentStrip->addChild(sep);
     _items.push_back({ItemRecord::Kind::Separator, sep});
     layoutItems();

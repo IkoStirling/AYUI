@@ -25,6 +25,7 @@ set(SRC_FILES
     Controls/AYMenu.cpp
     Controls/AYMenuBar.cpp
     Controls/AYToolBar.cpp
+    Controls/AYToolBarSeparator.cpp
     Controls/AYStatusBar.cpp
     Controls/AYListView.cpp
     Controls/AYComboBox.cpp
@@ -84,6 +85,7 @@ set(HEAD_FILES
     Controls/AYMenu.h
     Controls/AYMenuBar.h
     Controls/AYToolBar.h
+    Controls/AYToolBarSeparator.h
     Controls/AYStatusBar.h
     Controls/AYPanel.h
     Controls/AYTextLabel.h
