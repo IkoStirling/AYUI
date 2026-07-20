@@ -20,8 +20,12 @@ namespace ayt::ui {
 // Architecture (v1.1 — Phase E):
 //   ListView (CompoundWidget)
 //     └─ vScrollBar: ScrollBar* (auto-managed)
-//     └─ row widgets: InteractiveWidget* x N (one per item — single mode)
-//                     OR row pool K (visible + buffer — post-G2)
+//     └─ row pool K: InteractiveWidget* x K (visible + buffer rows).
+//                    Pool slot `s` shows logical item
+//                    `_firstVisibleIndex + s`. Always-on (G2); no
+//                    per-item allocation. v1 used N row widgets but
+//                    that's O(N) memory + O(N) layout for ≥1k items.
+//                    ComboBox's popup ListView shares the same code path.
 //
 // Selection model (v1.1 — Phase E):
 //   - Single mode (v1 default): _selectedIndex == -1 means no selection.
@@ -29,8 +33,8 @@ namespace ayt::ui {
 //     _selectedIndex mirrors _selectedIndices.back() for v1 callers.
 //   - setSelectedIndex(int) is the v1 single-int front; in Extended mode
 //     it routes through setSelectedIndices.
-//   - setItems replaces the row pool; the selection moves to track the
-//     same item text if present, else -1 (single-mode behavior).
+//   - setItems replaces the row pool; selection moves to track the same
+//     item text if present, else -1 (single-mode behavior).
 //
 // -----------------------------------------------------------------------------
 // G1 multi-select API surface
@@ -56,6 +60,27 @@ namespace ayt::ui {
 //   - JSON round-trip: `selectedIndex` (singular) preserved in single mode;
 //     `selectedIndices` (array) + `selectionMode` (int) added in extended
 // -----------------------------------------------------------------------------
+//
+// G2 row pool — virtualization
+// -----------------------------------------------------------------------------
+// Public API stays unchanged (setItems, getItem, getSelectedIndex,
+// scrollToIndex, etc). Internal allocation strategy: instead of one Row
+// widget per item, we keep a small pool of K = visible_rows + 2 buffer
+// rows. Pool slot `s` maps to logical item `_firstVisibleIndex + s`.
+// On scroll, `_firstVisibleIndex` shifts and rebindPoolRows() rewrites
+// row text + index without touching the pool slot count. For a 200px
+// viewport with 24px items, K ≤ 11 — 5k items allocate only 11 row widgets.
+//
+// Visible row bound (math::FVector2): slot positions stay in LOCAL space
+// (slot s at local y = s * itemHeight). The ListView's own world
+// position + the row's getWorldBounds() walk gives the painted y. The
+// scrollOffset is used purely to derive _firstVisibleIndex — there is
+// no per-row y-offset math in onRender.
+//
+// Selection visuals: setSelectedIndices() updates row flags only for
+// pool slots whose logical index is in the new vector. Logical indices
+// outside the viewport are kept in _selectedIndices (authoritative) but
+// their row visuals aren't applied until they scroll into view.
 //
 // KEYBOARD NAVIGATION (Phase B — B1, S3):
 //   ListView extends CompoundFocusableWidget so the focus traversal in
@@ -111,7 +136,7 @@ public:
         // paths that ignore modifiers still work; modifier-aware routing
         // (Ctrl/Shift) lives in ListView::handleRowClick. Pre-G1 the
         // signature was `void(int)`, but the only known wiring is the
-        // row lambda ListView sets in rebuildRows / rebuildVisibleRows,
+        // row lambda ListView sets in rebuildRows / rebindPoolRows,
         // so this is internal.
         std::function<void(int, uint32_t)> _onClickByRow;
         friend class ListView;
@@ -215,9 +240,27 @@ public:
     // _anchorIndex; Ctrl+A selects all; Esc clears.
     bool onKeyDown(int keyCode) override;
 
+    // G2 — pool inspection (test-only). Returns the current pool size
+    // (always ≤ visible_rows + 2, capped at item count).
+    size_t getRowPoolSize() const { return _rowPool.size(); }
+    // G2 — pool[slot].getIndex() in tests; logical item index of slot.
+    int    getRowPoolLogicalIndex(size_t slot) const;
+
 protected:
     void layoutChildren() override;
     void rebuildRows();
+
+    // G2 — remap each pool slot to its new logical item. Called
+    // whenever scrollOffset / setItems / performLayout / vbar drag /
+    // scrollToIndex changes which items are visible. Pure function
+    // over (current offset, current items) — safe to call repeatedly.
+    //
+    // NOT a ScrollableWidget::onScrollChanged override: _scrollState is
+    // a has-a member, not a base. Every ListView code path that mutates
+    // _scrollState.setScrollOffset (setScrollOffset, scrollToIndex, vbar
+    // callback) calls rebindPoolRows() explicitly. The chokepoint is
+    // ListView-owned, so we don't miss a call site.
+    void rebindPoolRows();
 
     math::FVector2 getViewportSize() const;
 
@@ -230,12 +273,26 @@ protected:
 private:
     void ensureBarCreated();
     void syncBarToOffset();
+    // G2 — returns the row widget currently bound to a logical item
+    // index, or nullptr if that index is outside the pool window.
+    Row* rowForLogical(int index) const;
     // G1 — handleRowClick now takes modifiers (Ctrl/Shift bits from
     // UIManager::_modifiers bitmask). Plain click = v1 single behavior.
     void handleRowClick(int index, uint32_t mods);
 
     std::vector<std::wstring> _items;
-    std::vector<Row*>         _rows;     // sized == _items.size()
+
+    // G2 — row pool (always-on). _rowPool.size() == K where
+    //   K = min(items.size(), ceil(viewport.h / itemHeight) + 2).
+    // Pool slot `s` displays logical item `_firstVisibleIndex + s`.
+    // Pool is rebuilt (only) when:
+    //   - setItems replaces the item set (rebuildRows)
+    //   - viewport size changes such that ceil(vp/itemH) differs by > 1
+    //   - item count is now smaller than the pool size (truncate)
+    // In all other cases (scroll, scrollToIndex, vbar drag) only
+    // rebindPoolRows() is called — pool widgets stay, text/index swap.
+    std::vector<Row*> _rowPool;
+    int              _firstVisibleIndex = 0;
 
     // G1 — selection state. _selectedIndex is the v1 single-mode primary
     // (kept as a cache for getSelectedIndex's O(1) read; derived from
@@ -264,6 +321,11 @@ private:
     // G4 — derive vbar visibility from content vs viewport. Single
     // helper called from layoutChildren so the rule stays in one place.
     bool needsVerticalScrollBar() const;
+
+    // G2 — pool sizing helper. Returns K = min(items.size(),
+    // ceil(viewport.h / itemHeight) + 2). Used by rebuildRows and the
+    // size-change path inside performLayout.
+    int computePoolSize() const;
 };
 
 Widget* createListViewWidget();

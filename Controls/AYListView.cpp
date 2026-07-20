@@ -76,10 +76,10 @@ ListView::ListView() {
 }
 
 ListView::~ListView() {
-    // Rows were added via addChildExternal — destroyWidgetTree (called
+    // Pool rows were added via addChildExternal — destroyWidgetTree (called
     // from the factory-owned tree's root delete) will free them. Just
-    // NULL our pointer to avoid double-free in case dtor runs first.
-    _rows.clear();
+    // NULL our pointers to avoid double-free in case dtor runs first.
+    _rowPool.clear();
     _vbar = nullptr;
 }
 
@@ -108,6 +108,8 @@ void ListView::setItems(const std::vector<std::wstring>& items) {
     if (_anchorIndex >= static_cast<int>(_items.size())) {
         _anchorIndex = _selectedIndex;
     }
+    // G2 — rebuild the pool. setItems is the only path that may grow
+    // the pool; scroll/remap paths don't touch allocation.
     rebuildRows();
 }
 
@@ -137,6 +139,12 @@ const std::wstring& ListView::getItem(size_t index) const {
     return _items[index];
 }
 
+int ListView::getRowPoolLogicalIndex(size_t slot) const {
+    if (slot >= _rowPool.size()) return -1;
+    if (_rowPool[slot] == nullptr) return -1;
+    return _rowPool[slot]->getIndex();
+}
+
 // =============================================================================
 // G4 — setVisibleRowCount + vbar auto-hide
 // =============================================================================
@@ -163,6 +171,81 @@ void ListView::setVisibleRowCount(int rows) {
 }
 
 // =============================================================================
+// G2 — row pool: sizing + rebind
+// =============================================================================
+
+int ListView::computePoolSize() const {
+    if (_items.empty()) return 0;
+    // +2 buffer rows so the half-visible top/bottom rows that scroll
+    // into view don't pop in/out one frame at a time. For 200px /
+    // 24px items → ceil(200/24) + 2 = 9 + 2 = 11. For a 24px-tall
+    // list with 1 item → 1 + 2 = 3 (cap at item count below).
+    const float vpH = std::max(0.0f, getHeight());
+    const int visibleRows = std::max(1,
+        static_cast<int>(vpH / _itemHeight) + 1);
+    const int poolSize = visibleRows + 2;
+    return std::min(static_cast<int>(_items.size()), poolSize);
+}
+
+ListView::Row* ListView::rowForLogical(int index) const {
+    if (index < 0 || index >= static_cast<int>(_items.size())) return nullptr;
+    const int first = _firstVisibleIndex;
+    const int last  = first + static_cast<int>(_rowPool.size()) - 1;
+    if (index < first || index > last) return nullptr;
+    const size_t slot = static_cast<size_t>(index - first);
+    if (slot >= _rowPool.size()) return nullptr;
+    return _rowPool[slot];
+}
+
+void ListView::rebindPoolRows() {
+    // Pure mapping step. Pool allocation is handled by rebuildRows();
+    // rebindPoolRows() only swaps which logical item each pool slot
+    // displays and updates row text/index/selection/visibility.
+    if (_rowPool.empty() || _items.empty()) {
+        for (Row* r : _rowPool) {
+            if (r != nullptr) r->setVisible(false);
+        }
+        _firstVisibleIndex = 0;
+        return;
+    }
+
+    // Derive first visible index from the current scrollOffset.y.
+    // Each itemHeight step moves by one logical item. Clamp so the
+    // last logical item is never beyond _items.size() - poolSize().
+    const float yOff = _scrollState.getScrollOffset().y;
+    const int rawFirst = static_cast<int>(yOff / _itemHeight);
+    const int maxFirst = std::max(0,
+        static_cast<int>(_items.size())
+        - static_cast<int>(_rowPool.size()));
+    _firstVisibleIndex = std::max(0, std::min(rawFirst, maxFirst));
+
+    const float barW = ScrollBar::kDefaultBarWidth;
+    const bool needsVbar = needsVerticalScrollBar();
+    const float rowW = std::max(0.0f, getWidth() - (needsVbar ? barW : 0.0f));
+
+    for (size_t slot = 0; slot < _rowPool.size(); ++slot) {
+        Row* row = _rowPool[slot];
+        if (row == nullptr) continue;
+        const int logical = _firstVisibleIndex + static_cast<int>(slot);
+        if (logical >= static_cast<int>(_items.size())) {
+            // Pool may be larger than remaining items (e.g. shrunk list);
+            // hide surplus slots.
+            row->setVisible(false);
+            continue;
+        }
+        row->setVisible(true);
+        row->setSize(math::FVector2(rowW, _itemHeight));
+        // Pool slot s is at local y = s * itemHeight. World bounds walk
+        // gives the painted y. No per-row scroll-offset math.
+        row->setPosition(math::FVector2(0.0f,
+            static_cast<float>(slot) * _itemHeight));
+        row->setText(_items[logical]);
+        row->setIndex(logical);
+        row->setSelected(isSelected(logical));
+    }
+}
+
+// =============================================================================
 // G1 — selection model (SelectionMode + vector<int> + anchor)
 // =============================================================================
 
@@ -185,7 +268,7 @@ void ListView::setSelectedIndex(int index) {
 }
 
 void ListView::setSelectedIndices(const std::vector<int>& indices) {
-    // G1 — the authoritative setter. Syncs all row visual flags and
+    // G1 — the authoritative setter. Syncs pool row visual flags and
     // fires BOTH _onSelectionChanged (single-int, last selected or -1)
     // AND _onSelectionIndicesChanged (full vector, multi-mode users).
     //
@@ -213,20 +296,19 @@ void ListView::setSelectedIndices(const std::vector<int>& indices) {
     filtered.erase(std::unique(filtered.begin(), filtered.end()),
                    filtered.end());
 
-    // Clear row visual flags for the OLD selection.
+    // Clear pool row visual flags for the OLD selection. G2 — only
+    // touch rows currently in the pool viewport (logical indices
+    // outside the pool window have no row widget yet).
     for (int oldIdx : _selectedIndices) {
-        if (oldIdx >= 0 &&
-            oldIdx < static_cast<int>(_rows.size()) &&
-            _rows[oldIdx] != nullptr) {
-            _rows[oldIdx]->setSelected(false);
+        if (Row* r = rowForLogical(oldIdx)) {
+            r->setSelected(false);
         }
     }
     // Apply new selection visuals + state.
     _selectedIndices = filtered;
     for (int idx : _selectedIndices) {
-        if (idx < static_cast<int>(_rows.size()) &&
-            _rows[idx] != nullptr) {
-            _rows[idx]->setSelected(true);
+        if (Row* r = rowForLogical(idx)) {
+            r->setSelected(true);
         }
     }
     // Mirror cache for getSelectedIndex() / backwards-compat callers.
@@ -297,8 +379,12 @@ void ListView::setScrollOffset(const math::FVector2& offset) {
     if (clamped.x > maxOff.x) clamped.x = maxOff.x;
     if (clamped.y < 0.0f) clamped.y = 0.0f;
     if (clamped.y > maxOff.y) clamped.y = maxOff.y;
+    // G2 — _scrollState is has-a, not base, so no virtual hook fires
+    // here. ListView owns the chokepoint: every site that mutates the
+    // scrollOffset must call rebindPoolRows() to refresh the pool.
     _scrollState.setScrollOffset(clamped);
     syncBarToOffset();
+    rebindPoolRows();
 }
 
 void ListView::ensureBarCreated() {
@@ -309,9 +395,12 @@ void ListView::ensureBarCreated() {
         const math::FVector2 vp = getViewportSize();
         const float maxOff = (_contentSize.y - vp.y);
         if (maxOff <= 0.0f) return;
-        // Map v (0..contentHeight) to scrollOffset.y.
+        // Map v (0..contentHeight) to scrollOffset.y. G2 chokepoint:
+        // the ScrollableWidget is has-a not base, so we call
+        // rebindPoolRows() here too (not relying on a virtual hook).
         _scrollState.setScrollOffset(math::FVector2(
             _scrollState.getScrollOffset().x, v));
+        rebindPoolRows();
         (void)vp;
     });
     addChildExternal(_vbar);
@@ -356,54 +445,60 @@ void ListView::layoutChildren() {
     _contentSize = math::FVector2(
         rowStripW,
         _items.size() * _itemHeight);
+    // Mirror into _scrollState so its getMaxScrollOffset(vp) returns a
+    // non-zero maxY when items overflow the viewport. Without this,
+    // setScrollOffset clamps every positive y to 0 (silent bug carried
+    // over from pre-G1; v1's per-row position loop didn't use
+    // getMaxScrollOffset, so the bug never bit).
+    _scrollState.setContentSize(_contentSize);
     syncBarToOffset();
 }
 
 void ListView::rebuildRows() {
-    // Tear down old rows (they are children; removeChild + delete so the
-    // tree doesn't accumulate dead nodes between setItems calls).
-    for (Row* r : _rows) {
+    // G2 — replace the previous N-row allocation with a pool of K rows.
+    // Pool size is derived from the current viewport so 5k items only
+    // allocate ~11 widgets instead of 5000.
+    //
+    // First: tear down the old pool (children; removeChild + delete so
+    // the tree doesn't accumulate dead nodes between setItems calls).
+    for (Row* r : _rowPool) {
         if (r == nullptr) continue;
         removeChild(r);
         delete r;
     }
-    _rows.clear();
+    _rowPool.clear();
 
-    // G4 — row width tracks the actual content-strip width, accounting for
-    // whether the vbar is currently visible. layoutChildren runs before
-    // rebuildRows in performLayout (which we call), but rebuildRows is
-    // also called from setItems (where layoutChildren hasn't run yet) —
-    // so we recompute the gate here directly.
+    const int poolSize = computePoolSize();
+    if (poolSize <= 0) {
+        // Empty items — keep _firstVisibleIndex at 0 so rebindPoolRows
+        // is well-defined next time items arrive.
+        _firstVisibleIndex = 0;
+        _contentSize = math::FVector2(getWidth(), 0.0f);
+        _scrollState.setContentSize(_contentSize);
+        syncBarToOffset();
+        return;
+    }
+
     const float barW = ScrollBar::kDefaultBarWidth;
     const bool needsVbar = needsVerticalScrollBar();
     const float rowW = std::max(0.0f, getWidth() - (needsVbar ? barW : 0.0f));
-    _rows.reserve(_items.size());
-    for (size_t i = 0; i < _items.size(); ++i) {
+
+    _rowPool.reserve(static_cast<size_t>(poolSize));
+    for (int i = 0; i < poolSize; ++i) {
         Row* row = new Row();
-        row->setText(_items[i]);
-        row->setIndex(static_cast<int>(i));
-        // G1 — row's selection flag derived from the multi-mode vector
-        // via isSelected() rather than the legacy _selectedIndex mirror
-        // (which still exists for v1 backwards-compat reads).
-        row->setSelected(isSelected(static_cast<int>(i)));
         row->setSize(math::FVector2(rowW, _itemHeight));
         row->_onClickByRow = [this](int idx, uint32_t mods) {
             handleRowClick(idx, mods);
         };
         addChildExternal(row);
-        _rows.push_back(row);
+        _rowPool.push_back(row);
     }
 
     _contentSize = math::FVector2(rowW, _items.size() * _itemHeight);
+    _scrollState.setContentSize(_contentSize);
     syncBarToOffset();
-    // Position rows on every rebuild — children may have just been added.
-    const float yOff = -_scrollState.getScrollOffset().y;
-    for (size_t i = 0; i < _rows.size(); ++i) {
-        if (_rows[i] != nullptr) {
-            _rows[i]->setPosition(math::FVector2(
-                0.0f, static_cast<float>(i) * _itemHeight + yOff));
-        }
-    }
+    // Map each pool slot to its starting logical item.
+    rebindPoolRows();
 }
 
 void ListView::onRender(IRenderBackend& renderer) {
@@ -429,9 +524,10 @@ void ListView::onRender(IRenderBackend& renderer) {
     renderer.drawRect(listBounds, bg);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
-    // Rows — positioned in rebuildRows(). vbar's own Widget::render
-    // skips _visible=false automatically.
-    for (Row* r : _rows) {
+    // G2 — rows: iterate the pool, not N items. Each pool slot's
+    // local y is fixed (slot * itemHeight); the row's getWorldBounds()
+    // walks parents to give the painted y.
+    for (Row* r : _rowPool) {
         if (r != nullptr && r->isVisible()) {
             r->render(renderer);
         }
@@ -502,20 +598,21 @@ void ListView::scrollToIndex(int index) {
     const float rowBot = rowTop + _itemHeight;
     const float viewTop = _scrollState.getScrollOffset().y;
     const float viewBot = viewTop + vp.y;
+    // G2 — only mutate if needed. If the row is already visible, no
+    // _scrollState.setScrollOffset call → no rebindPoolRows() needed
+    // (we'd just re-do the same work).
+    bool changed = false;
     if (rowTop < viewTop) {
         _scrollState.setScrollOffset(math::FVector2(0.0f, rowTop));
+        changed = true;
     } else if (rowBot > viewBot) {
         _scrollState.setScrollOffset(math::FVector2(
             0.0f, rowBot - vp.y));
+        changed = true;
     }
-    syncBarToOffset();
-    // Reposition rows after offset change.
-    const float yOff = -_scrollState.getScrollOffset().y;
-    for (size_t i = 0; i < _rows.size(); ++i) {
-        if (_rows[i] != nullptr) {
-            _rows[i]->setPosition(math::FVector2(
-                0.0f, static_cast<float>(i) * _itemHeight + yOff));
-        }
+    if (changed) {
+        syncBarToOffset();
+        rebindPoolRows();
     }
 }
 
@@ -525,9 +622,13 @@ Widget* createListViewWidget() {
 
 bool ListView::onMouseButtonUp(const UIMouseEvent& e) {
     if (e.mouseButton != 0) return false;
-    // Walk rows in reverse draw order and route to the first hit.
-    for (auto it = _rows.rbegin(); it != _rows.rend(); ++it) {
+    // G2 — walk the pool in reverse draw order and route to the first
+    // hit. Pool slots with logical index >= items.size() are hidden
+    // (rebindPoolRows sets visible=false) so they're skipped naturally
+    // by getWorldBounds.contains.
+    for (auto it = _rowPool.rbegin(); it != _rowPool.rend(); ++it) {
         if (*it == nullptr) continue;
+        if (!(*it)->isVisible()) continue;
         if ((*it)->getWorldBounds().contains(e.mousePos)) {
             return (*it)->onMouseButtonUp(e);
         }

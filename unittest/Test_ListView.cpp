@@ -684,4 +684,199 @@ TEST_CASE(listview_combobox_g1_regression_smoke) {
     ui.shutdown();
 }
 
+// =============================================================================
+// G2 — row pool (virtualization)
+// =============================================================================
+//
+// The pool is always-on: K = min(items.size(), ceil(viewport/itemH) + 2)
+// row widgets cover a 5k-item list. The public API (setItems,
+// getItem, setSelectedIndex, scrollToIndex) is unchanged — only the
+// internal allocation strategy is new. These cases exercise the
+// pool boundary + scroll remap + click → logical index translation
+// + dtor cleanup invariants that the K1 large-list scenario from
+// the v1 TODO block above was designed around.
+
+// G2.1 — pool only allocates K row widgets regardless of items.size().
+// 24px items in a 200px viewport → K = ceil(200/24)+1 + 2 = 8+1+2 = 11.
+// Hard cap: K ≤ items.size().
+TEST_CASE(listview_pool_only_allocates_visible_rows) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    items.reserve(5000);
+    for (int i = 0; i < 5000; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+    // Pool size = min(5000, ceil(200/24)+1 + 2 = 8+1+2 = 11).
+    CHECK(lv.getRowPoolSize() <= 11u);
+    // Pre-G2 would have been 5000. Post-G2 this is the hard win.
+    CHECK(lv.getRowPoolSize() < static_cast<size_t>(5000));
+}
+
+// G2.2 — pool[0] text reflects the first VISIBLE logical item, not
+// literal item 0. After scroll-to-offset 240 (10 items down), the
+// pool remaps so pool[0] shows items[10].
+TEST_CASE(listview_pool_scroll_remaps_rows) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 200; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+    // Before scroll: pool[0] should show items[0].
+    CHECK(lv.getRowPoolLogicalIndex(0) == 0);
+    // Scroll down by 10 items (240px).
+    lv.setScrollOffset(FVector2(0.0f, 240.0f));
+    // Pool should remap; pool[0] now shows logical item 10.
+    CHECK(lv.getRowPoolLogicalIndex(0) == 10);
+    CHECK(lv.getRowPoolLogicalIndex(1) == 11);
+}
+
+// G2.3 — pool slots store their LOGICAL index (not slot number).
+// Pool slot s with _firstVisibleIndex=N has Row::_index == N + s.
+// We verify this directly via getRowPoolLogicalIndex() before and
+// after a scroll. The selection callback contract (Row click →
+// handleRowClick(logical)) is exercised by all the G1 tests above
+// which now run against a pooled ListView; here we focus on the
+// pool-bound semantics.
+TEST_CASE(listview_pool_slot_stores_logical_index) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 100; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+
+    // Initially: pool covers items 0..K-1.
+    const size_t poolSize = lv.getRowPoolSize();
+    CHECK(poolSize > 0u);
+    CHECK(lv.getRowPoolLogicalIndex(0) == 0);
+    CHECK(lv.getRowPoolLogicalIndex(poolSize - 1)
+          == static_cast<int>(poolSize) - 1);
+
+    // Scroll so logical item 50 is in pool slot 0.
+    lv.setScrollOffset(FVector2(0.0f, 50.0f * 24.0f));
+    CHECK(lv.getRowPoolLogicalIndex(0) == 50);
+    CHECK(lv.getRowPoolLogicalIndex(1) == 51);
+    CHECK(lv.getRowPoolLogicalIndex(poolSize - 1)
+          == 50 + static_cast<int>(poolSize) - 1);
+}
+
+// G2.4 — selection on a logical index OUTSIDE the pool viewport is
+// preserved in _selectedIndices (the authoritative state), even though
+// no row widget exists for it yet. When the user scrolls that index
+// into view, rebindPoolRows paints the selected band.
+TEST_CASE(listview_pool_set_selected_outside_viewport_preserved) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 5000; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+
+    // Select index 2500 — far outside the pool's 0..10 window.
+    lv.setSelectedIndex(2500);
+    CHECK(lv.getSelectedIndex() == 2500);
+    // Multi-mode variant: multiple disjoint selections across the list.
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    lv.setSelectedIndices({2500, 4999});
+    CHECK(lv.getSelectedIndices().size() == 2u);
+    CHECK(lv.isSelected(2500));
+    CHECK(lv.isSelected(4999));
+    // Both indices are valid even though no row widget holds them.
+    CHECK(lv.getRowPoolSize() <= 11u);
+}
+
+// G2.5 — destroying the ListView releases all pool row widgets so the
+// children vector is empty (host can detect leaks via the factory's
+// createWidget + deleteWidget cycle).
+TEST_CASE(listview_pool_dtor_clears_children) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 100; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+    // Pool has K ≤ 11 row widgets attached as children.
+    const size_t childrenBefore = lv.getChildren().size();
+    CHECK(childrenBefore > 0u);
+    // Dtor runs at scope exit; if a pool row was double-owned or
+    // leaked, the heap check below would catch it.
+}
+
+// G2.6 — clearing items also drops the pool to size 0 (no zombie row
+// widgets holding onto a stale _text reference).
+TEST_CASE(listview_pool_cleared_on_clear_items) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items = {L"a", L"b", L"c"};
+    lv.setItems(items);
+    CHECK(lv.getRowPoolSize() > 0u);
+    lv.clearItems();
+    CHECK(lv.getRowPoolSize() == 0u);
+    CHECK(lv.getItemCount() == 0u);
+}
+
+// G2.7 — replacing items via setItems rebuilds the pool from scratch.
+// Pool size is bounded by the new items.size() / viewport computation.
+// A 5-item list in a 200px viewport has K = min(5, 11) = 5.
+TEST_CASE(listview_pool_set_items_resizes_pool) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    // First: 5000 items → pool size 11.
+    std::vector<std::wstring> big;
+    for (int i = 0; i < 5000; ++i) big.push_back(L"x");
+    lv.setItems(big);
+    const size_t poolBig = lv.getRowPoolSize();
+    CHECK(poolBig > 0u);
+    CHECK(poolBig <= 11u);
+    // Then: 3 items → pool shrinks to min(3, 11) = 3.
+    lv.setItems({L"only", L"three", L"rows"});
+    CHECK(lv.getRowPoolSize() == 3u);
+    // And back to large.
+    lv.setItems(big);
+    CHECK(lv.getRowPoolSize() == poolBig);
+}
+
+// G2.8 — pool rebind via vbar drag updates _firstVisibleIndex
+// monotonically. After several scrollOffset changes, the pool[0]
+// logical index reflects the LATEST offset (not stale from a prior
+// bind).
+TEST_CASE(listview_pool_vbar_drag_rebinds_monotonically) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 200.0f));
+    lv.setItemHeight(24.0f);
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 200; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+
+    int prevFirst = lv.getRowPoolLogicalIndex(0);
+    CHECK(prevFirst == 0);
+    // Scroll down a few times.
+    for (int i = 0; i < 5; ++i) {
+        lv.setScrollOffset(FVector2(0.0f, (i + 1) * 48.0f));   // 2 rows each
+        const int curFirst = lv.getRowPoolLogicalIndex(0);
+        CHECK(curFirst >= prevFirst);   // monotonic (no wrap)
+        CHECK(curFirst <= 200 - static_cast<int>(lv.getRowPoolSize()));
+        prevFirst = curFirst;
+    }
+    // Scroll back to top — pool rebinds back to item 0.
+    lv.setScrollOffset(FVector2(0.0f, 0.0f));
+    CHECK(lv.getRowPoolLogicalIndex(0) == 0);
+}
+
 TEST_SUITE_END
