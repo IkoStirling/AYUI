@@ -2,6 +2,7 @@
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "aymath/MathUtils.h"
+#include <algorithm>
 
 namespace ayt::ui {
 
@@ -96,10 +97,24 @@ void CheckBox::onRender(IRenderBackend& renderer) {
     renderer.drawRect(box, boxBg);
     renderer.drawBorderRect(box, boxBorderColor, boxBorderWidth, 2.0f);
 
-    // Checkmark accent fill (inset 3px on each side). Same color as Button
+    // Checkmark accent fill (inset 3px on each side). When a style
+    // is wired AND its bg color is not the makeDefault sentinel, the
+    // accent reuses the style's backgroundColor (the theme's "filled"
+    // state). Otherwise the v1 fallback blue applies — same as Button
     // Pressed's accent for visual coherence.
     if (_checked) {
-        const math::FVector4 accent(0.18f, 0.45f, 0.78f, 1.0f);
+        math::FVector4 accent(0.18f, 0.45f, 0.78f, 1.0f);
+        if (style.hasStyle) {
+            // Use a brightened variant of the style bg so the accent
+            // reads as "selected" against the box bg. Multiply each
+            // channel by 1.6 (clamped to 1.0). Keeps the design intent
+            // (theme drives color) without inventing a new AccentColor
+            // field in WidgetStyle.
+            accent.x = std::min(1.0f, style.backgroundColor.x * 1.6f);
+            accent.y = std::min(1.0f, style.backgroundColor.y * 1.6f);
+            accent.z = std::min(1.0f, style.backgroundColor.z * 1.6f);
+            accent.w = style.backgroundColor.w;
+        }
         const float ix = box.minX + 3.0f;
         const float iy = box.minY + 3.0f;
         renderer.drawRect(

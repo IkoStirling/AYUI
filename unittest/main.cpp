@@ -51,6 +51,7 @@
 #include "Test_TabStrip.cpp"
 #include "Test_ModalDialog.cpp"
 #include "Test_DragDrop.cpp"
+#include "Test_Style_G9.cpp"
 
 void runTest()
 {

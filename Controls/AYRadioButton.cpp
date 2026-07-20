@@ -2,6 +2,7 @@
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "aymath/MathUtils.h"
+#include <algorithm>
 
 namespace ayt::ui {
 
@@ -113,10 +114,19 @@ void RadioButton::onRender(IRenderBackend& renderer) {
     renderer.drawBorderRect(circle, outerBorderColor, outerBorderWidth,
                             kCircleSize * 0.5f);
 
-    // Selected dot — inset 4px on each side, accent fill. Matches
-    // CheckBox's accent (Button's Pressed fill).
+    // Selected dot — inset 4px on each side, accent fill. Same pattern
+    // as CheckBox's check accent: when a style is wired AND its bg is
+    // not the makeDefault sentinel, the dot reuses a brightened variant
+    // of the style's backgroundColor. Otherwise the v1 fallback blue
+    // matches Button's Pressed fill for visual coherence.
     if (_checked) {
-        const math::FVector4 accent(0.18f, 0.45f, 0.78f, 1.0f);
+        math::FVector4 accent(0.18f, 0.45f, 0.78f, 1.0f);
+        if (style.hasStyle) {
+            accent.x = std::min(1.0f, style.backgroundColor.x * 1.6f);
+            accent.y = std::min(1.0f, style.backgroundColor.y * 1.6f);
+            accent.z = std::min(1.0f, style.backgroundColor.z * 1.6f);
+            accent.w = style.backgroundColor.w;
+        }
         const float inset = 4.0f;
         renderer.drawRect(
             math::FRectangle(circle.minX + inset,

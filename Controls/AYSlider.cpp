@@ -241,6 +241,22 @@ void Slider::onRender(IRenderBackend& renderer) {
     // Handle
     math::FVector4 handleColor = math::FVector4(0.85f, 0.88f, 0.92f, 1.0f);
     math::FVector4 handleBorder = math::FVector4(0.4f, 0.4f, 0.45f, 1.0f);
+    // G9 — when a style is wired AND its bg is not the makeDefault
+    // sentinel, derive the handle fill from the style's backgroundColor
+    // brightened toward white (so the handle reads as "lighter than the
+    // track"). State-aware overrides (disabled / pressed / hover) take
+    // precedence — they signal interaction and must win over the theme.
+    if (style.hasStyle) {
+        const auto& bg = style.backgroundColor;
+        // Mix toward white by 0.55 — keeps the style hue but lifts the
+        // value so the handle reads against a mid-grey track.
+        handleColor.x = bg.x + (1.0f - bg.x) * 0.55f;
+        handleColor.y = bg.y + (1.0f - bg.y) * 0.55f;
+        handleColor.z = bg.z + (1.0f - bg.z) * 0.55f;
+        handleColor.w = bg.w;
+        // Border reuses the style border for theme consistency.
+        handleBorder = style.borderColor;
+    }
     if (!isEnabled()) {
         handleColor = math::FVector4(0.5f, 0.5f, 0.52f, 1.0f);
     } else if (_dragging || isPressed()) {
