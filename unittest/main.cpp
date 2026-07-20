@@ -52,6 +52,7 @@
 #include "Test_ModalDialog.cpp"
 #include "Test_DragDrop.cpp"
 #include "Test_Style_G9.cpp"
+#include "Test_ImageTexture_G10.cpp"
 
 void runTest()
 {

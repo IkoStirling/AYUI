@@ -461,6 +461,27 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (Image* img = dynamic_cast<Image*>(widget)) {
+            // G10 — round-trip textureName → TextureRegistry::acquire.
+            // The width/height we record here are metadata; the actual
+            // backend handle is filled in by the host's loader once the
+            // PNG is decoded. Missing textureName = anonymous (no
+            // registry touch).
+            if (j.contains("textureName")) {
+                const std::string name =
+                    j["textureName"].get<std::string>();
+                if (!name.empty()) {
+                    img->setTexture(name);
+                    // Width/height captured via setTexture(name); if the
+                    // registry already has an entry, _tex.width/height
+                    // come from there. Otherwise we leave them 0 and the
+                    // host fills them in via registerExternal() later.
+                    (void)j["textureWidth"];   // metadata only
+                    (void)j["textureHeight"];
+                }
+            }
+        }
+
         if (j.contains("children") && j["children"].is_array()) {
             for (const auto& childJson : j["children"]) {
                 Widget* child = deserialize(childJson.dump());
@@ -718,7 +739,17 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (Image* image = dynamic_cast<Image*>(widget)) {
         j["type"] = "Image";
-        // texture handle would need separate serialization
+        // G10 — texture handle is now typed + name-based. The backend
+        // pointer itself never serializes (it's runtime state); the
+        // host re-resolves `textureName` via TextureRegistry at load
+        // time. width/height travel with the JSON so editor inspectors
+        // can show "missing 64×48 icon" before the texture loads.
+        const ImageTextureHandle& tex = image->getTexture();
+        if (!tex.name.empty()) {
+            j["textureName"]   = tex.name;
+            j["textureWidth"]  = tex.width;
+            j["textureHeight"] = tex.height;
+        }
     }
     else if (TreeNode* tn = dynamic_cast<TreeNode*>(widget)) {
         j["type"] = "TreeNode";

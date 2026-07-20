@@ -11,7 +11,11 @@ TEST_SUITE(AYUI_Image)
 
 TEST_CASE(image_initial_state) {
     Image image;
-    CHECK(image.getTexture() == nullptr);
+    // G10 — getTexture() now returns a typed ImageTextureHandle. The
+    // default handle has handle=nullptr + name="" + width=0 + height=0.
+    CHECK(image.getTexture().handle == nullptr);
+    CHECK(image.getTextureName().empty());
+    CHECK(!image.hasTexture());
     CHECK(image.getColor().x == 1.0f);  // default white
     CHECK(image.getColor().y == 1.0f);
     CHECK(image.getColor().z == 1.0f);
@@ -21,8 +25,10 @@ TEST_CASE(image_initial_state) {
 TEST_CASE(image_set_texture) {
     Image image;
     void* tex = reinterpret_cast<void*>(0x12345678);
-    image.setTexture(tex);
-    CHECK(image.getTexture() == tex);
+    image.setTexture(tex);   // legacy void* → anonymous typed handle
+    CHECK(image.getTexture().handle == tex);
+    CHECK(image.getTextureName().empty());
+    CHECK(image.hasTexture());
 }
 
 TEST_CASE(image_set_color) {

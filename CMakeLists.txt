@@ -17,6 +17,8 @@ set(SRC_FILES
     Controls/AYScrollBar.cpp
     Controls/AYScrollView.cpp
     Controls/AYImage.cpp
+    Controls/AYImageTexture.h
+    Controls/AYTextureRegistry.cpp
     Controls/AYInteractiveWidget.cpp
     Controls/AYSelectableWidget.cpp
     Controls/AYTooltip.cpp
@@ -72,6 +74,8 @@ set(HEAD_FILES
     Controls/AYScrollBar.h
     Controls/AYScrollView.h
     Controls/AYImage.h
+    Controls/AYImageTexture.h
+    Controls/AYTextureRegistry.h
     Controls/AYInteractiveWidget.h
     Controls/AYLeafWidget.h
     Controls/AYListView.h
