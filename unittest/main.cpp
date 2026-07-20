@@ -7,6 +7,7 @@
 #include "Test_Button.cpp"
 #include "Test_CheckBox.cpp"
 #include "Test_RadioButton.cpp"
+#include "Test_RadioGroup.cpp"
 #include "Test_Slider.cpp"
 #include "Test_ProgressBar.cpp"
 #include "Test_TextInput.cpp"

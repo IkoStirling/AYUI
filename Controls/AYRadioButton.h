@@ -5,6 +5,12 @@
 
 namespace ayt::ui {
 
+// G5 — RadioGroup (defined in AYRadioGroup.h) needs friend access to
+// wrap the _onToggled / _onSelected callbacks. Forward-declare so
+// AYRadioGroup.h doesn't need to be included here (RadioGroup needs
+// the full RadioButton def, not the other way around).
+class RadioGroup;
+
 // C-2b: RadioButton is the mutually-exclusive sibling of CheckBox. The two
 // share most of the architecture:
 //   - extends InteractiveWidget (Hovered/Pressed/Disabled state, Hand cursor)
@@ -53,6 +59,14 @@ public:
     // Fires only on the uncheck -> check transition. Useful for
     // "selection-changed" observers that don't care about deselects.
     void setOnSelected(std::function<void()> cb) { _onSelected = std::move(cb); }
+
+    // G5 — RadioGroup needs to wrap (not replace) the existing
+    // _onToggled / _onSelected callbacks so the host's observers keep
+    // firing AND the mutex still runs. friend access lets the group
+    // capture prevToggled / prevSelected at add() time. R3-style
+    // friend declaration (matches UIManager being a friend of Widget
+    // for the G12 drag-drop dispatcher).
+    friend class RadioGroup;
 
     math::FRectangle getCircleRect() const;
 
