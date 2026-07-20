@@ -48,6 +48,7 @@ set(SRC_FILES
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
     Layout/AYGridPanel.cpp
+    Layout/AYConstraint.cpp
     Loader/AYLayoutLoader.cpp
     Loader/AYWidgetFactory.cpp
     Loader/AYWidgetSerializer.cpp
@@ -107,6 +108,7 @@ set(HEAD_FILES
     Layout/AYBox.h
     Layout/AYSplitterHandle.h
     Layout/AYGridPanel.h
+    Layout/AYConstraint.h
     Loader/AYLayoutLoader.h
     Loader/AYWidgetFactory.h
     Loader/AYWidgetSerializer.h
