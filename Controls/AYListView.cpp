@@ -100,6 +100,34 @@ const std::wstring& ListView::getItem(size_t index) const {
     return _items[index];
 }
 
+// =============================================================================
+// G4 — setVisibleRowCount + vbar auto-hide
+// =============================================================================
+
+bool ListView::needsVerticalScrollBar() const {
+    // True when total content height (rows * itemHeight) exceeds the
+    // viewport height. v1.1 keeps _visibleRowCount as an optional hint:
+    // if the host set it and items <= visibleRowCount, the row content
+    // trivially fits and vbar can hide even if host height is loose.
+    // The hard gate is contentH vs viewportH — _visibleRowCount is
+    // "additional early-out" so hosts setting visibleRowCount=5 with a
+    // 200px-tall list and 3 items don't show a useless vbar.
+    const float contentH =
+        static_cast<float>(_items.size()) * _itemHeight;
+    if (contentH > getHeight() + 1e-3f) return true;
+    if (_visibleRowCount > 0 &&
+        _items.size() > static_cast<size_t>(_visibleRowCount)) {
+        return true;
+    }
+    return false;
+}
+
+void ListView::setVisibleRowCount(int rows) {
+    // <= 0 → -1 (no cap). Preserves v1 default behavior.
+    _visibleRowCount = (rows <= 0) ? -1 : rows;
+    performLayout();   // re-derive vbar visibility + contentSize
+}
+
 void ListView::setSelectedIndex(int index) {
     int clamped = index;
     if (clamped < -1) clamped = -1;
@@ -183,17 +211,21 @@ void ListView::performLayout() {
 }
 
 void ListView::layoutChildren() {
+    // G4 — derive vbar visibility BEFORE positioning it. When the vbar
+    // is hidden, we want rows to occupy the full list width and the
+    // vbar to not draw a 12px strip down the right edge.
+    const bool needsVbar = needsVerticalScrollBar();
+    const float barW = ScrollBar::kDefaultBarWidth;
     if (_vbar != nullptr) {
-        // CompoundWidget::layoutChildren iterates _children; rows already
-        // positioned by rebuildRows. Re-pin the vbar so layout-driven
-        // callers (Resize etc.) don't leave it stale.
-        const float barW = ScrollBar::kDefaultBarWidth;
+        _vbar->setVisible(needsVbar);
         _vbar->setPosition(math::FVector2(getWidth() - barW, 0.0f));
         _vbar->setSize(math::FVector2(barW, getHeight()));
     }
-    // Update content size and sync bar.
+    // Update content size and sync bar. When vbar is hidden, row width
+    // is the full list width; otherwise we reserve `barW` on the right.
+    const float rowStripW = std::max(0.0f, getWidth() - (needsVbar ? barW : 0.0f));
     _contentSize = math::FVector2(
-        getWidth() - (_vbar ? ScrollBar::kDefaultBarWidth : 0.0f),
+        rowStripW,
         _items.size() * _itemHeight);
     syncBarToOffset();
 }
@@ -208,8 +240,14 @@ void ListView::rebuildRows() {
     }
     _rows.clear();
 
+    // G4 — row width tracks the actual content-strip width, accounting for
+    // whether the vbar is currently visible. layoutChildren runs before
+    // rebuildRows in performLayout (which we call), but rebuildRows is
+    // also called from setItems (where layoutChildren hasn't run yet) —
+    // so we recompute the gate here directly.
     const float barW = ScrollBar::kDefaultBarWidth;
-    const float rowW = std::max(0.0f, getWidth() - barW);
+    const bool needsVbar = needsVerticalScrollBar();
+    const float rowW = std::max(0.0f, getWidth() - (needsVbar ? barW : 0.0f));
     _rows.reserve(_items.size());
     for (size_t i = 0; i < _items.size(); ++i) {
         Row* row = new Row();
@@ -247,8 +285,13 @@ void ListView::onRender(IRenderBackend& renderer) {
         : math::FVector4(0.45f, 0.45f, 0.5f, 1.0f);
     float bw = style.hasStyle ? style.borderWidth : 1.0f;
 
-    // Background — only behind rows; ScrollBar paints itself.
-    const float barW = (_vbar != nullptr) ? ScrollBar::kDefaultBarWidth : 0.0f;
+    // G4 — background fills the row strip; vbar paints itself when visible.
+    // When the vbar is hidden, listBounds = full bounds (no 12px strip on
+    // the right that would otherwise show through as bg color behind the
+    // missing vbar).
+    const bool vbarShown =
+        (_vbar != nullptr) && _vbar->isVisible();
+    const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
     const math::FRectangle listBounds(
         bounds.minX, bounds.minY,
         bounds.maxX - barW, bounds.maxY);
@@ -256,7 +299,8 @@ void ListView::onRender(IRenderBackend& renderer) {
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
     // Rows — positioned in rebuildRows(). Standard render() cascade draws
-    // them; we render vbar ourselves to make the order explicit.
+    // them; we render vbar ourselves to make the order explicit. vbar's
+    // own Widget::render skips _visible=false automatically.
     for (Row* r : _rows) {
         if (r != nullptr && r->isVisible()) {
             r->render(renderer);

@@ -61,6 +61,11 @@ public:
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
 
+    // G3 — overflow accessor. Exposed so the host (or tests) can inspect
+    // whether the horizontal scrollbar is currently shown.
+    class ScrollView* getScrollView() const { return _scrollView; }
+    class ScrollBar*  getHorizontalScrollBar() const;
+
 private:
     struct ItemRecord {
         enum class Kind { Button, Separator };
@@ -68,6 +73,19 @@ private:
         Widget* widget;
     };
     std::vector<ItemRecord> _items;
+
+    // G3 — wrap pattern (matches TabStrip Q12 plan: "v1.1 wraps the
+    // whole strip in a ScrollView"). Items are children of _contentStrip
+    // (an internal CompoundWidget); ToolBar owns the ScrollView +
+    // _contentStrip and is responsible for deleting them in ~ToolBar.
+    // When items' total width exceeds ToolBar width, the ScrollView
+    // shows a horizontal scrollbar.
+    void ensureScrollWrap();
+    void layoutItems();
+    void clearOwnedItems();
+
+    class ScrollView* _scrollView  = nullptr;
+    class Widget*     _contentStrip = nullptr;   // owning child of _scrollView
 };
 
 Widget* createToolBarWidget();

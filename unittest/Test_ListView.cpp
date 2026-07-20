@@ -332,4 +332,56 @@ TEST_CASE(listview_key_nav_on_empty_list_noop) {
     CHECK(lv.getSelectedIndex() == -1);
 }
 
+// =============================================================================
+// G4 — vbar auto-hide + setVisibleRowCount
+// =============================================================================
+
+// G4: 3 items in a 200-tall list fit comfortably → vbar must hide so
+// rows take the full width. vbar widget still exists (auto-managed), but
+// isVisible() == false. This is the canonical "no overflow → no chrome".
+TEST_CASE(listview_vbar_hidden_when_items_fit) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSize(FVector2(160.0f, 200.0f));   // contentH = 3*24 = 72 ≤ 200
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    // performLayout derives vbar visibility from contentH vs viewportH.
+    lv.performLayout();
+    CHECK_NOT_NULL(lv.getVerticalScrollBar());
+    CHECK_FALSE(lv.getVerticalScrollBar()->isVisible());
+}
+
+// G4: 100 items in a 100-tall list with 24px rows → contentH = 2400 ≫ 100,
+// vbar must remain visible so the user can scroll.
+TEST_CASE(listview_vbar_visible_when_items_exceed) {
+    ListView lv;
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 100; ++i) items.push_back(L"row" + std::to_wstring(i));
+    lv.setItems(items);
+    lv.setSize(FVector2(160.0f, 100.0f));   // contentH = 100*24 = 2400 ≫ 100
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    lv.performLayout();
+    CHECK_NOT_NULL(lv.getVerticalScrollBar());
+    CHECK(lv.getVerticalScrollBar()->isVisible());
+}
+
+// G4: setVisibleRowCount clamps non-positive values to -1 (v1 default)
+// and stores the requested value verbatim otherwise. The API is a
+// round-trip getter; the vbar-auto-hide derivation lives in
+// needsVerticalScrollBar() and is verified by the two cases above.
+TEST_CASE(listview_visible_row_count_api_round_trip) {
+    ListView lv;
+    // Default is -1 (no cap) — preserves v1 behavior.
+    CHECK(lv.getVisibleRowCount() == -1);
+    lv.setVisibleRowCount(5);
+    CHECK(lv.getVisibleRowCount() == 5);
+    // 0 / negative are clamped back to -1 sentinel.
+    lv.setVisibleRowCount(0);
+    CHECK(lv.getVisibleRowCount() == -1);
+    lv.setVisibleRowCount(-3);
+    CHECK(lv.getVisibleRowCount() == -1);
+    // Positive value sticks.
+    lv.setVisibleRowCount(8);
+    CHECK(lv.getVisibleRowCount() == 8);
+}
+
 TEST_SUITE_END

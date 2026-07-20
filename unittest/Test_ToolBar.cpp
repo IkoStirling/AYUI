@@ -75,5 +75,57 @@ TEST_CASE(toolbar_factory_registered) {
     destroyWidgetTree(widget);
 }
 
+// =============================================================================
+// G3 — ToolBar overflow (ScrollView wrap)
+// =============================================================================
+
+// G3: when 10 buttons (each ~80px wide, so total ~820px) are added to a
+// 200px-wide toolbar, the internal ScrollView must show its horizontal
+// scrollbar so the overflow content is reachable. Without overflow this
+// would be silently clipped (v1 behavior).
+TEST_CASE(toolbar_overflow_enables_hscroll_when_content_exceeds) {
+    ToolBar tb;
+    tb.setSize(FVector2(200.0f, 32.0f));
+    for (int i = 0; i < 10; ++i) {
+        tb.addButton(L"B" + std::to_wstring(i));
+    }
+    tb.performLayout();
+
+    ScrollView* sv = tb.getScrollView();
+    CHECK_NOT_NULL(sv);
+    ScrollBar* hbar = tb.getHorizontalScrollBar();
+    CHECK_NOT_NULL(hbar);
+    // hbar is visible when content width exceeds viewport width.
+    CHECK(hbar->isVisible());
+}
+
+// G3: 3 buttons in an 800px-wide toolbar fit comfortably → horizontal
+// scrollbar must NOT show (no useless chrome when content fits).
+TEST_CASE(toolbar_overflow_hscroll_disabled_when_content_fits) {
+    ToolBar tb;
+    tb.setSize(FVector2(800.0f, 32.0f));
+    tb.addButton(L"Save");
+    tb.addButton(L"Open");
+    tb.addButton(L"Quit");
+    tb.performLayout();
+
+    ScrollBar* hbar = tb.getHorizontalScrollBar();
+    CHECK_NOT_NULL(hbar);
+    CHECK_FALSE(hbar->isVisible());
+}
+
+// G3: smoke test — the public addButton API still returns the same
+// pointer that's also accessible via getItem(). This guards against
+// accidental refactor breakage of the public surface.
+TEST_CASE(toolbar_add_button_returns_existing_widget) {
+    ToolBar tb;
+    auto* btn = tb.addButton(L"Foo");
+    CHECK_NOT_NULL(btn);
+    CHECK(tb.getItem(0) == btn);
+    CHECK(tb.getItemCount() == 1u);
+    // ScrollView is created lazily on first addButton.
+    CHECK_NOT_NULL(tb.getScrollView());
+}
+
 TEST_SUITE_END
 

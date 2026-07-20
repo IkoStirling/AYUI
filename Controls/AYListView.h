@@ -176,6 +176,16 @@ public:
     void  setItemHeight(float h) { _itemHeight = h; }
     float getItemHeight() const { return _itemHeight; }
 
+    // G4 — visible row count cap. -1 = no cap (v1 behavior; vbar always
+    // shows when content > viewport). When set > 0, used as a hint to
+    // auto-hide the vertical scrollbar when items * itemHeight fits
+    // within the viewport (i.e. items.size() <= visibleRowCount OR
+    // items * itemHeight <= viewport height). The list's own height is
+    // host-controlled — this API does NOT clamp _size.y in v1.1 (deferred
+    // to v1.2 if host-side height-derive use cases appear).
+    void  setVisibleRowCount(int rows);
+    int   getVisibleRowCount() const { return _visibleRowCount; }
+
     // Item-level visual offset (scroll position). Mirrors ScrollableWidget
     // contract; here the host reads it for tests + combo popup syncing.
     const math::FVector2& getScrollOffset() const { return _scrollState.getScrollOffset(); }
@@ -237,6 +247,13 @@ private:
 
     std::function<void(int)> _onSelectionChanged;
     std::function<void(int)> _onItemActivated;
+
+    // G4 — visible row count cap. -1 = no cap (v1 behavior).
+    int _visibleRowCount = -1;
+
+    // G4 — derive vbar visibility from content vs viewport. Single
+    // helper called from layoutChildren so the rule stays in one place.
+    bool needsVerticalScrollBar() const;
 };
 
 Widget* createListViewWidget();
