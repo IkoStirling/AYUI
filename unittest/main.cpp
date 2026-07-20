@@ -47,6 +47,7 @@
 #include "Test_Modal.cpp"
 #include "Test_TabStrip.cpp"
 #include "Test_ModalDialog.cpp"
+#include "Test_DragDrop.cpp"
 
 void runTest()
 {

@@ -303,6 +303,17 @@ void Widget::render(IRenderBackend& renderer) {
     if (!_visible) return;
     onRender(renderer);
     renderChildren(renderer);
+    // G12 — drop-target highlight. When this widget is the active drop
+    // target during a drag session, paint a 1px accent border (matches
+    // the SplitterHandle drag-reveal palette so the editor feels
+    // consistent). Default visual; hosts can suppress by clearing
+    // isCurrentDropTarget or by drawing their own highlight inside an
+    // onDragEnter callback.
+    if (_isCurrentDropTarget) {
+        const math::FRectangle b = getWorldBounds();
+        renderer.drawBorderRect(b,
+            math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 1.0f, 2.0f);
+    }
 }
 
 void Widget::renderChildren(IRenderBackend& renderer) {

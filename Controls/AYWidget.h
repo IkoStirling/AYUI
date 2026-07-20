@@ -3,6 +3,7 @@
 #include "aymath/MathTypes.h"
 #include "aymath/MathUtils.h"
 #include "IAYRenderBackend.h"
+#include "AYDragDrop.h"
 
 #include <functional>
 #include <vector>
@@ -13,6 +14,7 @@ namespace ayt::ui {
     
 // Forward declarations
 class Widget;
+class UIManager;
 
 enum class UIEventType {
     UIMouseMove,
@@ -67,6 +69,15 @@ class Widget {
 public:
     Widget();
     virtual ~Widget();
+
+    // G12 — UIManager is the only class that fires the drag/drop
+    // callbacks (beginDrag → source->_onDragStart, updateDrag →
+    // target->_onDragEnter/Leave, endDrag → target->_onDrop +
+    // source->_onDragEnd). Friend grant keeps the protected
+    // _onDrag*/_drop callback fields from leaking into the public
+    // surface; mirrors the same UIManager-friend pattern used for the
+    // protected focus/capture helpers in earlier phases.
+    friend class UIManager;
 
     // Tree operations
     Widget* getParent() const { return _parent; }
@@ -184,6 +195,44 @@ public:
     void setStyleId(const std::string& id) { _styleId = id; }
     const std::string& getStyleId() const { return _styleId; }
 
+    // =================================================================
+    // G12 — Drag & Drop API.
+    // =================================================================
+    // DragSource side: a widget can opt in to be a drag source via
+    // setDraggable(true). The host (typically the widget's own
+    // onMouseButtonDown handler) calls UIManager::beginDrag(this, ...)
+    // when it decides user intent warrants a drag. The widget's
+    // payload is read from getDragPayload() inside beginDrag; the
+    // host sets it via setDragPayload() before the gesture starts.
+    void setDraggable(bool d) { _draggable = d; }
+    bool isDraggable() const  { return _draggable; }
+    void setDragPayload(const DragPayload& p) { _dragPayload = p; }
+    const DragPayload& getDragPayload() const { return _dragPayload; }
+    void setOnDragStart(std::function<void()> cb)   { _onDragStart = std::move(cb); }
+    void setOnDragEnd  (std::function<void(bool /*accepted*/)> cb) {
+        _onDragEnd = std::move(cb);
+    }
+
+    // DropTarget side: a widget can opt in to receive drops via
+    // setAcceptDrops(true). UIManager walks up from the widget under
+    // the cursor to find the nearest accepting ancestor; that ancestor
+    // gets onDragEnter + onDragLeave + onDrop callbacks.
+    void  setAcceptDrops(bool a) { _acceptDrops = a; }
+    bool  isAcceptDrops() const  { return _acceptDrops; }
+    void  setOnDrop      (std::function<void(const DragPayload&)> cb) {
+        _onDrop = std::move(cb);
+    }
+    void  setOnDragEnter (std::function<void(const DragPayload&)> cb) {
+        _onDragEnter = std::move(cb);
+    }
+    void  setOnDragLeave (std::function<void()> cb) { _onDragLeave = std::move(cb); }
+
+    // G12 internal — used by UIManager to toggle the drop-target highlight.
+    // Not part of the host-facing API; public only because UIManager is
+    // friended via the .cpp implementation.
+    bool isCurrentDropTarget() const            { return _isCurrentDropTarget; }
+    void setCurrentDropTarget(bool t)          { _isCurrentDropTarget = t; }
+
     // ID
     void setId(const std::string& id) { _id = id; }
     const std::string& getId() const { return _id; }
@@ -228,6 +277,23 @@ protected:
     bool _layoutSizeManaged = true;
     std::string _styleId;
     std::string _id;
+
+    // G12 — Drag & Drop state. Empty std::function defaults pay no
+    // runtime cost; only widgets that opt in (setDraggable / setAcceptDrops
+    // + a callback) allocate the closure capture. The "horizontal feature"
+    // argument against adding these to base: it's deliberate — every
+    // widget needs to be reachable as a drag source or target without
+    // deriving a new class, and a mixin would force host boilerplate that
+    // duplicates this exact field set per subclass.
+    bool _draggable = false;
+    bool _acceptDrops = false;
+    DragPayload _dragPayload;
+    std::function<void()>                       _onDragStart;
+    std::function<void(bool /*accepted*/)>      _onDragEnd;
+    std::function<void(const DragPayload&)>     _onDrop;
+    std::function<void(const DragPayload&)>     _onDragEnter;
+    std::function<void()>                       _onDragLeave;
+    bool _isCurrentDropTarget = false;
 
     // R-6: removed `Widget::_hoverWidget` field. The previous design stored
     // "the currently hovered child" on every Widget, but the only purpose was

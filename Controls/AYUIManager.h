@@ -3,6 +3,7 @@
 #include "AYLayoutLoader.h"
 #include "IAYRenderBackend.h"
 #include "UIKeyCode.h"
+#include "AYDragDrop.h"
 
 #include <functional>
 #include <memory>
@@ -240,6 +241,50 @@ public:
     void clearCaptureNoDispatch(Widget* candidate);
     void clearHoverNoDispatch(Widget* candidate);
 
+    // =================================================================
+    // G12 — Drag & Drop session lifecycle.
+    // =================================================================
+    // beginDrag is called BY a widget (typically from its own
+    // onMouseButtonDown handler) AFTER deciding the user intent warrants
+    // a cross-widget drag. beginDrag early-returns if _capturedWidget is
+    // non-null (SplitterHandle / Slider / ScrollBar thumb / Window
+    // title-drag / TextInput drag-select own capture — they're separate
+    // channels and don't overlap with G12).
+    //
+    // Once active, onMouseMove routes through updateDrag → drop target
+    // detection; onMouseButtonUp fires endDrag(true) which calls
+    // target->onDrop; Esc fires cancelDrag() (no drop fires).
+    //
+    // beginDrag takes the source's stored DragPayload via getDragPayload().
+    // The source widget must be in the tree (have a parent) — beginDrag
+    // rejects orphan sources so the ghost can render against an attached
+    // widget's coordinate space.
+    bool beginDrag(Widget* source);
+    void updateDrag(float x, float y);
+    bool endDrag(bool accepted = true);
+    void cancelDrag();
+
+    bool        isDragging() const             { return _dragSession.active; }
+    const DragPayload& getDragPayload() const  { return _dragSession.payload; }
+    Widget*     getDragSource() const          { return _dragSession.source; }
+    Widget*     getCurrentDropTarget() const   { return _dragSession.currentTarget; }
+
+    // G12 R3-safe parallel of clearFocus/Capture/HoverNoDispatch. If
+    // `candidate` is the drag source or current target, drop the session
+    // state without firing virtual callbacks (which would dispatch on a
+    // mid-destruction widget — UB landmine).
+    void clearDragStateNoDispatch(Widget* candidate);
+
+    // G12 internal — ghost helpers. ensureGhostCreated lazily spawns a
+    // plain Widget attached to the overlay root (or main root). Called
+    // by beginDrag; tear-down via shutdown's destroyWidgetTree on the
+    // root that owns the ghost. updateGhostPosition repositions the
+    // ghost on every cursor move; paintGhost draws the plate + payload
+    // text (called from UIManager::render after overlay root render).
+    void ensureGhostCreated();
+    void updateGhostPosition(const math::FVector2& pos);
+    void paintGhost(IRenderBackend& renderer);
+
 private:
     // Used by get()'s static fallback: null bookkeeping Widget* so process
     // exit / cross-test get() cannot dereference fixtures that already died.
@@ -258,6 +303,19 @@ private:
     Widget* _hoverWidget = nullptr;
     Widget* _focusedWidget = nullptr;
     bool _shutdown = false;
+
+    // G12 — drag session state. Independent of _capturedWidget because
+    // G12 drag-drop is a separate channel from widget-internal drag
+    // (SplitterHandle/Slider/ScrollBar thumb/Window title-drag).
+    struct DragSession {
+        bool        active        = false;
+        Widget*     source        = nullptr;
+        DragPayload payload;
+        Widget*     currentTarget = nullptr;
+        math::FVector2 lastMousePos{0.0f, 0.0f};
+    };
+    DragSession _dragSession;
+    Widget*     _dragGhost = nullptr;   // attached to overlay, drawn after _overlayRoot
 
     // DropdownManager: at most one "active dropdown" at a time. Opening
     // a new popup closes the previous one. `_activeDropdownAnchor` lets

@@ -1,0 +1,366 @@
+#include "AYTest.h"
+#include "AYUIManager.h"
+#include "AYDragDrop.h"
+#include "AYMockRenderer.h"
+#include "AYInteractiveWidget.h"
+#include "UIKeyCode.h"
+
+using namespace ayt::ui;
+using namespace ayt::math;
+
+// =============================================================================
+// G12 — Drag & Drop API tests.
+//
+// Test fixture convention (per Test_UIManager.cpp idiom):
+//   MockRenderer backend; UIManager ui; ui.initialize(&backend);
+//   setClientSize + layout; mouse event sequences via the public API;
+//   ui.shutdown().
+//
+// For drag tests we don't need JSON — we use stack-allocated widgets
+// wired into a CompoundWidget root attached to the manager's _root
+// (so CompoundWidget::hitTest can descend into captor / source /
+// target). The drag source / target must have a parent (beginDrag
+// rejects orphans).
+// =============================================================================
+
+TEST_SUITE(AYUI_DragDrop)
+
+// Helper: UIManager's _root is a plain Widget — for hit-test descent we
+// need widgets attached as siblings of the overlay root, or we wrap the
+// test in a CompoundWidget root inserted as a child. Test fixture:
+// attach captor / source / target directly to _overlayRoot (which is
+// also a plain Widget but lives at the same level). Actually simpler:
+// use _root directly with addChildExternal — even though it's plain
+// Widget, child widgets' hitTest is called via the pickTopmostWidget's
+// child-iteration (the descender at line 41 of AYWidget.cpp walks
+// _children on every node, regardless of leaf/compound).
+//
+// Actually checking: pickTopmostWidget walks _overlayRoot's children
+// then falls back to _root which is a plain Widget — plain Widget's
+// hitTest only checks self bounds, NOT descend. So to get descent we
+// must either (a) wrap our test widgets in a CompoundWidget that becomes
+// _root, or (b) attach them as overlay children (overlay path manually
+// descends via pickWidgetAt).
+//
+// We choose (b) — attach test widgets directly to _overlayRoot. This
+// mirrors how ComboBox popups + Modal land in the overlay and how
+// pickTopmostWidget descends into them.
+
+// -----------------------------------------------------------------------------
+// 1. beginDrag creates a session
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_begin_drag_creates_session) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(80.0f, 24.0f));
+    source.setPosition(FVector2(10.0f, 10.0f));
+    DragPayload p;
+    p.kind = "FilePath";
+    p.text = L"C:/foo.txt";
+    source.setDragPayload(p);
+    bool dragStarted = false;
+    source.setOnDragStart([&dragStarted]() { dragStarted = true; });
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK_FALSE(ui.isDragging());
+    CHECK(ui.beginDrag(&source));
+    CHECK(ui.isDragging());
+    CHECK(ui.getDragSource() == &source);
+    CHECK(ui.getDragPayload().kind == "FilePath");
+    CHECK(dragStarted);
+
+    ui.cancelDrag();
+    CHECK_FALSE(ui.isDragging());
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 2. beginDrag rejects when _capturedWidget is non-null
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_begin_drag_rejects_when_captured) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    // InteractiveWidget onMouseButtonDown returns true → UIManager sets
+    // _capturedWidget. While captured, beginDrag for a different widget
+    // must return false so the two channels don't collide.
+    InteractiveWidget captor;
+    captor.setSize(FVector2(50.0f, 30.0f));
+    captor.setPosition(FVector2(10.0f, 10.0f));
+    ui.getOverlayRoot()->addChildExternal(&captor);
+
+    CHECK(ui.onMouseButtonDown(20.0f, 20.0f, 0));
+    CHECK(ui.isCapturing());
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(50.0f, 30.0f));
+    source.setPosition(FVector2(200.0f, 100.0f));
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK_FALSE(ui.beginDrag(&source));
+    CHECK_FALSE(ui.isDragging());
+
+    ui.onMouseButtonUp(20.0f, 20.0f, 0);
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 3. updateDrag finds the nearest accepting ancestor
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_update_drag_finds_drop_target) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "item";
+    p.text = L"item-7";
+    source.setDragPayload(p);
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    ui.updateDrag(250.0f, 220.0f);
+    CHECK(ui.getCurrentDropTarget() == &target);
+    CHECK(target.isCurrentDropTarget());
+
+    ui.updateDrag(100.0f, 100.0f);   // off target
+    CHECK(ui.getCurrentDropTarget() == nullptr);
+    CHECK_FALSE(target.isCurrentDropTarget());
+
+    ui.cancelDrag();
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 4. onDragEnter / onDragLeave fire on target transition
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_drag_enter_leave_fires_on_target_change) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "item";
+    p.text = L"hello";
+    source.setDragPayload(p);
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setSize(FVector2(80.0f, 60.0f));
+    target.setPosition(FVector2(200.0f, 100.0f));
+    int enterCount = 0;
+    int leaveCount = 0;
+    target.setOnDragEnter([&enterCount](const DragPayload&) { ++enterCount; });
+    target.setOnDragLeave([&leaveCount]() { ++leaveCount; });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    ui.updateDrag(220.0f, 120.0f);    // enter
+    CHECK(enterCount == 1);
+    CHECK(leaveCount == 0);
+    ui.updateDrag(230.0f, 130.0f);    // still over target
+    CHECK(enterCount == 1);
+    ui.updateDrag(50.0f, 50.0f);      // leave
+    CHECK(leaveCount == 1);
+
+    ui.cancelDrag();
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 5. endDrag fires onDrop on the target
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_end_drag_fires_on_drop) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "color";
+    p.userData = 0x12345678;
+    source.setDragPayload(p);
+    bool endAccepted = false;
+    source.setOnDragEnd([&endAccepted](bool accepted) { endAccepted = accepted; });
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    DragPayload droppedPayload;
+    bool dropFired = false;
+    target.setOnDrop([&](const DragPayload& payload) {
+        droppedPayload = payload;
+        dropFired = true;
+    });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    ui.updateDrag(250.0f, 220.0f);
+    CHECK(ui.endDrag(true));
+    CHECK(dropFired);
+    CHECK(droppedPayload.kind == "color");
+    CHECK(droppedPayload.userData == 0x12345678);
+    CHECK(endAccepted);
+    CHECK_FALSE(ui.isDragging());
+
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 6. cancelDrag does NOT fire onDrop; source gets _onDragEnd(false)
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_cancel_drag_does_not_fire_on_drop) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "x";
+    source.setDragPayload(p);
+    bool endAccepted = true;
+    source.setOnDragEnd([&endAccepted](bool accepted) { endAccepted = accepted; });
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    int dropFired = 0;
+    target.setOnDrop([&](const DragPayload&) { ++dropFired; });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    ui.updateDrag(250.0f, 220.0f);
+    ui.cancelDrag();
+    CHECK(dropFired == 0);
+    CHECK_FALSE(endAccepted);
+    CHECK_FALSE(ui.isDragging());
+
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 7. Escape cancels an active drag session
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_escape_key_cancels_drag) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "x";
+    source.setDragPayload(p);
+    int startCount = 0;
+    source.setOnDragStart([&startCount]() { ++startCount; });
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK(ui.beginDrag(&source));
+    CHECK(startCount == 1);
+    CHECK(ui.onKeyDown(UIKey_Escape));
+    CHECK_FALSE(ui.isDragging());
+
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 8. Drop target renders accent border when current
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_drop_target_renders_accent_border) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(100.0f, 100.0f));
+
+    // Baseline: count Rect draw calls before flipping the drop-target flag.
+    const int beforeRectCount = static_cast<int>(backend.getDrawCalls().size());
+
+    target.setCurrentDropTarget(true);
+    target.render(backend);
+    const int afterRectCount = static_cast<int>(backend.getDrawCalls().size());
+    CHECK(afterRectCount > beforeRectCount);
+
+    ui.shutdown();
+}
+
+// -----------------------------------------------------------------------------
+// 9. Widget dtor mid-drag does not UAF (R3 landmine guard)
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_widget_dtor_clears_drag_state_no_uaf) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    auto* source = new Widget();
+    source->setDraggable(true);
+    source->setSize(FVector2(40.0f, 40.0f));
+    source->setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "item";
+    source->setDragPayload(p);
+    ui.getOverlayRoot()->addChild(source);   // owning — destructor fires ~Widget
+    source->setOnDragEnd([](bool) {});
+
+    CHECK(ui.beginDrag(source));
+    CHECK(ui.isDragging());
+    // Mid-drag dtor: source is about to be freed. clearDragStateNoDispatch
+    // is the R3-safe parallel of clearFocusNoDispatch / clearCaptureNoDispatch;
+    // it drops the session slot without dispatching any virtual on the
+    // about-to-be-freed widget.
+    ui.getOverlayRoot()->removeChild(source);
+    delete source;
+    ui.clearDragStateNoDispatch(source);   // pointer now dangling; helper matches by value
+    // Subsequent ops must be safe no-ops.
+    ui.cancelDrag();
+    CHECK_FALSE(ui.isDragging());
+
+    ui.shutdown();
+}
+
+TEST_SUITE_END

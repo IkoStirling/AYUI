@@ -56,6 +56,7 @@ set(SRC_FILES
 set(HEAD_FILES
     AYUI.h
     Events/AYEvent.h
+    Controls/AYDragDrop.h
     Controls/AYButton.h
     Controls/AYCheckBox.h
     Controls/AYRadioButton.h

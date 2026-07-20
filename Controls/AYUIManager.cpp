@@ -397,6 +397,12 @@ void UIManager::shutdown() {
     // is undefined behavior in C++ (R3 landmine, same pattern Phase C
     // TextInput::~TextInput → cancelComposition(this, fireEndOnOwner=false)).
     clearFocusNoDispatch(_focusedWidget);
+    // G12 — cancel any in-flight drag session. We do NOT fire the
+    // source's _onDragEnd here because by shutdown time the source may
+    // be mid-destruction; the R3-safe clearDragStateNoDispatch is the
+    // parallel to clearFocusNoDispatch above. Ghost is torn down below
+    // with the overlay root.
+    clearDragStateNoDispatch(nullptr);
     // Phase C (S4): also drop any in-flight composition. We don't fire
     // End on the owner because by shutdown time the owner may already
     // be part of the tree about to be destroyed, and we just cleared
@@ -611,6 +617,11 @@ void UIManager::render() {
     if (_overlayRoot != nullptr) {
         _overlayRoot->render(*_backend);
     }
+    // G12 — render drag ghost AFTER overlay so the cursor-following
+    // indicator paints above popups. paintGhost draws the plate +
+    // border + payload text; _dragGhost->render() would be a no-op
+    // (base Widget has empty onRender).
+    paintGhost(*_backend);
     // Flush any batched quads accumulated during the widget tree walk.
     // Default backend implementation is a no-op; backends that override
     // addColoredQuad/addTexturedQuad for batching submit here in one go.
@@ -843,6 +854,17 @@ bool UIManager::onMouseMove(float x, float y) {
     _lastMouseY = y;
     _hasLastMouse = true;
 
+    // G12 — drag session is its own channel: when active, route the move
+    // through updateDrag (drop target detection) and return. Captured-
+    // mouse widgets (SplitterHandle / Slider / ScrollBar thumb / Window
+    // title-drag / TextInput drag-select) are independent; a drag
+    // session is rejected if capture is non-null in beginDrag, so we
+    // never see drag+active-capture concurrently.
+    if (_dragSession.active) {
+        updateDrag(x, y);
+        return true;
+    }
+
     math::FVector2 pos(x, y);
     if (_capturedWidget != nullptr) {
         if (splitterDebugEnabled()
@@ -884,6 +906,17 @@ bool UIManager::onMouseMove(float x, float y) {
 bool UIManager::onMouseButtonDown(float x, float y, int button) {
     if (!_root) {
         return false;
+    }
+
+    // G12 — drag-active short-circuit. If a drag is in progress and the
+    // user presses a button, treat it as an explicit end-of-drag (e.g.
+    // drag-then-press on a popup). Without this, the click-outside-popup
+    // detector + modal-block checks would fire mid-drag and confuse the
+    // session. Mouse-up still owns the canonical end-of-drag path; this
+    // is the fallback.
+    if (_dragSession.active) {
+        endDrag(true);
+        return true;
     }
 
     math::FVector2 pos(x, y);
@@ -967,8 +1000,264 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     // SplitterHandle intentionally stays un-revealed after mouse-up until
     // the next real WM_MOUSEMOVE re-arms hover.
     updateHoverWidget(_hoverWidget, pickTopmostWidget(pos));
+
+    // G12 — drag session ends on mouse-up. endDrag fires target->onDrop
+    // if the cursor is over an accepting widget, then resets state.
+    // Returns true so the host/manager can short-circuit follow-ups
+    // (e.g. click-outside-popup-close won't fire because we already
+    // returned). captured-widget drags (Slider/SplitterHandle/etc.)
+    // are independent — handled above by the target->onMouseButtonUp
+    // path; G12 just observes the up as the "drop here" event.
+    if (_dragSession.active) {
+        endDrag(true);
+        return true;
+    }
+
     return handled;
 }
+
+// =============================================================================
+// G12 — Drag & Drop session implementation.
+// =============================================================================
+//
+// Session lifecycle:
+//   beginDrag(source)   → creates session, fires source->_onDragStart,
+//                          shows ghost at cursor
+//   updateDrag(x,y)     → on every mouse-move; walks widget-under-cursor
+//                          up to nearest accepting ancestor; fires
+//                          onDragLeave / onDragEnter on transition
+//   endDrag(accepted)   → on mouse-up; if accepted AND target present,
+//                          fires target->onDrop; fires source->_onDragEnd;
+//                          resets state
+//   cancelDrag()        → Esc / external; endDrag(false) — no onDrop fires,
+//                          onDragEnd(false) fires on source
+//
+// Invariants:
+//   - at most ONE active session (beginDrag is no-op if active)
+//   - session does NOT touch _capturedWidget (separate channel)
+//   - ghost is addChildExternal to overlay root (or main root if no overlay)
+//   - clearDragStateNoDispatch is the R3-safe dtor path that bypasses
+//     virtual callbacks; called by ~Widget equivalents and by shutdown
+// =============================================================================
+
+void UIManager::ensureGhostCreated() {
+    if (_dragGhost != nullptr) return;
+    _dragGhost = new Widget();
+    _dragGhost->setSize(math::FVector2(120.0f, 24.0f));
+    _dragGhost->setVisible(false);
+    // Ghost lives on the overlay if there is one; otherwise on the main
+    // root. addChildExternal = host (UIManager) owns delete; we tear it
+    // down in shutdown via destroyWidgetTree.
+    if (_overlayRoot != nullptr) {
+        _overlayRoot->addChildExternal(_dragGhost);
+    } else if (_root != nullptr) {
+        _root->addChildExternal(_dragGhost);
+    }
+}
+
+void UIManager::updateGhostPosition(const math::FVector2& pos) {
+    if (_dragGhost == nullptr) return;
+    // Slight cursor offset so the ghost doesn't sit directly under the
+    // mouse cursor (small "+12, +8" indirection — matches Qt's default
+    // and most editor conventions).
+    _dragGhost->setPosition(math::FVector2(pos.x + 12.0f, pos.y + 8.0f));
+}
+
+void UIManager::paintGhost(IRenderBackend& renderer) {
+    if (_dragGhost == nullptr) return;
+    const math::FRectangle b = _dragGhost->getWorldBounds();
+    if (b.maxX <= b.minX || b.maxY <= b.minY) return;
+    // Dark semi-transparent plate.
+    renderer.drawRect(b, math::FVector4(0.15f, 0.16f, 0.20f, 0.85f));
+    // 1px accent border (matches the drop-target highlight palette).
+    renderer.drawBorderRect(b,
+        math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 1.0f, 2.0f);
+    // Payload text (best-effort: mock backends return 0 from measureText,
+    // so we don't try to clip the string to the ghost width — we just
+    // pass it through and let the renderer truncate).
+    if (!_dragSession.payload.text.empty()) {
+        renderer.drawText(b, _dragSession.payload.text, 12,
+            math::FVector4(0.95f, 0.95f, 0.97f, 1.0f));
+    } else if (!_dragSession.payload.kind.empty()) {
+        // Fallback: show the kind tag if text is empty.
+        const std::wstring kindW(_dragSession.payload.kind.begin(),
+                                  _dragSession.payload.kind.end());
+        renderer.drawText(b, kindW, 12,
+            math::FVector4(0.95f, 0.95f, 0.97f, 1.0f));
+    }
+}
+
+bool UIManager::beginDrag(Widget* source) {
+    if (!_root || source == nullptr) {
+        return false;
+    }
+    if (_dragSession.active) {
+        return false;   // one session at a time
+    }
+    if (_capturedWidget != nullptr) {
+        // SplitterHandle/Slider/ScrollBar thumb/Window title-drag own
+        // the capture; their drags don't overlap with G12. Bail.
+        return false;
+    }
+    if (source->getParent() == nullptr) {
+        // Host must wire source into the tree first; otherwise the ghost
+        // can't render against a sensible coordinate space and the
+        // session is meaningless.
+        return false;
+    }
+    _dragSession.active        = true;
+    _dragSession.source        = source;
+    _dragSession.payload       = source->getDragPayload();
+    _dragSession.currentTarget = nullptr;
+    _dragSession.lastMousePos  = math::FVector2(0.0f, 0.0f);
+
+    if (source->_onDragStart) {
+        source->_onDragStart();
+    }
+    ensureGhostCreated();
+    if (_dragGhost != nullptr) {
+        _dragGhost->setVisible(true);
+        // Default initial position is the source's center; the next
+        // onMouseMove will refine via updateDrag → updateGhostPosition.
+        const math::FRectangle sb = source->getWorldBounds();
+        updateGhostPosition(math::FVector2(
+            (sb.minX + sb.maxX) * 0.5f,
+            (sb.minY + sb.maxY) * 0.5f));
+    }
+    return true;
+}
+
+void UIManager::updateDrag(float x, float y) {
+    if (!_dragSession.active) return;
+
+    _dragSession.lastMousePos = math::FVector2(x, y);
+    updateGhostPosition(math::FVector2(x, y));
+
+    // Walk up from the hit widget to find the nearest accepting
+    // ancestor. Skipping the source's own subtree (we don't allow
+    // dragging onto ourselves — Qt behavior).
+    Widget* hit = pickTopmostWidget(math::FVector2(x, y));
+    Widget* newTarget = nullptr;
+    Widget* w = hit;
+    while (w != nullptr) {
+        if (w == _root) break;   // don't target the root directly
+        if (w->isAcceptDrops()) {
+            newTarget = w;
+            break;
+        }
+        w = w->getParent();
+    }
+
+    // Reject the drag source itself as a drop target. A common editor
+    // convention: dragging a tab onto itself is a no-op (vs. Unity
+    // Editor which DOES allow it for "duplicate into self"; we choose
+    // the conservative Qt behavior here — host can override by
+    // disabling the source's acceptDrops / not marking source accept).
+    if (newTarget == _dragSession.source) {
+        newTarget = nullptr;
+    }
+
+    if (newTarget != _dragSession.currentTarget) {
+        // Leave old target.
+        if (_dragSession.currentTarget != nullptr) {
+            _dragSession.currentTarget->setCurrentDropTarget(false);
+            if (_dragSession.currentTarget->_onDragLeave) {
+                _dragSession.currentTarget->_onDragLeave();
+            }
+        }
+        // Enter new target.
+        if (newTarget != nullptr) {
+            newTarget->setCurrentDropTarget(true);
+            if (newTarget->_onDragEnter) {
+                newTarget->_onDragEnter(_dragSession.payload);
+            }
+        }
+        _dragSession.currentTarget = newTarget;
+    }
+}
+
+bool UIManager::endDrag(bool accepted) {
+    if (!_dragSession.active) return false;
+
+    // Snapshot session state BEFORE clearing so callbacks see the right
+    // target/payload (and a stale getDragPayload() call during the
+    // callback observes the still-active session — matching Qt's
+    // QDrag::exec() pattern).
+    Widget*     source = _dragSession.source;
+    Widget*     target = _dragSession.currentTarget;
+    DragPayload payload = _dragSession.payload;
+    const bool  hadTarget = (target != nullptr);
+
+    // Fire target callbacks.
+    if (target != nullptr) {
+        if (accepted && target->_onDrop) {
+            target->_onDrop(payload);
+        }
+        target->setCurrentDropTarget(false);
+        if (target->_onDragLeave) {
+            target->_onDragLeave();
+        }
+    }
+
+    // Clear session state.
+    _dragSession.active        = false;
+    _dragSession.source        = nullptr;
+    _dragSession.currentTarget = nullptr;
+    _dragSession.payload       = DragPayload{};
+    if (_dragGhost != nullptr) {
+        _dragGhost->setVisible(false);
+    }
+
+    // Fire source's end callback LAST so it observes the cleared state
+    // (mirrors QDrag::exec returning; source can re-arm itself).
+    if (source != nullptr && source->_onDragEnd) {
+        source->_onDragEnd(accepted && hadTarget);
+    }
+    return true;
+}
+
+void UIManager::cancelDrag() {
+    if (!_dragSession.active) return;
+    // Cancel = endDrag(false): no onDrop fires, but source still gets
+    // _onDragEnd(false) so it can refresh any "is dragging" UI state.
+    endDrag(false);
+}
+
+void UIManager::clearDragStateNoDispatch(Widget* candidate) {
+    // R3-safe parallel of clearFocusNoDispatch / clearCaptureNoDispatch.
+    // Called by ~Widget-equivalent paths and shutdown. Does NOT fire any
+    // virtual callbacks (no onDragLeave, no onDragEnd, no onDrop) — those
+    // would dispatch on a mid-destruction widget (UB landmine, same
+    // pattern as Phase D R3 round 2 — commit 3844a95).
+    //
+    // `candidate == nullptr` is the shutdown-style "drop everything"
+    // mode: cancel unconditionally without dispatch. Otherwise only drop
+    // the slot if it points at `candidate` (mirrors the focus/capture/
+    // hover no-dispatch helpers' contract).
+    if (candidate != nullptr) {
+        if (_dragSession.source == candidate) {
+            _dragSession.source = nullptr;
+        }
+        if (_dragSession.currentTarget == candidate) {
+            _dragSession.currentTarget = nullptr;
+        }
+        if (_dragSession.source == nullptr && _dragSession.currentTarget == nullptr) {
+            _dragSession.active = false;
+            if (_dragGhost != nullptr) _dragGhost->setVisible(false);
+        }
+        return;
+    }
+    // candidate == nullptr: drop everything, hide ghost. Used by shutdown.
+    _dragSession = DragSession{};
+    if (_dragGhost != nullptr) {
+        _dragGhost->setVisible(false);
+    }
+}
+
+// G12 — paint the ghost during render(). Called from UIManager::render()
+// AFTER _overlayRoot->render() (so the ghost paints above popups).
+// (paintGhost is the actual implementation; this comment keeps the
+// call-site in render() self-explanatory.)
 
 void UIManager::clearHover() {
     // Always drop the hover target. Previously this early-returned while
@@ -1096,6 +1385,16 @@ bool UIManager::onKeyDown(int keyCode) {
     if (keyCode == UIKey_Tab) {
         if (_modifiers & (1u << (UIKey_Shift - UIKey_Shift))) focusPrev();
         else                                                  focusNext();
+        return true;
+    }
+
+    // G12 — Esc cancels an active drag session BEFORE the modal-Esc
+    // branch below. Rationale: a drag-in-progress means the user is mid-
+    // gesture; an Esc press during drag should kill the drag, not the
+    // modal behind it. If both happen to be active (drag started inside
+    // a modal — unusual but possible), drag wins; the modal stays open.
+    if (keyCode == UIKey_Escape && _dragSession.active) {
+        cancelDrag();
         return true;
     }
 
