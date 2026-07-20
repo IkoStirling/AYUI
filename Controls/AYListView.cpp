@@ -6,6 +6,7 @@
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace ayt::ui {
 
@@ -23,11 +24,18 @@ ListView::Row::~Row() = default;
 bool ListView::Row::onMouseButtonUp(const UIMouseEvent& e) {
     if (!isEnabled() || e.mouseButton != 0) return false;
     if (!getWorldBounds().contains(e.mousePos)) return false;
-    // Route click to ListView via _onClickByRow. ListView toggles the
-    // selected state on the rows itself (single-selection model); Row
-    // does NOT auto-toggle so the parent stays in charge.
+    // Route click to ListView via _onClickByRow with current modifier
+    // bitmask. ListView pulls modifiers via UIManager::tryGet() because
+    // modifier keys (Shift/Ctrl/Alt) are intercepted at the UIManager
+    // level and never reach Row as key events (see UIKeyCode.h:28-31).
+    // If no UIManager is active (e.g. bare Row in a test fixture), the
+    // modifiers default to 0 → plain click → v1 single-select semantics.
+    uint32_t mods = 0;
+    if (UIManager* ui = UIManager::tryGet()) {
+        mods = ui->getModifiers();
+    }
     if (_onClickByRow) {
-        _onClickByRow(_index);
+        _onClickByRow(_index, mods);
     }
     return true;
 }
@@ -77,8 +85,28 @@ ListView::~ListView() {
 
 void ListView::setItems(const std::vector<std::wstring>& items) {
     _items = items;
-    if (_selectedIndex >= static_cast<int>(_items.size())) {
-        _selectedIndex = -1;
+    // Clamp stale selections to -1 (G1 — multi mode: filter out-of-range
+    // entries from the vector). We funnel through setSelectedIndices so
+    // row visuals + callbacks fire once with the cleaned-up vector.
+    std::vector<int> cleaned;
+    cleaned.reserve(_selectedIndices.size());
+    for (int idx : _selectedIndices) {
+        if (idx >= 0 && idx < static_cast<int>(_items.size())) {
+            cleaned.push_back(idx);
+        }
+    }
+    std::sort(cleaned.begin(), cleaned.end());
+    if (cleaned.size() != _selectedIndices.size()) {
+        setSelectedIndices(cleaned);   // fires callbacks if changed
+    } else {
+        _selectedIndex = _selectedIndices.empty()
+            ? -1
+            : _selectedIndices.back();
+    }
+    // Anchor may now be out of range — reset to last selected if valid,
+    // else -1.
+    if (_anchorIndex >= static_cast<int>(_items.size())) {
+        _anchorIndex = _selectedIndex;
     }
     rebuildRows();
 }
@@ -90,7 +118,16 @@ void ListView::addItem(const std::wstring& item) {
 
 void ListView::clearItems() {
     _items.clear();
-    _selectedIndex = -1;
+    // G1 — clear selection vector (was previously just _selectedIndex=-1).
+    // Anchor + range end reset too so a subsequent Ctrl/Shift+click
+    // doesn't extend from a stale index.
+    if (!_selectedIndices.empty()) {
+        setSelectedIndices({});
+    } else {
+        _selectedIndex = -1;
+    }
+    _anchorIndex = -1;
+    _rangeEndIndex = -1;
     rebuildRows();
 }
 
@@ -109,9 +146,6 @@ bool ListView::needsVerticalScrollBar() const {
     // viewport height. v1.1 keeps _visibleRowCount as an optional hint:
     // if the host set it and items <= visibleRowCount, the row content
     // trivially fits and vbar can hide even if host height is loose.
-    // The hard gate is contentH vs viewportH — _visibleRowCount is
-    // "additional early-out" so hosts setting visibleRowCount=5 with a
-    // 200px-tall list and 3 items don't show a useless vbar.
     const float contentH =
         static_cast<float>(_items.size()) * _itemHeight;
     if (contentH > getHeight() + 1e-3f) return true;
@@ -128,27 +162,122 @@ void ListView::setVisibleRowCount(int rows) {
     performLayout();   // re-derive vbar visibility + contentSize
 }
 
+// =============================================================================
+// G1 — selection model (SelectionMode + vector<int> + anchor)
+// =============================================================================
+
 void ListView::setSelectedIndex(int index) {
+    // G1 — setSelectedIndex is now the "single-element" front for
+    // setSelectedIndices. Behavior by mode:
+    //   Single: replaces selection with this index (v1 semantics).
+    //   Extended: clears + pushes this index. Subsequent Ctrl/Shift
+    //             clicks will keep accumulating from this point.
+    // Clamping mirrors v1: out-of-range and <-1 collapse to -1 (no-op
+    // when current is also -1; otherwise clears selection).
     int clamped = index;
     if (clamped < -1) clamped = -1;
     if (clamped >= static_cast<int>(_items.size())) clamped = -1;
-    if (clamped == _selectedIndex) return;
-    // Clear old row's selection flag.
-    if (_selectedIndex >= 0 &&
-        _selectedIndex < static_cast<int>(_rows.size()) &&
-        _rows[_selectedIndex] != nullptr) {
-        _rows[_selectedIndex]->setSelected(false);
+    if (clamped == -1) {
+        setSelectedIndices({});
+    } else {
+        setSelectedIndices({clamped});
     }
-    _selectedIndex = clamped;
-    if (_selectedIndex >= 0 &&
-        _selectedIndex < static_cast<int>(_rows.size()) &&
-        _rows[_selectedIndex] != nullptr) {
-        _rows[_selectedIndex]->setSelected(true);
+}
+
+void ListView::setSelectedIndices(const std::vector<int>& indices) {
+    // G1 — the authoritative setter. Syncs all row visual flags and
+    // fires BOTH _onSelectionChanged (single-int, last selected or -1)
+    // AND _onSelectionIndicesChanged (full vector, multi-mode users).
+    //
+    // We early-out only if the new vector is identical (same size + same
+    // elements at each position). Order-independence matters because
+    // callers may pass unsorted vectors; we sort defensively below.
+    bool same = (indices.size() == _selectedIndices.size());
+    if (same) {
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (indices[i] != _selectedIndices[i]) { same = false; break; }
+        }
     }
-    scrollToIndex(_selectedIndex);
+    if (same) return;
+
+    // Defensive: filter + sort + dedupe ascending. Bounds-check each
+    // index; out-of-range entries are dropped (host bug — we don't crash).
+    std::vector<int> filtered;
+    filtered.reserve(indices.size());
+    for (int idx : indices) {
+        if (idx >= 0 && idx < static_cast<int>(_items.size())) {
+            filtered.push_back(idx);
+        }
+    }
+    std::sort(filtered.begin(), filtered.end());
+    filtered.erase(std::unique(filtered.begin(), filtered.end()),
+                   filtered.end());
+
+    // Clear row visual flags for the OLD selection.
+    for (int oldIdx : _selectedIndices) {
+        if (oldIdx >= 0 &&
+            oldIdx < static_cast<int>(_rows.size()) &&
+            _rows[oldIdx] != nullptr) {
+            _rows[oldIdx]->setSelected(false);
+        }
+    }
+    // Apply new selection visuals + state.
+    _selectedIndices = filtered;
+    for (int idx : _selectedIndices) {
+        if (idx < static_cast<int>(_rows.size()) &&
+            _rows[idx] != nullptr) {
+            _rows[idx]->setSelected(true);
+        }
+    }
+    // Mirror cache for getSelectedIndex() / backwards-compat callers.
+    _selectedIndex = _selectedIndices.empty()
+        ? -1
+        : _selectedIndices.back();
+
+    // Auto-scroll to keep the most-recent selection visible (matches v1
+    // scrollToIndex-on-setSelectedIndex). In Extended mode, prefer the
+    // LAST index (most recent click), matching standard list UX.
+    if (!_selectedIndices.empty()) {
+        scrollToIndex(_selectedIndices.back());
+    }
+
+    // Fire callbacks. _onSelectionChanged (single-int) gets the most
+    // recently selected index (-1 if selection cleared). _onSelection
+    // IndicesChanged (vector) only fires when something actually
+    // changed — guaranteed by the early-out above.
     if (_onSelectionChanged) {
         _onSelectionChanged(_selectedIndex);
     }
+    if (_onSelectionIndicesChanged) {
+        _onSelectionIndicesChanged(_selectedIndices);
+    }
+}
+
+bool ListView::isSelected(int index) const {
+    if (index < 0 || index >= static_cast<int>(_items.size())) return false;
+    return std::find(_selectedIndices.begin(), _selectedIndices.end(), index)
+        != _selectedIndices.end();
+}
+
+void ListView::clearSelection() {
+    setSelectedIndices({});
+}
+
+void ListView::setAnchorIndex(int idx) {
+    if (idx < -1) idx = -1;
+    if (idx >= static_cast<int>(_items.size())) idx = -1;
+    _anchorIndex = idx;
+    // Range end follows anchor on plain clicks so Shift+arrow knows
+    // where the range starts when extending.
+    if (idx >= 0) _rangeEndIndex = idx;
+}
+
+int ListView::getSelectedIndex() const {
+    // G1 — returns -1 if empty, else the last (most recently selected)
+    // entry. Single-mode callers (Combobox popup / TabStrip / TreeView)
+    // always see a 0/1-element vector, so this is identical to v1.
+    if (_selectedIndices.empty()) return -1;
+    return _selectedIndices.back();
 }
 
 const std::wstring& ListView::getSelectedItem() const {
@@ -253,9 +382,14 @@ void ListView::rebuildRows() {
         Row* row = new Row();
         row->setText(_items[i]);
         row->setIndex(static_cast<int>(i));
-        row->setSelected(static_cast<int>(i) == _selectedIndex);
+        // G1 — row's selection flag derived from the multi-mode vector
+        // via isSelected() rather than the legacy _selectedIndex mirror
+        // (which still exists for v1 backwards-compat reads).
+        row->setSelected(isSelected(static_cast<int>(i)));
         row->setSize(math::FVector2(rowW, _itemHeight));
-        row->_onClickByRow = [this](int idx) { handleRowClick(idx); };
+        row->_onClickByRow = [this](int idx, uint32_t mods) {
+            handleRowClick(idx, mods);
+        };
         addChildExternal(row);
         _rows.push_back(row);
     }
@@ -286,9 +420,6 @@ void ListView::onRender(IRenderBackend& renderer) {
     float bw = style.hasStyle ? style.borderWidth : 1.0f;
 
     // G4 — background fills the row strip; vbar paints itself when visible.
-    // When the vbar is hidden, listBounds = full bounds (no 12px strip on
-    // the right that would otherwise show through as bg color behind the
-    // missing vbar).
     const bool vbarShown =
         (_vbar != nullptr) && _vbar->isVisible();
     const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
@@ -298,9 +429,8 @@ void ListView::onRender(IRenderBackend& renderer) {
     renderer.drawRect(listBounds, bg);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
-    // Rows — positioned in rebuildRows(). Standard render() cascade draws
-    // them; we render vbar ourselves to make the order explicit. vbar's
-    // own Widget::render skips _visible=false automatically.
+    // Rows — positioned in rebuildRows(). vbar's own Widget::render
+    // skips _visible=false automatically.
     for (Row* r : _rows) {
         if (r != nullptr && r->isVisible()) {
             r->render(renderer);
@@ -309,13 +439,57 @@ void ListView::onRender(IRenderBackend& renderer) {
     if (_vbar != nullptr) _vbar->render(renderer);
 }
 
-void ListView::handleRowClick(int index) {
+void ListView::handleRowClick(int index, uint32_t mods) {
     if (index < 0 || index >= static_cast<int>(_items.size())) return;
-    // Single-click selects in v1. Double-click → activation lives behind a
-    // future Tick-based timer (no monotonic time plumbing in UIManager
-    // today); the public _onItemActivated is wired up but only fires when
-    // a future engine-level double-click arrives (out of v1 scope).
-    setSelectedIndex(index);
+    // G1 — modifier dispatch. Bit positions mirror UIManager::_modifiers
+    // (UIKey_Shift - UIKey_Shift = 0, UIKey_Control - UIKey_Shift = 1,
+    // UIKey_Alt - UIKey_Shift = 2). See UIManager.cpp:1380.
+    const bool shift = (mods & (1u << (UIKey_Shift   - UIKey_Shift))) != 0;
+    const bool ctrl  = (mods & (1u << (UIKey_Control - UIKey_Shift))) != 0;
+
+    if (_selectionMode == SelectionMode::Single || (!shift && !ctrl)) {
+        // Single mode OR plain click: replace selection with this index
+        // (v1 behavior). Anchor moves to clicked index so a subsequent
+        // Shift+click extends from here.
+        setSelectedIndices({index});
+        setAnchorIndex(index);
+    } else if (ctrl && !shift) {
+        // Ctrl+click: toggle this index in/out of selection without
+        // clearing other rows. Anchor always moves to clicked index
+        // (so a subsequent Shift+click extends from the new toggle point).
+        std::vector<int> v = _selectedIndices;
+        auto it = std::find(v.begin(), v.end(), index);
+        if (it != v.end()) {
+            v.erase(it);
+        } else {
+            v.push_back(index);
+        }
+        std::sort(v.begin(), v.end());
+        setSelectedIndices(v);
+        setAnchorIndex(index);
+    } else if (shift) {
+        // Shift+click: range select [anchorIndex..index] inclusive.
+        // Standard list UX — range REPLACES prior selection (not additive).
+        // If no anchor yet (clicked without prior plain/Ctrl+click),
+        // fall back to single-select this index.
+        const int anchor = (_anchorIndex >= 0 &&
+                            _anchorIndex < static_cast<int>(_items.size()))
+            ? _anchorIndex
+            : index;
+        const int lo = std::min(anchor, index);
+        const int hi = std::max(anchor, index);
+        std::vector<int> range(static_cast<size_t>(hi - lo + 1));
+        std::iota(range.begin(), range.end(), lo);
+        setSelectedIndices(range);
+        _rangeEndIndex = index;
+        // Anchor stays put during range select so subsequent Shift+arrows
+        // extend from the original click origin.
+    }
+
+    // ItemActivated: kept fires-on-single-click for v1 backwards-compat
+    // (test listview_enter_key_activates + v1 host expectations). Hosts
+    // wanting activate-only-on-explicit-gesture should listen on
+    // Enter key (which still calls _onItemActivated via onKeyDown).
     if (_onItemActivated) {
         _onItemActivated(index);
     }
@@ -384,13 +558,44 @@ bool ListView::onKeyDown(int keyCode) {
     if (_items.empty()) return false;
     const int n = static_cast<int>(_items.size());
 
-    // Enter activates the current selection (R3 in plan: fires
-    // _onItemActivated — same callback as row double-click). No
-    // selection movement.
+    // Pull current modifier bitmask once per keypress so the G1 dispatch
+    // below sees a consistent view (UIManager owns the canonical state).
+    uint32_t mods = 0;
+    if (UIManager* ui = UIManager::tryGet()) {
+        mods = ui->getModifiers();
+    }
+    const bool ctrl  = (mods & (1u << (UIKey_Control - UIKey_Shift))) != 0;
+
+    // Enter activates the current selection (fires _onItemActivated).
     if (keyCode == UIKey_Enter) {
-        const int cur = _selectedIndex;
+        const int cur = getSelectedIndex();
         if (cur >= 0 && cur < n && _onItemActivated) {
             _onItemActivated(cur);
+            return true;
+        }
+        return false;
+    }
+
+    // G1 — Ctrl+A: select all items. Extended mode → all entries; Single
+    // mode → first item only (consistent with setSelectedIndex(0) since
+    // single-mode can never hold more than one). Both paths use
+    // setSelectedIndices so the visual + callback contract is shared.
+    if (ctrl && keyCode == UIKey_A) {
+        if (_selectionMode == SelectionMode::Extended) {
+            std::vector<int> all(n);
+            std::iota(all.begin(), all.end(), 0);
+            setSelectedIndices(all);
+        } else {
+            setSelectedIndex(0);
+        }
+        return true;
+    }
+
+    // G1 — Escape: clear selection. Single mode behaves identically
+    // (setSelectedIndices({}) is the v1 way to clear too).
+    if (keyCode == UIKey_Escape) {
+        if (!_selectedIndices.empty()) {
+            clearSelection();
             return true;
         }
         return false;
@@ -406,6 +611,13 @@ bool ListView::onKeyDown(int keyCode) {
     const math::FVector2 vp = getViewportSize();
     const int pageRows = std::max(1,
         static_cast<int>(vp.y / _itemHeight));
+
+    // Shift detection: Shift+arrow extends range from anchorIndex.
+    // Shift+Home/End extends to first/last. Plain keys collapse to
+    // single-element selection (the v1 behavior).
+    const bool shift = (mods & (1u << (UIKey_Shift - UIKey_Shift))) != 0;
+    const bool wantRange = shift &&
+        _selectionMode == SelectionMode::Extended;
 
     switch (keyCode) {
     case UIKey_Up:
@@ -430,11 +642,28 @@ bool ListView::onKeyDown(int keyCode) {
         return false;
     }
 
-    // If selection was -1 and we got Up/Down/Home/End above, next is
-    // already 0 or n-1 (sentinel). setSelectedIndex handles -1→N
-    // transitions by firing the callback once on real change.
-    if (next != _selectedIndex) {
-        setSelectedIndex(next);   // already auto-scrolls via scrollToIndex (cpp:118)
+    if (wantRange) {
+        // Extend range from anchorIndex → next.
+        const int anchor = (_anchorIndex >= 0 &&
+                            _anchorIndex < n) ? _anchorIndex : cur;
+        const int lo = std::min(anchor, next);
+        const int hi = std::max(anchor, next);
+        std::vector<int> range(static_cast<size_t>(hi - lo + 1));
+        std::iota(range.begin(), range.end(), lo);
+        setSelectedIndices(range);
+        // Anchor + range end update for subsequent Shift+arrows.
+        _rangeEndIndex = next;
+        if (_anchorIndex < 0) {
+            _anchorIndex = cur;   // first Shift+arrow seeds anchor at cur
+        }
+    } else {
+        // Plain key OR Single mode: collapse to single-element.
+        if (next != _selectedIndex) {
+            setSelectedIndex(next);   // already auto-scrolls via scrollToIndex
+            // Single-mode / plain arrow updates the anchor so a future
+            // Shift+arrow extends from the new position.
+            setAnchorIndex(next);
+        }
     }
     return true;
 }

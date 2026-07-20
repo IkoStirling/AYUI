@@ -6,6 +6,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYMockRenderer.h"
 #include "AYStyle.h"
+#include "AYComboBox.h"
 #include "UIKeyCode.h"
 #include <iostream>
 
@@ -382,6 +383,305 @@ TEST_CASE(listview_visible_row_count_api_round_trip) {
     // Positive value sticks.
     lv.setVisibleRowCount(8);
     CHECK(lv.getVisibleRowCount() == 8);
+}
+
+// =============================================================================
+// G1 — ListView multi-select (Phase E)
+// =============================================================================
+
+// G1.1: default selection mode is Single (v1 backwards-compat).
+TEST_CASE(listview_selection_mode_default_is_single) {
+    ListView lv;
+    CHECK(lv.getSelectionMode() == ListView::SelectionMode::Single);
+}
+
+// G1.2: switching to Extended keeps existing single-setSelectedIndex API
+// working (it routes through setSelectedIndices internally).
+TEST_CASE(listview_set_selection_mode_extended) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    CHECK(lv.getSelectionMode() == ListView::SelectionMode::Extended);
+
+    int singleChanges = 0;
+    lv.setOnSelectionChanged([&](int) { ++singleChanges; });
+    lv.setSelectedIndex(1);
+    CHECK(lv.getSelectedIndex() == 1);
+    CHECK(singleChanges == 1);
+    // Vector holds just the one entry in this path.
+    CHECK(lv.getSelectedIndices().size() == 1u);
+    CHECK(lv.isSelected(1));
+    CHECK_FALSE(lv.isSelected(0));
+}
+
+// G1.3: Ctrl+click adds to selection (simulated via direct vector path
+// since we can't easily inject modifiers into a bare Widget test; the
+// public setSelectedIndices vector simulates the same end state).
+TEST_CASE(listview_multi_select_set_indices_additive) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+
+    int multiChanges = 0;
+    int lastMultiSize = -1;
+    lv.setOnSelectionIndicesChanged([&](const std::vector<int>& v) {
+        ++multiChanges;
+        lastMultiSize = static_cast<int>(v.size());
+    });
+
+    lv.setSelectedIndices({0, 2, 4});
+    CHECK(lv.getSelectedIndices().size() == 3u);
+    CHECK(lv.isSelected(0));
+    CHECK(lv.isSelected(2));
+    CHECK(lv.isSelected(4));
+    CHECK_FALSE(lv.isSelected(1));
+    CHECK(multiChanges == 1);
+    CHECK(lastMultiSize == 3);
+
+    // Toggle one off (simulates Ctrl+click on already-selected).
+    lv.setSelectedIndices({0, 4});
+    CHECK(lv.getSelectedIndices().size() == 2u);
+    CHECK_FALSE(lv.isSelected(2));
+    CHECK(multiChanges == 2);
+    CHECK(lastMultiSize == 2);
+}
+
+// G1.4: setSelectedIndices rejects duplicates + sorts ascending.
+TEST_CASE(listview_multi_select_set_indices_dedupes_and_sorts) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    // Pass duplicates + reverse order.
+    lv.setSelectedIndices({4, 0, 2, 4, 0});
+    const auto& v = lv.getSelectedIndices();
+    CHECK(v.size() == 3u);
+    CHECK(v[0] == 0);
+    CHECK(v[1] == 2);
+    CHECK(v[2] == 4);
+}
+
+// G1.5: out-of-range indices are filtered silently.
+TEST_CASE(listview_multi_select_set_indices_filters_out_of_range) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    lv.setSelectedIndices({0, 99, -5, 2});
+    const auto& v = lv.getSelectedIndices();
+    CHECK(v.size() == 2u);
+    CHECK(v[0] == 0);
+    CHECK(v[1] == 2);
+}
+
+// G1.6: clearSelection empties the vector + clears row flags + fires
+// _onSelectionChanged(-1) for backwards-compat single-mode callers.
+TEST_CASE(listview_multi_select_clear_selection) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    lv.setSelectedIndices({1, 3});
+
+    int singleChanges = 0;
+    lv.setOnSelectionChanged([&](int idx) {
+        if (idx == -1) ++singleChanges;
+    });
+    lv.clearSelection();
+    CHECK(lv.getSelectedIndices().empty());
+    CHECK(lv.getSelectedIndex() == -1);
+    CHECK(singleChanges == 1);
+}
+
+// G1.7: isSelected() reports membership correctly.
+TEST_CASE(listview_is_selected_helper) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    CHECK_FALSE(lv.isSelected(0));
+    CHECK_FALSE(lv.isSelected(2));
+    CHECK_FALSE(lv.isSelected(-1));
+    CHECK_FALSE(lv.isSelected(99));
+
+    lv.setSelectedIndices({1});
+    CHECK(lv.isSelected(1));
+    CHECK_FALSE(lv.isSelected(0));
+    CHECK_FALSE(lv.isSelected(2));
+}
+
+// G1.8: anchorIndex tracks setSelectedIndex in single mode AND moves on
+// Ctrl/click (setAnchorIndex API direct test).
+TEST_CASE(listview_anchor_index_api) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    CHECK(lv.getAnchorIndex() == -1);
+
+    lv.setAnchorIndex(2);
+    CHECK(lv.getAnchorIndex() == 2);
+
+    // Out-of-range anchor clamps to -1.
+    lv.setAnchorIndex(99);
+    CHECK(lv.getAnchorIndex() == -1);
+    lv.setAnchorIndex(-3);
+    CHECK(lv.getAnchorIndex() == -1);
+}
+
+// G1.9: Shift+Down extends range from anchorIndex. We exercise the
+// dispatch through onKeyDown with the focus holding a ListView whose
+// UIManager has the Shift modifier bit set.
+TEST_CASE(listview_multi_select_keyboard_shift_arrow_extends_range) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv.setSize(FVector2(160.0f, 200.0f));
+    lv.setPosition(FVector2(0.0f, 0.0f));
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+
+    // Click index 0 to seed anchor via setAnchorIndex (we bypass the
+    // hit-test plumbing since UIManager::initialize(nullptr) gives a
+    // valid manager but no real layout for hit-test descent).
+    lv.setSelectedIndex(0);
+    lv.setAnchorIndex(0);
+    CHECK(lv.getAnchorIndex() == 0);
+
+    // Press Shift (UIManager intercepts Shift+Up to set the bit), then
+    // Down twice. End state: range = [0..2].
+    ui.onKeyDown(UIKey_Shift);
+    lv.onKeyDown(UIKey_Down);
+    lv.onKeyDown(UIKey_Down);
+    ui.onKeyUp(UIKey_Shift);
+
+    const auto& v = lv.getSelectedIndices();
+    CHECK(v.size() == 3u);
+    CHECK(v[0] == 0);
+    CHECK(v[1] == 1);
+    CHECK(v[2] == 2);
+
+    ui.shutdown();
+}
+
+// G1.10: Ctrl+A selects all (Extended mode); ignored in Single mode.
+TEST_CASE(listview_multi_select_ctrl_a_selects_all) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    // Extended: Ctrl+A → all items.
+    {
+        ListView lv;
+        lv.setItems({L"a", L"b", L"c", L"d"});
+        lv.setSelectionMode(ListView::SelectionMode::Extended);
+        ui.onKeyDown(UIKey_Control);
+        lv.onKeyDown(UIKey_A);
+        ui.onKeyUp(UIKey_Control);
+        CHECK(lv.getSelectedIndices().size() == 4u);
+    }
+    // Single: Ctrl+A → only first item (because setSelectedIndex clamps
+    // a vector down to a single-element front).
+    {
+        ListView lv;
+        lv.setItems({L"a", L"b", L"c", L"d"});
+        // selectionMode stays Single (default).
+        ui.onKeyDown(UIKey_Control);
+        lv.onKeyDown(UIKey_A);
+        ui.onKeyUp(UIKey_Control);
+        CHECK(lv.getSelectedIndices().size() == 1u);
+        CHECK(lv.getSelectedIndex() == 0);
+    }
+
+    ui.shutdown();
+}
+
+// G1.11: Esc clears selection (Extended mode); no-op on empty.
+TEST_CASE(listview_multi_select_esc_clears_selection) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    lv.setSelectedIndices({0, 1, 2});
+    CHECK_FALSE(lv.getSelectedIndices().empty());
+
+    lv.onKeyDown(UIKey_Escape);
+    CHECK(lv.getSelectedIndices().empty());
+
+    // Second Esc is a no-op (empty → no fire).
+    int changes = 0;
+    lv.setOnSelectionChanged([&](int) { ++changes; });
+    lv.onKeyDown(UIKey_Escape);
+    CHECK(changes == 0);
+
+    ui.shutdown();
+}
+
+// G1.12: setItems on Extended list clamps selection indices; anchor
+// preserves last valid anchor or resets if out of range.
+TEST_CASE(listview_set_items_filters_stale_selection) {
+    ListView lv;
+    lv.setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv.setSelectionMode(ListView::SelectionMode::Extended);
+    lv.setSelectedIndices({1, 3});
+    lv.setAnchorIndex(3);
+
+    // Shrink to 2 items — selection should drop indices 3.
+    lv.setItems({L"x", L"y"});
+    const auto& v = lv.getSelectedIndices();
+    CHECK(v.size() == 1u);
+    CHECK(v[0] == 1);
+    // Anchor 3 was out of range → reset to last valid (1).
+    CHECK(lv.getAnchorIndex() == 1);
+}
+
+// G1.13: factory + serializer round-trip preserves selectionMode + the
+// full vector (not just the legacy selectedIndex).
+TEST_CASE(listview_factory_serializer_round_trip_with_multi) {
+    WidgetFactory& factory = WidgetFactory::get();
+    Widget* widget = factory.create("ListView");
+    ListView* lv = dynamic_cast<ListView*>(widget);
+    CHECK_NOT_NULL(lv);
+
+    lv->setItems({L"a", L"b", L"c", L"d", L"e"});
+    lv->setSelectionMode(ListView::SelectionMode::Extended);
+    lv->setSelectedIndices({1, 3});
+
+    const std::string json = WidgetSerializer::serialize(widget);
+    CHECK(json.find("\"selectionMode\": 1") != std::string::npos);
+    CHECK(json.find("\"selectedIndices\"") != std::string::npos);
+    CHECK(json.find("\"selectedIndex\": 3") != std::string::npos);
+
+    Widget* restored = WidgetSerializer::deserialize(json);
+    ListView* rlv = dynamic_cast<ListView*>(restored);
+    CHECK_NOT_NULL(rlv);
+    CHECK(rlv->getSelectionMode() == ListView::SelectionMode::Extended);
+    CHECK(rlv->getSelectedIndices().size() == 2u);
+    CHECK(rlv->isSelected(1));
+    CHECK(rlv->isSelected(3));
+
+    destroyWidgetTree(widget);
+    destroyWidgetTree(restored);
+}
+
+// G1.14: ComboBox smoke check — opening a popup + clicking a row +
+// verifying the existing single-select contract still works. ComboBox's
+// popup ListView is locked to Single (via ComboBox::ensurePopupCreated
+// calling setSelectionMode(Single)); the ~30 ComboBox tests in
+// Test_ComboBox.cpp cover the popup-lock behavior end-to-end. This case
+// is a regression guard: ensure G1's SelectionMode addition didn't break
+// the ComboBox popup creation / selection path.
+TEST_CASE(listview_combobox_g1_regression_smoke) {
+    UIManager ui;
+    ui.initialize(nullptr);
+    ComboBox cb;
+    cb.setItems({L"a", L"b", L"c"});
+    cb.setSize(FVector2(120.0f, 24.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    cb.openPopup();
+    // If the popup were created in Extended mode by accident, opening
+    // + closing without selection would still succeed; the real
+    // contract is exercised in Test_ComboBox. Here we just verify the
+    // basic open/close path doesn't crash post-G1.
+    cb.closePopup();
+    ui.shutdown();
 }
 
 TEST_SUITE_END

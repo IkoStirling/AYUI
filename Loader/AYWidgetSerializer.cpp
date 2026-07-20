@@ -187,6 +187,23 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("selectedIndex")) {
                 lv->setSelectedIndex(j["selectedIndex"].get<int>());
             }
+            // G1 — multi-select round-trip. `selectionMode` is an int
+            // (0 = Single, 1 = Extended) so we don't depend on enum-string
+            // conversions. `selectedIndices` is an array; only meaningful
+            // in Extended mode but we apply it regardless so a Single-mode
+            // ListView with a single-element array round-trips cleanly.
+            if (j.contains("selectionMode")) {
+                const int mode = j["selectionMode"].get<int>();
+                lv->setSelectionMode(static_cast<ListView::SelectionMode>(
+                    mode == 1 ? 1 : 0));
+            }
+            if (j.contains("selectedIndices") && j["selectedIndices"].is_array()) {
+                std::vector<int> v;
+                for (const auto& s : j["selectedIndices"]) {
+                    v.push_back(s.get<int>());
+                }
+                lv->setSelectedIndices(v);
+            }
             if (j.contains("itemHeight")) {
                 lv->setItemHeight(j["itemHeight"].get<float>());
             }
@@ -543,6 +560,16 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         j["selectedIndex"] = lv->getSelectedIndex();
         j["itemHeight"] = lv->getItemHeight();
+        // G1 — multi-select round-trip. Always emit both fields so a
+        // Single-mode list still round-trips cleanly through extended
+        // payloads. `selectedIndex` keeps its v1 semantic; `selectedIndices`
+        // carries the full vector (sorted ascending). Hosts reading old
+        // payloads without these new fields fall back to single-index.
+        j["selectionMode"] = static_cast<int>(lv->getSelectionMode());
+        j["selectedIndices"] = json::array();
+        for (int idx : lv->getSelectedIndices()) {
+            j["selectedIndices"].push_back(idx);
+        }
     }
     else if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
         j["type"] = "ComboBox";

@@ -121,6 +121,12 @@ const std::wstring& ComboBox::getSelectedItem() const {
 void ComboBox::ensurePopupCreated() {
     if (_popup != nullptr) return;
     _popup = new ListView();
+    // G1 — lock the popup to single-selection mode so ComboBox's existing
+    // single-select contract (popup click → close + fire host callback)
+    // is unchanged after ListView's multi-select API landed. Hosts wanting
+    // a multi-select popup should build their own ListView with
+    // setSelectionMode(Extended) rather than going through ComboBox.
+    _popup->setSelectionMode(ListView::SelectionMode::Single);
     _popup->setItems(_items);
     _popup->setVisible(false);
     // Wire popup's selection callback to fire ComboBox's own callback.

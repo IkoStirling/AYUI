@@ -6,6 +6,7 @@
 #include "AYSelectableWidget.h"
 #include "AYScrollBar.h"
 #include "AYScrollableWidget.h"
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -16,104 +17,70 @@ namespace ayt::ui {
 // C-5 ListView: a single/multi-select list of text rows.
 // =============================================================================
 //
-// Architecture (v1 — no virtualization):
+// Architecture (v1.1 — Phase E):
 //   ListView (CompoundWidget)
 //     └─ vScrollBar: ScrollBar* (auto-managed)
-//     └─ row widgets: InteractiveWidget* x N (one per item)
+//     └─ row widgets: InteractiveWidget* x N (one per item — single mode)
+//                     OR row pool K (visible + buffer — post-G2)
 //
-// Each row is a real InteractiveWidget child — not a virtualized stub. v1
-// targets lists up to ~1000 rows; for larger lists a virtualization pass
-// (R-11-ish) will swap the row pool in without changing the public API.
-//
-// Scroll behavior is delegated to the embedded ScrollBar (re-uses the
-// C-4 ScrollBar contract: setRange / setValue / setViewportSize /
-// setOnValueChanged → scrollBy). The ScrollableWidget mixin stores the
-// offset + content size.
-//
-// Selection model lives here (mirrors the SelectableWidget.h contract):
-//   - Single mode in v1; _selectedIndex == -1 means no selection.
-//   - setSelectedIndex fires _onSelectionChanged when the value actually
-//     changes (idempotent).
+// Selection model (v1.1 — Phase E):
+//   - Single mode (v1 default): _selectedIndex == -1 means no selection.
+//   - Extended mode (G1): _selectedIndices is the authoritative vector;
+//     _selectedIndex mirrors _selectedIndices.back() for v1 callers.
+//   - setSelectedIndex(int) is the v1 single-int front; in Extended mode
+//     it routes through setSelectedIndices.
 //   - setItems replaces the row pool; the selection moves to track the
-//     same item text if present, else -1.
+//     same item text if present, else -1 (single-mode behavior).
 //
 // -----------------------------------------------------------------------------
-// Virtualization boundary — when to upgrade + what to change
+// G1 multi-select API surface
 // -----------------------------------------------------------------------------
-// (This is the "future implementer" note. The current implementation makes
-// an explicit trade: 1 item = 1 real widget child. This is simple and
-// correct but does not scale beyond ~1000 rows. The points below pin down
-// exactly where the upgrade boundary sits so the swap-in doesn't ripple
-// across ComboBox / TabControl / other consumers.)
+// Public:
+//   enum class SelectionMode { Single, Extended }
+//   void  setSelectionMode(SelectionMode m);
+//   int   getSelectedIndex() const;             // -1 or last selected
+//   void  setSelectedIndex(int index);          // routes via setSelectedIndices
+//   const std::vector<int>& getSelectedIndices() const;
+//   void  setSelectedIndices(const std::vector<int>& indices);
+//   bool  isSelected(int index) const;
+//   void  clearSelection();
+//   int   getAnchorIndex() const;               // for Shift+click range
+//   void  setAnchorIndex(int idx);
+//   void  setOnSelectionIndicesChanged(std::function<void(const std::vector<int>&)>);
+//   const std::wstring& getSelectedItem() const;
 //
-// TRIGGER conditions (any one is enough to justify swapping in a row pool):
-//   - Item count > 1000 AND user-visible scroll jank (frame time spike
-//     when scrolling). Empirically the cost is per-frame layout of N
-//     children + per-frame render of N row quads.
-//   - Per-item state cost too high (each row is a full InteractiveWidget
-//     with a hover/press state machine — ~100 bytes of state + vtable
-//     pointer × N rows).
-//   - Future virtualization frameworks (imgui-style immediate-mode list,
-//     TableView with sticky headers, etc.) require a different access
-//     pattern than "widget child per row".
-//
-// WHAT MUST STAY (public API contract — do NOT change):
-//   - setItems / addItem / clearItems / getItem / getItemCount
-//   - getSelectedIndex / setSelectedIndex / getSelectedItem
-//   - setOnSelectionChanged / setOnItemActivated
-//   - setItemHeight / getItemHeight
-//   - getScrollOffset / setScrollOffset
-//   - getVerticalScrollBar() (caller may want to skin or hide it)
-//   - JSON round-trip fields (items, selectedIndex, itemHeight)
-//
-// WHAT WILL CHANGE (internal — these are the upgrade seams):
-//   1. _rows vector → a small pool of reused row widgets (typically
-//      ceil(viewport / itemHeight) + a few). Track pool position →
-//      item index via a small mapping.
-//   2. `rebuildRows()` becomes `rebuildVisibleRows()` — runs on
-//      layout pass + on scroll offset change, NOT on every setItems.
-//   3. _items stays (it's the model). The pool just renders whatever
-//      items intersect the current viewport + scrollOffset.
-//   4. hitTest and onMouseButtonUp need to convert a clicked row pool
-//      position BACK to a logical item index before calling
-//      setSelectedIndex / handleRowClick.
-//   5. scrollToIndex (currently O(1) clamping) may need to animate or
-//      snap; keep the public signature, allow callers to be unaffected.
-//
-// WHAT BREAKS the public API and must be guarded:
-//   - Row* pointers handed out via internal callbacks (only the
-//     `_onClickByRow` callback uses int index, so we're already safe —
-//     confirm by grep before changing the Row::onMouseButtonUp signature).
-//   - getChildren() returning N rows: any caller that walks children
-//     expecting row widgets will see only the pool size after the
-//     upgrade. Today the only such caller is ComboBox::onMouseButtonUp
-//     via _popup->getChildren().back() — that one grabs the popup
-//     ListView itself, not its rows, so it's safe; verify before any
-//     further ComboBox change.
-//
+// Backwards-compat (v1 consumers):
+//   - ComboBox::ensurePopupCreated locks popup to SelectionMode::Single
+//   - TabStrip / TreeView: single-int paths still work (extended vector
+//     holds 0 or 1 entries in single mode)
+//   - JSON round-trip: `selectedIndex` (singular) preserved in single mode;
+//     `selectedIndices` (array) + `selectionMode` (int) added in extended
 // -----------------------------------------------------------------------------
+//
 // KEYBOARD NAVIGATION (Phase B — B1, S3):
 //   ListView extends CompoundFocusableWidget so the focus traversal in
 //   UIManager::focusNext/focusPrev can land on a ListView directly.
 //   ListView::onKeyDown routes Up/Down/Home/End/PageUp/PageDown/Enter
-//   to setSelectedIndex + scrollToIndex (scrollToIndex is promoted to
-//   protected so onKeyDown can drive it — R7 in
-//   recursive-squishing-turing.md).
+//   to setSelectedIndex + scrollToIndex.
 //
-//   Focus is acquired via onMouseButtonDown (which calls
-//   UIManager::get().setFocus(this)) or programmatically via
-//   UIManager::get().setFocus(this). Tab traversal is NOT what enters
-//   the list from outside — onKeyDown handles the in-list navigation
-//   once focus is held.
+//   In Extended mode (G1):
+//   - Shift+Up/Down extends the range from anchorIndex
+//   - Ctrl+A selects all
+//   - Esc clears selection
 // =============================================================================
-//
-// Click on a row selects it; double-click selects + fires _onItemActivated.
-// Keyboard navigation (Up / Down / Home / End / PageUp / PageDown / Enter)
-// is owned by the list itself in v1.1 — Tab will focus INTO the list,
-// then arrows cycle, Enter activates.
 
 class ListView : public CompoundFocusableWidget {
 public:
+    // G1 — selection mode. v1 was always Single; v1.1 adds Extended
+    // (multi-select with Ctrl/Shift click semantics + range select).
+    // ComboBox's popup ListView is locked to Single (via
+    // ensurePopupCreated's explicit setSelectionMode(Single)) so the
+    // popup's existing single-select contract is unchanged.
+    enum class SelectionMode {
+        Single,        // exactly 0 or 1 selected (v1 behavior)
+        Extended,      // 0..N selected; Ctrl+click toggle, Shift+click range
+    };
+
     // Row widget — C-11 promoted from InteractiveWidget to
     // SelectableWidget. Holds a single string + index. List controls
     // selection externally via setSelected on the new row + setSelected
@@ -140,11 +107,13 @@ public:
     private:
         std::wstring _text;
         int _index = -1;
-        // Callback set by the owning ListView — fires with the row index
-        // when the row is clicked (single click). The list uses this to
-        // route selection changes through its single _onSelectionChanged
-        // callback, and to track double-click for _onItemActivated.
-        std::function<void(int)> _onClickByRow;
+        // G1 — callback now carries (index, modifiers). Single-row code
+        // paths that ignore modifiers still work; modifier-aware routing
+        // (Ctrl/Shift) lives in ListView::handleRowClick. Pre-G1 the
+        // signature was `void(int)`, but the only known wiring is the
+        // row lambda ListView sets in rebuildRows / rebuildVisibleRows,
+        // so this is internal.
+        std::function<void(int, uint32_t)> _onClickByRow;
         friend class ListView;
     };
 
@@ -159,9 +128,39 @@ public:
     const std::wstring& getItem(size_t index) const;
     const std::vector<std::wstring>& getItemsRef() const { return _items; }
 
-    // Selection — single mode in v1.
-    int  getSelectedIndex() const { return _selectedIndex; }
+    // G1 — selection mode. Default Single (v1). Switching modes does
+    // NOT clear existing selection (host can do that explicitly via
+    // clearSelection); only changes the dispatch semantics of subsequent
+    // clicks / key events.
+    void          setSelectionMode(SelectionMode m) { _selectionMode = m; }
+    SelectionMode getSelectionMode() const          { return _selectionMode; }
+
+    // Selection — single-mode shortcut (preserves v1 API).
+    //   - In Single mode: returns -1 if empty, else first (and only).
+    //   - In Extended mode: returns the last selected index (single-int
+    //     summary; multi-mode callers should use getSelectedIndices).
+    int  getSelectedIndex() const;
     void setSelectedIndex(int index);
+
+    // G1 — extended-mode API. Sorted ascending (host can rely on this).
+    const std::vector<int>& getSelectedIndices() const { return _selectedIndices; }
+    void setSelectedIndices(const std::vector<int>& indices);
+    bool isSelected(int index) const;
+    void clearSelection();
+
+    // G1 — anchor for Shift+click range selection.
+    // In Single mode _anchorIndex tracks getSelectedIndex().
+    // In Extended mode anchors on click (Ctrl OR plain) and stays put
+    // during Shift+click range select.
+    int  getAnchorIndex() const { return _anchorIndex; }
+    void setAnchorIndex(int idx);
+
+    // G1 — multi-mode callback. Fires on any setSelectedIndices()
+    // call that actually changed the selection.
+    void setOnSelectionIndicesChanged(std::function<void(const std::vector<int>&)> cb) {
+        _onSelectionIndicesChanged = std::move(cb);
+    }
+
     const std::wstring& getSelectedItem() const;
 
     // Callbacks
@@ -179,10 +178,7 @@ public:
     // G4 — visible row count cap. -1 = no cap (v1 behavior; vbar always
     // shows when content > viewport). When set > 0, used as a hint to
     // auto-hide the vertical scrollbar when items * itemHeight fits
-    // within the viewport (i.e. items.size() <= visibleRowCount OR
-    // items * itemHeight <= viewport height). The list's own height is
-    // host-controlled — this API does NOT clamp _size.y in v1.1 (deferred
-    // to v1.2 if host-side height-derive use cases appear).
+    // within the viewport.
     void  setVisibleRowCount(int rows);
     int   getVisibleRowCount() const { return _visibleRowCount; }
 
@@ -214,6 +210,9 @@ public:
     // _onItemActivated. Tab is NOT handled here — UIManager intercepts
     // it before delegating (R2 contract). Returns true when the key
     // was consumed.
+    //
+    // G1 Extended mode additions: Shift+Up/Down extends selection from
+    // _anchorIndex; Ctrl+A selects all; Esc clears.
     bool onKeyDown(int keyCode) override;
 
 protected:
@@ -231,13 +230,23 @@ protected:
 private:
     void ensureBarCreated();
     void syncBarToOffset();
-    void handleRowClick(int index);    // row callback → selection update
-    void handleRowDouble(int index);   // row callback → activation
+    // G1 — handleRowClick now takes modifiers (Ctrl/Shift bits from
+    // UIManager::_modifiers bitmask). Plain click = v1 single behavior.
+    void handleRowClick(int index, uint32_t mods);
 
     std::vector<std::wstring> _items;
     std::vector<Row*>         _rows;     // sized == _items.size()
 
-    int _selectedIndex = -1;
+    // G1 — selection state. _selectedIndex is the v1 single-mode primary
+    // (kept as a cache for getSelectedIndex's O(1) read; derived from
+    // _selectedIndices in Extended mode). _selectedIndices is the
+    // authoritative multi-mode state; empty = no selection. Anchor
+    // tracks the last "click origin" for Shift+click range select.
+    SelectionMode    _selectionMode = SelectionMode::Single;
+    std::vector<int> _selectedIndices;
+    int              _selectedIndex  = -1;   // mirror of back()/empty
+    int              _anchorIndex    = -1;
+    int              _rangeEndIndex  = -1;
 
     float _itemHeight = 24.0f;
 
@@ -246,6 +255,7 @@ private:
     math::FVector2 _contentSize{0.0f, 0.0f};
 
     std::function<void(int)> _onSelectionChanged;
+    std::function<void(const std::vector<int>&)> _onSelectionIndicesChanged;
     std::function<void(int)> _onItemActivated;
 
     // G4 — visible row count cap. -1 = no cap (v1 behavior).

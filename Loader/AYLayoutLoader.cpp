@@ -350,6 +350,21 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             if (j.contains("selectedIndex")) {
                 lv->setSelectedIndex(j["selectedIndex"].get<int>());
             }
+            // G1 — multi-select round-trip. Mirror of AYWidgetSerializer:
+            // selectionMode is an int (0 = Single, 1 = Extended);
+            // selectedIndices is an int array.
+            if (j.contains("selectionMode")) {
+                const int mode = j["selectionMode"].get<int>();
+                lv->setSelectionMode(static_cast<ListView::SelectionMode>(
+                    mode == 1 ? 1 : 0));
+            }
+            if (j.contains("selectedIndices") && j["selectedIndices"].is_array()) {
+                std::vector<int> v;
+                for (const auto& s : j["selectedIndices"]) {
+                    v.push_back(s.get<int>());
+                }
+                lv->setSelectedIndices(v);
+            }
             if (j.contains("itemHeight")) {
                 lv->setItemHeight(j["itemHeight"].get<float>());
             }
