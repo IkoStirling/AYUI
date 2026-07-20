@@ -171,6 +171,29 @@ public:
         //   Up / Down → move line (preserve col, clamp to line length)
         //   Home / End → start / end of line
         //   Backspace / Delete → handled by TextArea (insert/delete API)
+        //   Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z → undo / redo (P1 polish)
+        //
+        // Polish (P1): Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z routing. Modifiers
+        // are tracked by UIManager::_modifiers — we never see the
+        // modifier key itself (intercepted earlier in
+        // UIManager::onKeyDown). The bit layout is bit 0 = Shift,
+        // bit 1 = Control, bit 2 = Alt.
+        UIManager* ui = UIManager::tryGet();
+        const uint32_t mods = ui ? ui->getModifiers() : 0u;
+        const bool ctrl    = (mods & 0x02u) != 0u;
+        const bool shift   = (mods & 0x01u) != 0u;
+        if (ctrl && (keyCode == UIKey_Z || keyCode == UIKey_Y)) {
+            if (keyCode == UIKey_Y) {
+                _owner->redo();
+            } else if (shift) {
+                // Ctrl+Shift+Z is the macOS redo; honor it so a host
+                // running on both platforms has consistent behavior.
+                _owner->redo();
+            } else {
+                _owner->undo();
+            }
+            return true;
+        }
         int line = _owner->_caretLine;
         int col  = _owner->_caretCol;
         switch (keyCode) {
@@ -411,6 +434,7 @@ const std::wstring& TextArea::getText() const {
 }
 
 void TextArea::setText(const std::wstring& text) {
+    pushUndo();
     _lines.clear();
     size_t start = 0;
     for (size_t i = 0; i <= text.size(); ++i) {
@@ -434,6 +458,7 @@ void TextArea::setText(const std::wstring& text) {
 bool TextArea::insertChar(wchar_t ch) {
     if (_readOnly) return false;
     if (_maxLength > 0 && getText().size() + 1 > _maxLength) return false;
+    pushUndo();
     // Replace selection if any.
     if (hasSelection()) {
         // Delete selection first (no-op if collapse).
@@ -470,6 +495,11 @@ bool TextArea::insertChar(wchar_t ch) {
 
 bool TextArea::deleteLeft() {
     if (_readOnly) return false;
+    if (hasSelection() ||
+        _caretCol > 0 ||
+        _caretLine > 0) {
+        pushUndo();
+    }
     if (hasSelection()) {
         // Reuse insertChar's selection-delete branch by simulating an
         // empty insert — simpler: do it inline.
@@ -512,6 +542,10 @@ bool TextArea::deleteRight() {
     if (_readOnly) return false;
     if (hasSelection()) return deleteLeft();
     if (_caretLine >= static_cast<int>(_lines.size())) return false;
+    if (_caretCol < static_cast<int>(_lines[_caretLine].size()) ||
+        _caretLine + 1 < static_cast<int>(_lines.size())) {
+        pushUndo();
+    }
     if (_caretCol >= static_cast<int>(_lines[_caretLine].size())) {
         if (_caretLine + 1 >= static_cast<int>(_lines.size())) return false;
         _lines[_caretLine].append(_lines[_caretLine + 1]);
@@ -526,6 +560,7 @@ bool TextArea::deleteRight() {
 }
 
 void TextArea::clear() {
+    pushUndo();
     _lines.clear();
     _lines.push_back(L"");
     _caretLine = 0;
@@ -627,6 +662,94 @@ void TextArea::performLayout() {
 
 void TextArea::fireTextChanged() {
     if (_onTextChanged) _onTextChanged(getText());
+}
+
+// ============================================================================
+// Polish (P1) — undo / redo infrastructure.
+// ============================================================================
+// captureSnapshot is the single point where the editing state is copied
+// into a TextEditSnapshot. We copy by value rather than share a buffer
+// so that subsequent mutations don't invalidate stored snapshots — each
+// undo step must remain independently restorable even after many other
+// edits have happened.
+//
+// restoreSnapshot is the inverse: it pushes back into all six editing
+// state fields and marks the text cache dirty. It does NOT call
+// fireTextChanged because onTextChanged listeners would otherwise get a
+// spurious callback for an undo (which is already a user-visible action
+// the host should learn about via the canRedo + getText pair, not via
+// onTextChanged). Listeners can observe undo via a future hook if needed.
+//
+// pushUndo is the bookkeeping: capture current state, append to undo,
+// drop redo (linear-history semantics). Called at the TOP of each
+// mutating op BEFORE the change is applied. The undo entry therefore
+// represents "the state I'm leaving".
+// ============================================================================
+
+TextArea::TextEditSnapshot TextArea::captureSnapshot() const {
+    TextEditSnapshot s;
+    s.lines        = _lines;
+    s.caretLine    = _caretLine;
+    s.caretCol     = _caretCol;
+    s.selStartLine = _selStartLine;
+    s.selStartCol  = _selStartCol;
+    s.selEndLine   = _selEndLine;
+    s.selEndCol    = _selEndCol;
+    s.hasSelection = hasSelection();
+    return s;
+}
+
+void TextArea::restoreSnapshot(const TextEditSnapshot& s) {
+    _lines         = s.lines;
+    _caretLine     = s.caretLine;
+    _caretCol      = s.caretCol;
+    _selStartLine  = s.selStartLine;
+    _selStartCol   = s.selStartCol;
+    _selEndLine    = s.selEndLine;
+    _selEndCol     = s.selEndCol;
+    // Defensive clamp: a restored snapshot might reference an out-of-range
+    // caret if the host cleared _lines externally between pushes (rare but
+    // possible via setText('')). Clamp rather than trust.
+    if (_lines.empty()) _lines.push_back(L"");
+    _caretLine = std::clamp(_caretLine, 0, static_cast<int>(_lines.size()) - 1);
+    if (_caretLine < 0) _caretLine = 0;
+    _caretCol = std::clamp(_caretCol, 0,
+        static_cast<int>(_lines[_caretLine].size()));
+    _textCacheDirty = true;
+    syncDocumentSizeToContent();
+}
+
+void TextArea::pushUndo() {
+    _undoStack.push_back(captureSnapshot());
+    if (_undoStack.size() > kMaxHistoryEntries) {
+        // Drop oldest. Used to keep memory bounded in pathological long
+        // sessions (10k+ character typing). 100 entries × 6 ints × ~50
+        // chars/line ≈ O(few KB) — well within budget.
+        _undoStack.erase(_undoStack.begin());
+    }
+    // Fresh edit invalidates redo path (standard editor semantics).
+    _redoStack.clear();
+}
+
+bool TextArea::canUndo() const { return !_undoStack.empty(); }
+bool TextArea::canRedo() const { return !_redoStack.empty(); }
+
+void TextArea::undo() {
+    if (_undoStack.empty()) return;
+    // Push current state onto redo so redo can come back here.
+    _redoStack.push_back(captureSnapshot());
+    // Pop undo and restore.
+    TextEditSnapshot s = _undoStack.back();
+    _undoStack.pop_back();
+    restoreSnapshot(s);
+}
+
+void TextArea::redo() {
+    if (_redoStack.empty()) return;
+    _undoStack.push_back(captureSnapshot());
+    TextEditSnapshot s = _redoStack.back();
+    _redoStack.pop_back();
+    restoreSnapshot(s);
 }
 
 Widget* createTextAreaWidget() { return new TextArea(); }

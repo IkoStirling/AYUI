@@ -168,13 +168,68 @@ public:
     // NULL when not yet created.
     FocusableWidget* getDocumentAsFocusable() const;
 
+    // =================================================================
+    // Polish (P1) — undo / redo.
+    // =================================================================
+    // Each mutating op (insertChar / deleteLeft / deleteRight / setText)
+    // pushes a TextEditSnapshot onto an internal double-stack
+    // (`_undoStack` / `_redoStack`) BEFORE applying the change. Ctrl+Z
+    // pops `_undoStack` and pushes the current state onto `_redoStack`;
+    // Ctrl+Y (or Ctrl+Shift+Z) is the inverse. After undo, the next
+    // mutation clears `_redoStack` — standard linear-history semantics.
+    //
+    // Snapshot captures _lines + caret + selection. Coalesce strategy
+    // is intentionally minimal in v1 polish: each op pushes once. A
+    // future v1.2 could group consecutive inserts within a 500ms window
+    // into one snapshot for "word-level undo" (Word-style); not in
+    // scope here.
+    //
+    // The history is owned by TextArea, not the inner TextDocument, so
+    // TabControl / Modal close paths that destroy the document don't
+    // leak history. TextDocument's onKeyDown dispatches Ctrl+Z/Y to
+    // TextArea::undo() / redo() via its `_owner` pointer.
+    // =================================================================
+    bool canUndo() const;
+    bool canRedo() const;
+    void undo();
+    void redo();
+    size_t getUndoStackSize() const { return _undoStack.size(); }
+    size_t getRedoStackSize() const { return _redoStack.size(); }
+
     void performLayout() override;
 
+    // Polish (P1) — public so tests + hosts can size against the cap.
+    static constexpr size_t kMaxHistoryEntries = 100;
+
 private:
+    // One snapshot of the editing state at a moment in time. Captured
+    // BEFORE a mutation so the mutation can be reversed by restore()
+    // back to this exact state. Held by value in the history stacks.
+    struct TextEditSnapshot {
+        std::vector<std::wstring> lines;
+        int caretLine   = 0;
+        int caretCol    = 0;
+        int selStartLine = 0;
+        int selStartCol = 0;
+        int selEndLine   = 0;
+        int selEndCol    = 0;
+        bool hasSelection = false;
+    };
+
     void ensureChildrenCreated();
     void syncDocumentSizeToContent();
     void syncTextToDocument();
     void fireTextChanged();
+
+    // Polish (P1): capture current state into a snapshot. Called at
+    // the top of every mutating op; _redoStack is cleared at the same
+    // point so a fresh-edit-after-undo forgets the redo path.
+    TextEditSnapshot captureSnapshot() const;
+    void restoreSnapshot(const TextEditSnapshot& s);
+    void pushUndo();
+
+    std::vector<TextEditSnapshot> _undoStack;
+    std::vector<TextEditSnapshot> _redoStack;
 
     ScrollView*  _scrollView = nullptr;
     TextDocument* _document  = nullptr;

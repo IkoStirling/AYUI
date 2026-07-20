@@ -55,6 +55,7 @@
 #include "Test_ImageTexture_G10.cpp"
 #include "Test_Theme_G11.cpp"
 #include "Test_Constraint_G13.cpp"
+#include "Test_UndoRedo_P1.cpp"
 
 void runTest()
 {
