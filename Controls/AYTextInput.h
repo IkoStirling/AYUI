@@ -165,6 +165,18 @@ public:
     // flipped when this widget gains/loses focus.
     bool isTextEditingWidget() const override { return true; }
 
+    // =================================================================
+    // G6 — text horizontal alignment. v1 was always Left (v1.1 adds
+    // Center + Right). Affects the rendered textBounds.minX only;
+    // caret stays at the right padding edge as a deliberately
+    // approximate signal (we don't have a precise text shaper; v1.2
+    // will tighten). Default Left preserves v1 contract — every
+    // existing test that pins drawRect bounds stays green.
+    // =================================================================
+    enum class HAlign { Left, Center, Right };
+    void  setHAlign(HAlign a) { _hAlign = a; }
+    HAlign getHAlign() const   { return _hAlign; }
+
     UiCursorHint getCursorHint() const override;
     void tick(float dt) override;
 
@@ -230,6 +242,9 @@ protected:
     bool           _dragging = false;
     math::FVector2 _dragAnchorWorld = math::FVector2(0.0f, 0.0f);
     size_t         _dragAnchorCol = 0;
+
+    // G6 — text alignment. Default Left preserves v1 contract.
+    HAlign _hAlign = HAlign::Left;
 };
 
 Widget* createTextInputWidget();

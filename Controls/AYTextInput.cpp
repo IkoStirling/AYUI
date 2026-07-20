@@ -494,8 +494,23 @@ void TextInput::onRender(IRenderBackend& renderer) {
     const std::wstring displayText =
         _passwordMode ? std::wstring(_text.size(), L'*') : _text;
     if (!displayText.empty() || _hasFocus) {
+        // G6 — apply HAlign to the textBounds.minX. Approximation: we
+        // don't know exact glyph widths, so Right/Center shift the
+        // rectangle by an estimated text width (7px/char * len). For
+        // Left we keep the v1 behavior verbatim.
+        const float approxCharW = 7.0f;
+        const float approxTextW =
+            static_cast<float>(displayText.size()) * approxCharW;
+        const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
+        float textMinX = bounds.minX + kPaddingX;
+        if (_hAlign == HAlign::Right && approxTextW < innerW) {
+            textMinX = bounds.maxX - kPaddingX - approxTextW;
+        } else if (_hAlign == HAlign::Center && approxTextW < innerW) {
+            textMinX = bounds.minX + kPaddingX
+                + (innerW - approxTextW) * 0.5f;
+        }
         math::FRectangle textBounds(
-            bounds.minX + kPaddingX, bounds.minY,
+            textMinX, bounds.minY,
             bounds.maxX - kPaddingX, bounds.maxY);
         const math::FVector4 textColor = _readOnly
             ? math::FVector4(0.55f, 0.55f, 0.55f, 1.0f)
@@ -521,8 +536,20 @@ void TextInput::onRender(IRenderBackend& renderer) {
             const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
             if (ws != nullptr) phColor = ws->placeholderColor;
         }
+        // G6 — same HAlign shift as the real text path.
+        const float approxCharW = 7.0f;
+        const float approxTextW =
+            static_cast<float>(_placeholder.size()) * approxCharW;
+        const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
+        float textMinX = bounds.minX + kPaddingX;
+        if (_hAlign == HAlign::Right && approxTextW < innerW) {
+            textMinX = bounds.maxX - kPaddingX - approxTextW;
+        } else if (_hAlign == HAlign::Center && approxTextW < innerW) {
+            textMinX = bounds.minX + kPaddingX
+                + (innerW - approxTextW) * 0.5f;
+        }
         math::FRectangle textBounds(
-            bounds.minX + kPaddingX, bounds.minY,
+            textMinX, bounds.minY,
             bounds.maxX - kPaddingX, bounds.maxY);
         renderer.drawText(textBounds, _placeholder, 14, phColor);
     }

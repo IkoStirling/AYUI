@@ -765,4 +765,117 @@ TEST_CASE(textinput_drag_release_keeps_selection) {
     um.shutdown();
 }
 
+// =============================================================================
+// G6 — TextInput HAlign Center / Right
+// =============================================================================
+// v1 was always Left. v1.1 adds the enum + set/get API + shifts the
+// textBounds.minX on render. Caret still anchors at the right padding
+// edge (v1's deliberately-approximate caret position; v1.2 will
+// tighten). Default Left preserves v1's draw-rect bounds exactly.
+
+// Helper: find the FIRST Text draw call (real text or placeholder).
+static const MockRenderer::DrawCall* firstTextDraw(const MockRenderer& r) {
+    for (const auto& dc : r.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Text) return &dc;
+    }
+    return nullptr;
+}
+
+// 1. Default is Left; set+get round-trip.
+TEST_CASE(textinput_halign_default_is_left) {
+    TextInput ti;
+    CHECK(ti.getHAlign() == TextInput::HAlign::Left);
+    ti.setHAlign(TextInput::HAlign::Center);
+    CHECK(ti.getHAlign() == TextInput::HAlign::Center);
+    ti.setHAlign(TextInput::HAlign::Right);
+    CHECK(ti.getHAlign() == TextInput::HAlign::Right);
+    ti.setHAlign(TextInput::HAlign::Left);
+    CHECK(ti.getHAlign() == TextInput::HAlign::Left);
+}
+
+// 2. Render shifts text bounds on HAlign=Right.
+TEST_CASE(textinput_halign_right_shifts_text_bounds) {
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(0.0f, 0.0f));
+    ti.setText(L"hi");
+    ti.setHAlign(TextInput::HAlign::Right);
+
+    MockRenderer r;
+    ti.render(r);
+    const auto* dc = firstTextDraw(r);
+    CHECK(dc != nullptr);
+    // Right-aligned: bounds.minX should be much larger than Left's
+    // kPaddingX (=6) and bounded by maxX - padding - approxTextW.
+    CHECK(dc->bounds.minX > 6.0f + 50.0f);
+    CHECK(dc->bounds.maxX <= 200.0f - 6.0f);
+}
+
+// 3. Center: bounds.minX is roughly midway.
+TEST_CASE(textinput_halign_center_centers_text_bounds) {
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(0.0f, 0.0f));
+    ti.setText(L"hi");
+    ti.setHAlign(TextInput::HAlign::Center);
+
+    MockRenderer r;
+    ti.render(r);
+    const auto* dc = firstTextDraw(r);
+    CHECK(dc != nullptr);
+    CHECK(dc->bounds.minX > 6.0f);
+    CHECK(dc->bounds.minX < 200.0f - 6.0f - 2.0f);
+}
+
+// 4. Left (default): bounds.minX == kPaddingX — preserves v1 contract.
+TEST_CASE(textinput_halign_left_preserves_v1_contract) {
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(0.0f, 0.0f));
+    ti.setText(L"hello");
+    CHECK(ti.getHAlign() == TextInput::HAlign::Left);
+
+    MockRenderer r;
+    ti.render(r);
+    const auto* dc = firstTextDraw(r);
+    CHECK(dc != nullptr);
+    CHECK(dc->bounds.minX == 6.0f);   // kPaddingX
+    CHECK(dc->bounds.maxX <= 200.0f - 6.0f);
+}
+
+// 5. Serializer round-trip — Right via JSON hAlign int.
+TEST_CASE(textinput_halign_serializer_round_trip) {
+    TextInput ti;
+    ti.setText(L"x");
+    ti.setHAlign(TextInput::HAlign::Right);
+    std::string json = WidgetSerializer::serialize(&ti);
+    // Serialize/deserialize round-trip — verify both sides via the deserialize
+    // result (the more reliable check). JSON substring matching is fragile
+    // because nlohmann adds whitespace around the colon in some modes.
+    WidgetSerializer ws;
+    Widget* w = ws.deserialize(json);
+    CHECK(w != nullptr);
+    TextInput* ti2 = dynamic_cast<TextInput*>(w);
+    CHECK(ti2 != nullptr);
+    CHECK(ti2->getHAlign() == TextInput::HAlign::Right);
+    delete w;
+}
+
+// 6. Placeholder path also respects HAlign. We grab the FIRST Text
+//    draw (which is the placeholder text since _text is empty).
+TEST_CASE(textinput_halign_right_shifts_placeholder) {
+    TextInput ti;
+    ti.setSize(FVector2(200.0f, 24.0f));
+    ti.setPosition(FVector2(0.0f, 0.0f));
+    ti.setPlaceholder(L"enter name");
+    ti.setHAlign(TextInput::HAlign::Right);
+
+    MockRenderer r;
+    ti.render(r);
+    const auto* dc = firstTextDraw(r);
+    CHECK(dc != nullptr);
+    CHECK(dc->bounds.minX > 6.0f + 50.0f);   // shifted right
+    CHECK(dc->text == L"enter name");
+}
+
 TEST_SUITE_END

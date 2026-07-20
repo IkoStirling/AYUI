@@ -150,6 +150,13 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("maxLength")) {
                 ti->setMaxLength(static_cast<size_t>(j["maxLength"].get<int>()));
             }
+            // G6 — HAlign round-trip. 0 = Left, 1 = Center, 2 = Right.
+            if (j.contains("hAlign")) {
+                const int a = j["hAlign"].get<int>();
+                if (a == 1) ti->setHAlign(TextInput::HAlign::Center);
+                else if (a == 2) ti->setHAlign(TextInput::HAlign::Right);
+                else ti->setHAlign(TextInput::HAlign::Left);
+            }
         }
 
         if (TextArea* ta = dynamic_cast<TextArea*>(widget)) {
@@ -536,6 +543,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["password"] = ti->isPasswordMode();
         j["readOnly"] = ti->isReadOnly();
         j["maxLength"] = static_cast<int>(ti->getMaxLength());
+        // G6 — HAlign round-trip. Always emit so a Left default
+        // round-trips cleanly.
+        j["hAlign"] = static_cast<int>(ti->getHAlign());
     }
     else if (TextArea* ta = dynamic_cast<TextArea*>(widget)) {
         j["type"] = "TextArea";
