@@ -75,7 +75,11 @@ protected:
     float _min = 0.0f;
     float _max = 1.0f;
     float _value = 0.0f;
-    float _viewportSize = 1.0f;
+    // Viewport-size 0 by default (= the entire content is visible, so
+    // scrollable range equals full range). The pre-existing tests
+    // assume this; defaulting to 1.0 collapses the last unit
+    // (scrollable = content - 1) and breaks setRange/setValue clamp.
+    float _viewportSize = 0.0f;
     bool _dragging = false;
     std::function<void(float)> _onValueChanged;
 };

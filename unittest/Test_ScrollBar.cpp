@@ -65,12 +65,16 @@ TEST_CASE(scrollbar_drag_thumb_updates_value) {
     // Click at y=50/100 = mid of track → normalized 0.5 → maps to
     // (0.5)*(max - 0) = 50.0 (when scrollable portion matches thumb).
     sb.onMouseButtonDown(UIMouseEvent(FVector2(6.0f, 50.0f), 0));
-    CHECK(valueChanges >= 1);
     CHECK(sb.getValue() >= 0.0f);
 
-    // Drag to y=80.
+    // Drag to y=80. The drag pipeline fires onValueChanged on each move
+    // that actually changes the value. Original C-4 expectation (>=1
+    // after onMouseButtonDown) didn't survive the v1.1 hover/drag UX
+    // rework — down itself is now a no-op for value (it only arms the
+    // drag session). Check the counter AFTER the move.
     sb.onMouseMove(UIMouseEvent(FVector2(6.0f, 80.0f), 0));
     CHECK(sb.getValue() > 0.0f);
+    CHECK(valueChanges >= 1);
 
     sb.onMouseButtonUp(UIMouseEvent(FVector2(6.0f, 80.0f), 0));
 }

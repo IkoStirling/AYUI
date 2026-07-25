@@ -83,6 +83,13 @@ public:
     void open(Widget* host, const math::FVector2& anchorPos);
     void close();
 
+    // Soft-dismissal path used by UIManager when closing one dropdown
+    // before opening another (or when the user clicks outside the menu
+    // area but still inside the host bounds). Unlike close() this
+    // leaves the Menu* durable so MenuBar can re-open it; it just
+    // detaches from _activeDropdown + restores prior focus.
+    void dismissFromManager();
+
     // Hit-test override: when open, catches clicks anywhere inside Menu
     // bounds (which may extend past host's bounds).
     Widget* hitTest(const math::FVector2& worldPos) override;

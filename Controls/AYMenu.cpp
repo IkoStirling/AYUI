@@ -277,4 +277,42 @@ void Menu::activateItem(int index) {
     close();
 }
 
+void Menu::dismissFromManager() {
+    // UIManager uses this path when the user clicks outside the menu
+    // bounds OR when it needs to swap one dropdown for another. The
+    // MenuBar keeps the Menu* as a durable leaf; close() would also
+    // tear down the menu subtree which is NOT what we want here.
+    //
+    // Sequence:
+    //   1. Restore prior focus (so Tab traversal returns to host).
+    //   2. Detach this menu from UIManager's overlay (so hit-test
+    //      stops routing to us).
+    //   3. Hide the subtree visually (we'll re-show on next open()).
+    if (UIManager* ui = UIManager::tryGet()) {
+        if (_focusedWidgetBefore != nullptr) {
+            ui->setFocus(_focusedWidgetBefore);
+            _focusedWidgetBefore = nullptr;
+        }
+        if (_onClose) _onClose();
+        // Phase A (A2): pull the menu subtree out of the overlay root
+        // without destroying it. The MenuBar (logical owner) keeps
+        // the Menu* reference; the next open() re-mounts.
+        if (ui->getOverlayRoot() != nullptr) {
+            Widget* overlayRoot = ui->getOverlayRoot();
+            Widget* parent = getParent();
+            while (parent != nullptr && parent != overlayRoot &&
+                   parent->getParent() != nullptr) {
+                parent = parent->getParent();
+            }
+            if (parent != nullptr && parent != overlayRoot) {
+                // Walked past the overlay — nothing to detach.
+            }
+            if (parent == overlayRoot) {
+                overlayRoot->removeChild(this);
+            }
+        }
+    }
+    setVisible(false);
+}
+
 } // namespace ayt::ui
