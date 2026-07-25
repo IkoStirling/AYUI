@@ -30,6 +30,9 @@
 #include "AYTreeNode.h"
 #include "AYTreeView.h"
 #include "AYRichText.h"
+#include "AYDockArea.h"
+#include "AYDockCard.h"
+#include "AYDockOverlay.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
@@ -692,6 +695,37 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "VBox";
         j["spacing"] = vbox->getSpacing();
     }
+    else if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
+        // D2 — DockCard is a leaf-with-content. It subclasses Panel, so
+        // this branch MUST precede the Panel branch below to keep the
+        // emitted type field "DockCard" rather than the base "Panel".
+        // We serialize the meta (id / title / flags / headerHeight)
+        // and inline `content` once, then suppress the auto children[]
+        // walk below because content already serializes via the same
+        // recursive path.
+        j["type"] = "DockCard";
+        j["id"]   = card->getId();
+        if (!card->getTitle().empty()) {
+            j["title"] = std::string(card->getTitle().begin(),
+                                     card->getTitle().end());
+        }
+        if (!card->getIcon().empty()) {
+            j["icon"] = card->getIcon();
+        }
+        j["closable"]     = card->isClosable();
+        j["floatable"]    = card->isFloatable();
+        j["collapsed"]    = card->isCollapsed();
+        j["headerHeight"] = card->getHeaderHeight();
+        // D2 — inline the content subtree as a `content` sub-object so
+        // the loader can reconstruct it via DockCard::setContent. We
+        // also suppress children[] later in this function so a content
+        // subtree doesn't double-emit.
+        if (card->getContent() != nullptr) {
+            json contentJson;
+            serializeWidgetToJson(card->getContent(), contentJson);
+            j["content"] = contentJson;
+        }
+    }
     else if (Panel* panel = dynamic_cast<Panel*>(widget)) {
         j["type"] = "Panel";
         j["borderEnabled"] = panel->isBorderEnabled();
@@ -841,11 +875,91 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             j["runs"].push_back(rj);
         }
     }
+    else if (DockArea* dock = dynamic_cast<DockArea*>(widget)) {
+        // D2 — DockArea emit. We list cards[] in 5 groups keyed by
+        // their slot (mirrors how `cards[]` is parsed on load), plus
+        // a `floating[]` for cards hosted on the overlay. The card
+        // body itself is NOT inlined here — it carries its own
+        // children tree (header strip + content) and gets serialized
+        // by the recursive serializeWidgetToJson when its turn comes
+        // via getOverlay()/getCard(). We stop recursion at the
+        // DockArea level so editors can read the top-level file as a
+        // pure shell description.
+        j["type"] = "DockArea";
+        // Per-slot slotWeights — emit any slot whose weight was
+        // overridden off the header default (0.0) so a re-saved
+        // shell only carries deltas.
+        json wj = json::object();
+        json mj = json::object();
+        static const char* slotNames[(int)DockArea::Slot::Count] = {
+            "Left", "Right", "Top", "Bottom", "Center"
+        };
+        for (int i = 0; i < (int)DockArea::Slot::Count; ++i) {
+            const float w = dock->getSlotWeight((DockArea::Slot)i);
+            if (w > 0.0f) {
+                wj[slotNames[i]] = w;
+            }
+            const float mn = dock->getSlotMinSize((DockArea::Slot)i);
+            if (mn > 0.0f) {
+                mj[slotNames[i]] = mn;
+            }
+        }
+        if (!wj.empty()) j["slotWeights"] = wj;
+        if (!mj.empty()) j["slotMinSizes"] = mj;
+
+        j["cards"] = json::array();
+        for (int i = 0; i < (int)DockArea::Slot::Count; ++i) {
+            const size_t n = dock->getCardCount((DockArea::Slot)i);
+            for (size_t k = 0; k < n; ++k) {
+                DockCard* c = dock->getCard((DockArea::Slot)i, k);
+                if (c == nullptr) continue;
+                json cj;
+                serializeWidgetToJson(c, cj);
+                cj["slot"] = slotNames[i];
+                j["cards"].push_back(cj);
+            }
+        }
+
+        DockOverlay* overlay = dock->getOverlay();
+        if (overlay != nullptr) {
+            const size_t fn = overlay->getFloatingCardCount();
+            if (fn > 0) {
+                j["floating"] = json::array();
+                for (size_t k = 0; k < fn; ++k) {
+                    DockCard* c = overlay->getFloatingCard(k);
+                    if (c == nullptr) continue;
+                    json cj;
+                    serializeWidgetToJson(c, cj);
+                    const math::FVector2 pos = c->getPosition();
+                    const math::FVector2 sz  = c->getSize();
+                    cj["x"] = pos.x;
+                    cj["y"] = pos.y;
+                    cj["w"] = sz.x;
+                    cj["h"] = sz.y;
+                    j["floating"].push_back(cj);
+                }
+            }
+        }
+    }
     else {
         j["type"] = "Widget";
     }
 
     // Children
+    // D2 — dock widgets opt out of the auto children[] walk because
+    // they hand-serialize their child cards themselves. DockCard's
+    // single child (the content widget set via setContent) was
+    // already inlined into the `cj["content"]` sub-object above; if
+    // we re-emitted it as a generic child the load path would
+    // double-add (once via content, once via the children[] block in
+    // deserialize). DockArea's children include the 5 slot
+    // containers, DockOverlay, AND every card; the editor shell
+    // format intentionally hides those intermediate nodes and only
+    // exposes the user-visible card list under `cards[]`.
+    if (dynamic_cast<DockCard*>(widget)  != nullptr ||
+        dynamic_cast<DockArea*>(widget)  != nullptr) {
+        return;
+    }
     const auto& children = widget->getChildren();
     if (!children.empty()) {
         j["children"] = json::array();

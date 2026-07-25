@@ -17,12 +17,19 @@
 #include "AYSlider.h"
 #include "AYCheckBox.h"
 #include "AYProgressBar.h"
+#include "AYDockArea.h"
+#include "AYDockCard.h"
+#include "AYDockOverlay.h"
+
+#include "AYWidgetSerializer.h"
+#include "AYLayoutLoader.h"
 
 #include <ayio/FileWatcher.h>
 
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -118,6 +125,68 @@ GridPanel::VAlign parseGridVAlign(const std::string& s)
     return GridPanel::VAlign::Fill;
 }
 
+// D2 — DockArea JSON bridge. Editor shells persist their layout via
+// DockArea, so the loader needs to (1) apply slot weights/min sizes,
+// (2) add cards with optional content subtrees (recursive deserialize
+// via WidgetSerializer), and (3) round-trip floating cards with their
+// frame coords. The deserializer-side wire format is documented in
+// `ay-ui.md` §D2.
+namespace {
+
+// Build one DockCard from a `cards[]` / `floating[]` entry. The card's
+// title / flags are mirrored directly; `content` (if present) is built
+// via WidgetSerializer::deserialize so the recursive subtree can hold
+// any registered widget type. Content is owned via DockCard::setContent
+// — DockCard::~DockCard tears down its content tree.
+DockCard* buildDockCard(const json& cj) {
+    if (!cj.is_object()) return nullptr;
+    auto card = std::make_unique<DockCard>();
+    if (cj.contains("id")) card->setId(cj["id"].get<std::string>());
+    if (cj.contains("title")) {
+        std::string u8 = cj["title"].get<std::string>();
+        card->setTitle(std::wstring(u8.begin(), u8.end()));
+    }
+    if (cj.contains("icon")) {
+        card->setIcon(cj["icon"].get<std::string>());
+    }
+    if (cj.contains("closable"))  card->setClosable(cj["closable"].get<bool>());
+    if (cj.contains("floatable")) card->setFloatable(cj["floatable"].get<bool>());
+    if (cj.contains("collapsed")) card->setCollapsed(cj["collapsed"].get<bool>());
+    if (cj.contains("headerHeight")) card->setHeaderHeight(cj["headerHeight"].get<float>());
+    Widget* content = nullptr;
+    if (cj.contains("content") && cj["content"].is_object()) {
+        content = WidgetSerializer::deserialize(cj["content"].dump());
+    }
+    if (content != nullptr) {
+        card->setContent(content);
+    }
+    return card.release();
+}
+
+// Apply a sparse slot-weights / slot-min-sizes map. Missing slots
+// keep the header-defined defaults (so a JSON file that only sets
+// `slotWeights.Left` doesn't reset the rest).
+void applySlotWeightMap(DockArea& area, const json& wj) {
+    if (!wj.is_object()) return;
+    for (auto it = wj.begin(); it != wj.end(); ++it) {
+        DockArea::Slot slot;
+        if (!DockArea::parseSlot(it.key(), slot)) continue;
+        if (!it.value().is_number()) continue;
+        area.setSlotWeight(slot, it.value().get<float>());
+    }
+}
+
+void applySlotMinSizeMap(DockArea& area, const json& mj) {
+    if (!mj.is_object()) return;
+    for (auto it = mj.begin(); it != mj.end(); ++it) {
+        DockArea::Slot slot;
+        if (!DockArea::parseSlot(it.key(), slot)) continue;
+        if (!it.value().is_number()) continue;
+        area.setSlotMinSize(slot, it.value().get<float>());
+    }
+}
+
+} // namespace
 } // namespace
 
 UILayoutLoader::UILayoutLoader()
@@ -726,6 +795,82 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         char buf[80];
         std::snprintf(buf, sizeof(buf), "after_build_%s", id.c_str());
         LOADER_HEAP_CHECK(buf);
+    }
+
+    // =================================================================
+    // D2 — DockArea JSON bridge. Editor shells persist their layout as
+    // a single DockArea node containing all docked + floating cards.
+    // Wire format: see `ay-ui.md` §D2. We process the bridge AFTER the
+    // base children[] walk above so an edge-case JSON containing both
+    // `children` (legacy form) and `cards` (new form) ends with the
+    // `cards[]` representation winning — matching the "last write wins"
+    // convention used by DockArea::addCard itself.
+    // =================================================================
+    if (DockArea* dock = dynamic_cast<DockArea*>(widget)) {
+        if (j.contains("slotWeights") && j["slotWeights"].is_object()) {
+            applySlotWeightMap(*dock, j["slotWeights"]);
+        }
+        if (j.contains("slotMinSizes") && j["slotMinSizes"].is_object()) {
+            applySlotMinSizeMap(*dock, j["slotMinSizes"]);
+        }
+        if (j.contains("cards") && j["cards"].is_array()) {
+            for (const auto& cj : j["cards"]) {
+                if (!cj.is_object()) continue;
+                if (!cj.contains("slot") || !cj["slot"].is_string()) continue;
+                DockArea::Slot slot;
+                if (!DockArea::parseSlot(cj["slot"].get<std::string>(), slot)) {
+                    continue;
+                }
+                DockCard* card = buildDockCard(cj);
+                if (card == nullptr) continue;
+                dock->addCard(slot, std::unique_ptr<DockCard>(card));
+            }
+        }
+        if (j.contains("floating") && j["floating"].is_array()) {
+            DockOverlay* overlay = dock->getOverlay();
+            for (const auto& cj : j["floating"]) {
+                DockCard* card = buildDockCard(cj);
+                if (card == nullptr) continue;
+                // Apply the floating frame (if present). Cards without
+                // an explicit frame are positioned at (0, 0) — keep
+                // behavior aligned with v0 default for unfloated cards.
+                if (cj.contains("x") && cj.contains("y")) {
+                    card->setPosition(math::FVector2(
+                        cj["x"].get<float>(),
+                        cj["y"].get<float>()));
+                }
+                if (cj.contains("w") && cj.contains("h")) {
+                    card->setSize(math::FVector2(
+                        cj["w"].get<float>(),
+                        cj["h"].get<float>()));
+                }
+                if (overlay != nullptr) {
+                    overlay->addFloatingCard(card);
+                }
+            }
+        }
+    }
+    // D2 — A bare DockCard or DockOverlay may appear directly (e.g.
+    // when an editor wraps a single floating window in a small file).
+    // Apply the same field set so the round-trip is symmetric.
+    if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
+        if (j.contains("title")) {
+            std::string u8 = j["title"].get<std::string>();
+            card->setTitle(std::wstring(u8.begin(), u8.end()));
+        }
+        if (j.contains("icon")) {
+            card->setIcon(j["icon"].get<std::string>());
+        }
+        if (j.contains("closable"))  card->setClosable(j["closable"].get<bool>());
+        if (j.contains("floatable")) card->setFloatable(j["floatable"].get<bool>());
+        if (j.contains("collapsed")) card->setCollapsed(j["collapsed"].get<bool>());
+        if (j.contains("headerHeight")) card->setHeaderHeight(j["headerHeight"].get<float>());
+        if (j.contains("content") && j["content"].is_object()) {
+            Widget* content = WidgetSerializer::deserialize(j["content"].dump());
+            if (content != nullptr) {
+                card->setContent(content);
+            }
+        }
     }
 
     return widget;

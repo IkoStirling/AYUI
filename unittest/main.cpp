@@ -58,6 +58,7 @@
 #include "Test_UndoRedo_P1.cpp"
 #include "Test_MenuShortcut_P3.cpp"
 #include "Test_DockArea.cpp"
+#include "Test_DockAreaLoader.cpp"
 
 void runTest()
 {
