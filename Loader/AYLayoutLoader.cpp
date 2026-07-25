@@ -3,12 +3,20 @@
 #include "AYI18n.h"
 #include "AYButton.h"
 #include "AYTextLabel.h"
+#include "AYTextInput.h"
+#include "AYTextArea.h"
+#include "AYTooltip.h"
+#include "AYMenuItem.h"
 #include "AYWindow.h"
 #include "AYBox.h"
+#include "AYGridPanel.h"
 #include "AYSplitterHandle.h"
 #include "AYImage.h"
 #include "AYComboBox.h"
 #include "AYListView.h"
+#include "AYSlider.h"
+#include "AYCheckBox.h"
+#include "AYProgressBar.h"
 
 #include <ayio/FileWatcher.h>
 
@@ -73,6 +81,41 @@ BoxSlotLimits parseHBoxSlotLimits(const json& childJson, float& outWidth)
     limits.minWidthPercent = slot.value("minWidthPercent", 0.0f);
     limits.maxWidthPercent = slot.value("maxWidthPercent", 0.0f);
     return limits;
+}
+
+// L4 — parseBoxGravity. JSON shape: "TopLeft" / "TopCenter" / "TopRight" /
+// "CenterLeft" / "Center" / "CenterRight" / "BottomLeft" / "BottomCenter" /
+// "BottomRight". Unknown / missing = TopLeft (default).
+BoxBase::Gravity parseBoxGravity(const std::string& s)
+{
+    if (s == "TopCenter")    return BoxBase::Gravity::TopCenter;
+    if (s == "TopRight")     return BoxBase::Gravity::TopRight;
+    if (s == "CenterLeft")   return BoxBase::Gravity::CenterLeft;
+    if (s == "Center")       return BoxBase::Gravity::Center;
+    if (s == "CenterRight")  return BoxBase::Gravity::CenterRight;
+    if (s == "BottomLeft")   return BoxBase::Gravity::BottomLeft;
+    if (s == "BottomCenter") return BoxBase::Gravity::BottomCenter;
+    if (s == "BottomRight")  return BoxBase::Gravity::BottomRight;
+    return BoxBase::Gravity::TopLeft;
+}
+
+// L3 — parseGridHAlign / parseGridVAlign. JSON shape: "Left" / "Center" /
+// "Right" / "Fill" for HAlign; "Top" / "Middle" / "Bottom" / "Fill" for
+// VAlign. Unknown / missing = Fill (default = stretch to cell).
+GridPanel::HAlign parseGridHAlign(const std::string& s)
+{
+    if (s == "Left")   return GridPanel::HAlign::Left;
+    if (s == "Center") return GridPanel::HAlign::Center;
+    if (s == "Right")  return GridPanel::HAlign::Right;
+    return GridPanel::HAlign::Fill;
+}
+
+GridPanel::VAlign parseGridVAlign(const std::string& s)
+{
+    if (s == "Top")    return GridPanel::VAlign::Top;
+    if (s == "Middle") return GridPanel::VAlign::Middle;
+    if (s == "Bottom") return GridPanel::VAlign::Bottom;
+    return GridPanel::VAlign::Fill;
 }
 
 } // namespace
@@ -288,6 +331,12 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 j["padding"].value("right", 4.0f),
                 j["padding"].value("bottom", 4.0f));
         }
+        // L4 — parity with WidgetSerializer. BoxBase::setGravity
+        // exists since v1.0; the loader only read spacing/padding
+        // before. JSON shape: "gravity": "Center" (8 alignments).
+        if (j.contains("gravity") && j["gravity"].is_string()) {
+            vbox->setGravity(parseBoxGravity(j["gravity"].get<std::string>()));
+        }
     } else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         if (j.contains("spacing")) {
             hbox->setSpacing(j["spacing"].get<float>());
@@ -299,6 +348,62 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 j["padding"].value("right", 4.0f),
                 j["padding"].value("bottom", 4.0f));
         }
+        // L4 — partner branch to VBox above.
+        if (j.contains("gravity") && j["gravity"].is_string()) {
+            hbox->setGravity(parseBoxGravity(j["gravity"].get<std::string>()));
+        }
+    } else if (GridPanel* grid = dynamic_cast<GridPanel*>(widget)) {
+        // L3 — parity with WidgetSerializer. GridPanel::setCell has
+        // existed since C-8; the loader only consumed rowCount /
+        // columnCount + flattened children (auto-linear). The cells
+        // shape lets hosts spell out exact (row, col, rowSpan, colSpan,
+        // hAlign, vAlign) without the implicit left-to-right walk.
+        const int rows = j.value("rowCount", 0);
+        const int cols = j.value("columnCount", 0);
+        if (rows > 0) grid->setRowCount(rows);
+        if (cols > 0) grid->setColumnCount(cols);
+
+        // Optional row / column definitions. JSON shape:
+        //   "rowDefs":    [{ "policy": "Fixed", "value": 32 }, ...]
+        //   "columnDefs": [{ "policy": "Stretch", "value": 1.0 }, ...]
+        // Parsed before cells so setCell's bounds-check sees the
+        // final row/col count.
+        if (j.contains("rowDefs") && j["rowDefs"].is_array()) {
+            int idx = 0;
+            for (const auto& rd : j["rowDefs"]) {
+                if (idx >= grid->getRowCount()) break;
+                GridPanel::RowDef def;
+                if (rd.contains("policy") && rd["policy"].is_string()) {
+                    const std::string p = rd["policy"].get<std::string>();
+                    def.policy = (p == "Fixed")
+                        ? GridPanel::SizePolicy::Fixed
+                        : GridPanel::SizePolicy::Stretch;
+                }
+                if (rd.contains("value")) {
+                    def.value = rd["value"].get<float>();
+                }
+                grid->setRowDef(idx, def);
+                ++idx;
+            }
+        }
+        if (j.contains("columnDefs") && j["columnDefs"].is_array()) {
+            int idx = 0;
+            for (const auto& cd : j["columnDefs"]) {
+                if (idx >= grid->getColumnCount()) break;
+                GridPanel::ColDef def;
+                if (cd.contains("policy") && cd["policy"].is_string()) {
+                    const std::string p = cd["policy"].get<std::string>();
+                    def.policy = (p == "Fixed")
+                        ? GridPanel::SizePolicy::Fixed
+                        : GridPanel::SizePolicy::Stretch;
+                }
+                if (cd.contains("value")) {
+                    def.value = cd["value"].get<float>();
+                }
+                grid->setColumnDef(idx, def);
+                ++idx;
+            }
+        }
     }
 
     if (Image* image = dynamic_cast<Image*>(widget)) {
@@ -309,6 +414,19 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 c[1].get<float>(),
                 c[2].get<float>(),
                 c[3].get<float>()));
+        }
+        // L2 — parity with WidgetSerializer. TextureRegistry + the
+        // typed ImageTextureHandle are landed (G10), but the loader
+        // previously only read `color`; a named texture in JSON was
+        // silently dropped. Calling setTexture(name) resolves the
+        // handle through the registry; if the texture is not yet
+        // registered, the Image keeps an empty handle and the host
+        // can re-bind via Image::registerExternal() later.
+        if (j.contains("textureName") && j["textureName"].is_string()) {
+            const std::string name = j["textureName"].get<std::string>();
+            if (!name.empty()) {
+                image->setTexture(name);
+            }
         }
     }
 
@@ -325,6 +443,52 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         if (j.contains("minSize") && j["minSize"].is_object()) {
             window->setMinSize(j["minSize"].value("w", 120.0f),
                                j["minSize"].value("h", 80.0f));
+        }
+    }
+
+    // Slider / ProgressBar / CheckBox — mirror WidgetSerializer. Editor
+    // layouts go through LayoutLoader; without this, Slider stays on the
+    // default [0,1] / 0.5 and panel knobs cannot leave that range.
+    if (Slider* sl = dynamic_cast<Slider*>(widget)) {
+        const bool hasMin = j.contains("min");
+        const bool hasMax = j.contains("max");
+        if (hasMin && hasMax) {
+            sl->setValueRange(j["min"].get<float>(), j["max"].get<float>());
+        } else {
+            // Expand max before min so setMin is not clamped to old max.
+            if (hasMax) {
+                sl->setMax(j["max"].get<float>());
+            }
+            if (hasMin) {
+                sl->setMin(j["min"].get<float>());
+            }
+        }
+        if (j.contains("value")) {
+            sl->setValue(j["value"].get<float>());
+        }
+    }
+
+    if (ProgressBar* pb = dynamic_cast<ProgressBar*>(widget)) {
+        const bool hasMin = j.contains("min");
+        const bool hasMax = j.contains("max");
+        if (hasMin && hasMax) {
+            pb->setValueRange(j["min"].get<float>(), j["max"].get<float>());
+        } else {
+            if (hasMax) {
+                pb->setMax(j["max"].get<float>());
+            }
+            if (hasMin) {
+                pb->setMin(j["min"].get<float>());
+            }
+        }
+        if (j.contains("value")) {
+            pb->setValue(j["value"].get<float>());
+        }
+    }
+
+    if (CheckBox* cb = dynamic_cast<CheckBox*>(widget)) {
+        if (j.contains("checked")) {
+            cb->setChecked(j["checked"].get<bool>());
         }
     }
 
@@ -388,6 +552,37 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
                 label->setText(wtext);
             }
+        } else if (type == "CheckBox") {
+            if (CheckBox* checkBox = dynamic_cast<CheckBox*>(widget)) {
+                checkBox->setText(wtext);
+            }
+        } else if (type == "TextInput") {
+            // L1 — parity with WidgetSerializer. Inspector inputs ship
+            // initial values like "0.00" in layout JSON; previously the
+            // loader dropped this field and the value reburned on the
+            // first refresh tick, causing visible flicker.
+            if (TextInput* textInput = dynamic_cast<TextInput*>(widget)) {
+                textInput->setText(wtext);
+            }
+        } else if (type == "TextArea") {
+            // L1 — parity with WidgetSerializer.
+            if (TextArea* textArea = dynamic_cast<TextArea*>(widget)) {
+                textArea->setText(wtext);
+            }
+        } else if (type == "Tooltip") {
+            // L1 — parity with WidgetSerializer (Tooltip's text is its
+            // body label, not a title — distinct from Window's title).
+            if (Tooltip* tip = dynamic_cast<Tooltip*>(widget)) {
+                tip->setText(wtext);
+            }
+        } else if (type == "MenuItem") {
+            // L1 — parity with WidgetSerializer. MenuItem's setText ===
+            // menu label; shortcut is a separate field handled by the
+            // serializer. The loader does not currently parse `shortcut`
+            // so we only round-trip the visible label here.
+            if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
+                mi->setText(wtext);
+            }
         } else if (type == "Window") {
             if (Window* window = dynamic_cast<Window*>(widget)) {
                 window->setTitle(wtext);
@@ -436,6 +631,10 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
             }
             hbox->rebindSplitters();
+        } else if (GridPanel* grid = dynamic_cast<GridPanel*>(widget)) {
+            // L3 — GridPanel cells + children are handled in a dedicated
+            // block below. Place nothing here; the dedicated block is
+            // sibling to VBox/HBox so it runs without a `children` array.
         } else {
             for (const auto& childJson : j["children"]) {
                 Widget* child = buildWidgetTree(childJson);
@@ -443,6 +642,82 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                     widget->addChild(child);
                     LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
                 }
+            }
+        }
+    }
+
+    // L3 — GridPanel cells[] + children[] are sibling to the layout
+    // containers (VBox/HBox). The cells[] shape is the structured form
+    // (row, col, rowSpan, colSpan, hAlign, vAlign) and runs whether or
+    // not the JSON also has a children[] array. children[] is the
+    // auto-linear fallback that fills the next free (row, col) cell.
+    if (GridPanel* grid = dynamic_cast<GridPanel*>(widget)) {
+        int nextRow = 0;
+        int nextCol = 0;
+        auto findNextCell = [&]() {
+            while (nextRow < grid->getRowCount()
+                   && nextCol < grid->getColumnCount()
+                   && grid->getCell(nextRow, nextCol) != nullptr) {
+                ++nextCol;
+                if (nextCol >= grid->getColumnCount()) {
+                    nextCol = 0;
+                    ++nextRow;
+                }
+            }
+        };
+        if (j.contains("cells") && j["cells"].is_array()) {
+            for (const auto& cellJson : j["cells"]) {
+                if (!cellJson.is_object()) continue;
+                const int row = cellJson.value("row", nextRow);
+                const int col = cellJson.value("col", nextCol);
+                if (row < 0 || col < 0
+                    || row >= grid->getRowCount()
+                    || col >= grid->getColumnCount()) {
+                    continue;
+                }
+                if (!cellJson.contains("content")
+                    || !cellJson["content"].is_object()) {
+                    continue;
+                }
+                Widget* cellChild = buildWidgetTree(cellJson["content"]);
+                if (cellChild == nullptr) continue;
+                const int rowSpan = cellJson.value("rowSpan", 1);
+                const int colSpan = cellJson.value("colSpan", 1);
+                GridPanel::HAlign hAlign = GridPanel::HAlign::Fill;
+                if (cellJson.contains("hAlign") && cellJson["hAlign"].is_string()) {
+                    hAlign = parseGridHAlign(
+                        cellJson["hAlign"].get<std::string>());
+                }
+                GridPanel::VAlign vAlign = GridPanel::VAlign::Fill;
+                if (cellJson.contains("vAlign") && cellJson["vAlign"].is_string()) {
+                    vAlign = parseGridVAlign(
+                        cellJson["vAlign"].get<std::string>());
+                }
+                grid->setCell(row, col, cellChild,
+                              rowSpan, colSpan, hAlign, vAlign);
+                nextRow = row;
+                nextCol = col + 1;
+                if (nextCol >= grid->getColumnCount()) {
+                    nextCol = 0;
+                    ++nextRow;
+                }
+                findNextCell();
+            }
+        }
+        if (j.contains("children") && j["children"].is_array()) {
+            const char* parentId = id.empty() ? type.c_str() : id.c_str();
+            for (const auto& childJson : j["children"]) {
+                Widget* child = buildWidgetTree(childJson);
+                if (!child) continue;
+                findNextCell();
+                if (nextRow >= grid->getRowCount()) break;
+                grid->setCell(nextRow, nextCol, child);
+                ++nextCol;
+                if (nextCol >= grid->getColumnCount()) {
+                    nextCol = 0;
+                    ++nextRow;
+                }
+                LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
             }
         }
     }
