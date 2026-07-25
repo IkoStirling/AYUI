@@ -44,6 +44,9 @@ set(SRC_FILES
     Controls/AYModalDialog.cpp
     Controls/AYDimmer.cpp
     Controls/AYTabStrip.cpp
+    Controls/AYDockArea.cpp
+    Controls/AYDockCard.cpp
+    Controls/AYDockOverlay.cpp
     Controls/AYUIManager.cpp
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
@@ -105,6 +108,9 @@ set(HEAD_FILES
     Controls/AYModalDialog.h
     Controls/AYDimmer.h
     Controls/AYTabStrip.h
+    Controls/AYDockArea.h
+    Controls/AYDockCard.h
+    Controls/AYDockOverlay.h
     Layout/AYBox.h
     Layout/AYSplitterHandle.h
     Layout/AYGridPanel.h

@@ -29,6 +29,9 @@
 #include "AYSplitterHandle.h"
 #include "AYTabControl.h"
 #include "AYGridPanel.h"
+#include "AYDockArea.h"
+#include "AYDockCard.h"
+#include "AYDockOverlay.h"
 
 namespace ayt::ui {
 
@@ -92,6 +95,9 @@ struct DefaultWidgetRegistrar {
         REGISTER_WIDGET("HBox", HBox);
         REGISTER_WIDGET("SplitterHandle", SplitterHandle);
         REGISTER_WIDGET("GridPanel", GridPanel);
+        REGISTER_WIDGET("DockArea", DockArea);
+        REGISTER_WIDGET("DockCard", DockCard);
+        REGISTER_WIDGET("DockOverlay", DockOverlay);
     }
 };
 
