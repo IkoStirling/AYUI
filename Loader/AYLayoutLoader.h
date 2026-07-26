@@ -31,6 +31,17 @@ public:
     Widget* loadFromFile(const std::string& filepath);
     Widget* loadFromString(const std::string& json);
 
+    // D4 (2026-07-26): Layout persistence.
+    // saveLayout serializes the Widget tree via WidgetSerializer and writes
+    // it to disk; saveLayoutToString does the same into an out-param. Both
+    // round-trip cleanly through loadFromFile / loadFromString because the
+    // wire format is the same as what loadFromString already accepts. The
+    // `root` is non-owning — caller retains its lifetime. Returns false on
+    // nullptr root or filesystem failure (the file write reports via stderr
+    // for parity with loadFromString's parse-error path).
+    bool saveLayout(const std::string& filepath, Widget* root, bool pretty = true);
+    bool saveLayoutToString(Widget* root, std::string& outJson, bool pretty = true);
+
     Widget* reload(const std::string& id);
     bool isReloadNeeded();
     Widget* tryReload();

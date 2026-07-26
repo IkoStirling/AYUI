@@ -61,6 +61,7 @@
 #include "Test_UIManagerPerWindow.cpp"
 #include "Test_DockAreaLoader.cpp"
 #include "Test_DockFloat.cpp"
+#include "Test_LayoutPersistence.cpp"  // D4 (2026-07-26)
 
 void runTest()
 {

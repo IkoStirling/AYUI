@@ -251,6 +251,44 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     }
 }
 
+// D4 (2026-07-26): Layout persistence. We delegate the actual
+// serialization to WidgetSerializer so the wire format stays single-sourced
+// (the file format = the format loadFromString already understands). The
+// loader class owns save because it already owns the loadFrom{File,String}
+// pair + the FileWatcher — saving the layout to disk completes the "I
+// edited my layout in a JSON file, hot-reloaded it, edited it more, want to
+// commit those edits back" workflow without leaking the serializer type to
+// callers.
+bool UILayoutLoader::saveLayout(const std::string& filepath, Widget* root, bool pretty) {
+    if (!root) return false;
+
+    std::string jsonStr;
+    if (!saveLayoutToString(root, jsonStr, pretty)) return false;
+
+    std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) {
+        std::fprintf(stderr, "[UILayoutLoader] save error: cannot open '%s' for write\n",
+                     filepath.c_str());
+        return false;
+    }
+    file.write(jsonStr.data(), static_cast<std::streamsize>(jsonStr.size()));
+    if (!file.good()) {
+        std::fprintf(stderr, "[UILayoutLoader] save error: write to '%s' failed\n",
+                     filepath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool UILayoutLoader::saveLayoutToString(Widget* root, std::string& outJson, bool pretty) {
+    if (!root) {
+        outJson.clear();
+        return false;
+    }
+    outJson = WidgetSerializer::serialize(root, pretty);
+    return !outJson.empty();
+}
+
 Widget* UILayoutLoader::reload(const std::string& id) {
     AYUNREFERENCED_PARAM(id);
     if (_lastFilePath.empty()) return nullptr;
