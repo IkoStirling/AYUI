@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYPanel.h"
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -84,6 +85,22 @@ public:
     void onMouseLeave() override;
     UiCursorHint getCursorHint() const override;
 
+    // D5.5 — Card promotion. The card hands off its frame to an external
+    // host (typically the editor's EditorChildWindowManager) which then
+    // owns it as a top-level HWND. AYUI does not depend on the host type:
+    // the PromoteCallback is injected at runtime by the editor shell
+    // (see EditorChildWindowManager::setPromoteCallback). Returning true
+    // means the host accepted the promotion — DockCard then detaches
+    // itself from its parent DockOverlay. Returning false aborts the
+    // promotion and the card stays in the overlay.
+    using PromoteCallback = std::function<bool(
+        const std::string& cardId,
+        const std::wstring& title,
+        int x, int y, int w, int h)>;
+
+    void setPromoteCallback(PromoteCallback cb) { _promoteCb = std::move(cb); }
+    bool detachToOwnWindow();
+
 private:
     std::string _id;
     std::wstring _title;
@@ -96,6 +113,9 @@ private:
 
     // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
     bool _titleBarHover = false;
+
+    // D5.5 — promotion hook. Default empty (detachToOwnWindow no-ops).
+    PromoteCallback _promoteCb;
 };
 
 } // namespace ayt::ui

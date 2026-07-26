@@ -1,5 +1,6 @@
 #include "AYDockCard.h"
 #include "AYBox.h"
+#include "AYDockOverlay.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "AYUIManager.h"
@@ -245,6 +246,69 @@ UiCursorHint DockCard::getCursorHint() const {
         return UiCursorHint::Move;
     }
     return UiCursorHint::Default;
+}
+
+// =============================================================================
+// D5.5 — Card promotion (in-panel floating card → top-level host window).
+// =============================================================================
+//
+// The card hands its frame (id + title + x/y/w/h) to a host via the
+// injected PromoteCallback. The host (EditorChildWindowManager in the
+// editor shell) decides whether to spawn a top-level HWND. If the host
+// returns true, we detach from the parent DockOverlay — the host now
+// owns the card's lifetime via the new window's UIManager.
+//
+// We deliberately do NOT delete `this` here: ownership transfer is the
+// host's responsibility once it accepts the promotion. This matches the
+// existing DockOverlay::removeFloatingCard contract (detach-only, no
+// destroy — see AYDockOverlay.cpp:48).
+//
+// K-INV-D5.5-1 — detachToOwnWindow returns false if no callback was
+// injected. Card stays in the overlay. This is the safe default and
+// matches D3's "drag without target = no-op" pattern.
+
+bool DockCard::detachToOwnWindow() {
+    if (!_promoteCb) {
+        return false;
+    }
+
+    // Pull the frame from current world position + size. The host wants
+    // the window's screen-space origin; world == local for an overlay-
+    // hosted floating card whose parent is the overlay at (0,0) by
+    // design, so we read local position. If a future caller wraps the
+    // card in a transform, switch to getWorldPosition(); for the v1
+    // editor shell this is always identity.
+    const math::FVector2 pos = getPosition();
+    const math::FVector2 sz  = getSize();
+
+    // Title may be empty (e.g. viewport card); pass through as-is
+    // rather than synthesizing a placeholder so the host's "untitled"
+    // default owns the UX decision. We pass _title (wstring) so the
+    // editor shell can carry wide text straight into the new top-level
+    // window's title bar without round-tripping through UTF-8.
+    const bool accepted = _promoteCb(
+        _id,
+        _title,
+        static_cast<int>(pos.x),
+        static_cast<int>(pos.y),
+        static_cast<int>(sz.x),
+        static_cast<int>(sz.y));
+
+    if (!accepted) {
+        // Host declined (e.g. host's window slot is full, layout parse
+        // failed). Card stays in the overlay unchanged.
+        return false;
+    }
+
+    // Detach from the overlay. We require parent == DockOverlay; if
+    // somebody calls detachToOwnWindow on a slot-docked card, we treat
+    // it as a no-op rather than guessing. The slot-card-promotion path
+    // (future cut) will go through a separate API.
+    Widget* parent = getParent();
+    if (auto* overlay = dynamic_cast<DockOverlay*>(parent)) {
+        overlay->removeFloatingCard(this);
+    }
+    return true;
 }
 
 } // namespace ayt::ui
