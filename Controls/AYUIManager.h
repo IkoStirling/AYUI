@@ -36,6 +36,43 @@ public:
     // absorb stack Widget* after the real manager has shut down (batch SEGV).
     static UIManager* tryGet();
 
+    // =================================================================
+    // D5 — multi-window support: RAII singleton-swap guard.
+    // =================================================================
+    // When the editor spawns child top-level windows (one UIManager per
+    // HWND), only ONE manager can be "active" (target of get()/tryGet()
+    // and ComboBox/Menu/Tooltip popup mounts) at a time. `pushActive`
+    // returns an RAII guard that swaps g_activeUIManager in its ctor and
+    // restores the previous owner in its dtor. Use range-for style:
+    //
+    //   for (auto& entry : manager.entries()) {
+    //       UIManager::ActiveScope g(entry.ui.get());
+    //       entry.ui->update(dt);
+    //       entry.ui->render();        // safe with _backend == nullptr
+    //   }
+    //
+    // K-INV-D5-1: NOT thread-safe. Single-tick-thread invariant — all
+    // child windows are ticked serially inside one thread, with nested
+    // pushActive scopes allowed.
+    class ActiveScope {
+    public:
+        explicit ActiveScope(UIManager* next);
+        ~ActiveScope();
+        ActiveScope(const ActiveScope&) = delete;
+        ActiveScope& operator=(const ActiveScope&) = delete;
+        ActiveScope(ActiveScope&&) = default;
+        ActiveScope& operator=(ActiveScope&&) = default;
+    private:
+        UIManager* _prev;
+        bool       _tookOwnership;
+    };
+
+    // Returns an RAII guard that swaps g_activeUIManager to `next` and
+    // restores on scope exit. Manual `popActive()` is forbidden — use
+    // the guard. Pair with the existing setFocus/onKeyDown/etc. APIs
+    // that all read through `tryGet()`.
+    static ActiveScope pushActive(UIManager* next);
+
     void initialize(IRenderBackend* backend);
     // =====================================================================
     // Polish (P3) — accelerator registry access.

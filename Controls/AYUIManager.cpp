@@ -191,6 +191,34 @@ UIManager* UIManager::tryGet() {
     return g_activeUIManager;
 }
 
+// =============================================================================
+// D5 — multi-window ActiveScope. RAII guard that swaps g_activeUIManager in its
+// ctor and restores the previous owner in its dtor.
+//
+// Single-thread invariant (K-INV-D5-1): nested scopes are safe; concurrent
+// scopes on different threads are UB. The editor tick (single thread) is the
+// only caller in D5 v1. Hosting frameworks that introduce threading must
+// introduce their own per-thread registry.
+// =============================================================================
+UIManager::ActiveScope::ActiveScope(UIManager* next)
+    : _prev(g_activeUIManager)
+    , _tookOwnership(next != nullptr) {
+    if (_tookOwnership) {
+        g_activeUIManager = next;
+    }
+}
+
+UIManager::ActiveScope::~ActiveScope() {
+    if (_tookOwnership) {
+        g_activeUIManager = _prev;
+        _tookOwnership = false;
+    }
+}
+
+UIManager::ActiveScope UIManager::pushActive(UIManager* next) {
+    return ActiveScope(next);
+}
+
 UIManager& UIManager::get() {
     if (g_activeUIManager != nullptr) {
         return *g_activeUIManager;
