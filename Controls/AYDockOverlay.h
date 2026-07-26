@@ -33,6 +33,19 @@ public:
 
     void onRender(IRenderBackend& renderer) override;
 
+    // D3 — K-INV-D3-4 (overlay pass-through). The inherited
+    // CompoundFocusableWidget::hitTest falls back to `return this`
+    // when the world position is inside our bounds but no child
+    // hit — that would block the F3 freecam "isPointOnChrome"
+    // raycast (see AYEditorSession.cpp:299) and would also break
+    // our own drop semantics (drop on overlay empty area must
+    // forward to DockArea::hitTestOverlay / floatCard, not be
+    // absorbed as a drop on overlay self).
+    //
+    // We override to: descend into floating cards first, return
+    // the hit card if any, else return nullptr (pass-through).
+    Widget* hitTest(const math::FVector2& worldPos) override;
+
 private:
     // Non-owning index of the floating cards stored in this overlay's
     // child tree. CompoundFocusableWidget owns them via ~Widget's child

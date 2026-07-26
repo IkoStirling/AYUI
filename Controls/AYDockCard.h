@@ -6,6 +6,8 @@
 
 namespace ayt::ui {
 
+class DockArea;
+
 // D1: DockCard - a leaf panel with a title + optional icon that hosts a
 // single widget tree. Built on top of Panel so existing style + border +
 // padding plumbing keeps working. The "thing" the user moves between slots
@@ -51,8 +53,10 @@ public:
     bool isClosable() const { return _closable; }
 
     // Whether the card can be torn off into a floating card. D1 stores
-    // the flag; D3 wires the actual drag path.
-    void setFloatable(bool f) { _floatable = f; }
+    // the flag; D3 wires the actual drag path. setFloatable(false) also
+    // clears setDraggable(false) so the title bar never starts a session
+    // for an explicitly non-floatable card (K-INV-D3-2).
+    void setFloatable(bool f);
     bool isFloatable() const { return _floatable; }
 
     // Whether the header is collapsed (only the title strip is visible).
@@ -67,6 +71,19 @@ public:
     void onRender(IRenderBackend& renderer) override;
     void performLayout() override;
 
+    // D3 — tear-off UX. The card's title bar becomes a drag handle that
+    // tears the card off into a floating card. The actual G12 wiring lives
+    // in the ctor (setDraggable + setOnDragStart + setOnDragEnd); these
+    // overrides are the mouse path.
+    //
+    // K-INV-D3-2 — _floatable=false short-circuits the title-bar drag.
+    // Return type mirrors Widget::onMouseButtonDown (bool) — overriding
+    // with a different return type triggers C2555.
+    bool onMouseButtonDown(const UIMouseEvent& e) override;
+    bool onMouseMove(const UIMouseEvent& e) override;
+    void onMouseLeave() override;
+    UiCursorHint getCursorHint() const override;
+
 private:
     std::string _id;
     std::wstring _title;
@@ -76,6 +93,9 @@ private:
     bool _floatable = true;
     bool _collapsed = false;
     float _headerHeight = 22.0f;
+
+    // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
+    bool _titleBarHover = false;
 };
 
 } // namespace ayt::ui

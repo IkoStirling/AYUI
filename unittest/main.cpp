@@ -59,6 +59,7 @@
 #include "Test_MenuShortcut_P3.cpp"
 #include "Test_DockArea.cpp"
 #include "Test_DockAreaLoader.cpp"
+#include "Test_DockFloat.cpp"
 
 void runTest()
 {

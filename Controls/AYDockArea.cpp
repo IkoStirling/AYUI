@@ -3,6 +3,9 @@
 #include "AYDockOverlay.h"
 #include "AYBox.h"
 #include "IAYRenderBackend.h"
+#include "AYUIManager.h"
+
+#include <algorithm>
 
 namespace ayt::ui {
 
@@ -167,6 +170,24 @@ DockCard* DockArea::getCard(Slot slot, size_t index) const {
 
 void DockArea::onRender(IRenderBackend& renderer) {
     AYUNREFERENCED_PARAM(renderer);
+    // D3 — drop-target highlight. Polls isCurrentDropTarget() per
+    // frame (cheap) and draws a generic outline over the DockArea
+    // bounds when active. Slot/overlay region-level highlighting
+    // would require either G12's onDragOver (not yet shipped) or
+    // UIManager exposing lastMousePos to drop targets; we accept the
+    // generic outline as good-enough visual feedback for v1.5.
+    // See K-INV-D3-8.
+    //
+    // The actual rect draw lives in a separate conditional so the
+    // common path (not dragging) skips the renderer call entirely.
+    // K-INV-D3-4 mirrors the F3 freecam isPointOnChrome contract:
+    // rendering must not add visual chrome that catches the raycast.
+    if (!isCurrentDropTarget()) {
+        return;
+    }
+    const math::FRectangle b = getWorldBounds();
+    renderer.drawBorderRect(b, math::FVector4(0.30f, 0.55f, 0.95f, 1.0f),
+                            2.0f, 0.0f);
 }
 
 void DockArea::performLayout() {
@@ -265,6 +286,172 @@ void DockArea::tearDownSlots() {
     _slotContainers[(int)Slot::Top]    = nullptr;
     _slotContainers[(int)Slot::Bottom] = nullptr;
     _slotContainers[(int)Slot::Center] = nullptr;
+}
+
+// =============================================================================
+// D3 — Tear-off / re-dock helpers.
+// =============================================================================
+
+bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
+    if (!_overlay) return false;
+    auto it = _cardIndex.find(cardId);
+    if (it == _cardIndex.end()) {
+        return false;       // not in any slot — nothing to float
+    }
+    DockCard* card = it->second;
+    if (card == nullptr) return false;
+
+    // Locate the slot the card currently lives in. O(N) but N is tiny
+    // (5 slots max, each holding a handful of cards).
+    int oldSlotIdx = -1;
+    for (int i = 0; i < (int)Slot::Count; ++i) {
+        for (DockCard* c : _slotCards[i]) {
+            if (c == card) {
+                oldSlotIdx = i;
+                break;
+            }
+        }
+        if (oldSlotIdx >= 0) break;
+    }
+    if (oldSlotIdx < 0) {
+        // _cardIndex says it's in a slot, but linear scan didn't find
+        // it — inconsistent state. Refuse to move rather than corrupt.
+        return false;
+    }
+
+    // Detach from the slot's container (VBox/HBox/Center Widget) WITHOUT
+    // delete. removeChild() + re-parent to overlay via addFloatingCard
+    // (which calls addChild internally) keeps ownership consistent.
+    //
+    // We CANNOT use DockArea::removeCard() because it calls
+    // destroyWidgetTree() — that frees the card. We need the card alive
+    // to hand to the overlay.
+    _cardIndex.erase(it);
+    _slotCards[oldSlotIdx].erase(
+        std::remove(_slotCards[oldSlotIdx].begin(),
+                    _slotCards[oldSlotIdx].end(), card),
+        _slotCards[oldSlotIdx].end());
+    // Detach from current parent (the slot container, not DockArea).
+    if (card->getParent() != nullptr) {
+        card->detachFromParent();
+    }
+
+    // Set floating position + size and hand to overlay. addFloatingCard
+    // calls addChild which re-parents and assumes ownership.
+    card->setPosition(pos);
+    _overlay->addFloatingCard(card);
+
+    // Reset hover state — the card just moved; the highlight from
+    // before the drop is stale.
+    _hoveredSlot = Slot::Count;
+    _hoveredOverlay = false;
+    markBoundsDirty();
+    return true;
+}
+
+bool DockArea::dockCard(const std::string& cardId, Slot target) {
+    if (!_overlay) return false;
+    if ((int)target < 0 || (int)target >= (int)Slot::Count) {
+        return false;
+    }
+
+    // Locate the floating card on the overlay. Linear scan; the
+    // overlay's _floatingCards vector is non-indexed.
+    DockCard* card = nullptr;
+    const size_t n = _overlay->getFloatingCardCount();
+    for (size_t i = 0; i < n; ++i) {
+        DockCard* c = _overlay->getFloatingCard(i);
+        if (c && c->getId() == cardId) {
+            card = c;
+            break;
+        }
+    }
+    if (card == nullptr) {
+        return false;       // not on the overlay — nothing to dock
+    }
+
+    // Detach from overlay (does NOT delete — see
+    // DockOverlay::removeFloatingCard).
+    _overlay->removeFloatingCard(card);
+
+    // Hand to addCard. addCard's `removeCard(id)` for last-write-wins
+    // is a no-op here: the floating card was never inserted into
+    // _cardIndex (addFloatingCard skips the index by design), so the
+    // id lookup misses and removeCard returns false without touching
+    // any card. K-INV-D3-7 invariant: the card transitions from
+    // "not in _cardIndex" (overlay) → "in _cardIndex" (slot).
+    addCard(target, std::unique_ptr<DockCard>(card));
+
+    _hoveredSlot = Slot::Count;
+    _hoveredOverlay = false;
+    markBoundsDirty();
+    return true;
+}
+
+DockArea::Slot DockArea::hitTestSlot(const math::FVector2& worldPos) const {
+    // Mirror the region math in performLayout() — same weights, same
+    // order. If the slot containers haven't been laid out yet (their
+    // size is 0), we fall back to Slot::Count so the highlight is
+    // suppressed rather than pinned to a stale zero-size region.
+    const math::FVector2 sz = getSize();
+    if (sz.x <= 0.0f || sz.y <= 0.0f) {
+        return Slot::Count;
+    }
+    const float w = sz.x;
+    const float h = sz.y;
+
+    const float wtTop    = effectiveWeight(*this, Slot::Top);
+    const float wtBottom = effectiveWeight(*this, Slot::Bottom);
+    const float wtLeft   = effectiveWeight(*this, Slot::Left);
+    const float wtRight  = effectiveWeight(*this, Slot::Right);
+    const float wtCenter = effectiveWeight(*this, Slot::Center);
+
+    const float sumVert = wtTop + wtBottom + 1.0f;
+    const float topH    = h * (wtTop    / sumVert);
+    const float botH    = h * (wtBottom / sumVert);
+    const float midY    = topH;
+    const float midH    = h - topH - botH;
+
+    const float sumHoriz = wtLeft + wtCenter + wtRight;
+    const float leftW  = (sumHoriz > 0.0f) ? w * (wtLeft   / sumHoriz) : 0.0f;
+    const float rightW = (sumHoriz > 0.0f) ? w * (wtRight  / sumHoriz) : 0.0f;
+    const float centerW = w - leftW - rightW;
+
+    // Test Top / Bottom first (full-width strips).
+    if (worldPos.y < midY) {
+        return Slot::Top;
+    }
+    if (worldPos.y >= midY + midH) {
+        return Slot::Bottom;
+    }
+    // Inside the middle row — split horizontally.
+    if (worldPos.x < leftW) {
+        return Slot::Left;
+    }
+    if (worldPos.x >= leftW + centerW) {
+        return Slot::Right;
+    }
+    return Slot::Center;
+}
+
+bool DockArea::hitTestOverlay(const math::FVector2& worldPos) const {
+    if (_overlay == nullptr) return false;
+    const math::FRectangle overlayBounds = _overlay->getWorldBounds();
+    if (!overlayBounds.contains(worldPos)) {
+        return false;
+    }
+    // Inside overlay bounds — but not on any floating card. Walk the
+    // overlay's children in reverse insertion order (top-most first),
+    // matching the Widget hit-test descent order.
+    const std::vector<Widget*>& kids = _overlay->getChildren();
+    for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+        Widget* w = *it;
+        if (w && w->isVisible() && w->hitTest(worldPos)) {
+            return false;       // hit a floating card — overlay
+                                // region not "empty"
+        }
+    }
+    return true;
 }
 
 } // namespace ayt::ui

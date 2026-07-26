@@ -3,14 +3,14 @@
 #include "AYCompoundFocusableWidget.h"
 #include "AYBox.h"
 #include "AYDockOverlay.h"
+#include "AYUIManager.h"
+#include "AYDockCard.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace ayt::ui {
-
-class DockCard;
 
 // D1: DockArea - the editor-shell root that hosts named slots
 // (Left/Right/Top/Bottom/Center) plus a DockOverlay for floating cards.
@@ -56,12 +56,89 @@ public:
                 addChild(_slotContainers[i]);
             }
         }
+
+        // D3 — drop-target wiring. DockArea is the single G12 drop
+        // target for the dock tree; sub-containers (VBox/HBox slot
+        // containers, individual DockCards) stay setAcceptDrops(false)
+        // so UIManager::updateDrag's parent-chain walk finds DockArea
+        // directly.
+        //
+        // Card-id resolution at onDrop time uses
+        // UIManager::tryGet()->getDragSource() — the source pointer
+        // is still alive in _dragSession.source when onDrop fires
+        // (UIManager nulls it AFTER the callback returns;
+        // see AYUIManager.cpp:1282-1293). K-INV-D3-6 landmine
+        // workaround: payload.data / userData weren't expressive
+        // enough for a std::string id without manual lifetime dance,
+        // so we read the source from UIManager instead.
+        //
+        // K-INV-D3-8 highlight limitation: G12 has no onDragOver
+        // callback and UIManager doesn't expose lastMousePos to the
+        // drop target, so per-frame slot/overlay hover tracking is
+        // out of scope for v1.5. The onDrop path uses _hoveredSlot /
+        // _hoveredOverlay (set by leave transitions and the drop's
+        // own hit-test). Visual highlight draws a generic "drop
+        // target active" outline when isCurrentDropTarget() polls
+        // true (see DockArea::onRender).
+        setAcceptDrops(true);
+        setOnDragLeave([this]() {
+            // Clear hover flags on leave. onDragEnter doesn't set
+            // them — we don't know the cursor position here.
+            _hoveredSlot = Slot::Count;
+            _hoveredOverlay = false;
+            markBoundsDirty();
+        });
+        setOnDrop([this](const DragPayload& payload) {
+            if (payload.kind != "DockCard") {
+                return;
+            }
+            // Resolve the source card via UIManager (alive here —
+            // see AYUIManager.cpp:1282).
+            UIManager* ui = UIManager::tryGet();
+            if (ui == nullptr) {
+                return;
+            }
+            Widget* src = ui->getDragSource();
+            DockCard* card = dynamic_cast<DockCard*>(src);
+            if (card == nullptr) {
+                return;
+            }
+            const std::string cardId = card->getId();
+
+            if (_hoveredSlot != Slot::Count) {
+                // K-INV-D3-1: same-slot no-op.
+                if (isCardInSlot(card, _hoveredSlot)) {
+                    return;
+                }
+                dockCard(cardId, _hoveredSlot);
+            } else if (_hoveredOverlay) {
+                floatCard(cardId, _dragEnterPos);
+            }
+            // else: no-op (drop on a region neither slot nor overlay
+            // accepts — rare; happens if all slot weights are zero).
+            markBoundsDirty();
+        });
     }
+
+public:
 
     // Frees overlay + slot containers + docked cards (heap children).
     // Stack DockArea must NOT be passed to destroyWidgetTree — that would
     // `delete` the stack object. Rely on this dtor (or heap+destroyWidgetTree).
     ~DockArea() override;
+
+    // D3 internal — used by the ctor's onDrop lambda to enforce
+    // K-INV-D3-1 (same-slot no-op). Returns true if `card` lives in
+    // `slot`. Inline because the lambda body needs it.
+    bool isCardInSlot(const DockCard* card, Slot slot) const {
+        if (card == nullptr) return false;
+        const int s = (int)slot;
+        if (s < 0 || s >= (int)Slot::Count) return false;
+        for (DockCard* c : _slotCards[s]) {
+            if (c == card) return true;
+        }
+        return false;
+    }
 
     // Slot weight (0..1) used by the layout pass for relative sizing.
     // Weights of 0 fall back to a hard-coded sensible default
@@ -108,6 +185,34 @@ public:
     void onRender(IRenderBackend& renderer) override;
     void performLayout() override;
 
+    // =================================================================
+    // D3 — Tear-off UX. These are the public surface that the
+    // DockArea's G12 drop callbacks call. Hosts don't normally call
+    // them directly; the drag/drop system invokes floatCard /
+    // dockCard as a side-effect of the drop event.
+    // =================================================================
+    // Tear a docked card off into a floating card on the overlay.
+    // Returns false if no card with `cardId` lives in any slot.
+    // K-INV-D3-7: `_cardIndex` is erased here because the card leaves
+    // the slot namespace.
+    bool floatCard(const std::string& cardId, const math::FVector2& pos);
+
+    // Re-dock a floating card into a named slot. Returns false if no
+    // floating card with `cardId` exists. K-INV-D3-1: same-slot
+    // transition is a no-op (handled at the drop callback level).
+    bool dockCard(const std::string& cardId, Slot target);
+
+    // Returns the slot whose region contains `worldPos`, or Slot::Count
+    // if none. Mirrors the region math in performLayout() so the
+    // drop-zone highlight stays in lockstep with the layout pass.
+    Slot hitTestSlot(const math::FVector2& worldPos) const;
+
+    // True if `worldPos` is inside the overlay's bounds but not on any
+    // floating card. K-INV-D3-4 (DockOverlay pass-through) requires
+    // this distinction: drop on the overlay EMPTY area = float, drop
+    // on a floating card = no-op (handled by DockOverlay::onDrop).
+    bool hitTestOverlay(const math::FVector2& worldPos) const;
+
 protected:
     // Mirrors CompoundFocusableWidget hooks. Default empty.
     void onChildAdded(Widget* child);
@@ -136,6 +241,17 @@ private:
     // unique_ptr here (it would need DockOverlay's complete type at the
     // point DockArea's dtor is implicit-synthesised).
     DockOverlay* _overlay = nullptr;
+
+    // D3 — render-time highlight state. Set in onDragEnter, cleared in
+    // onDragLeave / onDrop. Stored as enum + bool (not Widget*) so we
+    // can't hold a stale pointer to a torn-off card.
+    Slot _hoveredSlot = Slot::Count;   // Slot::Count sentinel = no hover
+    bool _hoveredOverlay = false;
+
+    // D3 — last-known cursor world position from the drag session.
+    // UIManager doesn't expose lastMousePos publicly; we cache it in
+    // onDragEnter for use by onDrop (overlay drop uses this position).
+    math::FVector2 _dragEnterPos = math::FVector2(-1.0f, -1.0f);
 
     void tearDownSlots();
 };

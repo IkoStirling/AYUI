@@ -1,6 +1,7 @@
 #include "AYDockOverlay.h"
 #include "AYDockCard.h"
 #include "AYWidget.h"
+#include "IAYRenderBackend.h"
 
 namespace ayt::ui {
 
@@ -12,6 +13,19 @@ DockOverlay::DockOverlay() {
     // order via the Widget z-order hint. CompoundFocusableWidget exposes
     // no direct setter; children added later already draw on top of
     // earlier siblings so insertion order is enough.
+
+    // D3 — drop-target wiring for the overlay. Dropping a card
+    // ON a floating card is a no-op (the card stays where it is);
+    // the design choice was made in plan §D3 ("drop on floating
+    // card = no-op", can be polished to stack-on-top later).
+    // Drops on the overlay's empty area are routed by G12 to the
+    // parent DockArea instead (overlay's hitTest pass-through means
+    // the parent-chain walk stops at DockArea, which IS the drop
+    // target for the empty-area case).
+    setAcceptDrops(true);
+    setOnDrop([](const DragPayload& /*payload*/) {
+        // Intentionally empty — see ctor comment above.
+    });
 }
 
 DockOverlay::~DockOverlay() {
@@ -61,6 +75,31 @@ void DockOverlay::onRender(IRenderBackend& renderer) {
     // (with its slot backgrounds) is visible. Floating cards draw their
     // own bodies; their headers + borders are sufficient visual cue.
     AYUNREFERENCED_PARAM(renderer);
+}
+
+Widget* DockOverlay::hitTest(const math::FVector2& worldPos) {
+    // K-INV-D3-4 pass-through override. See AYDockOverlay.h for the
+    // rationale (F3 freecam isPointOnChrome compatibility + drop
+    // semantics for the empty overlay area).
+    if (!_visible) return nullptr;
+    const math::FRectangle bounds = getWorldBounds();
+    if (!bounds.contains(worldPos)) return nullptr;
+    // Descend into floating cards in reverse insertion order (topmost
+    // first). The default compoundDescendHitTest walks the children
+    // list the same way; we re-implement inline so we can return
+    // nullptr instead of `this` when no child hits.
+    const std::vector<Widget*>& kids = getChildren();
+    for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+        Widget* w = *it;
+        if (w && w->isVisible() && w->hitTest(worldPos)) {
+            return w;
+        }
+    }
+    // Pass-through — caller (UIManager::pickTopmostWidget's parent-
+    // chain walk) will see nullptr and continue up to DockArea itself,
+    // which has isAcceptDrops()==true. Net effect: drop on overlay
+    // empty area routes to DockArea::onDrop, not DockOverlay::onDrop.
+    return nullptr;
 }
 
 } // namespace ayt::ui
