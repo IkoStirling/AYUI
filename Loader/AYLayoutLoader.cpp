@@ -43,8 +43,6 @@ void loaderHeapCheck(const char* label)
     if (!_CrtCheckMemory()) {
         std::fprintf(stderr, "[LoaderHeapCheck] FAIL at %s\n", label);
         _CrtDbgBreak();
-    } else {
-        std::fprintf(stderr, "[LoaderHeapCheck] OK at %s\n", label);
     }
 }
 
@@ -370,8 +368,6 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     if (!id.empty()) {
         widget->setId(id);
         _widgetsById[id] = widget;
-        std::fprintf(stderr, "[UILayoutLoader] built widget type='%s' id='%s'\n", type.c_str(),
-                     id.c_str());
     }
 
     // Position — only axes present in JSON are applied. Pinning requires both
