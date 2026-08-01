@@ -55,6 +55,19 @@ DockCard::DockCard() {
 }
 
 DockCard::~DockCard() {
+    // R3-safe parallel of ~TextInput / ~TextArea::TextDocument: drop the
+    // UIManager's transient drag pointers BEFORE the vtable dispatch
+    // chain unwinds. Without this, a tear-off drag in progress when the
+    // editor closes its DockArea (or destroys the card mid-drag) would
+    // leave _dragSession.source / _dragSession.currentTarget pointing at
+    // freed memory; the next endDrag() would call _onDragEnd on the
+    // freed source widget → UB. clearDragStateNoDispatch is the no-virtual
+    // variant (commit 3844a95), mirroring clearFocusNoDispatch /
+    // clearCaptureNoDispatch.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearDragStateNoDispatch(this);
+    }
+
     // Content is owned via destroyWidgetTree to keep the existing
     // children-tree lifecycle. CompoundWidget already tears down its
     // children tree on destruction, but a content Widget added via

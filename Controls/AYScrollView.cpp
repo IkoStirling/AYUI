@@ -10,13 +10,28 @@ ScrollView::ScrollView() {
 }
 
 ScrollView::~ScrollView() {
-    // Bars were added as children of the ScrollView (via addChildExternal);
-    // destroyWidgetTree (called by the factory-owned tree's root delete)
-    // will recursively delete them. Do NOT double-delete here — set the
-    // pointers to nullptr so a follow-up destruction never frees them
-    // twice.
-    _vbar = nullptr;
-    _hbar = nullptr;
+    // Bars were added via addChildExternal (host-lifetime semantics so
+    // TextArea / ListView can hold a ScrollView without re-owning its
+    // bars). But when *we* are destroyed, destroyWidgetTree SKIPS
+    // externally-owned children — which would leak both ScrollBars.
+    // Mirror the rebuildRows() teardown pattern: detach + delete.
+    //
+    // _content is host-owned (caller passes a Widget* whose lifetime it
+    // manages), so do NOT free it here.
+    if (_vbar != nullptr) {
+        if (_vbar->getParent() == this) {
+            removeChild(_vbar);
+        }
+        delete _vbar;
+        _vbar = nullptr;
+    }
+    if (_hbar != nullptr) {
+        if (_hbar->getParent() == this) {
+            removeChild(_hbar);
+        }
+        delete _hbar;
+        _hbar = nullptr;
+    }
 }
 
 void ScrollView::setContent(Widget* content) {

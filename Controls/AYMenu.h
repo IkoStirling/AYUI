@@ -83,6 +83,11 @@ public:
     void open(Widget* host, const math::FVector2& anchorPos);
     void close();
 
+    // Owner-host break path for dtor order safety. ~MenuBar calls this
+    // BEFORE close() so the reparent-on-close logic doesn't try to add
+    // us back to a MenuBar that's already unwinding. Idempotent.
+    void clearOwnerHost() { _ownerHost = nullptr; }
+
     // Soft-dismissal path used by UIManager when closing one dropdown
     // before opening another (or when the user clicks outside the menu).
     // Same durable-Menu* contract as close(): MenuBar keeps the pointer.

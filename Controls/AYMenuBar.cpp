@@ -27,9 +27,46 @@ MenuBar::~MenuBar() {
     if (UIManager* ui = UIManager::tryGet()) {
         ui->unregisterMenuBar(this);
     }
-    // Children include anchor buttons + open menus. CompoundWidget
-    // destructor frees them all.
+
+    // Open-menu lifetime fix (commit ay-ui.md code-review 2026-08-02 #5):
+    // `Menu::open()` reparents the Menu onto the UIManager overlay
+    // (NOT under us). When the editor destroys the MenuBar with an open
+    // menu still on the overlay, the Menu is no longer in our
+    // `_children` list — CompoundWidget's destructor wouldn't free it
+    // and it leaks (and any submenu items with it). Worse, MenuBar's
+    // findAccel() iterates `_menus[i].menu` and dereferences each —
+    // if we cleared `_menus` without freeing the menus, an accelerator
+    // hit on the orphan menu reads freed memory. Mirror ~DockArea's
+    // snapshot-and-delete pattern.
+    //
+    // Order matters: close() FIRST (which reparents the menu back onto
+    // us via _ownerHost so the standard child-tree destructor can free
+    // it normally), THEN let CompoundWidget's destruction handle it
+    // through `_children`. If close() fails to reparent (e.g. the
+    // manager is already gone), fall back to an explicit delete.
+    const std::vector<MenuEntry> snapshot = _menus;
     _menus.clear();
+    for (const MenuEntry& e : snapshot) {
+        if (e.menu == nullptr) continue;
+        // Break the open-menu's _ownerHost back-pointer so its close()
+        // / dismissFromManager() doesn't try to re-add itself to us
+        // mid-dtor (we're already unwinding).
+        e.menu->clearOwnerHost();
+        if (e.menu->isOpen()) {
+            e.menu->close();
+        }
+        // If close() reparented onto us, ~CompoundFocusableWidget's
+        // child-tree walk handles it. Otherwise (UIManager gone or
+        // ownerHost was already null) explicitly detach + delete so
+        // the menu doesn't leak on the overlay.
+        if (e.menu->getParent() != nullptr) {
+            // Detach so the parent's dtor doesn't double-free it (we
+            // already cleared _menus, so the dangling pointer would
+            // sit in _children).
+            e.menu->detachFromParent();
+        }
+        delete e.menu;
+    }
 }
 
 Menu* MenuBar::addMenu(const std::wstring& title) {

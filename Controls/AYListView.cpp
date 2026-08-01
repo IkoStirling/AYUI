@@ -76,11 +76,30 @@ ListView::ListView() {
 }
 
 ListView::~ListView() {
-    // Pool rows were added via addChildExternal — destroyWidgetTree (called
-    // from the factory-owned tree's root delete) will free them. Just
-    // NULL our pointers to avoid double-free in case dtor runs first.
+    // Pool rows AND the vbar are attached via addChildExternal
+    // (host-lifetime semantics so a parent container can own us without
+    // owning our internals). However, when *we* are destroyed (a top-level
+    // ListView, or one whose host uses the destroyWidgetTree path) the
+    // externally-owned flag means destroyWidgetTree SKIPS them — which
+    // would leak the rows and the ScrollBar we allocated. Mirror the
+    // rebuildRows() teardown pattern: detach + delete each row, then
+    // delete the vbar (it lives in our _children list).
+    for (Row* r : _rowPool) {
+        if (r == nullptr) continue;
+        if (r->getParent() == this) {
+            removeChild(r);
+        }
+        delete r;
+    }
     _rowPool.clear();
-    _vbar = nullptr;
+
+    if (_vbar != nullptr) {
+        if (_vbar->getParent() == this) {
+            removeChild(_vbar);
+        }
+        delete _vbar;
+        _vbar = nullptr;
+    }
 }
 
 void ListView::setItems(const std::vector<std::wstring>& items) {

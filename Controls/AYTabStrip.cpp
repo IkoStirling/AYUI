@@ -10,11 +10,15 @@ TabStrip::TabStrip() {
 }
 
 TabStrip::~TabStrip() {
-    // R6/R3 — children of `this` (the buttons) are released when the
-    // CompoundFocusableWidget destructor runs and tears down its tree. We
-    // do not need to free them here; clearing the vector keeps stale
-    // pointers from lingering in case dtor order surprises us.
-    _tabButtons.clear();
+    // Buttons were added via addChildExternal (host-lifetime semantics
+    // so a parent TabControl can hold us without re-owning them). But
+    // when *we* are destroyed, destroyWidgetTree SKIPS externally-owned
+    // children — which would leak every tab button. destroyAllButtons()
+    // already does the right detach+delete + clear; call it as the first
+    // action here so a `delete tabStrip` (or a host-driven stack unwind)
+    // releases them. removeTab/clearTabs call destroyAllButtons() too,
+    // making this idempotent.
+    destroyAllButtons();
 }
 
 void TabStrip::addTab(const std::wstring& label) {
