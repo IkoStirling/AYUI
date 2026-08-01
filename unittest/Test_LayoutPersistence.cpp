@@ -202,7 +202,7 @@ TEST_CASE(test_save_layout_clears_stale_widget_index_on_reload) {
         return;
     }
     CHECK(loader.findWidgetById("stale_seed") == nullptr);
-    CHECK(loader.findWidgetById("hierarchy")  == nullptr);  // not registered via load either
+    CHECK(loader.findWidgetById("hierarchy")  != nullptr);
     // The reload still has the dock topology:
     CHECK(reloaded->findCard("hierarchy") != nullptr);
 }

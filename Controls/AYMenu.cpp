@@ -96,6 +96,7 @@ void Menu::attachSubmenu(MenuItem* item, Menu* sub) {
 
 void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     if (host == nullptr) return;
+    _ownerHost = host;
     setVisible(true);
     setPosition(anchorPos);
     // Phase A (A2): mount on UIManager's overlay root instead of the host.
@@ -124,37 +125,26 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
 
 void Menu::close() {
     if (!_open) return;
-    setVisible(false);
     _open = false;
-    // Phase B (B3) R3: restore focus to whatever had it before open().
-    // The slot is cleared so a second close() (defensive) is a no-op.
-    // setFocus(null) is acceptable when nothing was focused previously.
-    //
-    // Phase D §5.3 — tryGet() guards: after a host shuts its manager down,
-    // close() can still fire as part of stack unwind; the static fallback
-    // would otherwise store _focusedWidgetBefore on the fallback.
+    setVisible(false);
+    // Soft unmount: MenuBar keeps a durable Menu* for the session.
+    // closePopup(..., destroy=true) used to free the tree here, which
+    // left MenuBar::_menus[i].menu dangling after the first item click
+    // / Escape — subsequent opens and hit-tests then stuck or AV'd.
     if (UIManager* ui = UIManager::tryGet()) {
         if (_focusedWidgetBefore != nullptr) {
             ui->setFocus(_focusedWidgetBefore);
             _focusedWidgetBefore = nullptr;
         }
         if (_onClose) _onClose();
-        // Phase A (A2): UIManager::closePopup removes us from the overlay and
-        // frees the tree via destroyWidgetTree. After this call `this` is
-        // dangling — callers must not touch the Menu after close().
-        //
-        // CRITICAL: clear _focusedWidget BEFORE closePopup destroys the menu.
-        // UIManager::shutdown() walks _focusedWidget and dynamic_casts it to
-        // FocusableWidget to fire setFocus(false). If we left it pointing at
-        // this Menu, shutdown hits a freed-pointer RTTI lookup → access
-        // violation. setFocus(null) drops the reference while this is still
-        // alive (the subsequent closePopup call is what actually frees us).
         if (ui->getFocusedWidget() == this) {
             ui->setFocus(nullptr);
         }
-        if (getParent() != nullptr) {
-            ui->closePopup(this);
-        }
+        ui->closePopup(this, /*destroy=*/false);
+    }
+    // Reparent under the owning MenuBar so CompoundWidget still owns us.
+    if (_ownerHost != nullptr && getParent() == nullptr) {
+        _ownerHost->addChild(this);
     }
 }
 
@@ -187,6 +177,9 @@ void Menu::performLayout() {
 }
 
 void Menu::onRender(IRenderBackend& renderer) {
+    if (!_open || !isVisible()) {
+        return;
+    }
     // Use local position + size to avoid a stale getWorldBounds when the
     // menu has never been laid out (caller might call render() directly
     // without first wiring into a host). For a popup later this is the
@@ -278,41 +271,28 @@ void Menu::activateItem(int index) {
 }
 
 void Menu::dismissFromManager() {
-    // UIManager uses this path when the user clicks outside the menu
-    // bounds OR when it needs to swap one dropdown for another. The
-    // MenuBar keeps the Menu* as a durable leaf; close() would also
-    // tear down the menu subtree which is NOT what we want here.
-    //
-    // Sequence:
-    //   1. Restore prior focus (so Tab traversal returns to host).
-    //   2. Detach this menu from UIManager's overlay (so hit-test
-    //      stops routing to us).
-    //   3. Hide the subtree visually (we'll re-show on next open()).
+    // UIManager click-outside / swap-dropdown path. Same soft contract
+    // as close(): keep Menu* alive for MenuBar, clear _open, and let
+    // closePopup(false) clear UIManager::_activeDropdown.
+    if (!_open && getParent() == nullptr) {
+        return;
+    }
+    _open = false;
+    setVisible(false);
     if (UIManager* ui = UIManager::tryGet()) {
         if (_focusedWidgetBefore != nullptr) {
             ui->setFocus(_focusedWidgetBefore);
             _focusedWidgetBefore = nullptr;
         }
         if (_onClose) _onClose();
-        // Phase A (A2): pull the menu subtree out of the overlay root
-        // without destroying it. The MenuBar (logical owner) keeps
-        // the Menu* reference; the next open() re-mounts.
-        if (ui->getOverlayRoot() != nullptr) {
-            Widget* overlayRoot = ui->getOverlayRoot();
-            Widget* parent = getParent();
-            while (parent != nullptr && parent != overlayRoot &&
-                   parent->getParent() != nullptr) {
-                parent = parent->getParent();
-            }
-            if (parent != nullptr && parent != overlayRoot) {
-                // Walked past the overlay — nothing to detach.
-            }
-            if (parent == overlayRoot) {
-                overlayRoot->removeChild(this);
-            }
+        if (ui->getFocusedWidget() == this) {
+            ui->setFocus(nullptr);
         }
+        ui->closePopup(this, /*destroy=*/false);
     }
-    setVisible(false);
+    if (_ownerHost != nullptr && getParent() == nullptr) {
+        _ownerHost->addChild(this);
+    }
 }
 
 } // namespace ayt::ui

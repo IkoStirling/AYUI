@@ -42,8 +42,11 @@ DockCard::DockCard() {
         // and queries _cardIndex[id] for the current slot.
         p.userData = 0;
         setDragPayload(p);
+        // Hide the docked copy while the ghost follows the cursor.
+        setVisible(false);
     });
     setOnDragEnd([this](bool /*accepted*/) {
+        setVisible(true);
         // Drag session ended (drop fired OR cancel). Cursor reset is
         // driven by UIManager re-polling cursor hint; we don't need to
         // explicitly clear _titleBarHover here because the next

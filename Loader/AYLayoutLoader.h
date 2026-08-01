@@ -19,6 +19,7 @@ using json = nlohmann::json;
 class Widget;
 class WidgetFactory;
 class I18n;
+class DockCard;
 
 class UILayoutLoader {
 public:
@@ -55,6 +56,7 @@ public:
 
 private:
     Widget* buildWidgetTree(const json& j);
+    DockCard* buildDockCardFromJson(const json& cj);
     // Drain the watcher queue and update _dirty. Returns _dirty after the poll.
     // R-4: const-ness relaxed vs the old mtime-based design because FileWatcher
     // pollPending mutates internal queues. Callers that only check the flag

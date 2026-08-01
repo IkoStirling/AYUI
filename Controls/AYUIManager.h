@@ -98,6 +98,9 @@ public:
     void setClientSize(float width, float height);
     void update(float dt);
     void layout();
+    // Invalidate the layout cache so the next layout() re-runs performLayout
+    // even when the client size is unchanged (dock float/hide, visibility).
+    void invalidateLayout();
 
     // AI-1 (2026-07-20): render() split into populateFrame() + flushFrame()
     // so AYRenderer's RenderPass dispatch can own the per-frame flush
@@ -124,6 +127,11 @@ public:
 
     Widget* root() const { return _root; }
     Widget* findById(const std::string& id) const;
+
+    // G12 — last cursor position from the active drag session (drop target
+    // resolution). Falls back to the most recent onMouseMove when idle.
+    math::FVector2 getDragLastMousePos() const;
+    bool isDragActive() const { return _dragSession.active; }
 
     // =====================================================================
     // Phase A — PopupLayer (S1) + viewport (S5)

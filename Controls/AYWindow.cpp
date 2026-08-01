@@ -3,6 +3,7 @@
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ayt::ui {
 
@@ -44,6 +45,9 @@ Window::Window()
 }
 
 Window::~Window() {
+    // _bodyVBar is an owned child via addChildExternal — CompoundWidget
+    // tears it down. Null so we don't touch a freed pointer.
+    _bodyVBar = nullptr;
 }
 
 void Window::setMinSize(float width, float height) {
@@ -82,10 +86,26 @@ Widget* Window::hitTest(const math::FVector2& worldPos) {
         }
     }
 
-    for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
-        Widget* child = *it;
-        Widget* hit = child->hitTest(worldPos);
-        if (hit) return hit;
+    // Prefer the overflow scrollbar when present.
+    if (_bodyVBar != nullptr && _bodyVBar->isVisible()) {
+        if (Widget* hit = _bodyVBar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+
+    // Clip body hits to the client rect so scrolled-off children
+    // don't steal clicks outside the window body.
+    math::FRectangle body(bounds.minX, bounds.minY + _titleBarHeight,
+                          bounds.maxX, bounds.maxY);
+    if (body.contains(worldPos)) {
+        for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
+            Widget* child = *it;
+            if (child == nullptr || child == _bodyVBar) {
+                continue;
+            }
+            Widget* hit = child->hitTest(worldPos);
+            if (hit) return hit;
+        }
     }
 
     return this;
@@ -262,13 +282,20 @@ void Window::onRender(IRenderBackend& renderer) {
         renderer.drawText(titleBounds, _title, 13, math::FVector4(0.92f, 0.92f, 0.92f, 1.0f));
     }
 
-    // Phase D (D1) — SE resize grip. Three 1.5×1.5 dots at NW→SE diagonal
-    // inside the SE band. Only drawn when _resizable (so hosts can flip
-    // resizability for production modals without losing the affordance in
-    // debug builds). Q3.
     if (_resizable) {
         renderResizeGrip(renderer);
     }
+}
+
+void Window::renderChildren(IRenderBackend& renderer) {
+    // Clip body children (+ scrollbar) to the client rect so scrolled
+    // content cannot paint over the title bar ("内容超过上部").
+    const math::FRectangle bounds = getWorldBounds();
+    const math::FRectangle body(bounds.minX, bounds.minY + _titleBarHeight,
+                                bounds.maxX, bounds.maxY);
+    renderer.pushClip(body);
+    CompoundWidget::renderChildren(renderer);
+    renderer.popClip();
 }
 
 void Window::renderResizeGrip(IRenderBackend& renderer) const {
@@ -289,6 +316,75 @@ void Window::renderResizeGrip(IRenderBackend& renderer) const {
     }
 }
 
+void Window::ensureBodyScrollBar() {
+    if (!_bodyScrollEnabled || _bodyVBar != nullptr) {
+        return;
+    }
+    _bodyVBar = new ScrollBar();
+    _bodyVBar->setOrientation(ScrollBar::Orientation::Vertical);
+    _bodyVBar->setOnValueChanged([this](float v) {
+        const float maxScroll = std::max(0.0f, _contentExtentY - _bodyViewportH);
+        const float clamped = std::clamp(v, 0.0f, maxScroll);
+        if (std::fabs(clamped - _scrollY) < 0.01f) {
+            return;
+        }
+        _scrollY = clamped;
+        const float paddingLeft = 8.0f;
+        const float paddingTop = 8.0f;
+        const float spacing = 6.0f;
+        const float contentTop = _titleBarHeight + paddingTop;
+        float y = contentTop - _scrollY;
+        for (Widget* child : _children) {
+            if (child == nullptr || child == _bodyVBar) {
+                continue;
+            }
+            const float h = child->getHeight();
+            child->setPosition(math::FVector2(paddingLeft, y));
+            y += h + spacing;
+        }
+    });
+    addChild(_bodyVBar);
+}
+
+void Window::syncBodyScrollBar() {
+    if (_bodyVBar == nullptr) {
+        return;
+    }
+    const float maxScroll = std::max(0.0f, _contentExtentY - _bodyViewportH);
+    const bool needed = maxScroll > 0.5f;
+    _bodyVBar->setVisible(needed);
+    if (!needed) {
+        _scrollY = 0.0f;
+        return;
+    }
+    // Thumb size uses viewport/content; value is the scroll offset in
+    // [0, content-viewport]. Matches ScrollView's bar contract.
+    _bodyVBar->setRange(0.0f, _contentExtentY);
+    _bodyVBar->setViewportSize(_bodyViewportH);
+    _scrollY = std::clamp(_scrollY, 0.0f, maxScroll);
+    _bodyVBar->setValue(_scrollY);
+}
+
+bool Window::scrollBodyBy(float dy) {
+    if (!_bodyScrollEnabled) {
+        return false;
+    }
+    const float maxOff = std::max(0.0f, _contentExtentY - _bodyViewportH);
+    if (maxOff <= 0.0f) {
+        return false;
+    }
+    const float next = std::clamp(_scrollY + dy, 0.0f, maxOff);
+    if (std::fabs(next - _scrollY) < 0.01f) {
+        return false;
+    }
+    _scrollY = next;
+    if (_bodyVBar != nullptr) {
+        _bodyVBar->setValue(_scrollY);
+    }
+    layoutChildren();
+    return true;
+}
+
 void Window::layoutChildren() {
     const float paddingLeft = 8.0f;
     const float paddingTop = 8.0f;
@@ -297,20 +393,21 @@ void Window::layoutChildren() {
     const float spacing = 6.0f;
 
     const float contentTop = _titleBarHeight + paddingTop;
-    const float contentWidth = getWidth() - paddingLeft - paddingRight;
-    const float contentHeight = getHeight() - contentTop - paddingBottom;
-    if (contentWidth <= 0.0f || contentHeight <= 0.0f) {
+    float contentWidth = getWidth() - paddingLeft - paddingRight;
+    _bodyViewportH = getHeight() - contentTop - paddingBottom;
+    if (contentWidth <= 0.0f || _bodyViewportH <= 0.0f) {
         return;
     }
 
-    size_t childCount = _children.size();
-    if (childCount == 0) {
-        return;
-    }
-
+    // Measure stacked body children (exclude the overflow scrollbar).
     float totalFixedHeight = 0.0f;
     size_t fillCount = 0;
+    size_t bodyCount = 0;
     for (Widget* child : _children) {
+        if (child == nullptr || child == _bodyVBar) {
+            continue;
+        }
+        ++bodyCount;
         const float childHeight = child->getHeight();
         if (childHeight > 0.0f) {
             totalFixedHeight += childHeight;
@@ -319,24 +416,50 @@ void Window::layoutChildren() {
         }
         totalFixedHeight += spacing;
     }
-    if (childCount > 0) {
+    if (bodyCount > 0) {
         totalFixedHeight -= spacing;
     }
 
-    const float fillHeight = (fillCount > 0)
-        ? (contentHeight - totalFixedHeight) / static_cast<float>(fillCount)
+    // Overflow → reserve bar width, then place children with -_scrollY.
+    const float barW = ScrollBar::kDefaultBarWidth;
+    const bool overflow = _bodyScrollEnabled && totalFixedHeight > _bodyViewportH + 0.5f;
+    if (overflow) {
+        ensureBodyScrollBar();
+        contentWidth = std::max(1.0f, contentWidth - barW);
+    }
+
+    _contentExtentY = totalFixedHeight;
+    if (!overflow) {
+        _scrollY = 0.0f;
+    } else {
+        const float maxOff = std::max(0.0f, _contentExtentY - _bodyViewportH);
+        _scrollY = std::clamp(_scrollY, 0.0f, maxOff);
+    }
+
+    const float fillHeight = (fillCount > 0 && !overflow)
+        ? (_bodyViewportH - totalFixedHeight) / static_cast<float>(fillCount)
         : 0.0f;
 
-    float y = contentTop;
+    float y = contentTop - _scrollY;
     for (Widget* child : _children) {
+        if (child == nullptr || child == _bodyVBar) {
+            continue;
+        }
         float childHeight = child->getHeight();
         if (childHeight <= 0.0f) {
-            childHeight = fillHeight;
+            childHeight = (fillHeight > 0.0f) ? fillHeight : 22.0f;
         }
 
         child->setPosition(math::FVector2(paddingLeft, y));
         child->setSize(math::FVector2(contentWidth, childHeight));
         y += childHeight + spacing;
+    }
+
+    if (_bodyVBar != nullptr) {
+        _bodyVBar->setPosition(math::FVector2(
+            getWidth() - paddingRight - barW + 4.0f, contentTop));
+        _bodyVBar->setSize(math::FVector2(barW, _bodyViewportH));
+        syncBodyScrollBar();
     }
 }
 

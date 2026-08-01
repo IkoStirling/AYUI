@@ -131,36 +131,6 @@ GridPanel::VAlign parseGridVAlign(const std::string& s)
 // `ay-ui.md` §D2.
 namespace {
 
-// Build one DockCard from a `cards[]` / `floating[]` entry. The card's
-// title / flags are mirrored directly; `content` (if present) is built
-// via WidgetSerializer::deserialize so the recursive subtree can hold
-// any registered widget type. Content is owned via DockCard::setContent
-// — DockCard::~DockCard tears down its content tree.
-DockCard* buildDockCard(const json& cj) {
-    if (!cj.is_object()) return nullptr;
-    auto card = std::make_unique<DockCard>();
-    if (cj.contains("id")) card->setId(cj["id"].get<std::string>());
-    if (cj.contains("title")) {
-        std::string u8 = cj["title"].get<std::string>();
-        card->setTitle(std::wstring(u8.begin(), u8.end()));
-    }
-    if (cj.contains("icon")) {
-        card->setIcon(cj["icon"].get<std::string>());
-    }
-    if (cj.contains("closable"))  card->setClosable(cj["closable"].get<bool>());
-    if (cj.contains("floatable")) card->setFloatable(cj["floatable"].get<bool>());
-    if (cj.contains("collapsed")) card->setCollapsed(cj["collapsed"].get<bool>());
-    if (cj.contains("headerHeight")) card->setHeaderHeight(cj["headerHeight"].get<float>());
-    Widget* content = nullptr;
-    if (cj.contains("content") && cj["content"].is_object()) {
-        content = WidgetSerializer::deserialize(cj["content"].dump());
-    }
-    if (content != nullptr) {
-        card->setContent(content);
-    }
-    return card.release();
-}
-
 // Apply a sparse slot-weights / slot-min-sizes map. Missing slots
 // keep the header-defined defaults (so a JSON file that only sets
 // `slotWeights.Left` doesn't reset the rest).
@@ -195,6 +165,41 @@ UILayoutLoader::UILayoutLoader()
 }
 
 UILayoutLoader::~UILayoutLoader() {
+}
+
+DockCard* UILayoutLoader::buildDockCardFromJson(const json& cj) {
+    if (!cj.is_object()) return nullptr;
+    auto card = std::make_unique<DockCard>();
+    std::string id;
+    if (cj.contains("id")) {
+        id = cj["id"].get<std::string>();
+        card->setId(id);
+    }
+    if (cj.contains("title")) {
+        std::string u8 = cj["title"].get<std::string>();
+        card->setTitle(std::wstring(u8.begin(), u8.end()));
+    }
+    if (cj.contains("icon")) {
+        card->setIcon(cj["icon"].get<std::string>());
+    }
+    if (cj.contains("closable"))  card->setClosable(cj["closable"].get<bool>());
+    if (cj.contains("floatable")) card->setFloatable(cj["floatable"].get<bool>());
+    if (cj.contains("collapsed")) card->setCollapsed(cj["collapsed"].get<bool>());
+    if (cj.contains("headerHeight")) {
+        card->setHeaderHeight(cj["headerHeight"].get<float>());
+    }
+    Widget* content = nullptr;
+    if (cj.contains("content") && cj["content"].is_object()) {
+        content = buildWidgetTree(cj["content"]);
+    }
+    if (content != nullptr) {
+        card->setContent(content);
+    }
+    DockCard* raw = card.release();
+    if (!id.empty()) {
+        _widgetsById[id] = raw;
+    }
+    return raw;
 }
 
 Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
@@ -855,7 +860,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 if (!DockArea::parseSlot(cj["slot"].get<std::string>(), slot)) {
                     continue;
                 }
-                DockCard* card = buildDockCard(cj);
+                DockCard* card = buildDockCardFromJson(cj);
                 if (card == nullptr) continue;
                 dock->addCard(slot, std::unique_ptr<DockCard>(card));
             }
@@ -863,7 +868,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         if (j.contains("floating") && j["floating"].is_array()) {
             DockOverlay* overlay = dock->getOverlay();
             for (const auto& cj : j["floating"]) {
-                DockCard* card = buildDockCard(cj);
+                DockCard* card = buildDockCardFromJson(cj);
                 if (card == nullptr) continue;
                 // Apply the floating frame (if present). Cards without
                 // an explicit frame are positioned at (0, 0) — keep

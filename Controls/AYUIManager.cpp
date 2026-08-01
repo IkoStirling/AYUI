@@ -656,6 +656,11 @@ void UIManager::update(float dt) {
     }
 }
 
+void UIManager::invalidateLayout() {
+    _lastLayoutWidth = -1.0f;
+    _lastLayoutHeight = -1.0f;
+}
+
 void UIManager::layout() {
     if (!_root) {
         return;
@@ -723,6 +728,16 @@ void UIManager::flushFrame() {
 
 Widget* UIManager::findById(const std::string& id) const {
     return _loader.findWidgetById(id);
+}
+
+math::FVector2 UIManager::getDragLastMousePos() const {
+    if (_dragSession.active) {
+        return _dragSession.lastMousePos;
+    }
+    if (_hasLastMouse) {
+        return math::FVector2(_lastMouseX, _lastMouseY);
+    }
+    return math::FVector2(0.0f, 0.0f);
 }
 
 // =====================================================================
@@ -1329,6 +1344,12 @@ bool UIManager::endDrag(bool accepted) {
     // (mirrors QDrag::exec returning; source can re-arm itself).
     if (source != nullptr && source->_onDragEnd) {
         source->_onDragEnd(accepted && hadTarget);
+    }
+
+    // Dock float/hide changes slot weights without resizing the client.
+    if (accepted && hadTarget) {
+        invalidateLayout();
+        layout();
     }
     return true;
 }

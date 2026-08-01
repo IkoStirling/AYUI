@@ -92,8 +92,6 @@ public:
             if (payload.kind != "DockCard") {
                 return;
             }
-            // Resolve the source card via UIManager (alive here —
-            // see AYUIManager.cpp:1282).
             UIManager* ui = UIManager::tryGet();
             if (ui == nullptr) {
                 return;
@@ -104,18 +102,25 @@ public:
                 return;
             }
             const std::string cardId = card->getId();
-
-            if (_hoveredSlot != Slot::Count) {
-                // K-INV-D3-1: same-slot no-op.
-                if (isCardInSlot(card, _hoveredSlot)) {
-                    return;
-                }
-                dockCard(cardId, _hoveredSlot);
-            } else if (_hoveredOverlay) {
-                floatCard(cardId, _dragEnterPos);
+            if (cardId.empty()) {
+                return;
             }
-            // else: no-op (drop on a region neither slot nor overlay
-            // accepts — rare; happens if all slot weights are zero).
+
+            const math::FVector2 dropPos = ui->getDragLastMousePos();
+            const Slot targetSlot = hitTestSlot(dropPos);
+            const bool isDocked = (_cardIndex.find(cardId) != _cardIndex.end());
+
+            if (isDocked) {
+                if (targetSlot != Slot::Count && !isCardInSlot(card, targetSlot)) {
+                    if (floatCard(cardId, dropPos)) {
+                        dockCard(cardId, targetSlot);
+                    }
+                } else if (hitTestOverlay(dropPos)) {
+                    floatCard(cardId, dropPos);
+                }
+            } else if (targetSlot != Slot::Count) {
+                dockCard(cardId, targetSlot);
+            }
             markBoundsDirty();
         });
     }

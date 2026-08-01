@@ -112,6 +112,53 @@ TEST_CASE(test_mock_renderer) {
     destroyWidgetTree(root);
 }
 
+TEST_CASE(test_hbox_hidden_panel_reclaims_space_for_fill) {
+    HBox hbox;
+    hbox.setSize(FVector2(800.0f, 400.0f));
+    hbox.setSpacing(0.0f);
+    hbox.setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+
+    Window left;
+    SplitterHandle split;
+    Image fill;
+    hbox.addWidget(&left, 200.0f);
+    hbox.addWidget(&split, SplitterHandle::kDefaultWidth);
+    hbox.addWidget(&fill, 0.0f);
+    hbox.performLayout();
+
+    const float fillWidthVisible = fill.getWidth();
+    CHECK(fillWidthVisible > 500.0f);
+
+    left.setVisible(false);
+    split.setVisible(false);
+    hbox.performLayout();
+
+    CHECK(fill.getWidth() > fillWidthVisible);
+    CHECK_FLOAT_EQ(fill.getWorldBounds().minX, 0.0f, 1e-5f);
+}
+
+TEST_CASE(test_vbox_hidden_child_reclaims_fill_height) {
+    VBox vbox;
+    vbox.setSize(FVector2(400.0f, 300.0f));
+    vbox.setSpacing(0.0f);
+    vbox.setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+
+    Widget top;
+    Widget fill;
+    top.setSize(FVector2(100.0f, 80.0f));
+    vbox.addWidget(&top, 80.0f);
+    vbox.addWidget(&fill, 0.0f);
+    vbox.performLayout();
+
+    const float fillHeightVisible = fill.getHeight();
+    CHECK(fillHeightVisible > 200.0f);
+
+    top.setVisible(false);
+    vbox.performLayout();
+
+    CHECK(fill.getHeight() > fillHeightVisible);
+}
+
 TEST_CASE(test_hbox_split_hit_and_resize) {
     HBox hbox;
     hbox.setSize(FVector2(800.0f, 400.0f));

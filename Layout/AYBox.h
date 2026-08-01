@@ -37,6 +37,7 @@ public:
 
     void addWidget(Widget* widget, float height = 0.0f);
     void insertWidget(int index, Widget* widget, float height = 0.0f);
+    void removeWidget(Widget* widget);
 
     void layoutChildren() override;
     void performLayout() override;
@@ -58,6 +59,7 @@ public:
 
     void addWidget(Widget* widget, float width = 0.0f, const BoxSlotLimits& limits = {});
     void insertWidget(int index, Widget* widget, float width = 0.0f, const BoxSlotLimits& limits = {});
+    void removeWidget(Widget* widget);
 
     void setSlotLimits(int slotIndex, const BoxSlotLimits& limits);
 

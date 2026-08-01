@@ -31,6 +31,46 @@ float effectiveWeight(const DockArea& area, DockArea::Slot slot) {
     }
 }
 
+bool slotHasVisibleCards(const DockArea& area, DockArea::Slot slot) {
+    const size_t n = area.getCardCount(slot);
+    for (size_t i = 0; i < n; ++i) {
+        if (const DockCard* card = area.getCard(slot, i)) {
+            if (card->isVisible()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+float layoutSlotWeight(const DockArea& area, DockArea::Slot slot) {
+    if (!slotHasVisibleCards(area, slot)) {
+        return 0.0f;
+    }
+    return effectiveWeight(area, slot);
+}
+
+void fillContainerChildren(Widget* container, float width, float height) {
+    if (container == nullptr || width <= 0.0f || height <= 0.0f) {
+        return;
+    }
+    for (Widget* child : container->getChildren()) {
+        if (child == nullptr || !child->isVisible()) {
+            continue;
+        }
+        child->setPosition(math::FVector2(0.0f, 0.0f));
+        child->setSize(math::FVector2(width, height));
+        child->performLayout();
+    }
+}
+
+void requestRelayout() {
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->invalidateLayout();
+        ui->layout();
+    }
+}
+
 } // namespace
 
 DockArea::~DockArea() {
@@ -202,11 +242,11 @@ void DockArea::performLayout() {
     const float w = sz.x;
     const float h = sz.y;
 
-    const float wtTop    = effectiveWeight(*this, Slot::Top);
-    const float wtBottom = effectiveWeight(*this, Slot::Bottom);
-    const float wtLeft   = effectiveWeight(*this, Slot::Left);
-    const float wtRight  = effectiveWeight(*this, Slot::Right);
-    const float wtCenter = effectiveWeight(*this, Slot::Center);
+    const float wtTop    = layoutSlotWeight(*this, Slot::Top);
+    const float wtBottom = layoutSlotWeight(*this, Slot::Bottom);
+    const float wtLeft   = layoutSlotWeight(*this, Slot::Left);
+    const float wtRight  = layoutSlotWeight(*this, Slot::Right);
+    const float wtCenter = layoutSlotWeight(*this, Slot::Center);
 
     const float sumVert = wtTop + wtBottom + 1.0f; // middle row takes the rest
     const float topH    = h * (wtTop    / sumVert);
@@ -231,21 +271,21 @@ void DockArea::performLayout() {
     if (Widget* left = _slotContainers[(int)Slot::Left]) {
         left->setPosition(math::FVector2(0.0f, midY));
         left->setSize(math::FVector2(leftW, midH));
+        if (leftW > 0.0f) {
+            left->performLayout();
+        }
     }
-    // Center holds its own direct children; size them to fill the
-    // middle region minus Left/Right columns.
     if (Widget* center = _slotContainers[(int)Slot::Center]) {
         center->setPosition(math::FVector2(leftW, midY));
         center->setSize(math::FVector2(centerW, midH));
-        // Center's children must fill the Center container; without
-        // this the center card stays at (0,0) relative to center
-        // (which IS correct for local), but its world bounds may not
-        // equal the slot bounds. Re-pin via inner layout pass.
-        center->performLayout();
+        fillContainerChildren(center, centerW, midH);
     }
     if (Widget* right = _slotContainers[(int)Slot::Right]) {
         right->setPosition(math::FVector2(leftW + centerW, midY));
         right->setSize(math::FVector2(rightW, midH));
+        if (rightW > 0.0f) {
+            right->performLayout();
+        }
     }
 
     // Overlay covers everything so floating cards can be positioned
@@ -319,10 +359,6 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
         return false;
     }
 
-    // Detach from the slot's container (VBox/HBox/Center Widget) WITHOUT
-    // delete. removeChild() + re-parent to overlay via addFloatingCard
-    // (which calls addChild internally) keeps ownership consistent.
-    //
     // We CANNOT use DockArea::removeCard() because it calls
     // destroyWidgetTree() — that frees the card. We need the card alive
     // to hand to the overlay.
@@ -331,14 +367,23 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
         std::remove(_slotCards[oldSlotIdx].begin(),
                     _slotCards[oldSlotIdx].end(), card),
         _slotCards[oldSlotIdx].end());
-    // Detach from current parent (the slot container, not DockArea).
-    if (card->getParent() != nullptr) {
+
+    // Detach from the slot's container (VBox/HBox/Center Widget) WITHOUT
+    // delete. removeWidget() + re-parent to overlay via addFloatingCard
+    // (which calls addChild internally) keeps ownership consistent.
+    Widget* parent = card->getParent();
+    if (auto* vbox = dynamic_cast<VBox*>(parent)) {
+        vbox->removeWidget(card);
+    } else if (auto* hbox = dynamic_cast<HBox*>(parent)) {
+        hbox->removeWidget(card);
+    } else if (parent != nullptr) {
         card->detachFromParent();
     }
 
     // Set floating position + size and hand to overlay. addFloatingCard
     // calls addChild which re-parents and assumes ownership.
     card->setPosition(pos);
+    card->setVisible(true);
     _overlay->addFloatingCard(card);
 
     // Reset hover state — the card just moved; the highlight from
@@ -346,6 +391,7 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
     _hoveredSlot = Slot::Count;
     _hoveredOverlay = false;
     markBoundsDirty();
+    requestRelayout();
     return true;
 }
 
@@ -385,6 +431,7 @@ bool DockArea::dockCard(const std::string& cardId, Slot target) {
     _hoveredSlot = Slot::Count;
     _hoveredOverlay = false;
     markBoundsDirty();
+    requestRelayout();
     return true;
 }
 
@@ -400,6 +447,8 @@ DockArea::Slot DockArea::hitTestSlot(const math::FVector2& worldPos) const {
     const float w = sz.x;
     const float h = sz.y;
 
+    // Drop targeting uses configured weights so empty slots remain
+    // valid dock targets even when performLayout collapses them.
     const float wtTop    = effectiveWeight(*this, Slot::Top);
     const float wtBottom = effectiveWeight(*this, Slot::Bottom);
     const float wtLeft   = effectiveWeight(*this, Slot::Left);

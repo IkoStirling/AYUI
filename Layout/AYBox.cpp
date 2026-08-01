@@ -39,6 +39,7 @@ void VBox::addWidget(Widget* widget, float height) {
     if (widget == nullptr) {
         return;
     }
+    removeWidget(widget);
     addChild(widget);
     if (widget->getParent() != this) {
         return;
@@ -53,6 +54,7 @@ void VBox::insertWidget(int index, Widget* widget, float height) {
     if (widget == nullptr) {
         return;
     }
+    removeWidget(widget);
     addChild(widget);
     if (widget->getParent() != this) {
         return;
@@ -69,6 +71,19 @@ void VBox::insertWidget(int index, Widget* widget, float height) {
     }
 }
 
+void VBox::removeWidget(Widget* widget) {
+    if (widget == nullptr) {
+        return;
+    }
+    _slots.erase(
+        std::remove_if(_slots.begin(), _slots.end(),
+            [widget](const Slot& slot) { return slot.widget == widget; }),
+        _slots.end());
+    if (widget->getParent() == this) {
+        removeChild(widget);
+    }
+}
+
 void VBox::layoutChildren() {
     math::FVector2 size = getSize();
     float availableWidth = size.x - _padding.x - _padding.z;
@@ -78,7 +93,13 @@ void VBox::layoutChildren() {
 
     float totalFixedHeight = 0.0f;
     size_t fillCount = 0;
+    size_t visibleSlotCount = 0;
     for (const auto& slot : _slots) {
+        if (slot.widget == nullptr || !slot.widget->isVisible()
+            || slot.widget->getParent() != this) {
+            continue;
+        }
+        ++visibleSlotCount;
         if (slot.height > 0.0f) {
             totalFixedHeight += slot.height;
         } else {
@@ -86,7 +107,9 @@ void VBox::layoutChildren() {
         }
         totalFixedHeight += _spacing;
     }
-    totalFixedHeight -= _spacing;
+    if (visibleSlotCount > 0) {
+        totalFixedHeight -= _spacing;
+    }
 
     float availableHeight = size.y - _padding.y - _padding.w;
     float fillHeight = (fillCount > 0) ? (availableHeight - totalFixedHeight) / fillCount : 0.0f;
@@ -96,13 +119,17 @@ void VBox::layoutChildren() {
     float y = _padding.y;
 
     for (auto& slot : _slots) {
+        if (slot.widget == nullptr || !slot.widget->isVisible()
+            || slot.widget->getParent() != this) {
+            if (slot.widget != nullptr && slot.widget->getParent() == this
+                && slot.widget->isLayoutSizeManaged()) {
+                slot.widget->setSize(math::FVector2(0.0f, 0.0f));
+            }
+            continue;
+        }
+
         float childHeight = (slot.height > 0.0f) ? slot.height : fillHeight;
         float childWidth = availableWidth;
-
-        // Note: `availableWidth` already has `_padding.x` (left) and
-        // `_padding.z` (right) subtracted above. Do NOT subtract `_padding.z`
-        // again here — doing so causes the right padding to be deducted twice
-        // (caught by Test_LayoutLoader::test_layout_loader_partial_height_fills_parent_width).
 
         if (slot.widget->isLayoutPositionManaged()) {
             slot.widget->setPosition(math::FVector2(x, y));
@@ -132,6 +159,7 @@ void HBox::addWidget(Widget* widget, float width, const BoxSlotLimits& limits) {
     if (widget == nullptr) {
         return;
     }
+    removeWidget(widget);
     addChild(widget);
     if (widget->getParent() != this) {
         return;
@@ -159,6 +187,7 @@ void HBox::insertWidget(int index, Widget* widget, float width, const BoxSlotLim
     if (widget == nullptr) {
         return;
     }
+    removeWidget(widget);
     addChild(widget);
     if (widget->getParent() != this) {
         return;
@@ -182,6 +211,19 @@ void HBox::insertWidget(int index, Widget* widget, float width, const BoxSlotLim
 
     if (slot.isSplitter) {
         rebindSplitters();
+    }
+}
+
+void HBox::removeWidget(Widget* widget) {
+    if (widget == nullptr) {
+        return;
+    }
+    _slots.erase(
+        std::remove_if(_slots.begin(), _slots.end(),
+            [widget](const Slot& slot) { return slot.widget == widget; }),
+        _slots.end());
+    if (widget->getParent() == this) {
+        removeChild(widget);
     }
 }
 
@@ -263,9 +305,19 @@ void HBox::layoutChildren() {
         }
     }
 
+    auto slotOccupiesSpace = [this](const Slot& slot) -> bool {
+        return slot.widget != nullptr && slot.widget->isVisible()
+            && slot.widget->getParent() == this;
+    };
+
     float totalFixedWidth = 0.0f;
     size_t fillCount = 0;
+    size_t visibleSlotCount = 0;
     for (const auto& slot : _slots) {
+        if (!slotOccupiesSpace(slot)) {
+            continue;
+        }
+        ++visibleSlotCount;
         if (slot.isSplitter) {
             totalFixedWidth += SplitterHandle::kDefaultWidth;
         } else if (slot.width > 0.0f) {
@@ -275,7 +327,9 @@ void HBox::layoutChildren() {
         }
         totalFixedWidth += _spacing;
     }
-    totalFixedWidth -= _spacing;
+    if (visibleSlotCount > 0) {
+        totalFixedWidth -= _spacing;
+    }
 
     const float availableWidth = size.x - _padding.x - _padding.z;
     const float fillWidth =
@@ -285,6 +339,14 @@ void HBox::layoutChildren() {
     const float y = _padding.y;
 
     for (auto& slot : _slots) {
+        if (!slotOccupiesSpace(slot)) {
+            if (slot.widget != nullptr && slot.widget->getParent() == this
+                && slot.widget->isLayoutSizeManaged()) {
+                slot.widget->setSize(math::FVector2(0.0f, 0.0f));
+            }
+            continue;
+        }
+
         float childWidth = fillWidth;
         if (slot.isSplitter) {
             childWidth = SplitterHandle::kDefaultWidth;
