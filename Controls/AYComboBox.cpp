@@ -295,7 +295,15 @@ void ComboBox::closePopup() {
         // `this` mid-callback (0xC0000005). Foreign dismiss paths
         // (other popup open, click-outside) still destroy via
         // UIManager::closePopup(p, true) + onPopupDismissedByManager.
-        UIManager::get().closePopup(_popup, /*destroy=*/false);   // safe: openPopup site above
+        //
+        // Code-review 2026-08-02 #10: prefer tryGet() over get(). get()'s
+        // static-fallback bootstrap would pin the popup onto the
+        // process-lifetime static UIManager (R3 landmine from Phase A2)
+        // when this ComboBox lives in a test fixture whose manager has
+        // already been torn down. Safe no-op when no manager is active.
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->closePopup(_popup, /*destroy=*/false);
+        }
     }
 }
 

@@ -261,27 +261,23 @@ void GridPanel::layoutChildren() {
             int rEnd = std::min(rows, r + rs);
             int cEnd = std::min(cols, c + cs);
 
-            // Merged cell rect.
+            // Merged cell rect. For spans > 1, computing width via colOffsets alone
+            // undercounts because colOffsets stores pre-spacing positions
+            // and only the leading (n-1) inter-column spacings live in the
+            // total. Sum colWidths explicitly and add the missing
+            // (span-1) spacings. Code-review 2026-08-02 #13: this used
+            // to be preceded by a (colOffsets[cEnd] - colOffsets[c])
+            // computation that was then unconditionally overwritten; the
+            // comment block on the dead branch invited a future refactor
+            // that would have broken span layouts. Removed.
             float cellX = colOffsets[c];
             float cellY = rowOffsets[r];
-            float cellW = (cEnd > 0 ? colOffsets[cEnd] : cellX) - cellX;
-            // For the trailing column, account for the trailing spacing that
-            // we did NOT add (we only added (n-1) spacings).
-            float cellH = (rEnd > 0 ? rowOffsets[rEnd] : cellY) - cellY;
-            // Adjust: colOffsets[cEnd] excluded the inter-spacing between
-            // cEnd-1 and cEnd, so cellW is correct.
-            // For the LAST column when cEnd == cols, we need to add back the
-            // (cEnd-1) spacing. Simpler: compute merged width as sum of
-            // colWidths[c..cEnd-1] + (cEnd-1 - c) spacings.
-            float mergedW = 0.0f;
-            for (int cc = c; cc < cEnd; ++cc) mergedW += colWidths[cc];
-            if (cEnd - c > 1) mergedW += _spacingH * static_cast<float>(cEnd - c - 1);
-            float mergedH = 0.0f;
-            for (int rr = r; rr < rEnd; ++rr) mergedH += rowHeights[rr];
-            if (rEnd - r > 1) mergedH += _spacingV * static_cast<float>(rEnd - r - 1);
-
-            cellW = mergedW;
-            cellH = mergedH;
+            float cellW = 0.0f;
+            for (int cc = c; cc < cEnd; ++cc) cellW += colWidths[cc];
+            if (cEnd - c > 1) cellW += _spacingH * static_cast<float>(cEnd - c - 1);
+            float cellH = 0.0f;
+            for (int rr = r; rr < rEnd; ++rr) cellH += rowHeights[rr];
+            if (rEnd - r > 1) cellH += _spacingV * static_cast<float>(rEnd - r - 1);
 
             float x = _padding.x + cellX;
             float y = _padding.y + cellY;

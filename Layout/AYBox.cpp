@@ -225,6 +225,12 @@ void HBox::removeWidget(Widget* widget) {
     if (widget->getParent() == this) {
         removeChild(widget);
     }
+    // Code-review 2026-08-02 #9: removing a panel between two splitters
+    // leaves the surrounding splitter widgets' cached neighbor indices
+    // (panelSlotBefore / panelSlotAfter) stale. Re-derive so the next
+    // drag-end re-resolves them safely. Mirrors what addWidget /
+    // insertWidget already do (rebindSplitters()).
+    rebindSplitters();
 }
 
 void HBox::setSlotLimits(int slotIndex, const BoxSlotLimits& limits) {
@@ -418,12 +424,24 @@ Widget* HBox::hitTest(const math::FVector2& worldPos) {
 
 void HBox::applySplitterDrag(int leftPanelSlot, int rightPanelSlot, float mouseWorldX,
                              float dragStartMouseX, float dragStartPrimaryWidth, bool adjustLeft) {
+    // Code-review 2026-08-02 #9: cache stale neighbor indices can fall
+    // out of range after a removeWidget before rebindSplitters() runs
+    // (or in concurrent shutdown paths). Bounds-check targetIndex
+    // before any write — the clampSlotWidth helper validates too, but
+    // the unguarded `_slots[targetIndex].width =` below would otherwise
+    // touch out-of-bounds memory.
     if (leftPanelSlot < 0 || rightPanelSlot < 0) {
+        return;
+    }
+    const int targetIndex = adjustLeft ? leftPanelSlot : rightPanelSlot;
+    if (targetIndex < 0 || targetIndex >= static_cast<int>(_slots.size())) {
+        return;
+    }
+    if (_slots[static_cast<size_t>(targetIndex)].widget == nullptr) {
         return;
     }
 
     const float dx = mouseWorldX - dragStartMouseX;
-    const int targetIndex = adjustLeft ? leftPanelSlot : rightPanelSlot;
     const float currentWidth = _slots[static_cast<size_t>(targetIndex)].width;
     const float desiredWidth =
         adjustLeft ? (dragStartPrimaryWidth + dx) : (dragStartPrimaryWidth - dx);

@@ -57,12 +57,34 @@ public:
     Modal();
     ~Modal() override;
 
-    // Sets the dimmer. v1 hosts typically do `Modal m; Dimmer d; m.setDimmer(&d);`
-    // — Modal owns nothing for the dimmer lifetime (host destroys the dimmer
-    // after the modal is closed; closeModal does NOT destroy the dimmer to
-    // avoid surprising host code). setDimmer may be called any time; passing
-    // nullptr detaches the current dimmer without dismissing the modal.
+    // Sets the dimmer. Two ownership modes — pick the one matching the
+    // call site's allocation:
+    //
+    //   setDimmer(d)            — non-owning attach. Host owns the
+    //                             Dimmer's lifetime; ~Modal just
+    //                             detaches the callback. Matches the
+    //                             stack-allocated test pattern
+    //                             `Modal m; Dimmer d; m.setDimmer(&d);`
+    //                             and any host that already owns the
+    //                             Dimmer as a member / persistent.
+    //
+    //   setDimmerOwned(new D)   — owning attach. Modal deletes the
+    //                             Dimmer in ~Modal(). Use for the
+    //                             common case `m.setDimmerOwned(new Dimmer())`
+    //                             which previously leaked because no
+    //                             caller-side delete path existed.
+    //
+    // Code-review 2026-08-02 #12: prior contract was ambiguous ("host
+    // owns lifetime, but no one calls delete"), so `new Dimmer()` calls
+    // leaked and pre-dtor host frees caused UAF. The two-mode split
+    // keeps the existing test fixtures valid AND gives heap-allocating
+    // hosts a clear ownership path.
+    //
+    // The previously-attached dimmer (if any) is detached in both modes.
+    // In setDimmerOwned mode, the previously-attached dimmer is also
+    // deleted (Modal owns it for the new one's lifetime too).
     void setDimmer(Dimmer* dimmer);
+    void setDimmerOwned(Dimmer* dimmer);
     Dimmer* getDimmer() const { return _dimmer; }
 
     // Sets the content widget. Reparents onto `this`. Host owns the content
@@ -119,6 +141,11 @@ private:
     void onDimmerClicked();   // sink bound to _dimmer->_onDismiss
 
     Dimmer* _dimmer = nullptr;
+    // Code-review 2026-08-02 #12: tracks whether ~Modal should delete
+    // _dimmer (true only when ownership was transferred via
+    // setDimmerOwned). Defaults false so stack-allocated Dimmer& passed
+    // to setDimmer() is NOT freed on modal destruction.
+    bool    _dimmerOwned = false;
     Widget* _content = nullptr;
     Widget* _focusedBefore = nullptr;
     bool    _isOpen = false;

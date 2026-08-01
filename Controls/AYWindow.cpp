@@ -45,8 +45,14 @@ Window::Window()
 }
 
 Window::~Window() {
-    // _bodyVBar is an owned child via addChildExternal — CompoundWidget
-    // tears it down. Null so we don't touch a freed pointer.
+    // _bodyVBar is an owned child via addChild(owning) — CompoundWidget's
+    // dtor does not delete children (UI-OWN-1 invariant), but a host
+    // using destroyWidgetTree(root) on us WILL recursively free it.
+    // Code-review 2026-08-02 #18: the previous comment incorrectly said
+    // addChildExternal (which would have leaked the bar — mirrors the
+    // ListView / ScrollView / TabStrip pattern fixed in commit 7502ca7).
+    // _bodyVBar is here only so we don't touch a freed pointer if our
+    // dtor runs first (e.g. host detaches us then deletes).
     _bodyVBar = nullptr;
 }
 

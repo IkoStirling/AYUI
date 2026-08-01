@@ -29,10 +29,28 @@ DockOverlay::DockOverlay() {
 }
 
 DockOverlay::~DockOverlay() {
-    // Children are torn down by ~CompoundFocusableWidget. Cards stored
-    // in _floatingCards are non-owning indices; we clear the vector
-    // before the destructor to avoid a stale-pointer view.
+    // Code-review 2026-08-02 #19: the previous comment claimed children
+    // are torn down by ~CompoundFocusableWidget, but that dtor is
+    // `= default` and ~Widget does NOT delete children (UI-OWN-1).
+    // addFloatingCard uses addChild (owning), so cards ARE freed via
+    // destroyWidgetTree(_overlay) when reached through ~DockArea's
+    // snapshot walk. But if a host does `delete _overlay` directly
+    // (bypassing DockArea), every floating card leaks.
+    //
+    // Defense in depth: snapshot children and free the owned ones
+    // here so direct deletion is also safe. _floatingCards is a
+    // non-owning index, so clear it BEFORE the loop to avoid the
+    // snapshot pointing at half-freed children.
     _floatingCards.clear();
+    const std::vector<Widget*> kids = getChildren();
+    for (Widget* w : kids) {
+        if (w == nullptr) continue;
+        if (w->isExternallyOwned()) {
+            w->detachFromParent();
+            continue;
+        }
+        destroyWidgetTree(w);
+    }
 }
 
 void DockOverlay::addFloatingCard(DockCard* card) {

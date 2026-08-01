@@ -110,18 +110,29 @@ void CassowarySolver::solve() {
                 }
             }
             float residual = c.rhs - lhs;
+            // Code-review 2026-08-02 #17: the convergence gate used to
+            // clamp the residual to 0 for satisfied LE/GE before summing
+            // into totalError. That meant an already-satisfied LE
+            // contributed 0 to the error budget, so totalError could
+            // fall under kEpsilon even if EQ constraints elsewhere still
+            // had measurable error. Track the unsatisfied portion
+            // (clamped) for the solver's per-iteration adjustment, but
+            // sum the *raw* residual into totalError so EQ error is
+            // always counted. LE/GE error correctly stays at 0 once
+            // satisfied (the raw residual IS already 0 in that case).
+            float clampedResidual = residual;
             switch (c.op) {
                 case ConstraintOp::EQ: break;
                 case ConstraintOp::LE:
-                    if (residual >= 0.0f) residual = 0.0f;
+                    if (clampedResidual >= 0.0f) clampedResidual = 0.0f;
                     break;
                 case ConstraintOp::GE:
-                    if (residual <= 0.0f) residual = 0.0f;
+                    if (clampedResidual <= 0.0f) clampedResidual = 0.0f;
                     break;
             }
             totalError += std::abs(residual);
             if (adjustVar == nullptr || adjustCoeff == 0.0f) continue;
-            float delta = residual / adjustCoeff;
+            float delta = clampedResidual / adjustCoeff;
             delta *= c.strength;
             adjustVar->setValue(adjustVar->getValue() + delta);
         }

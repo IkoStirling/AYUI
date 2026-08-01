@@ -115,6 +115,13 @@ public:
                  int rowSpan = 1, int colSpan = 1,
                  HAlign hAlign = HAlign::Fill,
                  VAlign vAlign = VAlign::Fill);
+    // Code-review 2026-08-02 #16: setCell silently resets rowSpan /
+    // colSpan / hAlign / vAlign to the values passed (defaults 1, 1,
+    // Fill, Fill) when re-attaching a widget that was previously at a
+    // different cell. Moving a wide-span widget to a new cell via
+    // setCell(N, M, widget) without re-supplying the span will collapse
+    // it back to 1×1 Fill — by design. Callers that want spans to
+    // carry across a move must pass them explicitly on every call.
     void clearCell(int row, int col);
     Widget* getCell(int row, int col) const;
     const CellInfo* findCell(int row, int col) const;

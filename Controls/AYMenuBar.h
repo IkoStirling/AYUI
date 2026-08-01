@@ -84,7 +84,11 @@ private:
     void onAnchorClicked(int index);
 
     struct MenuEntry {
-        std::string title;
+        // Code-review 2026-08-02 #21: removed dead `title` field.
+        // addMenu() always set it to "" (empty placeholder) and
+        // getMenuTitle() reads from `anchor->getText()` instead.
+        // Keeping the field around invited type confusion (was
+        // std::string while the public getter returned std::wstring).
         Menu* menu;
         // Lazily-created Button for the anchor (laid out next to it).
         class Button* anchor = nullptr;

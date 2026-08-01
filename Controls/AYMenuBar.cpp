@@ -73,7 +73,9 @@ Menu* MenuBar::addMenu(const std::wstring& title) {
     auto* m = new Menu();
     addChild(m);   // owning — MenuBar owns the menu
     MenuEntry e;
-    e.title = "";   // UTF-8 left as-is for menu titles; Button's setText takes wstring
+    // Code-review 2026-08-02 #21: removed the dead `title` field
+    // assignment. Anchor button (below) owns the visible title via
+    // setText(); MenuEntry only tracks Menu* + Button* anchors.
     e.menu = m;
     _menus.push_back(e);
     // Anchor button lives next to the menu (sibling-style).

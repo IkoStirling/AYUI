@@ -304,30 +304,6 @@ void DockArea::onChildRemoved(Widget* child) {
     AYUNREFERENCED_PARAM(child);
 }
 
-void DockArea::tearDownSlots() {
-    // Drop cards first so they don't double-free during container teardown.
-    for (int i = 0; i < (int)Slot::Count; ++i) {
-        for (auto* c : _slotCards[i]) {
-            if (c && c->getParent() == this) {
-                // Already parented directly (Center) or indirectly
-                // (through a VBox/HBox). Either way the container /
-                // CompoundWidget destructor will free it.
-            }
-        }
-        _slotCards[i].clear();
-    }
-    // _slotContainers holds raw pointers that are also attached as
-    // children of DockArea. We MUST NOT delete them here — destroyWidgetTree
-    // (or the direct delete in the test's `delete root` path) owns their
-    // lifetime. tearDownSlots only clears the bookkeeping; the actual
-    // slot container destruction is the parent's responsibility.
-    _slotContainers[(int)Slot::Left]   = nullptr;
-    _slotContainers[(int)Slot::Right]  = nullptr;
-    _slotContainers[(int)Slot::Top]    = nullptr;
-    _slotContainers[(int)Slot::Bottom] = nullptr;
-    _slotContainers[(int)Slot::Center] = nullptr;
-}
-
 // =============================================================================
 // D3 — Tear-off / re-dock helpers.
 // =============================================================================
@@ -426,6 +402,67 @@ bool DockArea::dockCard(const std::string& cardId, Slot target) {
     // id lookup misses and removeCard returns false without touching
     // any card. K-INV-D3-7 invariant: the card transitions from
     // "not in _cardIndex" (overlay) → "in _cardIndex" (slot).
+    addCard(target, std::unique_ptr<DockCard>(card));
+
+    _hoveredSlot = Slot::Count;
+    _hoveredOverlay = false;
+    markBoundsDirty();
+    requestRelayout();
+    return true;
+}
+
+bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
+    // Code-review 2026-08-02 #8: slot->slot move without routing through
+    // the overlay. Caller is responsible for K-INV-D3-1 (same-slot no-op)
+    // — the onDrop callback already pre-checks `isCardInSlot(card, target)`
+    // so this function unconditionally reparents the card to `target`.
+    auto it = _cardIndex.find(cardId);
+    if (it == _cardIndex.end()) {
+        return false;   // not docked anywhere — nothing to move
+    }
+    if ((int)target < 0 || (int)target >= (int)Slot::Count) {
+        return false;
+    }
+    DockCard* card = it->second;
+    if (card == nullptr) return false;
+
+    // Locate the current slot.
+    int oldSlotIdx = -1;
+    for (int i = 0; i < (int)Slot::Count; ++i) {
+        for (DockCard* c : _slotCards[i]) {
+            if (c == card) { oldSlotIdx = i; break; }
+        }
+        if (oldSlotIdx >= 0) break;
+    }
+    if (oldSlotIdx < 0) return false;
+    if (oldSlotIdx == (int)target) {
+        // Same-slot no-op (K-INV-D3-1 safety net — the onDrop
+        // pre-check should have caught this already).
+        return false;
+    }
+
+    // Detach from the old slot's container WITHOUT freeing. Reuse the
+    // same dynamic_cast cascade as floatCard.
+    Widget* parent = card->getParent();
+    if (auto* vbox = dynamic_cast<VBox*>(parent)) {
+        vbox->removeWidget(card);
+    } else if (auto* hbox = dynamic_cast<HBox*>(parent)) {
+        hbox->removeWidget(card);
+    } else if (parent != nullptr) {
+        card->detachFromParent();
+    }
+
+    // Drop the old-slot entry from _slotCards; _cardIndex stays valid
+    // (the card pointer didn't change).
+    _slotCards[oldSlotIdx].erase(
+        std::remove(_slotCards[oldSlotIdx].begin(),
+                    _slotCards[oldSlotIdx].end(), card),
+        _slotCards[oldSlotIdx].end());
+
+    // Re-attach under the new slot's container. addCard's
+    // removeCard-first safety net (last-write-wins) is a no-op here
+    // because the card pointer hasn't changed; the id-keyed
+    // _cardIndex lookup matches this card.
     addCard(target, std::unique_ptr<DockCard>(card));
 
     _hoveredSlot = Slot::Count;

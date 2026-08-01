@@ -9,14 +9,16 @@
 //     └─ _label: TextLabel  (the body text; may be replaced by any Widget)
 //
 // Lifecycle: tooltip is attached to a target widget via `Tooltip::attachTo`
-// which adds it as an OWNING child. When the target is destroyed via
-// destroyWidgetTree, the tooltip goes with it. The tooltip starts hidden
-// and becomes visible when the cursor hovers the target for at least
-// _hoverDelay seconds.
+// which mounts it on the UIManager's overlay root (NOT as a child of the
+// target — see Phase A A2 for the popup-as-overlay convention). The
+// tooltip's lifetime is therefore INDEPENDENT of the target: when the
+// target is destroyed the tooltip stays alive on the overlay, and the
+// next tick() sees `_target` dangling.
 //
-// Why popup-as-child (matches ComboBox DECISION 2): simplest ownership
-// story — tooltip lifetime tracks target lifetime via the existing
-// destroyWidgetTree path.
+// To prevent that UAF, callers must call detach() (or destroy the tooltip)
+// BEFORE destroying the target, OR rely on the tick() guard that skips
+// work when _target is no longer reachable. The Tooltip pointer returned
+// from attachTo remains owned by the caller.
 //
 // -----------------------------------------------------------------------------
 // v1 design decisions + known limitations + v1.1 upgrade paths
@@ -52,9 +54,18 @@ public:
     Tooltip();
     ~Tooltip() override;
 
-    // Factory: create a tooltip attached as OWNING child of `target`.
-    // Caller does NOT manually free the tooltip — it's owned by `target`.
+    // Factory: create a tooltip attached as overlay popup via the active
+    // UIManager. Lifetime is independent of `target`; caller must call
+    // detach() (or destroy the tooltip) before destroying the target to
+    // avoid a dangling _target reference. Returns nullptr if no active
+    // UIManager.
     static Tooltip* attachTo(Widget* target);
+
+    // Detach from the overlay (no-op if not mounted) and disarm _target
+    // so subsequent tick() calls early-return without dereferencing a
+    // possibly-destroyed anchor. Idempotent. Caller still owns the
+    // Tooltip* and must delete it (or destroyWidgetTree it).
+    void detach();
 
     // Text payload.
     void setText(const std::wstring& text);

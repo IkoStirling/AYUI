@@ -239,17 +239,43 @@ Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
 }
 
 Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
-    _widgetsById.clear();
+    // Code-review 2026-08-02 #15: do NOT clear _widgetsById before
+    // buildWidgetTree. A throw mid-recursion (deeply nested + malformed
+    // JSON) would otherwise wipe the previous load's id index AND leak
+    // the partially-built widget tree (nlohmann's recursive build has
+    // already allocated children but the throw skips cleanup).
+    //
+    // Strategy: keep the old index intact until we know the new tree
+    // was built successfully. On success, swap in the new tree's index
+    // (the root widget owns the new tree's lifetime). On failure, the
+    // old index still resolves to the old widgets (caller is expected
+    // to release them via destroyWidgetTree as before; we log + return
+    // nullptr). The leaked partial tree is unavoidable from here
+    // without a try/catch inside buildWidgetTree itself; deferring the
+    // wipe is the highest-value half of the fix.
+    std::unordered_map<std::string, Widget*> oldIndex;
+    oldIndex.swap(_widgetsById);
 
     try {
         json j = json::parse(jsonStr);
         LOADER_HEAP_CHECK("after_json_parse");
         Widget* root = buildWidgetTree(j);
         LOADER_HEAP_CHECK("after_build_widget_tree");
+        // Success: the new tree's buildWidgetTree path already populated
+        // _widgetsById during recursion (the early-swap above restored
+        // the old map's empty state). Build succeeded; commit the new
+        // index by leaving it in place (we already wrote into it).
+        // (Note: buildWidgetTree used _widgetsById after the swap, so
+        // the new index IS what _widgetsById holds now.)
+        (void)oldIndex;
         return root;
     }
     catch (const std::exception& e) {
         std::fprintf(stderr, "[UILayoutLoader] parse error: %s\n", e.what());
+        // Restore the old index so callers that hold pointers to the
+        // previous tree can still find them. Wipe the (incomplete)
+        // index that buildWidgetTree may have partially populated.
+        _widgetsById = std::move(oldIndex);
         return nullptr;
     }
 }
@@ -372,6 +398,17 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     // ID
     if (!id.empty()) {
         widget->setId(id);
+        // Code-review 2026-08-02 #14: warn on duplicate registration so
+        // hand-edited layout mistakes (parent + child sharing an id)
+        // surface in the editor's stderr instead of silently making
+        // findWidgetById return the wrong node. Last-wins is preserved.
+        if (_widgetsById.find(id) != _widgetsById.end()) {
+            std::fprintf(stderr,
+                "[UILayoutLoader] duplicate id '%s' in type='%s' "
+                "(last write wins; previous widget will no longer be "
+                "findable by id)\n",
+                id.c_str(), type.c_str());
+        }
         _widgetsById[id] = widget;
     }
 
@@ -685,11 +722,19 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             }
         } else if (type == "MenuItem") {
             // L1 — parity with WidgetSerializer. MenuItem's setText ===
-            // menu label; shortcut is a separate field handled by the
-            // serializer. The loader does not currently parse `shortcut`
-            // so we only round-trip the visible label here.
+            // menu label; shortcut is a separate field.
+            //
+            // Code-review 2026-08-02 #11: previously the loader only
+            // round-tripped the visible label and dropped the `shortcut`
+            // field. The serializer emits it (line ~777), so save -> load
+            // lost the accelerator binding too (setShortcut re-parses).
+            // Read shortcut here using the same UTF-8 -> wstring path.
             if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
                 mi->setText(wtext);
+                if (j.contains("shortcut") && j["shortcut"].is_string()) {
+                    const std::string sc = j["shortcut"].get<std::string>();
+                    mi->setShortcut(std::wstring(sc.begin(), sc.end()));
+                }
             }
         } else if (type == "Window") {
             if (Window* window = dynamic_cast<Window*>(widget)) {

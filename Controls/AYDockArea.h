@@ -112,9 +112,12 @@ public:
 
             if (isDocked) {
                 if (targetSlot != Slot::Count && !isCardInSlot(card, targetSlot)) {
-                    if (floatCard(cardId, dropPos)) {
-                        dockCard(cardId, targetSlot);
-                    }
+                    // Code-review 2026-08-02 #8: same-tree slot→slot
+                    // move, no overlay detour (the detour caused the
+                    // card to flash at dropPos before snapping into
+                    // the target slot). moveInSlot also handles
+                    // K-INV-D3-1 same-slot no-op as a no-op itself.
+                    moveInSlot(cardId, targetSlot);
                 } else if (hitTestOverlay(dropPos)) {
                     floatCard(cardId, dropPos);
                 }
@@ -207,6 +210,13 @@ public:
     // transition is a no-op (handled at the drop callback level).
     bool dockCard(const std::string& cardId, Slot target);
 
+    // Code-review 2026-08-02 #8: same-tree move (slot→slot) without
+    // routing through the overlay. Avoids the visible flicker the
+    // dockCard/floatCard pair caused on docked→docked drops (the card
+    // momentarily flashed at the cursor position before snapping into
+    // the new slot). Returns false if the card is not in any slot.
+    bool moveInSlot(const std::string& cardId, Slot target);
+
     // Returns the slot whose region contains `worldPos`, or Slot::Count
     // if none. Mirrors the region math in performLayout() so the
     // drop-zone highlight stays in lockstep with the layout pass.
@@ -258,7 +268,12 @@ private:
     // onDragEnter for use by onDrop (overlay drop uses this position).
     math::FVector2 _dragEnterPos = math::FVector2(-1.0f, -1.0f);
 
-    void tearDownSlots();
+    // Code-review 2026-08-02 #20: tearDownSlots() was dead (never
+    // called) AND inconsistent (didn't clear _cardIndex, leaving stale
+    // pointers that would UAF via removeCard on the next rebuild).
+    // Removed body + declaration; if a future "rebuild slots" path
+    // needs it, write a new function with full bookkeeping (cards +
+    // containers + _cardIndex + correct ownership semantics).
 };
 
 } // namespace ayt::ui

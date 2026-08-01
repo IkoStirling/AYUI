@@ -46,19 +46,52 @@ Modal::~Modal() {
     }
     _focusedBefore = nullptr;
     if (_dimmer != nullptr) {
+        // Code-review 2026-08-02 #12: detach callback. Only delete
+        // when ownership was transferred via setDimmerOwned() —
+        // setDimmer() (the stack-allocated host-owned path) must NOT
+        // free the dimmer. _dimmerOwned defaults to false and is
+        // flipped true ONLY by setDimmerOwned().
         _dimmer->setOnDismiss(nullptr);
+        if (_dimmerOwned) {
+            delete _dimmer;
+        }
         _dimmer = nullptr;
+        _dimmerOwned = false;
     }
 }
 
 void Modal::setDimmer(Dimmer* dimmer) {
     if (_dimmer == dimmer) return;
-    // Detach the previous dimmer's callback so a stale _onDismiss can't fire
-    // on a different Modal.
+    // Non-owning path: detach the previous dimmer's callback so a
+    // stale _onDismiss can't fire on a different Modal. If we previously
+    // took ownership via setDimmerOwned, free the old dimmer now.
     if (_dimmer != nullptr) {
         _dimmer->setOnDismiss(nullptr);
+        if (_dimmerOwned) {
+            delete _dimmer;
+            _dimmerOwned = false;
+        }
     }
     _dimmer = dimmer;
+    _dimmerOwned = false;
+    if (_dimmer != nullptr) {
+        _dimmer->setOnDismiss([this]() { onDimmerClicked(); });
+    }
+}
+
+void Modal::setDimmerOwned(Dimmer* dimmer) {
+    if (_dimmer == dimmer) return;
+    // Owning path: same as setDimmer but flag the dimmer for deletion
+    // in ~Modal(). Replaces any previously-attached dimmer (which is
+    // freed if it was owned; detached if it was host-owned).
+    if (_dimmer != nullptr) {
+        _dimmer->setOnDismiss(nullptr);
+        if (_dimmerOwned) {
+            delete _dimmer;
+        }
+    }
+    _dimmer = dimmer;
+    _dimmerOwned = (_dimmer != nullptr);
     if (_dimmer != nullptr) {
         _dimmer->setOnDismiss([this]() { onDimmerClicked(); });
     }

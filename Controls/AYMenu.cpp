@@ -13,6 +13,18 @@ Menu::Menu() {
 }
 
 Menu::~Menu() {
+    // R3 — break the _ownerHost back-pointer BEFORE any compound dtor
+    // work runs. If we're being destroyed while still open on the overlay
+    // (e.g. the host MenuBar died first and left us alive as a zombie),
+    // close() / dismissFromManager() would route _ownerHost->addChild()
+    // into freed memory. Idempotent; safe to call even when already null.
+    //
+    // We do NOT call close() here — dtor order is the caller's problem
+    // (MenuBar's dtor walks open menus and calls close() on each BEFORE
+    // clearing its own state; standalone Menu destruction skips that
+    // because there's no host to coordinate with).
+    clearOwnerHost();
+
     // _submenus are owned; CompoundWidget destructor frees our children
     // (which includes MenuItems). Submenu pointers themselves were added
     // as children of this menu (via attachSubmenu), so they self-clean.

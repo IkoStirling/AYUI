@@ -19,6 +19,11 @@ Widget* Tooltip::hitTest(const math::FVector2& /*worldPos*/) {
 
 Tooltip::~Tooltip() {
     // CompoundWidget's destructor handles child cleanup.
+    // Code-review 2026-08-02 #7: clear _target back-pointer so any
+    // post-destruction path that checks getTarget() observes null.
+    // detach()'s overlay-close side is unnecessary here because
+    // ~UIManager::shutdown will tear down the overlay tree.
+    _target = nullptr;
 }
 
 Tooltip* Tooltip::attachTo(Widget* target) {
@@ -45,6 +50,21 @@ Tooltip* Tooltip::attachTo(Widget* target) {
     ui.openPopup(target, tip);
     tip->setVisible(false);
     return tip;
+}
+
+void Tooltip::detach() {
+    // Code-review 2026-08-02 #7: tooltip is mounted on the overlay, so
+    // target destruction doesn't reach us through destroyWidgetTree. Null
+    // _target so tick() early-returns on the next call instead of
+    // dereferencing a freed anchor. Also pull ourselves off the overlay
+    // so the manager doesn't keep ticking / rendering a stranded popup.
+    _target = nullptr;
+    if (UIManager* ui = UIManager::tryGet()) {
+        if (getParent() != nullptr) {
+            ui->closePopup(this, /*destroy=*/false);
+        }
+    }
+    hide();
 }
 
 void Tooltip::ensureLabelCreated() {
@@ -79,7 +99,19 @@ void Tooltip::tick(float dt, const math::FVector2& mousePos,
     } else {
         _viewportSize = viewportSize;
     }
-    if (_target == nullptr) return;
+    // Code-review 2026-08-02 #7: tooltip lifetime is independent of target
+    // (mounted on overlay). When target dies first, _target dangles.
+    // detach() clears it for the orderly path; this guard catches the
+    // case where the host forgot to detach() and the target was destroyed
+    // out from under us. Hides any in-flight tip + clears hover state.
+    if (_target == nullptr) {
+        if (_hovering || _visible) {
+            _hovering = false;
+            _hoverTime = 0.0f;
+            hide();
+        }
+        return;
+    }
     const math::FRectangle tBounds = _target->getWorldBounds();
 
     const bool inside = tBounds.contains(mousePos);
