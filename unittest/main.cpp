@@ -63,6 +63,7 @@
 #include "Test_DockFloat.cpp"
 #include "Test_LayoutPersistence.cpp"  // D4 (2026-07-26)
 #include "Test_CardPromotion.cpp"      // D5.5 (2026-07-26)
+#include "Test_Leak.cpp"               // code-review 2026-08-02 leak-detection regression
 
 void runTest()
 {

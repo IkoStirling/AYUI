@@ -119,6 +119,13 @@ TEST_CASE(modaldialog_set_body_content_positions_above_button_bar) {
     // has 3 children (bodyPanel, _okButton, _cancelButton).
     CHECK(dlg.getChildren().size() >= 3u);
 
+    // Release the dialog's reference to body BEFORE deleting body.
+    // ModalDialog caches the body pointer in _bodyContent; its dtor
+    // reads _bodyContent to decide whether to detach it from
+    // _bodyPanel. Without nulling the cache first, ~ModalDialog
+    // dereferences a freed body pointer and ASAN catches it as a
+    // heap-use-after-free.
+    dlg.setBodyContent(nullptr);
     delete body;
 }
 
