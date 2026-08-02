@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.12)
-project(AYUI)
+project(AYUI
+    VERSION 1.0.0
+    DESCRIPTION "AYUI — in-game UI framework (C-lane + v1.1 phases + D1-D5 docking + ASAN option)"
+)
 
 set(MODULE_NAME AYUI)
 
@@ -157,3 +160,5 @@ target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
 
 enable_testing()
 add_subdirectory(unittest)
+
+message(STATUS "AYUI v1.0.0 (C-lane ship + D1-D5 docking + G3-G13 tier + ASAN regression tests) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")
