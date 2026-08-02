@@ -99,12 +99,27 @@ Widget::~Widget() {
 }
 
 void Widget::addChild(Widget* child) {
-    if (child && child->_parent != this) {
-        child->detachFromParent();
-        child->_parent = this;
-        child->_externallyOwned = false;
-        _children.push_back(child);
+    if (child == nullptr) return;
+    if (child->_parent == this) {
+        // Already in our tree. addChild's semantic is "we own it" so
+        // if the child was previously addChildExternal'd, promote it
+        // to fully-owned — otherwise destroyWidgetTree would leak it
+        // when treating the externally-owned flag as host-managed.
+        // Code-review Sweep3-#4: previously we early-returned when
+        // _parent matched and skipped the flag flip; a fixture that
+        // did addChildExternal first and then addChild (e.g. to take
+        // ownership after a manual construction step) would leak on
+        // tree teardown. Always normalize the flag on the
+        // owning-path call.
+        if (child->_externallyOwned) {
+            child->_externallyOwned = false;
+        }
+        return;
     }
+    child->detachFromParent();
+    child->_parent = this;
+    child->_externallyOwned = false;
+    _children.push_back(child);
 }
 
 void Widget::addChildExternal(Widget* child) {

@@ -107,6 +107,26 @@ bool Theme::loadFromJson(const std::string& jsonStr) {
                 fragment.loadFromString(fragJson.data(), fragJson.size());
                 _sheetFragments[it.key()] = std::move(fragment);
             }
+            // Code-review Sweep3-#6: sheet fragments are eagerly
+            // parsed at loadFromJson time, which means $token refs in
+            // fragment styles are expanded against the ACTIVE theme at
+            // load time. After a setActiveTheme() swap, the fragment's
+            // already-parsed WidgetStyle.backgroundColor / border.color
+            // / textColor are STALE — they hold the old theme's
+            // resolved values.
+            //
+            // The fix in resolveStyle() (Sweep3-#3) sidesteps this for
+            // token-captured slots: the resolver re-expands against the
+            // active theme on every call, so widgets always see live
+            // values. The literal slots in a fragment, however, are
+            // frozen. Hosts that need fully-dynamic sheets should keep
+            // token refs in their fragment JSON, not literal arrays, so
+            // the resolver path applies.
+            //
+            // Future work: store raw fragment JSON and re-parse inside
+            // buildComposedSheet against the currently active theme.
+            // Currently out of scope; the Sweep3-#3 fix mitigates the
+            // user-visible impact.
         }
         return true;
     } catch (const std::exception&) {

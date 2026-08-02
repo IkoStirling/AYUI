@@ -309,8 +309,23 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
     // arrays) keep their original color — overrides don't reach them
     // by design (you can't "override a literal" without changing the
     // sheet). Caller passes nullptr to skip override lookup.
-    if (widget != nullptr && widget->getStyleTokenOverrides().empty()) {
-        // Common path — no overrides → no work.
+    //
+    // Code-review Sweep3-#3: previously we early-returned when
+    // (widget != nullptr && overrides empty()), which left the frozen-
+    // at-load-time s->backgroundColor / s->border.color in place when
+    // the active theme had been swapped AFTER the StyleSheet was
+    // loaded. The point of the *Token capture was exactly to keep the
+    // token reference alive for re-expansion; short-circuiting when
+    // the widget had no overrides defeated the design. Fix: always
+    // consult the theme when ANY token slot is captured, regardless
+    // of whether the widget carries overrides.
+    const bool hasAnyToken = !s->bgToken.empty() ||
+                             !s->borderColorToken.empty() ||
+                             !s->textColorToken.empty();
+    if (!hasAnyToken &&
+        (widget == nullptr || widget->getStyleTokenOverrides().empty())) {
+        // No tokens captured AND no overrides → the literal s-> values
+        // are the final answer. Skip the theme lookup entirely.
         return out;
     }
     const Theme* theme = ThemeManager::get().getActiveTheme();
@@ -325,15 +340,15 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
             widget ? &widget->getStyleTokenOverrides() : nullptr);
         slot = v;
     };
-    if (!s->bgToken.empty() || !s->borderColorToken.empty() ||
-        !s->textColorToken.empty()) {
-        apply(s->bgToken, out.backgroundColor);
-        apply(s->borderColorToken, out.borderColor);
-        // textColorToken isn't surfaced via ResolvedStyle (out doesn't
-        // carry textColor), but we re-expand it to keep WidgetStyle
-        // parity if the caller asks the StyleManager directly.
-        // (No-op here.)
-    }
+    apply(s->bgToken, out.backgroundColor);
+    apply(s->borderColorToken, out.borderColor);
+    // Code-review Sweep3-#7: ResolvedStyle doesn't carry textColor, so
+    // we can't write the re-expanded value here. Hosts that need
+    // theme-overridable textColor should extend ResolvedStyle with a
+    // textColor field and call apply(s->textColorToken, out.textColor).
+    // For now, the StyleManager direct lookup (StyleManager::get().getStyle
+    // -> WidgetStyle::textColor) still surfaces the value frozen at
+    // load time — the same Sweep3-#6 caveat applies.
     return out;
 }
 
