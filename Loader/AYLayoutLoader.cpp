@@ -392,8 +392,10 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                      type.c_str());
         return nullptr;
     }
+#if defined(_DEBUG) && defined(_MSC_VER)
     loaderHeapCheckId("after_factory_create", type.c_str(),
                       id.empty() ? "anonymous" : id.c_str());
+#endif
 
     // ID
     if (!id.empty()) {
