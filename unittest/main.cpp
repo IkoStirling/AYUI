@@ -66,6 +66,7 @@
 #include "Test_Leak.cpp"               // code-review 2026-08-02 leak-detection regression
 #include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText 贯通
 #include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接口
+#include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
 
 void runTest()
 {
