@@ -126,6 +126,7 @@ set(HEAD_FILES
     Style/AYTheme.h
     Style/AYThickness.h
     Style/AYTextContent.h
+    Style/AYTextMeasure.h
     i18n/AYI18n.h
     Controls/UIKeyCode.h
 )

@@ -2,6 +2,7 @@
 #include "AYScrollBar.h"
 #include "AYUIManager.h"
 #include "AYStyle.h"
+#include "AYTextMeasure.h"
 #include "UIKeyCode.h"
 #include <algorithm>
 #include <string>
@@ -309,8 +310,10 @@ public:
                 std::swap(sc, ec);
             }
             if (sl == el) {
-                float x0 = origin.x + TextArea::kPaddingX + static_cast<float>(sc) * 7.0f;  // rough char width
-                float x1 = origin.x + TextArea::kPaddingX + static_cast<float>(ec) * 7.0f;
+                float x0 = origin.x + TextArea::kPaddingX
+                           + measurePrefixWidth(lines[static_cast<size_t>(sl)], static_cast<size_t>(sc));
+                float x1 = origin.x + TextArea::kPaddingX
+                           + measurePrefixWidth(lines[static_cast<size_t>(sl)], static_cast<size_t>(ec));
                 float y  = origin.y + static_cast<float>(sl) * lh;
                 renderer.drawRect({{x0, y}, {x1 - x0, lh}},
                                   math::FVector4(0.30f, 0.45f, 0.78f, 0.35f));
@@ -322,7 +325,8 @@ public:
             math::FVector2 p(origin.x + TextArea::kPaddingX,
                              origin.y + static_cast<float>(i) * lh + TextArea::kPaddingY);
             if (!lines[i].empty()) {
-                math::FRectangle bounds{p, {static_cast<float>(lines[i].size()) * 7.0f, lh}};
+                const float lineW = measurePrefixWidth(lines[i], lines[i].size());
+                math::FRectangle bounds{p, {lineW, lh}};
                 renderer.drawText(bounds, lines[i], static_cast<int>(fontSize),
                                   math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
             }
@@ -330,7 +334,9 @@ public:
 
         // Caret.
         if (hasFocus()) {
-            float x = origin.x + TextArea::kPaddingX + static_cast<float>(_owner->_caretCol) * 7.0f;
+            float x = origin.x + TextArea::kPaddingX
+                      + measurePrefixWidth(lines[static_cast<size_t>(_owner->_caretLine)],
+                                           static_cast<size_t>(_owner->_caretCol));
             float y = origin.y + static_cast<float>(_owner->_caretLine) * lh + 1.0f;
             renderer.drawRect({{x, y}, {1.0f, lh - 2.0f}},
                               math::FVector4(1.0f, 1.0f, 1.0f, 0.95f));
@@ -339,9 +345,8 @@ public:
         // Phase C (S4) — IME composition underline. Drawn under the
         // active line, anchored at the caret column. Same sky-blue
         // default as TextInput; honours WidgetStyle override via
-        // StyleManager lookup. Width approximated via the rough 7px
-        // char width used elsewhere in this render — R3 in the Phase C
-        // plan.
+        // StyleManager lookup. Width now uses measurePrefixWidth so
+        // the underline tracks real glyph metrics on a wired backend.
         if (_composing && !_compositionPreview.empty()) {
             math::FVector4 ulColor(0.30f, 0.65f, 0.95f, 1.0f);
             const std::string sid = getStyleId();
@@ -349,10 +354,12 @@ public:
                 const WidgetStyle* ws = StyleManager::get().getStyle(sid);
                 if (ws != nullptr) ulColor = ws->compositionUnderlineColor;
             }
-            constexpr float approxCharWidth = 7.0f;
-            const float ulX = origin.x + TextArea::kPaddingX
-                              + static_cast<float>(_owner->_caretCol) * approxCharWidth;
-            const float ulW = static_cast<float>(_compositionPreview.size()) * approxCharWidth;
+            const float caretX = measurePrefixWidth(
+                lines[static_cast<size_t>(_owner->_caretLine)],
+                static_cast<size_t>(_owner->_caretCol));
+            const float ulW = measurePrefixWidth(_compositionPreview,
+                                                 _compositionPreview.size());
+            const float ulX = origin.x + TextArea::kPaddingX + caretX;
             const float ulY = origin.y + static_cast<float>(_owner->_caretLine) * lh + lh - 3.0f;
             constexpr float ulH = 1.5f;
             renderer.drawRect(math::FRectangle(ulX, ulY, ulX + ulW, ulY + ulH),
@@ -626,9 +633,12 @@ void TextArea::syncDocumentSizeToContent() {
     // height (and therefore the scrollbar range) reflects what the
     // user actually sees.
     int visualLines = 0;
-    constexpr float kApproxCharWidth = 7.0f;
+    // Em-width proxy: measure a single "M" so wrap math uses real glyph width
+    // when the backend is wired. Falls back to 7px per char via measurePrefixWidth
+    // when no backend is active (unit tests, MockRenderer).
+    const float emWidth = std::max(1.0f, measurePrefixWidth(L"M", 1));
     const float wrapWidthPx = std::max(1.0f, getSize().x - 2.0f * kPaddingX);
-    const int wrapCols = static_cast<int>(wrapWidthPx / kApproxCharWidth);
+    const int wrapCols = static_cast<int>(wrapWidthPx / emWidth);
     for (const auto& l : _lines) {
         if (!_wordWrap || wrapCols <= 0) {
             visualLines += 1;
@@ -643,7 +653,8 @@ void TextArea::syncDocumentSizeToContent() {
     // hint that allows the longest line to fit if hbar were enabled.
     float maxLineW = 0.0f;
     for (const auto& l : _lines) {
-        maxLineW = std::max(maxLineW, static_cast<float>(l.size()) * 7.0f + 2.0f * kPaddingX);
+        const float w = measurePrefixWidth(l, l.size());
+        maxLineW = std::max(maxLineW, w + 2.0f * kPaddingX);
     }
     _document->setSize(math::FVector2(std::max(maxLineW, getSize().x), h));
     if (_scrollView != nullptr) {

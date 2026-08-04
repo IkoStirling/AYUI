@@ -2,6 +2,7 @@
 #include "AYUIManager.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
+#include "AYTextMeasure.h"
 #include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
@@ -24,31 +25,7 @@ namespace ayt::ui {
 
 namespace {
 
-constexpr int kTextFontSize = 14;
-
-float fallbackCharWidth(wchar_t ch) {
-    // Rough fallback when measureText is unavailable (unit tests / mock).
-    return (ch < 0x100) ? 7.0f : static_cast<float>(kTextFontSize);
-}
-
-float measurePrefixWidth(const std::wstring& text, size_t n) {
-    if (n == 0 || text.empty()) return 0.0f;
-    if (n > text.size()) n = text.size();
-    if (UIManager* ui = UIManager::tryGet()) {
-        if (IRenderBackend* backend = ui->backend()) {
-            const IRenderBackend::TextMetrics m =
-                backend->measureText(text.substr(0, n), kTextFontSize);
-            if (m.width > 0.0f) {
-                return m.width;
-            }
-        }
-    }
-    float w = 0.0f;
-    for (size_t i = 0; i < n; ++i) {
-        w += fallbackCharWidth(text[i]);
-    }
-    return w;
-}
+constexpr int kTextFontSize = ayt::ui::kDefaultTextFontSize;
 
 size_t columnFromLocalX(const std::wstring& text, float localX) {
     if (localX <= 0.0f || text.empty()) return 0;
