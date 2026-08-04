@@ -1,0 +1,241 @@
+{
+  "type": "VBox",
+  "id": "gallery_root",
+  "size": { "w": 1280, "h": 720 },
+  "spacing": 0,
+  "children": [
+    {
+      "type": "HBox",
+      "id": "title_row",
+      "size": { "h": 36 },
+      "spacing": 8,
+      "padding": { "left": 10, "top": 6, "right": 10, "bottom": 4 },
+      "children": [
+        {
+          "type": "TextLabel",
+          "id": "lbl_title",
+          "text": "AYUI Gallery",
+          "size": { "w": 200, "h": 24 },
+          "slot": { "width": 200 }
+        },
+        {
+          "type": "TextLabel",
+          "id": "lbl_subtitle",
+          "text": "Control visual check - no 3D / no Editor shell",
+          "size": { "w": 480, "h": 24 }
+        },
+        {
+          "type": "Button",
+          "id": "btn_reload",
+          "text": "Reload JSON",
+          "size": { "w": 110, "h": 26 },
+          "slot": { "width": 110 }
+        }
+      ]
+    },
+    {
+      "type": "HBox",
+      "id": "body_row",
+      "size": { "h": 0 },
+      "spacing": 0,
+      "children": [
+        {
+          "type": "VBox",
+          "id": "nav_column",
+          "size": { "w": 180 },
+          "slot": { "width": 180 },
+          "spacing": 4,
+          "padding": { "left": 8, "top": 8, "right": 8, "bottom": 8 },
+          "children": [
+            { "type": "TextLabel", "id": "lbl_nav", "text": "Sections", "size": { "w": 160, "h": 22 } },
+            { "type": "Button", "id": "nav_basics", "text": "1. Basics", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_input", "text": "2. Input", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_collections", "text": "3. Collections", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_overlay", "text": "4. Overlay", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_layout", "text": "5. Layout", "size": { "w": 160, "h": 28 } },
+            { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
+            { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
+          ]
+        },
+        {
+          "type": "Separator",
+          "id": "nav_content_sep",
+          "size": { "w": 2, "h": 0 },
+          "slot": { "width": 2 }
+        },
+        {
+          "type": "VBox",
+          "id": "content_host",
+          "spacing": 0,
+          "children": [
+            {
+              "type": "VBox",
+              "id": "page_basics",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "basics_hdr", "text": "Basics - Button / Label / Image / Panel / Separator", "size": { "w": 640, "h": 24 } },
+                {
+                  "type": "HBox",
+                  "id": "basics_row1",
+                  "size": { "h": 36 },
+                  "spacing": 8,
+                  "children": [
+                    { "type": "Button", "id": "btn_demo", "text": "Primary", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+                    { "type": "Button", "id": "btn_disabled", "text": "Disabled", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+                    { "type": "TextLabel", "id": "lbl_click_count", "text": "clicks: 0", "size": { "w": 120, "h": 24 }, "slot": { "width": 120 } }
+                  ]
+                },
+                { "type": "Separator", "id": "basics_sep", "size": { "w": 600, "h": 10 } },
+                {
+                  "type": "HBox",
+                  "id": "basics_row2",
+                  "size": { "h": 48 },
+                  "spacing": 12,
+                  "children": [
+                    { "type": "Image", "id": "img_swatch_a", "size": { "w": 48, "h": 48 }, "color": [0.25, 0.55, 0.95, 1.0], "slot": { "width": 48 } },
+                    { "type": "Image", "id": "img_swatch_b", "size": { "w": 48, "h": 48 }, "color": [0.90, 0.40, 0.25, 1.0], "slot": { "width": 48 } },
+                    { "type": "Image", "id": "img_swatch_c", "size": { "w": 48, "h": 48 }, "color": [0.30, 0.75, 0.45, 1.0], "slot": { "width": 48 } },
+                    { "type": "TextLabel", "id": "lbl_swatch", "text": "Image swatches (display-only)", "size": { "w": 240, "h": 24 } }
+                  ]
+                },
+                {
+                  "type": "Panel",
+                  "id": "basics_panel",
+                  "size": { "w": 420, "h": 80 },
+                  "children": [
+                    { "type": "TextLabel", "id": "lbl_panel", "text": "Panel body (styled background + border)", "size": { "w": 380, "h": 24 } }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_input",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "input_hdr", "text": "Input - CheckBox / Slider / TextInput / ProgressBar", "size": { "w": 640, "h": 24 } },
+                { "type": "CheckBox", "id": "chk_demo", "text": "Enable fancy mode", "size": { "w": 220, "h": 26 } },
+                { "type": "TextLabel", "id": "lbl_slider", "text": "Slider  0.50", "size": { "w": 200, "h": 20 } },
+                { "type": "Slider", "id": "sld_demo", "size": { "w": 280, "h": 24 } },
+                { "type": "TextLabel", "id": "lbl_progress", "text": "Progress mirrors slider", "size": { "w": 240, "h": 20 } },
+                { "type": "ProgressBar", "id": "prg_demo", "size": { "w": 280, "h": 18 } },
+                { "type": "TextLabel", "id": "lbl_text", "text": "TextInput", "size": { "w": 120, "h": 20 } },
+                { "type": "TextInput", "id": "txt_demo", "text": "type here", "size": { "w": 280, "h": 28 } },
+                { "type": "TextLabel", "id": "lbl_check_state", "text": "checkbox: off", "size": { "w": 200, "h": 20 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_collections",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "coll_hdr", "text": "Collections - ListView / ComboBox (items filled in C++)", "size": { "w": 640, "h": 24 } },
+                { "type": "TextLabel", "id": "lbl_list", "text": "ListView", "size": { "w": 120, "h": 20 } },
+                { "type": "ListView", "id": "lst_demo", "size": { "w": 320, "h": 128 } },
+                { "type": "TextLabel", "id": "lbl_combo", "text": "ComboBox", "size": { "w": 120, "h": 20 } },
+                { "type": "ComboBox", "id": "cmb_demo", "size": { "w": 240, "h": 28 } },
+                { "type": "TextLabel", "id": "lbl_selection", "text": "selection: (none)", "size": { "w": 320, "h": 22 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_overlay",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "overlay_hdr", "text": "Overlay - MenuBar / Modal trigger", "size": { "w": 640, "h": 24 } },
+                {
+                  "type": "MenuBar",
+                  "id": "menubar",
+                  "size": { "w": 320, "h": 28 }
+                },
+                { "type": "TextLabel", "id": "lbl_menu_action", "text": "menu: (idle)", "size": { "w": 400, "h": 22 } },
+                { "type": "Separator", "id": "overlay_sep", "size": { "w": 400, "h": 10 } },
+                { "type": "Button", "id": "btn_modal", "text": "Open ModalDialog", "size": { "w": 180, "h": 28 } },
+                { "type": "TextLabel", "id": "lbl_modal", "text": "modal: (idle)", "size": { "w": 400, "h": 22 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_layout",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "layout_hdr", "text": "Layout - mini DockArea (drag card headers to retarget)", "size": { "w": 640, "h": 24 } },
+                {
+                  "type": "DockArea",
+                  "id": "mini_dock",
+                  "size": { "w": 900, "h": 420 },
+                  "slotWeights": {
+                    "Left": 0.28,
+                    "Right": 0.28,
+                    "Center": 0.44,
+                    "Top": 1e-6,
+                    "Bottom": 1e-6
+                  },
+                  "cards": [
+                    {
+                      "slot": "Left",
+                      "id": "card_left",
+                      "title": "Left",
+                      "floatable": true,
+                      "content": {
+                        "type": "VBox",
+                        "id": "dock_left_body",
+                        "spacing": 4,
+                        "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+                        "children": [
+                          { "type": "TextLabel", "id": "dock_left_lbl", "text": "Dock Left card", "size": { "w": 160, "h": 22 } },
+                          { "type": "Button", "id": "dock_left_btn", "text": "Ping", "size": { "w": 80, "h": 24 } }
+                        ]
+                      }
+                    },
+                    {
+                      "slot": "Center",
+                      "id": "card_center",
+                      "title": "Center",
+                      "floatable": true,
+                      "headerHeight": 28,
+                      "content": {
+                        "type": "Panel",
+                        "id": "dock_center_body",
+                        "children": [
+                          { "type": "TextLabel", "id": "dock_center_lbl", "text": "Center hole - check opaque fill vs chrome", "size": { "w": 360, "h": 24 } }
+                        ]
+                      }
+                    },
+                    {
+                      "slot": "Right",
+                      "id": "card_right",
+                      "title": "Right",
+                      "floatable": true,
+                      "content": {
+                        "type": "VBox",
+                        "id": "dock_right_body",
+                        "spacing": 4,
+                        "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
+                        "children": [
+                          { "type": "TextLabel", "id": "dock_right_lbl", "text": "Dock Right card", "size": { "w": 160, "h": 22 } },
+                          { "type": "Slider", "id": "dock_right_sld", "size": { "w": 140, "h": 22 } }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                { "type": "TextLabel", "id": "lbl_dock_ping", "text": "dock: idle", "size": { "w": 300, "h": 22 } }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "StatusBar",
+      "id": "status",
+      "size": { "h": 24 }
+    }
+  ]
+}

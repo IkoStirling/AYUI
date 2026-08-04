@@ -135,6 +135,19 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     performLayout();
 }
 
+void Menu::detachForHostDestruction()
+{
+    _open = false;
+    setVisible(false);
+    _focusedWidgetBefore = nullptr;
+    if (UIManager* ui = UIManager::tryGet()) {
+        // Soft bookkeeping only — closePopup walks isDescendantOf /
+        // removeChild and is unsafe while destroyWidgetTree is tearing
+        // down parents (Reload JSON / shutdown crashes).
+        ui->abandonPopup(this);
+    }
+}
+
 void Menu::close() {
     if (!_open) return;
     _open = false;
@@ -144,19 +157,29 @@ void Menu::close() {
     // left MenuBar::_menus[i].menu dangling after the first item click
     // / Escape — subsequent opens and hit-tests then stuck or AV'd.
     if (UIManager* ui = UIManager::tryGet()) {
-        if (_focusedWidgetBefore != nullptr) {
-            ui->setFocus(_focusedWidgetBefore);
+        // Shutdown / tree teardown: `_focusedWidgetBefore` (and any
+        // previous focus target) may already be destroyed. Skip all
+        // virtual setFocus dispatch — UIManager::shutdown already
+        // cleared focus via clearFocusNoDispatch.
+        if (!ui->isShuttingDown()) {
+            if (_focusedWidgetBefore != nullptr) {
+                ui->setFocus(_focusedWidgetBefore);
+                _focusedWidgetBefore = nullptr;
+            }
+            if (_onClose) _onClose();
+            if (ui->getFocusedWidget() == this) {
+                ui->setFocus(nullptr);
+            }
+        } else {
             _focusedWidgetBefore = nullptr;
-        }
-        if (_onClose) _onClose();
-        if (ui->getFocusedWidget() == this) {
-            ui->setFocus(nullptr);
         }
         ui->closePopup(this, /*destroy=*/false);
     }
-    // Reparent under the owning MenuBar so CompoundWidget still owns us.
+    // Reparent under the owning MenuBar so MenuBar still tracks us.
+    // Must be External — MenuBar::_menus owns delete in ~MenuBar;
+    // addChild would let destroyWidgetTree free us first → UAF.
     if (_ownerHost != nullptr && getParent() == nullptr) {
-        _ownerHost->addChild(this);
+        _ownerHost->addChildExternal(this);
     }
 }
 
@@ -292,18 +315,22 @@ void Menu::dismissFromManager() {
     _open = false;
     setVisible(false);
     if (UIManager* ui = UIManager::tryGet()) {
-        if (_focusedWidgetBefore != nullptr) {
-            ui->setFocus(_focusedWidgetBefore);
+        if (!ui->isShuttingDown()) {
+            if (_focusedWidgetBefore != nullptr) {
+                ui->setFocus(_focusedWidgetBefore);
+                _focusedWidgetBefore = nullptr;
+            }
+            if (_onClose) _onClose();
+            if (ui->getFocusedWidget() == this) {
+                ui->setFocus(nullptr);
+            }
+        } else {
             _focusedWidgetBefore = nullptr;
-        }
-        if (_onClose) _onClose();
-        if (ui->getFocusedWidget() == this) {
-            ui->setFocus(nullptr);
         }
         ui->closePopup(this, /*destroy=*/false);
     }
     if (_ownerHost != nullptr && getParent() == nullptr) {
-        _ownerHost->addChild(this);
+        _ownerHost->addChildExternal(this);
     }
 }
 

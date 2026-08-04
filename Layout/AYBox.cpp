@@ -86,7 +86,7 @@ void VBox::removeWidget(Widget* widget) {
 
 void VBox::layoutChildren() {
     math::FVector2 size = getSize();
-    float availableWidth = size.x - _padding.x - _padding.z;
+    float availableWidth = std::max(0.0f, size.x - _padding.x - _padding.z);
 
     size_t childCount = _slots.size();
     if (childCount == 0) return;
@@ -111,7 +111,7 @@ void VBox::layoutChildren() {
         totalFixedHeight -= _spacing;
     }
 
-    float availableHeight = size.y - _padding.y - _padding.w;
+    float availableHeight = std::max(0.0f, size.y - _padding.y - _padding.w);
     float fillHeight = (fillCount > 0) ? (availableHeight - totalFixedHeight) / fillCount : 0.0f;
     fillHeight = std::max(0.0f, fillHeight);
 

@@ -7,7 +7,7 @@ namespace ayt::ui {
 
 TreeView::TreeView() {
     setSize(math::FVector2(240.0f, 240.0f));
-    setLayoutPositionManaged(false);
+    // Keep layoutPositionManaged=true so VBox/HBox can place the tree.
     ensureBarCreated();
 }
 

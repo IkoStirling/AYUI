@@ -71,7 +71,9 @@ void ListView::Row::onRender(IRenderBackend& renderer) {
 // =============================================================================
 ListView::ListView() {
     setSize(math::FVector2(160.0f, 200.0f));
-    setLayoutPositionManaged(false);   // host positions the list
+    // Keep layoutPositionManaged=true (default) so VBox/HBox can place the
+    // list in flow layouts. Absolute hosts can still call
+    // setLayoutPositionManaged(false) after construction.
     ensureBarCreated();
 }
 

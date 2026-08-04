@@ -116,11 +116,25 @@ void DockArea::addCard(Slot slot, std::unique_ptr<DockCard> card) {
         return;
     }
 
-    // If a card with the same id already exists, remove it first so the
-    // "last write wins" rule is consistent with the Loader.
+    // If a *different* card with the same id already exists, remove it
+    // first so the "last write wins" rule is consistent with the Loader.
+    // Same-pointer re-add (moveInSlot) must NOT call removeCard — that
+    // destroyWidgetTree's the card we're about to reparent (UAF in
+    // container->addChild).
     const std::string id = card->getId();
     if (!id.empty()) {
-        removeCard(id);
+        auto it = _cardIndex.find(id);
+        if (it != _cardIndex.end() && it->second != card.get()) {
+            removeCard(id);
+        } else if (it != _cardIndex.end() && it->second == card.get()) {
+            // Same instance: scrub slot bookkeeping without freeing.
+            _cardIndex.erase(it);
+            for (int i = 0; i < (int)Slot::Count; ++i) {
+                auto& vec = _slotCards[i];
+                vec.erase(std::remove(vec.begin(), vec.end(), card.get()),
+                          vec.end());
+            }
+        }
     }
 
     // Push the card into the slot's container. All 5 slots — including

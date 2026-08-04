@@ -12,7 +12,8 @@ namespace ayt::ui {
 
 ComboBox::ComboBox() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
-    setLayoutPositionManaged(false);
+    // Keep layoutPositionManaged=true so VBox/HBox flow can place us.
+    // (Previously false left ComboBox stuck at 0,0 inside Gallery pages.)
 
     _display = new TextLabel();
     _display->setText(L"");
@@ -432,9 +433,10 @@ void ComboBox::performLayout() {
 
 void ComboBox::layoutChildren() {
     if (_display != nullptr) {
-        _display->setPosition(math::FVector2(0.0f, 0.0f));
-        // Reserve the right edge for the dropdown arrow.
-        const float textW = std::max(0.0f, getWidth() - kArrowWidth);
+        // Inset text from the left border; reserve the right edge for the
+        // dropdown arrow (previously text sat flush against the chrome).
+        _display->setPosition(math::FVector2(kTextPadX, 0.0f));
+        const float textW = std::max(0.0f, getWidth() - kArrowWidth - kTextPadX);
         _display->setSize(math::FVector2(textW, getHeight()));
     }
     // Phase A (A2): popup positioning moved to openPopup(), which uses

@@ -88,6 +88,11 @@ public:
     // us back to a MenuBar that's already unwinding. Idempotent.
     void clearOwnerHost() { _ownerHost = nullptr; }
 
+    // Soft-dismiss used by ~MenuBar / tree teardown. Clears open state and
+    // unmounts from the overlay WITHOUT restoring focus via setFocus
+    // (the saved focus target may already be destroyed).
+    void detachForHostDestruction();
+
     // Soft-dismissal path used by UIManager when closing one dropdown
     // before opening another (or when the user clicks outside the menu).
     // Same durable-Menu* contract as close(): MenuBar keeps the pointer.

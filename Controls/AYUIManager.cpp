@@ -402,6 +402,20 @@ void UIManager::tearDownOverlayChildren() {
             (_hoverWidget == child || isDescendantOf(_hoverWidget, child))) {
             _hoverWidget = nullptr;
         }
+        // Soft-dismiss MenuBar-owned Menus: never destroyWidgetTree them
+        // (MenuBar::_menus still holds the pointer). Hard-destroy other
+        // overlay popups (ComboBox ListView, tooltips, etc.).
+        if (Menu* menu = dynamic_cast<Menu*>(child)) {
+            // Prefer abandon over dismissFromManager during tree teardown:
+            // dismiss reparents onto MenuBar via addChild and can race
+            // destroyWidgetTree ownership. Soft-clear + leave parent as-is;
+            // MenuBar::~MenuBar deletes via _menus.
+            menu->detachForHostDestruction();
+            if (menu->getParent() == _overlayRoot) {
+                menu->detachFromParent();
+            }
+            continue;
+        }
         destroyWidgetTree(child);
     }
 }
@@ -511,6 +525,13 @@ bool UIManager::loadLayout(const std::string& path) {
         // TextInput::~TextInput). See clearFocusNoDispatch docstring.
         clearFocusNoDispatch(_focusedWidget);
     }
+    clearDragStateNoDispatch(nullptr);
+    // Reload / host callbacks often run from inside onMouseButtonUp.
+    // Null hover + capture WITHOUT onMouseLeave — those widgets are about
+    // to be freed, and updateHoverWidget after the callback would UAF
+    // (Gallery Reload JSON: updateHoverWidget → onMouseLeave on 0xF...F).
+    _capturedWidget = nullptr;
+    _hoverWidget = nullptr;
     // Phase A: drop overlay children — popups may reference widgets in
     // the about-to-be-destroyed root. Keep overlay itself (it survives
     // across loads; only its contents change).
@@ -549,6 +570,9 @@ bool UIManager::loadFromString(const std::string& json) {
         // TextInput::~TextInput). See clearFocusNoDispatch docstring.
         clearFocusNoDispatch(_focusedWidget);
     }
+    clearDragStateNoDispatch(nullptr);
+    _capturedWidget = nullptr;
+    _hoverWidget = nullptr;
     // Phase A: same overlay-teardown sequence as loadLayout.
     tearDownOverlayChildren();
     if (_root != nullptr) {
@@ -776,13 +800,41 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     if (popup->getParent() != nullptr) {
         popup->getParent()->removeChild(popup);
     }
-    _overlayRoot->addChild(popup);   // ref-only per Widget::addChild; overlay doesn't delete
+    // Menu is owned by MenuBar for the session (soft mount). ComboBox /
+    // other popups are owned by the overlay until closePopup(destroy=true).
+    // Using addChild for Menu made tearDownOverlayChildren destroyWidgetTree
+    // free the Menu while MenuBar::_menus still held it → ~MenuBar UAF.
+    if (dynamic_cast<Menu*>(popup) != nullptr) {
+        _overlayRoot->addChildExternal(popup);
+    } else {
+        _overlayRoot->addChild(popup);
+    }
 
     // Track as active.
     _activeDropdown = popup;
     _activeDropdownAnchor = anchor;
     _activeDropdownAnchorIsComboBox =
         (dynamic_cast<ComboBox*>(anchor) != nullptr);
+}
+
+void UIManager::abandonPopup(Widget* popup) {
+    if (popup == nullptr) return;
+    // Bookkeeping only — no isDescendantOf (may walk freed parents) and
+    // no removeChild (parent may be mid-destruction with a dead vector).
+    if (_activeDropdown == popup) {
+        _activeDropdown = nullptr;
+        _activeDropdownAnchor = nullptr;
+        _activeDropdownAnchorIsComboBox = false;
+    }
+    if (_capturedWidget == popup) {
+        _capturedWidget = nullptr;
+    }
+    if (_focusedWidget == popup) {
+        _focusedWidget = nullptr;
+    }
+    if (_hoverWidget == popup) {
+        _hoverWidget = nullptr;
+    }
 }
 
 void UIManager::closePopup(Widget* popup, bool destroy) {
@@ -1102,6 +1154,18 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
         }
     }
 
+    // Click-away: clear text-editing focus when the press lands outside
+    // the focused field. Other widgets may claim focus in onMouseButtonDown
+    // immediately after (e.g. another TextInput / ListView).
+    if (_focusedWidget != nullptr && isTextEditing(_focusedWidget)) {
+        const bool insideFocused = (hit != nullptr) && (
+            hit == _focusedWidget ||
+            isDescendantOf(hit, _focusedWidget));
+        if (!insideFocused) {
+            setFocus(nullptr);
+        }
+    }
+
     if (hit != nullptr && hit->onMouseButtonDown(UIMouseEvent(pos, button))) {
         _capturedWidget = hit;
         return true;
@@ -1131,7 +1195,15 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     // cursor now (for cursor hints). Do NOT synthesize onMouseMove here:
     // SplitterHandle intentionally stays un-revealed after mouse-up until
     // the next real WM_MOUSEMOVE re-arms hover.
-    updateHoverWidget(_hoverWidget, pickTopmostWidget(pos));
+    //
+    // If the up-handler reloaded the tree (loadLayout), `_hoverWidget` was
+    // already nulled; updateHoverWidget(nullptr, next) is then safe.
+    // Guard the empty-root case so we don't walk a null tree.
+    if (_root == nullptr) {
+        _hoverWidget = nullptr;
+    } else {
+        updateHoverWidget(_hoverWidget, pickTopmostWidget(pos));
+    }
 
     // G12 — drag session ends on mouse-up. endDrag fires target->onDrop
     // if the cursor is over an accepting widget, then resets state.
@@ -1196,7 +1268,8 @@ void UIManager::updateGhostPosition(const math::FVector2& pos) {
 }
 
 void UIManager::paintGhost(IRenderBackend& renderer) {
-    if (_dragGhost == nullptr) return;
+    if (!_dragSession.active || _dragGhost == nullptr) return;
+    if (!_dragGhost->isVisible()) return;
     const math::FRectangle b = _dragGhost->getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
     // Dark semi-transparent plate.
@@ -1311,27 +1384,16 @@ void UIManager::updateDrag(float x, float y) {
 bool UIManager::endDrag(bool accepted) {
     if (!_dragSession.active) return false;
 
-    // Snapshot session state BEFORE clearing so callbacks see the right
-    // target/payload (and a stale getDragPayload() call during the
-    // callback observes the still-active session — matching Qt's
-    // QDrag::exec() pattern).
+    // Snapshot, then CLEAR session before onDrop so a crashing drop
+    // handler cannot leave a sticky ghost (payload text residue).
     Widget*     source = _dragSession.source;
     Widget*     target = _dragSession.currentTarget;
     DragPayload payload = _dragSession.payload;
     const bool  hadTarget = (target != nullptr);
 
-    // Fire target callbacks.
     if (target != nullptr) {
-        if (accepted && target->_onDrop) {
-            target->_onDrop(payload);
-        }
         target->setCurrentDropTarget(false);
-        if (target->_onDragLeave) {
-            target->_onDragLeave();
-        }
     }
-
-    // Clear session state.
     _dragSession.active        = false;
     _dragSession.source        = nullptr;
     _dragSession.currentTarget = nullptr;
@@ -1340,8 +1402,15 @@ bool UIManager::endDrag(bool accepted) {
         _dragGhost->setVisible(false);
     }
 
-    // Fire source's end callback LAST so it observes the cleared state
-    // (mirrors QDrag::exec returning; source can re-arm itself).
+    if (target != nullptr) {
+        if (accepted && target->_onDrop) {
+            target->_onDrop(payload);
+        }
+        if (target->_onDragLeave) {
+            target->_onDragLeave();
+        }
+    }
+
     if (source != nullptr && source->_onDragEnd) {
         source->_onDragEnd(accepted && hadTarget);
     }

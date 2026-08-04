@@ -160,5 +160,6 @@ target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
 
 enable_testing()
 add_subdirectory(unittest)
+add_subdirectory(demo)
 
 message(STATUS "AYUI v1.0.0 (C-lane ship + D1-D5 docking + G3-G13 tier + ASAN regression tests) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

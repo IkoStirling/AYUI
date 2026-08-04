@@ -52,17 +52,12 @@ MenuBar::~MenuBar() {
         // / dismissFromManager() doesn't try to re-add itself to us
         // mid-dtor (we're already unwinding).
         e.menu->clearOwnerHost();
-        if (e.menu->isOpen()) {
-            e.menu->close();
-        }
-        // If close() reparented onto us, ~CompoundFocusableWidget's
-        // child-tree walk handles it. Otherwise (UIManager gone or
-        // ownerHost was already null) explicitly detach + delete so
-        // the menu doesn't leak on the overlay.
+        // Never call close() from the MenuBar dtor — close() restores
+        // focus via UIManager::setFocus, and during loadLayout/shutdown
+        // the saved widget (or RTTI) may already be gone (Reload JSON
+        // crash: MenuBar::~MenuBar → Menu::close → setFocus).
+        e.menu->detachForHostDestruction();
         if (e.menu->getParent() != nullptr) {
-            // Detach so the parent's dtor doesn't double-free it (we
-            // already cleared _menus, so the dangling pointer would
-            // sit in _children).
             e.menu->detachFromParent();
         }
         delete e.menu;
@@ -71,7 +66,10 @@ MenuBar::~MenuBar() {
 
 Menu* MenuBar::addMenu(const std::wstring& title) {
     auto* m = new Menu();
-    addChild(m);   // owning — MenuBar owns the menu
+    // External: MenuBar owns via _menus and deletes in ~MenuBar.
+    // addChild (owning) would let destroyWidgetTree free the Menu before
+    // ~MenuBar runs, leaving _menus dangling (Reload/shutdown UAF).
+    addChildExternal(m);
     MenuEntry e;
     // Code-review 2026-08-02 #21: removed the dead `title` field
     // assignment. Anchor button (below) owns the visible title via
@@ -180,7 +178,11 @@ void MenuBar::onAnchorClicked(int index) {
     Menu* m = _menus[index].menu;
     if (m == nullptr) return;
     if (auto* btn = _menus[index].anchor) {
-        const math::FVector2 anchorWorld = btn->getWorldBounds().getMax();
+        // Bottom-left of the anchor (VS Code / Win32 menu convention).
+        // getMax() is bottom-right and made File menus open under the
+        // wrong edge of the button.
+        const math::FRectangle b = btn->getWorldBounds();
+        const math::FVector2 anchorWorld(b.minX, b.maxY);
         m->open(this, anchorWorld);
     } else {
         m->open(this, math::FVector2(0.0f, kDefaultHeight));

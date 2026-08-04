@@ -157,6 +157,7 @@ public:
     static constexpr int   kDefaultMaxPopupItems = 8;
     static constexpr float kPopupGap = 2.0f;
     static constexpr float kArrowWidth = 18.0f;
+    static constexpr float kTextPadX = 8.0f;
 
     ComboBox();
     ~ComboBox() override;

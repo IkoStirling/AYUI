@@ -33,6 +33,12 @@ public:
     void setBorderEnabled(bool enabled) { _borderEnabled = enabled; }
     bool isBorderEnabled() const { return _borderEnabled; }
 
+    // When false, onRender skips the opaque body fill (and border).
+    // Editor Play composite uses this on `card_viewport` so PostProcess
+    // 3D remains visible under the DockCard hole. Default: true.
+    void setBackgroundEnabled(bool enabled) { _backgroundEnabled = enabled; }
+    bool isBackgroundEnabled() const { return _backgroundEnabled; }
+
     // Padding inset (logical pixels) for child layout. Panel does not
     // lay out children itself — this is exposed as a property so a future
     // layout pass (C-2 helpers) can read it without re-fetching from a
@@ -45,6 +51,7 @@ public:
 
 protected:
     bool _borderEnabled = true;
+    bool _backgroundEnabled = true;
     math::FVector4 _padding{4.0f, 4.0f, 4.0f, 4.0f};
 };
 

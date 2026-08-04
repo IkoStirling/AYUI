@@ -135,7 +135,14 @@ void DockCard::performLayout() {
 }
 
 void DockCard::onRender(IRenderBackend& renderer) {
-    // Re-use Panel's body rendering (background + border).
+    // Re-use Panel's body rendering (background + border). When the
+    // editor punches a Play-mode composite hole it disables the Panel
+    // background — skip the header strip too so we don't paint an
+    // opaque bar over the 3D blit (card_viewport uses headerHeight=0
+    // today, but keep the guard for titled cards).
+    if (!isBackgroundEnabled()) {
+        return;
+    }
     Panel::onRender(renderer);
 
     const math::FRectangle bounds = getWorldBounds();
@@ -147,6 +154,9 @@ void DockCard::onRender(IRenderBackend& renderer) {
     // title text inside. We deliberately use worldBounds so docking
     // works inside any transform.
     const float h = _headerHeight;
+    if (h <= 0.0f) {
+        return;
+    }
     const math::FRectangle header(
         bounds.minX,
         bounds.minY,

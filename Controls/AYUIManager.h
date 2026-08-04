@@ -74,6 +74,14 @@ public:
     static ActiveScope pushActive(UIManager* next);
 
     void initialize(IRenderBackend* backend);
+    void shutdown();
+
+    // True after shutdown() starts (and stays true). Widget dtors that
+    // still reach tryGet() during tree teardown MUST skip setFocus /
+    // virtual focus dispatch — focused / saved widgets may already be
+    // partially destroyed (MenuBar::~MenuBar → Menu::close UAF).
+    bool isShuttingDown() const { return _shutdown; }
+
     // =====================================================================
     // Polish (P3) — accelerator registry access.
     // =====================================================================
@@ -87,8 +95,6 @@ public:
     // =====================================================================
     void registerMenuBar(class MenuBar* bar);
     void unregisterMenuBar(class MenuBar* bar);
-
-    void shutdown();
 
     bool loadLayout(const std::string& path);
     bool loadFromString(const std::string& json);
@@ -162,6 +168,10 @@ public:
     // Caller DOES NOT need to track the popup — getOverlayRoot() lets
     // tests / hosts verify placement if they care.
     void openPopup(Widget* anchor, Widget* popup);
+    // Soft-clear dropdown bookkeeping for `popup` without walking the
+    // widget tree or calling removeChild on a possibly-dying parent.
+    // Used by Menu::detachForHostDestruction during loadLayout/shutdown.
+    void abandonPopup(Widget* popup);
     // closePopup removes the popup from the overlay. If `destroy` is true
     // (default), the popup tree is freed via destroyWidgetTree and any
     // ComboBox anchor is notified via onPopupDismissedByManager. Pass

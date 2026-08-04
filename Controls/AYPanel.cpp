@@ -19,6 +19,9 @@ void Panel::setPadding(float left, float top, float right, float bottom) {
 }
 
 void Panel::onRender(IRenderBackend& renderer) {
+    if (!_backgroundEnabled) {
+        return;
+    }
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
         return;

@@ -6,10 +6,116 @@
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <Windows.h>
+#endif
+
 namespace ayt::ui {
+
+namespace {
+
+constexpr int kTextFontSize = 14;
+
+float fallbackCharWidth(wchar_t ch) {
+    // Rough fallback when measureText is unavailable (unit tests / mock).
+    return (ch < 0x100) ? 7.0f : static_cast<float>(kTextFontSize);
+}
+
+float measurePrefixWidth(const std::wstring& text, size_t n) {
+    if (n == 0 || text.empty()) return 0.0f;
+    if (n > text.size()) n = text.size();
+    if (UIManager* ui = UIManager::tryGet()) {
+        if (IRenderBackend* backend = ui->backend()) {
+            const IRenderBackend::TextMetrics m =
+                backend->measureText(text.substr(0, n), kTextFontSize);
+            if (m.width > 0.0f) {
+                return m.width;
+            }
+        }
+    }
+    float w = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+        w += fallbackCharWidth(text[i]);
+    }
+    return w;
+}
+
+size_t columnFromLocalX(const std::wstring& text, float localX) {
+    if (localX <= 0.0f || text.empty()) return 0;
+    size_t lo = 0;
+    size_t hi = text.size();
+    while (lo < hi) {
+        const size_t mid = (lo + hi + 1) / 2;
+        if (measurePrefixWidth(text, mid) <= localX) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return lo;
+}
+
+#if defined(_WIN32)
+bool clipboardSetText(const std::wstring& text) {
+    if (!::OpenClipboard(nullptr)) return false;
+    ::EmptyClipboard();
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL mem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (mem == nullptr) {
+        ::CloseClipboard();
+        return false;
+    }
+    void* locked = ::GlobalLock(mem);
+    if (locked == nullptr) {
+        ::GlobalFree(mem);
+        ::CloseClipboard();
+        return false;
+    }
+    std::memcpy(locked, text.c_str(), bytes);
+    ::GlobalUnlock(mem);
+    if (::SetClipboardData(CF_UNICODETEXT, mem) == nullptr) {
+        ::GlobalFree(mem);
+        ::CloseClipboard();
+        return false;
+    }
+    ::CloseClipboard();
+    return true;
+}
+
+bool clipboardGetText(std::wstring& out) {
+    out.clear();
+    if (!::OpenClipboard(nullptr)) return false;
+    HANDLE mem = ::GetClipboardData(CF_UNICODETEXT);
+    if (mem == nullptr) {
+        ::CloseClipboard();
+        return false;
+    }
+    const wchar_t* locked = static_cast<const wchar_t*>(::GlobalLock(mem));
+    if (locked == nullptr) {
+        ::CloseClipboard();
+        return false;
+    }
+    out.assign(locked);
+    ::GlobalUnlock(mem);
+    ::CloseClipboard();
+    return true;
+}
+#else
+bool clipboardSetText(const std::wstring&) { return false; }
+bool clipboardGetText(std::wstring&) { return false; }
+#endif
+
+} // namespace
 
 // =============================================================================
 // Phase C (S4) — UTF-8 → std::wstring helper for IME composition.
@@ -251,29 +357,34 @@ void TextInput::replaceRange(size_t a, size_t b, const std::wstring& replacement
 bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     if (e.mouseButton != 0) return false;
     if (!getWorldBounds().contains(e.mousePos)) return false;
-    // Click anywhere grants focus. Reset blink so the caret is visible
-    // immediately after click.
-    setFocus(true);
-    // Phase C (C5) — drag-select. Record the click as the drag anchor
-    // and return true so UIManager captures this widget. Subsequent
-    // onMouseMove events (delivered because of capture) extend the
-    // selection from the anchor to the current column.
+    const bool gainingFocus = !_hasFocus;
+    // Register with UIManager so onTextInput / IME route here. Local
+    // setFocus(true) alone leaves UIManager::_focusedWidget null and
+    // typed characters are dropped.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->setFocus(this);
+    } else {
+        setFocus(true);
+    }
+    // First click that grants focus: select-all so default/demo text is
+    // easy to replace (common single-line field UX). Subsequent clicks
+    // place a caret / start a drag-select.
+    if (gainingFocus && !_text.empty()) {
+        selectAll();
+        _dragging = true;
+        _dragAnchorCol = 0;
+        _dragAnchorWorld = e.mousePos;
+        _caretBlinkTimer = 0.0f;
+        _caretVisible = true;
+        return true;
+    }
     _dragging = true;
     _dragAnchorWorld = e.mousePos;
-    // Approximate the anchor column from the click x relative to the
-    // text area start. We use the same 7px char width as the renderer
-    // (R3 approximation). Clamp to text length.
-    constexpr float kApproxCharWidth = 7.0f;
     const math::FRectangle b = getWorldBounds();
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
-    long approxCol = static_cast<long>(localX / kApproxCharWidth);
-    if (approxCol < 0) approxCol = 0;
-    if (static_cast<size_t>(approxCol) > _text.size()) {
-        approxCol = static_cast<long>(_text.size());
-    }
-    _dragAnchorCol = static_cast<size_t>(approxCol);
-    // Initial selection is the anchor (collapsed) — onMouseMove will
-    // extend it once the mouse moves.
+    const std::wstring& display = _passwordMode
+        ? std::wstring(_text.size(), L'*') : _text;
+    _dragAnchorCol = columnFromLocalX(display, localX);
     _selStart = _dragAnchorCol;
     _selEnd = _dragAnchorCol;
     _caret = _dragAnchorCol;
@@ -283,21 +394,13 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
 }
 
 bool TextInput::onMouseMove(const UIMouseEvent& e) {
-    // Phase C (C5): only meaningful while drag is active and we own the
-    // capture. We don't gate on _capturedWidget because UIManager only
-    // delivers onMouseMove to the captured widget — if we're getting
-    // called, we're captured.
     if (!_dragging) return false;
-    constexpr float kApproxCharWidth = 7.0f;
     const math::FRectangle b = getWorldBounds();
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
-    long curCol = static_cast<long>(localX / kApproxCharWidth);
-    if (curCol < 0) curCol = 0;
-    if (static_cast<size_t>(curCol) > _text.size()) {
-        curCol = static_cast<long>(_text.size());
-    }
+    const std::wstring& display = _passwordMode
+        ? std::wstring(_text.size(), L'*') : _text;
+    const size_t cur = columnFromLocalX(display, localX);
     const size_t anchor = _dragAnchorCol;
-    const size_t cur = static_cast<size_t>(curCol);
     if (cur < anchor) {
         _selStart = cur;
         _selEnd = anchor;
@@ -325,11 +428,63 @@ bool TextInput::onMouseButtonUp(const UIMouseEvent& e) {
 
 bool TextInput::onTextInput(wchar_t ch) {
     if (!_hasFocus || _readOnly) return false;
+    // Drop C0 controls (Ctrl+C → 0x03 etc.); shortcuts go through onKeyDown.
+    if (ch < 0x20 && ch != L'\t') return true;
     return insertChar(ch);
 }
 
 bool TextInput::onKeyDown(int keyCode) {
     if (!_hasFocus) return false;
+
+    UIManager* ui = UIManager::tryGet();
+    const uint32_t mods = ui ? ui->getModifiers() : 0u;
+    const bool ctrl = (mods & (1u << (UIKey_Control - UIKey_Shift))) != 0u;
+
+    if (ctrl) {
+        switch (keyCode) {
+        case UIKey_A:
+            selectAll();
+            _caretBlinkTimer = 0.0f;
+            _caretVisible = true;
+            return true;
+        case UIKey_C: {
+            if (!hasSelection()) return true;
+            size_t a = _selStart;
+            size_t b = _selEnd;
+            if (b < a) std::swap(a, b);
+            (void)clipboardSetText(_text.substr(a, b - a));
+            return true;
+        }
+        case UIKey_X: {
+            if (_readOnly || !hasSelection()) return true;
+            size_t a = _selStart;
+            size_t b = _selEnd;
+            if (b < a) std::swap(a, b);
+            if (clipboardSetText(_text.substr(a, b - a))) {
+                replaceRange(a, b, L"");
+            }
+            _caretBlinkTimer = 0.0f;
+            _caretVisible = true;
+            return true;
+        }
+        case UIKey_V: {
+            if (_readOnly) return true;
+            std::wstring clip;
+            if (!clipboardGetText(clip) || clip.empty()) return true;
+            // Single-line: strip CR/LF from paste.
+            clip.erase(std::remove(clip.begin(), clip.end(), L'\r'), clip.end());
+            clip.erase(std::remove(clip.begin(), clip.end(), L'\n'), clip.end());
+            if (clip.empty()) return true;
+            replaceRange(_selStart, _selEnd, clip);
+            _caretBlinkTimer = 0.0f;
+            _caretVisible = true;
+            return true;
+        }
+        default:
+            break;
+        }
+    }
+
     bool handled = true;
     switch (keyCode) {
     case UIKey_Backspace:
@@ -353,15 +508,7 @@ bool TextInput::onKeyDown(int keyCode) {
     case UIKey_Enter:
         if (_onSubmit) _onSubmit(_text);
         break;
-    case UIKey_A:
-        // Ctrl+A select-all is host-side (we don't track modifier
-        // keys here); v1 keeps keyboard shortcut handling out of scope.
-        handled = false;
-        break;
     case UIKey_Tab:
-        // UIManager.onKeyDown intercepts Tab BEFORE delegating; if we ever
-        // see Tab here it means a host bypassed UIManager. Swallow it
-        // defensively to avoid caret-eating surprises.
         return true;
     default:
         handled = false;
@@ -493,30 +640,38 @@ void TextInput::onRender(IRenderBackend& renderer) {
     // Display text — password mask replaces each char with '*'.
     const std::wstring displayText =
         _passwordMode ? std::wstring(_text.size(), L'*') : _text;
+    const float textW = measurePrefixWidth(displayText, displayText.size());
+    const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
+    float textMinX = bounds.minX + kPaddingX;
+    if (_hAlign == HAlign::Right && textW < innerW) {
+        textMinX = bounds.maxX - kPaddingX - textW;
+    } else if (_hAlign == HAlign::Center && textW < innerW) {
+        textMinX = bounds.minX + kPaddingX + (innerW - textW) * 0.5f;
+    }
+
     if (!displayText.empty() || _hasFocus) {
-        // G6 — apply HAlign to the textBounds.minX. Approximation: we
-        // don't know exact glyph widths, so Right/Center shift the
-        // rectangle by an estimated text width (7px/char * len). For
-        // Left we keep the v1 behavior verbatim.
-        const float approxCharW = 7.0f;
-        const float approxTextW =
-            static_cast<float>(displayText.size()) * approxCharW;
-        const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
-        float textMinX = bounds.minX + kPaddingX;
-        if (_hAlign == HAlign::Right && approxTextW < innerW) {
-            textMinX = bounds.maxX - kPaddingX - approxTextW;
-        } else if (_hAlign == HAlign::Center && approxTextW < innerW) {
-            textMinX = bounds.minX + kPaddingX
-                + (innerW - approxTextW) * 0.5f;
-        }
         math::FRectangle textBounds(
             textMinX, bounds.minY,
             bounds.maxX - kPaddingX, bounds.maxY);
+        if (hasSelection()) {
+            size_t a = _selStart;
+            size_t bsel = _selEnd;
+            if (bsel < a) std::swap(a, bsel);
+            if (a > displayText.size()) a = displayText.size();
+            if (bsel > displayText.size()) bsel = displayText.size();
+            const float selX0 = textMinX + measurePrefixWidth(displayText, a);
+            const float selX1 = textMinX + measurePrefixWidth(displayText, bsel);
+            const float pad = 2.0f;
+            renderer.drawRect(
+                math::FRectangle(selX0, bounds.minY + pad,
+                                 selX1, bounds.maxY - pad),
+                math::FVector4(0.18f, 0.45f, 0.78f, 0.45f));
+        }
         const math::FVector4 textColor = _readOnly
             ? math::FVector4(0.55f, 0.55f, 0.55f, 1.0f)
             : math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
         if (!displayText.empty()) {
-            renderer.drawText(textBounds, displayText, 14, textColor);
+            renderer.drawText(textBounds, displayText, kTextFontSize, textColor);
         }
     }
 
@@ -536,22 +691,17 @@ void TextInput::onRender(IRenderBackend& renderer) {
             const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
             if (ws != nullptr) phColor = ws->placeholderColor;
         }
-        // G6 — same HAlign shift as the real text path.
-        const float approxCharW = 7.0f;
-        const float approxTextW =
-            static_cast<float>(_placeholder.size()) * approxCharW;
-        const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
-        float textMinX = bounds.minX + kPaddingX;
-        if (_hAlign == HAlign::Right && approxTextW < innerW) {
-            textMinX = bounds.maxX - kPaddingX - approxTextW;
-        } else if (_hAlign == HAlign::Center && approxTextW < innerW) {
-            textMinX = bounds.minX + kPaddingX
-                + (innerW - approxTextW) * 0.5f;
+        const float phW = measurePrefixWidth(_placeholder, _placeholder.size());
+        float phMinX = bounds.minX + kPaddingX;
+        if (_hAlign == HAlign::Right && phW < innerW) {
+            phMinX = bounds.maxX - kPaddingX - phW;
+        } else if (_hAlign == HAlign::Center && phW < innerW) {
+            phMinX = bounds.minX + kPaddingX + (innerW - phW) * 0.5f;
         }
         math::FRectangle textBounds(
-            textMinX, bounds.minY,
+            phMinX, bounds.minY,
             bounds.maxX - kPaddingX, bounds.maxY);
-        renderer.drawText(textBounds, _placeholder, 14, phColor);
+        renderer.drawText(textBounds, _placeholder, kTextFontSize, phColor);
     }
 
     // =================================================================
@@ -570,11 +720,6 @@ void TextInput::onRender(IRenderBackend& renderer) {
     // widget without overlapping the caret rectangle).
     // =================================================================
     if (_composing && !_compositionPreview.empty()) {
-        // Resolve the underline color via StyleManager. Fall back to the
-        // WidgetStyle default (sky blue) when no styleId is set. We
-        // bypass ResolvedStyle because that struct only carries the
-        // background/border fields — compositionUnderlineColor lives on
-        // WidgetStyle directly.
         math::FVector4 ulColor(0.30f, 0.65f, 0.95f, 1.0f);
         if (!getStyleId().empty()) {
             const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
@@ -582,9 +727,9 @@ void TextInput::onRender(IRenderBackend& renderer) {
                 ulColor = ws->compositionUnderlineColor;
             }
         }
-        constexpr float approxCharWidth = 7.0f; // matches TextArea rough
-        const float ulX = bounds.minX + kPaddingX;
-        const float ulW = static_cast<float>(_compositionPreview.size()) * approxCharWidth;
+        const float ulX = textMinX + measurePrefixWidth(displayText, _caret);
+        const float ulW = measurePrefixWidth(_compositionPreview,
+                                             _compositionPreview.size());
         const float ulY = bounds.maxY - 3.0f;
         constexpr float ulH = 1.5f;
         renderer.drawRect(
@@ -592,12 +737,12 @@ void TextInput::onRender(IRenderBackend& renderer) {
             ulColor);
     }
 
-    // Caret — small vertical line at the right side of the text we
-    // pinned in the rendering rect (we don't know glyph widths, so
-    // the caret stays at the right of the rendered area as a
-    // deliberately approximate signal — sufficient for unit tests).
+    // Caret — vertical bar at the glyph edge after `_caret` characters.
     if (_hasFocus && _caretVisible) {
-        const float cx = bounds.maxX - kPaddingX - kCaretWidth;
+        float cx = textMinX + measurePrefixWidth(displayText, _caret);
+        const float maxCx = bounds.maxX - kPaddingX - kCaretWidth;
+        if (cx > maxCx) cx = maxCx;
+        if (cx < bounds.minX + kPaddingX) cx = bounds.minX + kPaddingX;
         const float pad = 3.0f;
         renderer.drawRect(
             math::FRectangle(cx, bounds.minY + pad,
