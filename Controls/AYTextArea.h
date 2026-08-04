@@ -122,6 +122,10 @@ public:
     void clearSelection();
     void selectAll();
     bool hasSelection() const;
+    // PR-A2: read the currently-selected text as a single wstring, with
+    // line boundaries joined by '\n'. Returns empty when no selection
+    // is active. Used by TextDocument::onKeyDown's Ctrl+C / Ctrl+X paths.
+    std::wstring getSelectedText() const;
 
     void setReadOnly(bool ro);
     bool isReadOnly() const;

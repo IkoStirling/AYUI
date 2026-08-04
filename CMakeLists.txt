@@ -46,6 +46,8 @@ set(SRC_FILES
     Controls/AYModal.cpp
     Controls/AYModalDialog.cpp
     Controls/AYDimmer.cpp
+    Controls/AYClipboard.cpp
+    Controls/AYClipboard_Win32.cpp
     Controls/AYTabStrip.cpp
     Controls/AYDockArea.cpp
     Controls/AYDockCard.cpp
@@ -110,6 +112,7 @@ set(HEAD_FILES
     Controls/AYModal.h
     Controls/AYModalDialog.h
     Controls/AYDimmer.h
+    Controls/AYClipboard.h
     Controls/AYTabStrip.h
     Controls/AYDockArea.h
     Controls/AYDockCard.h

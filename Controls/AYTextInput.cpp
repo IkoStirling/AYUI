@@ -3,6 +3,7 @@
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "AYTextMeasure.h"
+#include "AYClipboard.h"
 #include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
 
@@ -10,16 +11,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-#if defined(_WIN32)
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <Windows.h>
-#endif
 
 namespace ayt::ui {
 
@@ -41,56 +32,6 @@ size_t columnFromLocalX(const std::wstring& text, float localX) {
     }
     return lo;
 }
-
-#if defined(_WIN32)
-bool clipboardSetText(const std::wstring& text) {
-    if (!::OpenClipboard(nullptr)) return false;
-    ::EmptyClipboard();
-    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-    HGLOBAL mem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
-    if (mem == nullptr) {
-        ::CloseClipboard();
-        return false;
-    }
-    void* locked = ::GlobalLock(mem);
-    if (locked == nullptr) {
-        ::GlobalFree(mem);
-        ::CloseClipboard();
-        return false;
-    }
-    std::memcpy(locked, text.c_str(), bytes);
-    ::GlobalUnlock(mem);
-    if (::SetClipboardData(CF_UNICODETEXT, mem) == nullptr) {
-        ::GlobalFree(mem);
-        ::CloseClipboard();
-        return false;
-    }
-    ::CloseClipboard();
-    return true;
-}
-
-bool clipboardGetText(std::wstring& out) {
-    out.clear();
-    if (!::OpenClipboard(nullptr)) return false;
-    HANDLE mem = ::GetClipboardData(CF_UNICODETEXT);
-    if (mem == nullptr) {
-        ::CloseClipboard();
-        return false;
-    }
-    const wchar_t* locked = static_cast<const wchar_t*>(::GlobalLock(mem));
-    if (locked == nullptr) {
-        ::CloseClipboard();
-        return false;
-    }
-    out.assign(locked);
-    ::GlobalUnlock(mem);
-    ::CloseClipboard();
-    return true;
-}
-#else
-bool clipboardSetText(const std::wstring&) { return false; }
-bool clipboardGetText(std::wstring&) { return false; }
-#endif
 
 } // namespace
 
@@ -429,7 +370,7 @@ bool TextInput::onKeyDown(int keyCode) {
             size_t a = _selStart;
             size_t b = _selEnd;
             if (b < a) std::swap(a, b);
-            (void)clipboardSetText(_text.substr(a, b - a));
+            (void)ayt::ui::getClipboard().setText(_text.substr(a, b - a));
             return true;
         }
         case UIKey_X: {
@@ -437,7 +378,7 @@ bool TextInput::onKeyDown(int keyCode) {
             size_t a = _selStart;
             size_t b = _selEnd;
             if (b < a) std::swap(a, b);
-            if (clipboardSetText(_text.substr(a, b - a))) {
+            if (ayt::ui::getClipboard().setText(_text.substr(a, b - a))) {
                 replaceRange(a, b, L"");
             }
             _caretBlinkTimer = 0.0f;
@@ -447,7 +388,7 @@ bool TextInput::onKeyDown(int keyCode) {
         case UIKey_V: {
             if (_readOnly) return true;
             std::wstring clip;
-            if (!clipboardGetText(clip) || clip.empty()) return true;
+            if (!ayt::ui::getClipboard().getText(clip) || clip.empty()) return true;
             // Single-line: strip CR/LF from paste.
             clip.erase(std::remove(clip.begin(), clip.end(), L'\r'), clip.end());
             clip.erase(std::remove(clip.begin(), clip.end(), L'\n'), clip.end());

@@ -3,6 +3,7 @@
 #include "AYUIManager.h"
 #include "AYStyle.h"
 #include "AYTextMeasure.h"
+#include "AYClipboard.h"
 #include "UIKeyCode.h"
 #include <algorithm>
 #include <string>
@@ -173,6 +174,7 @@ public:
         //   Home / End → start / end of line
         //   Backspace / Delete → handled by TextArea (insert/delete API)
         //   Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z → undo / redo (P1 polish)
+        //   Ctrl+C / Ctrl+X / Ctrl+V → clipboard (PR-A2)
         //
         // Polish (P1): Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z routing. Modifiers
         // are tracked by UIManager::_modifiers — we never see the
@@ -192,6 +194,51 @@ public:
                 _owner->redo();
             } else {
                 _owner->undo();
+            }
+            return true;
+        }
+        // PR-A2: clipboard routing. Multi-line paste is split on '\n'
+        // (and '\r' stripped) and re-inserted character-by-character
+        // through TextArea::insertChar so existing line-splitting +
+        // undo-push + caret-clamp logic all fires automatically. There's
+        // no public replaceRange on TextArea; we delete the existing
+        // selection first via deleteLeft (which respects readOnly) then
+        // stream the paste. On readOnly, Ctrl+V is a no-op.
+        if (ctrl && keyCode == UIKey_C) {
+            if (!_owner->hasSelection()) return true;
+            (void)ayt::ui::getClipboard().setText(_owner->getSelectedText());
+            return true;
+        }
+        if (ctrl && keyCode == UIKey_X) {
+            if (_owner->isReadOnly() || !_owner->hasSelection()) return true;
+            const std::wstring sel = _owner->getSelectedText();
+            if (!ayt::ui::getClipboard().setText(sel)) return true;
+            // Delete the selection. TextArea has no public replaceRange,
+            // so we move caret to start, then backspace once per char
+            // (deleteLeft handles selection-collapse + undo-push).
+            // Simpler: while hasSelection, deleteLeft.
+            while (_owner->hasSelection()) {
+                _owner->deleteLeft();
+            }
+            return true;
+        }
+        if (ctrl && keyCode == UIKey_V) {
+            if (_owner->isReadOnly()) return true;
+            std::wstring clip;
+            if (!ayt::ui::getClipboard().getText(clip) || clip.empty()) return true;
+            // Drop existing selection first so the paste replaces it.
+            while (_owner->hasSelection()) {
+                _owner->deleteLeft();
+            }
+            // Strip '\r' (Windows-paste leftover), keep '\n' for new lines.
+            std::wstring cleaned;
+            cleaned.reserve(clip.size());
+            for (const wchar_t ch : clip) {
+                if (ch == L'\r') continue;
+                cleaned.push_back(ch);
+            }
+            for (const wchar_t ch : cleaned) {
+                _owner->insertChar(ch);
             }
             return true;
         }
@@ -615,6 +662,33 @@ void TextArea::selectAll() {
 
 bool TextArea::hasSelection() const {
     return _selStartLine != _selEndLine || _selStartCol != _selEndCol;
+}
+
+// PR-A2: get the currently-selected text as a single wstring (lines
+// joined by '\n'). Selection is internal-ordered so start <= end per
+// axis (setSelection enforces that). Used by TextDocument::onKeyDown's
+// Ctrl+C / Ctrl+X paths. Pre-PR there was no public selection-accessor
+// because TextArea had no clipboard support at all.
+std::wstring TextArea::getSelectedText() const {
+    if (!hasSelection()) return std::wstring();
+    int sl = _selStartLine, sc = _selStartCol;
+    int el = _selEndLine,   ec = _selEndCol;
+    if (sl > el || (sl == el && sc > ec)) {
+        std::swap(sl, el);
+        std::swap(sc, ec);
+    }
+    if (sl == el) {
+        return _lines[sl].substr(sc, ec - sc);
+    }
+    std::wstring out;
+    out.append(_lines[sl].substr(sc));
+    out.push_back(L'\n');
+    for (int line = sl + 1; line < el; ++line) {
+        out.append(_lines[line]);
+        out.push_back(L'\n');
+    }
+    out.append(_lines[el].substr(0, ec));
+    return out;
 }
 
 void TextArea::setReadOnly(bool ro) { _readOnly = ro; }
