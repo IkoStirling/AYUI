@@ -212,6 +212,11 @@ public:
     const math::FVector2& getScrollOffset() const { return _scrollState.getScrollOffset(); }
     void setScrollOffset(const math::FVector2& offset);
 
+    // PR-B3 — index of the first visible pool row. Hosts (and tests)
+    // use this to assert that rebindPoolRows() actually advanced as a
+    // result of a wheel event.
+    int  getFirstVisibleIndex() const { return _firstVisibleIndex; }
+
     ScrollBar* getVerticalScrollBar() const { return _vbar; }
 
     void performLayout() override;
@@ -246,6 +251,17 @@ public:
     // G2 — pool[slot].getIndex() in tests; logical item index of slot.
     int    getRowPoolLogicalIndex(size_t slot) const;
 
+    // PR-B3 — wheel-routable scroll. Applies a vertical delta and
+    // rebinds the pool so row visuals follow the new scrollOffset.
+    // Sign convention matches ScrollView::scrollBy: positive dy moves
+    // scrollOffset DOWN (content reveals more below). Returns true if
+    // the offset actually changed (clamped + non-zero).
+    bool scrollBy(float deltaY);
+
+    // PR-B3 — wheel handler. Maps wheel deltaY to scrollBy with the
+    // sign flipped to match ScrollView's onMouseWheel convention.
+    bool onMouseWheel(const UIMouseWheelEvent& e) override;
+
 protected:
     void layoutChildren() override;
     void rebuildRows();
@@ -269,6 +285,8 @@ protected:
     // R7 in recursive-squishing-turing.md. Subclasses / self call this
     // to keep selection in the viewport.
     void scrollToIndex(int index);
+
+protected:
 
 private:
     void ensureBarCreated();

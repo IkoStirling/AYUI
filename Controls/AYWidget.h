@@ -52,6 +52,23 @@ struct UIMouseEvent {
         : mousePos(pos), mouseButton(btn) {}
 };
 
+// PR-B3 — wheel event. Positive deltaY = scroll DOWN (content moves up);
+// deltaX is unused today (only V scrollbars are wired) but kept in the
+// event so horizontal wheels (Shift+wheel on Win32, native tilt on macOS)
+// can be routed later without breaking the API.
+//
+// We don't reuse UIMouseEvent because wheel events have no button code
+// (mouseButton would be a meaningless 0/2/3 convention) and the routing
+// semantics differ (no capture, no focus-only semantics, no click
+// follow-up).
+struct UIMouseWheelEvent {
+    math::FVector2 mousePos;
+    float deltaY;
+
+    UIMouseWheelEvent(const math::FVector2& pos, float dy)
+        : mousePos(pos), deltaY(dy) {}
+};
+
 enum class UiCursorHint {
     Default,
     Hand,
@@ -175,6 +192,15 @@ public:
     virtual bool onKeyDown(int keyCode);
     virtual bool onKeyUp(int keyCode);
     virtual bool onTextInput(wchar_t ch);
+
+    // PR-B3 — wheel routing. Default returns false (no scrollable
+    // behaviour). ScrollView / ListView override this and return true
+    // when the wheel actually moved content (caller uses the bool to
+    // decide whether to suppress a parent scroll container).
+    virtual bool onMouseWheel(const UIMouseWheelEvent& e) {
+        AYUNREFERENCED_PARAM(e);
+        return false;
+    }
 
     virtual UiCursorHint getCursorHint() const { return UiCursorHint::Default; }
 

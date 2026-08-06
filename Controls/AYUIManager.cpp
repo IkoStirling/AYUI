@@ -1083,6 +1083,45 @@ bool UIManager::onMouseMove(float x, float y) {
     return false;
 }
 
+// PR-B3 — wheel routing. Hit-tests the topmost widget, then walks UP the
+// parent chain calling onMouseWheel on each ancestor until one returns
+// true (the widget scrolled something, so we stop). The bottom-up walk
+// mirrors how focus routing works: the deepest widget that knows how to
+// handle a wheel wins, so nested containers (ScrollView inside another
+// ScrollView, ComboBox popup with an outer ScrollView) route correctly.
+//
+// Why not the reverse (outer first): Win32 / macOS / GTK all route wheel
+// to the deepest scrollable under the cursor. The OS convention is
+// "scroll the thing under the cursor" — bubbling UP only after the inner
+// widget declines.
+//
+// Why not pop the overlay first explicitly: pickTopmostWidget already
+// prefers the overlay over the root tree (see implementation), so a
+// ComboBox popup ListView is the natural deepest hit when the cursor
+// is on the popup. We then bubble through the popup's parent chain
+// (which is the ComboBox itself → its parent), and the popup's
+// onMouseWheel override consumes the event before the outer ScrollView
+// gets a chance.
+bool UIManager::onMouseWheel(float x, float y, float deltaY) {
+    if (!_root) {
+        return false;
+    }
+    const math::FVector2 pos(x, y);
+    Widget* hit = pickTopmostWidget(pos);
+    if (hit == nullptr) {
+        return false;
+    }
+    const UIMouseWheelEvent ev(pos, deltaY);
+    Widget* cur = hit;
+    while (cur != nullptr) {
+        if (cur->onMouseWheel(ev)) {
+            return true;
+        }
+        cur = cur->getParent();
+    }
+    return false;
+}
+
 bool UIManager::onMouseButtonDown(float x, float y, int button) {
     if (!_root) {
         return false;

@@ -6,6 +6,7 @@
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 
 namespace ayt::ui {
@@ -406,6 +407,33 @@ void ListView::setScrollOffset(const math::FVector2& offset) {
     _scrollState.setScrollOffset(clamped);
     syncBarToOffset();
     rebindPoolRows();
+}
+
+// PR-B3 — public scrollBy for wheel routing and any other callers
+// (keyboard PgUp/PgDn that may be added later). We compute the new
+// offset, then call setScrollOffset (which clamps, syncs the bar, and
+// rebinds the pool in one chokepoint — same G2 invariant as the bar
+// drag path).
+bool ListView::scrollBy(float deltaY) {
+    const math::FVector2 vp = getViewportSize();
+    const math::FVector2 maxOff = _scrollState.getMaxScrollOffset(vp);
+    const float cur = _scrollState.getScrollOffset().y;
+    const float next = std::clamp(cur + deltaY, 0.0f, maxOff.y);
+    if (std::fabs(next - cur) < 0.01f) {
+        return false;
+    }
+    setScrollOffset(math::FVector2(_scrollState.getScrollOffset().x, next));
+    return true;
+}
+
+// PR-B3 — wheel handler. scrollBy accepts positive deltaY to move the
+// scroll offset DOWN (reveal more rows below). Wheel convention on
+// every desktop OS: positive deltaY = "user rolled the wheel away
+// from them" = content moves UP = scrollOffset INCREASES. So pass
+// deltaY through unchanged. Defers to scrollBy for the clamp +
+// rebind chokepoint.
+bool ListView::onMouseWheel(const UIMouseWheelEvent& e) {
+    return scrollBy(e.deltaY);
 }
 
 void ListView::ensureBarCreated() {

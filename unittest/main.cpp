@@ -69,6 +69,7 @@
 #include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
 #include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
 #include "Test_Theme_Gallery.cpp"       // PR-B2 measurePrefixWidth + Theme swap
+#include "Test_WheelRouting.cpp"        // PR-B3 nested wheel routing
 
 void runTest()
 {

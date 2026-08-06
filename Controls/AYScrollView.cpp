@@ -112,6 +112,16 @@ bool ScrollView::scrollBy(const math::FVector2& delta) {
     return changed;
 }
 
+// PR-B3 — wheel handler. scrollBy accepts (dx, dy) where positive dy
+// moves the scroll offset DOWN — i.e. reveals more content below the
+// cursor (content moves up out of the viewport). Wheel conventions on
+// every desktop OS are the same: positive deltaY = "user rolled the
+// wheel away from them" = content moves UP = scrollOffset INCREASES.
+// So we pass deltaY through unchanged here.
+bool ScrollView::onMouseWheel(const UIMouseWheelEvent& e) {
+    return scrollBy(math::FVector2(0.0f, e.deltaY));
+}
+
 void ScrollView::performLayout() {
     // Default size — sensible default 200x150 if not set by host.
     if (getWidth() <= 0.0f) {

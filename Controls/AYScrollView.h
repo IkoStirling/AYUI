@@ -60,12 +60,36 @@ public:
     // change. Re-syncs bar values to the new offset.
     bool scrollBy(const math::FVector2& delta);
 
+    // PR-B3 — explicit scroll offset setter. Mirrors ListView's
+    // setScrollOffset for tests + hosts that want to seed a known
+    // scroll position before running a wheel assertion. Clamped via
+    // the same chokepoint scrollBy uses.
+    void setScrollOffset(const math::FVector2& offset) {
+        scrollBy(offset - _scrollState.getScrollOffset());
+    }
+
     void setOnScroll(std::function<void(const math::FVector2&)> cb) {
         _onScroll = std::move(cb);
     }
 
     ScrollBar* getVerticalScrollBar()   const { return _vbar; }
     ScrollBar* getHorizontalScrollBar() const { return _hbar; }
+
+    // PR-B3 — exposes the current scroll offset for tests + host code
+    // that wants to mirror the bar's value. Mirrors ListView's
+    // getScrollOffset() so wheel-routing assertions can read either
+    // container's state the same way.
+    const math::FVector2& getScrollOffset() const {
+        return _scrollState.getScrollOffset();
+    }
+
+    // PR-B3 — wheel routing. Maps a vertical wheel deltaY into a
+    // scrollBy(0, -deltaY) call (sign flipped: wheel deltaY positive
+    // means "scroll content UP", which is a DECREASE in scrollOffset.y
+    // because content moves with the cursor). Returns true if the
+    // scroll actually moved (clamped + changed) so the UIManager
+    // router stops bubbling the event to outer scroll containers.
+    bool onMouseWheel(const UIMouseWheelEvent& e) override;
 
 protected:
     void performLayout() override;

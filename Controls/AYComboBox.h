@@ -200,6 +200,13 @@ public:
     void closePopup();
     void togglePopup() { if (_popupOpen) closePopup(); else openPopup(); }
 
+    // PR-B3 — exposes the popup ListView (may be nullptr before first
+    // openPopup). Hosts and tests use this to query the popup's
+    // scrollOffset / firstVisibleIndex without going through the
+    // overlay tree directly. Returns the managed pointer; lifetime
+    // is owned by ComboBox.
+    ListView* getPopup() const { return _popup; }
+
     // Layout knobs.
     void setMaxPopupItems(int n) { _maxPopupItems = (n > 0 ? n : 1); }
     int  getMaxPopupItems() const { return _maxPopupItems; }

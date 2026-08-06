@@ -195,6 +195,14 @@ public:
     void onMouseLeave();
     void clearHover();
 
+    // PR-B3 — wheel routing. Hit-tests the topmost widget at (x, y),
+    // then walks UP the parent chain calling onMouseWheel on each
+    // ancestor until one returns true (consumed). The first TRUE wins
+    // so nested scroll containers don't double-scroll — a wheel over a
+    // ComboBox popup routes to the popup's ListView, NOT to an outer
+    // ScrollView. Returns true iff any widget consumed the event.
+    bool onMouseWheel(float x, float y, float deltaY);
+
     // C-3 focus + keyboard routing. setFocus replaces the currently
     // focused widget (if any) with the new one; pass nullptr to drop
     // focus. onKeyDown / onKeyUp route to the focused widget if it
