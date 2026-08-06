@@ -603,4 +603,162 @@ TEST_CASE(combobox_focus_grab_on_click) {
     ui.shutdown();
 }
 
+// ============================================================================
+// PR-C2 — typeahead: typing letters jumps to matching items + opens popup
+// (Windows native dropdown semantics). Buffers accumulate within
+// kTypeaheadTimeout=0.5s; arrow keys / Enter / Escape / mouse-pick all
+// invalidate the buffer.
+// ============================================================================
+
+// PR-C2.1 — single letter jumps to the next matching item and opens
+// the popup. Case-insensitive.
+TEST_CASE(combobox_typeahead_letter_jumps_and_opens) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"banana", L"cherry", L"apricot"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    CHECK_FALSE(cb.isPopupOpen());
+    CHECK(cb.getSelectedIndex() == -1);
+
+    // 'a' (lowercase from UIKey_A — case folded inside onKeyDown) should
+    // jump to "apple" (index 0) and open the popup.
+    const bool consumed = cb.onKeyDown(UIKey_A);
+    CHECK(consumed);
+    CHECK(cb.getSelectedIndex() == 0);
+    CHECK(cb.isPopupOpen());
+
+    ui.shutdown();
+}
+
+// PR-C2.2 — repeating the same letter cycles through matching items
+// (the search starts from current+1, wrapping at end).
+TEST_CASE(combobox_typeahead_repeat_letter_cycles) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"apricot", L"banana"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    cb.onKeyDown(UIKey_A);   // → apple (index 0)
+    CHECK(cb.getSelectedIndex() == 0);
+    cb.onKeyDown(UIKey_A);   // → apricot (index 1, search from 1)
+    CHECK(cb.getSelectedIndex() == 1);
+    cb.onKeyDown(UIKey_A);   // wraps → apple (0)
+    CHECK(cb.getSelectedIndex() == 0);
+
+    ui.shutdown();
+}
+
+// PR-C2.3 — multi-letter prefix within timeout extends the match
+// (typing "ap" should land on "apple"/"apricot", not "banana").
+TEST_CASE(combobox_typeahead_multi_letter_within_timeout) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"apricot", L"banana", L"cherry"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    cb.onKeyDown(UIKey_A);   // → apple
+    cb.onKeyDown(UIKey_P);   // extend to "ap" — still apple
+    CHECK(cb.getSelectedIndex() == 0);
+
+    ui.shutdown();
+}
+
+// PR-C2.4 — buffer resets after kTypeaheadTimeout. Tick ComboBox with
+// dt > 0.5s; next letter starts a fresh single-char prefix.
+TEST_CASE(combobox_typeahead_buffer_resets_after_timeout) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"banana", L"cherry"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    cb.onKeyDown(UIKey_A);   // → apple (0)
+    cb.onKeyDown(UIKey_P);   // → apple (still, "ap" matches)
+    CHECK(cb.getSelectedIndex() == 0);
+
+    // Tick past the timeout window.
+    cb.tick(0.6f);
+
+    // Next 'b' should match "banana" (index 1) — the buffer cleared, so
+    // we don't try "apb" which matches nothing.
+    cb.onKeyDown(UIKey_B);
+    CHECK(cb.getSelectedIndex() == 1);
+
+    ui.shutdown();
+}
+
+// PR-C2.5 — arrow keys / Enter / Escape invalidate the typeahead buffer
+// (the user switched to navigation or committed/dismissed).
+TEST_CASE(combobox_typeahead_invalidated_by_navigation_keys) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"apricot", L"banana"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    cb.onKeyDown(UIKey_A);    // → apple
+    CHECK(cb.getSelectedIndex() == 0);
+
+    // Down arrow should advance to index 1 (apricot) and clear buffer.
+    cb.onKeyDown(UIKey_Down);
+    CHECK(cb.getSelectedIndex() == 1);
+
+    // Now 'a' again should land on apple (index 0), not on apricot,
+    // because the buffer was reset by the arrow key.
+    cb.onKeyDown(UIKey_A);
+    CHECK(cb.getSelectedIndex() == 0);
+
+    ui.shutdown();
+}
+
+// PR-C2.6 — typeahead letter that doesn't match any item is NOT
+// consumed (returned false). The buffer is reset so subsequent keys
+// aren't masked by the bad prefix.
+TEST_CASE(combobox_typeahead_no_match_does_not_consume) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"apple", L"banana"});
+    cb.setSize(FVector2(160.0f, 28.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+    ui.root()->addChildExternal(&cb);
+
+    // 'z' doesn't start any item — onKeyDown should return false.
+    const bool consumed = cb.onKeyDown(UIKey_Z);
+    CHECK_FALSE(consumed);
+    CHECK_FALSE(cb.isPopupOpen());   // nothing opened
+
+    // Next valid letter 'a' should still work (buffer cleared).
+    cb.onKeyDown(UIKey_A);
+    CHECK(cb.getSelectedIndex() == 0);
+
+    ui.shutdown();
+}
+
 TEST_SUITE_END

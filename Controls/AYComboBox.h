@@ -159,6 +159,11 @@ public:
     static constexpr float kArrowWidth = 18.0f;
     static constexpr float kTextPadX = 8.0f;
 
+    // PR-C2 — typeahead timeout. After this many seconds without a new
+    // letter, the buffer is cleared so the next letter starts a fresh
+    // prefix match. Matches the Windows native dropdown's 0.5s.
+    static constexpr float kTypeaheadTimeout = 0.5f;
+
     ComboBox();
     ~ComboBox() override;
 
@@ -237,7 +242,17 @@ public:
     // — does NOT delegate to the popup ListView. See DECISION 3 in the
     // header note above for the full state table. Returns true when the
     // key was consumed.
+    //
+    // PR-C2: extended to consume UIKey_A..UIKey_Z (and digits 0-9) as
+    // typeahead letters. See typeahead section in the cpp for the
+    // matching algorithm + buffer semantics.
     bool onKeyDown(int keyCode) override;
+
+    // PR-C2 — accumulates the typeahead-reset timer. Called by the
+    // CompoundFocusableWidget::tick cascade when ComboBox is in the
+    // _root subtree (the common case). Hosts that put a ComboBox on
+    // the overlay can tick it directly; v1 doesn't expect that.
+    void tick(float dt) override;
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
@@ -259,6 +274,22 @@ private:
     ListView*  _popup   = nullptr;
 
     bool _enabled = true;
+
+    // PR-C2 — typeahead state. _typeaheadBuffer accumulates the user's
+    // recent letters; _typeaheadTimer counts down since the last letter
+    // so a pause resets the prefix (matches Windows native dropdown).
+    // _typeaheadStartingIndex is the index we started the search FROM
+    // (typically current selection + 1, wrapping at end) so repeated
+    // presses of the same letter cycle through matching items instead
+    // of always landing on the first.
+    std::wstring _typeaheadBuffer;
+    float        _typeaheadTimer   = 0.0f;
+    int          _typeaheadStartingIndex = -1;
+
+    // PR-C2 — find the next item whose first _typeaheadBuffer.size()
+    // chars (case-insensitive) match _typeaheadBuffer, starting the
+    // search at `startFrom` and wrapping. Returns -1 if nothing matches.
+    int  findTypeaheadMatch(int startFrom) const;
 
     // Phase B (B2): mute flag for the popup's selection callback. When
     // onKeyDown's open-state path mirrors `_selectedIndex` into the popup

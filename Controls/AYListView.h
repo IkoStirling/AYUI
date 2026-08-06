@@ -217,6 +217,12 @@ public:
     // result of a wheel event.
     int  getFirstVisibleIndex() const { return _firstVisibleIndex; }
 
+    // PR-C2 — scroll a specific logical index into the viewport. Hosts
+    // (ComboBox::typeahead) use this to ensure the matched item is
+    // visible without going through the wheel/scrollBy path. Promoted
+    // from protected so external callers don't need to subclass.
+    void scrollToIndex(int index);
+
     ScrollBar* getVerticalScrollBar() const { return _vbar; }
 
     void performLayout() override;
@@ -279,12 +285,6 @@ protected:
     void rebindPoolRows();
 
     math::FVector2 getViewportSize() const;
-
-    // Promoted from private → protected so Phase B (B1) ListView::onKeyDown
-    // can ensure the newly-selected row is visible after a keyboard move.
-    // R7 in recursive-squishing-turing.md. Subclasses / self call this
-    // to keep selection in the viewport.
-    void scrollToIndex(int index);
 
 protected:
 

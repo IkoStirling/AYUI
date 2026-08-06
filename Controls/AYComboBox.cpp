@@ -93,6 +93,10 @@ void ComboBox::setSelectedIndex(int index) {
     int clamped = index;
     if (clamped < -1) clamped = -1;
     if (clamped >= static_cast<int>(_items.size())) clamped = -1;
+    // PR-C2 — programmatic selection also invalidates the typeahead
+    // buffer because the user (or host) has committed to a value. The
+    // next letter starts a fresh prefix.
+    _typeaheadBuffer.clear();
     _selectedIndex = clamped;
     if (_display != nullptr) {
         _display->setText(
@@ -141,6 +145,10 @@ void ComboBox::ensurePopupCreated() {
         // (close + callback) in that case — the keyboard caller owns
         // the state machine. Display label still updates so the
         // highlight stays consistent.
+        //
+        // PR-C2: a real popup-row click (NOT silent sync) invalidates
+        // the typeahead buffer because the user has committed to a
+        // selection — clear it so a subsequent letter starts fresh.
         if (_silentPopupSync) {
             _selectedIndex = idx;
             if (_display != nullptr) {
@@ -151,6 +159,9 @@ void ComboBox::ensurePopupCreated() {
             }
             return;
         }
+        // Mouse-driven selection (popup row click). Drop the typeahead
+        // buffer; the popup is about to close anyway.
+        _typeaheadBuffer.clear();
         // Mirror selection into ComboBox's own _selectedIndex so
         // getSelectedIndex / getSelectedItem report the new value, and
         // update the display label. setSelectedIndex closes the popup
@@ -367,14 +378,91 @@ bool ComboBox::onMouseButtonDown(const UIMouseEvent& e) {
 bool ComboBox::onKeyDown(int keyCode) {
     // ComboBox owns ALL its keys — does NOT delegate to the popup
     // ListView. See DECISION 3 in the header note for the state table.
+    //
+    // PR-C2 — typeahead letter handling. UIKey_A..UIKey_Z (and digits
+    // 0..9 if you want to extend) become characters in the typeahead
+    // buffer. We treat each letter as: append to buffer (lowercased),
+    // find next match starting from current selection+1, jump there,
+    // and ensure the popup is open so the user sees the match. The
+    // timer is reset so the next letter within kTypeaheadTimeout
+    // extends the prefix; after the timeout the buffer clears.
 
     if (_items.empty()) return false;
     const int n = static_cast<int>(_items.size());
+
+    // PR-C2 — typeahead: A-Z (case-insensitive). Each match is a single
+    // character so we accept exactly one VK per press. The buffer can
+    // grow if the user keeps typing within kTypeaheadTimeout.
+    if (keyCode >= UIKey_A && keyCode <= UIKey_Z) {
+        // Reset the buffer if the previous letter aged out (defensive:
+        // tick() should already have cleared it).
+        if (_typeaheadTimer > kTypeaheadTimeout) {
+            _typeaheadBuffer.clear();
+        }
+        // Append the lowercase letter. Lowercasing here keeps the
+        // matching case-insensitive without per-char branching later.
+        const wchar_t ch = static_cast<wchar_t>(
+            L'a' + (keyCode - UIKey_A));
+        _typeaheadBuffer.push_back(ch);
+        _typeaheadTimer = 0.0f;
+        const int startFrom = (_selectedIndex < 0) ? 0
+                                                  : (_selectedIndex + 1) % n;
+        const int match = findTypeaheadMatch(startFrom);
+        if (match < 0) {
+            // No match for the full prefix. Reset and try the first
+            // character only — matches Windows behavior where typing
+            // 'zx' when nothing starts with 'zx' falls back to items
+            // starting with 'z'. Without this fallback the user would
+            // get no feedback at all on a typo.
+            if (_typeaheadBuffer.size() > 1) {
+                _typeaheadBuffer.pop_back();
+                const int retryStart = (_selectedIndex < 0) ? 0
+                    : (_selectedIndex + 1) % n;
+                const int retry = findTypeaheadMatch(retryStart);
+                if (retry >= 0) {
+                    _silentPopupSync = true;
+                    setSelectedIndex(retry);
+                    if (_popup != nullptr) {
+                        _popup->setSelectedIndex(retry);
+                        _popup->scrollToIndex(retry);
+                    }
+                    _silentPopupSync = false;
+                    if (!isPopupOpen()) {
+                        openPopup();
+                    }
+                    return true;
+                }
+            }
+            // Still nothing — clear the buffer so the next keypress
+            // starts fresh, but DON'T consume the key (let the host
+            // app or the focused widget see it).
+            _typeaheadBuffer.clear();
+            return false;
+        }
+        // Match found — jump there silently (no popup close + no
+        // _onSelectionChanged fire, matching the arrow-key path).
+        _silentPopupSync = true;
+        setSelectedIndex(match);
+        if (_popup != nullptr) {
+            _popup->setSelectedIndex(match);
+            _popup->scrollToIndex(match);
+        }
+        _silentPopupSync = false;
+        if (!isPopupOpen()) {
+            openPopup();
+        }
+        return true;
+    }
+
     const bool isOpen = isPopupOpen();
 
     switch (keyCode) {
     case UIKey_Down:
     case UIKey_Up: {
+        // PR-C2 — arrow keys invalidate the typeahead buffer because
+        // the user has switched to navigation. Matches Windows: once
+        // you press an arrow, the next letter starts a fresh prefix.
+        _typeaheadBuffer.clear();
         if (!isOpen) {
             // Closed → open popup, target depends on direction.
             // Down: target = current (or 0 if nothing selected).
@@ -406,6 +494,8 @@ bool ComboBox::onKeyDown(int keyCode) {
         return true;
     }
     case UIKey_Enter:
+        // PR-C2 — Enter invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         if (isOpen) {
             // Commit: close + fire callback.
             closePopup();
@@ -416,6 +506,8 @@ bool ComboBox::onKeyDown(int keyCode) {
         }
         return false;
     case UIKey_Escape:
+        // PR-C2 — Escape invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         if (isOpen) {
             // Dismiss without committing — _selectedIndex unchanged.
             closePopup();
@@ -424,6 +516,60 @@ bool ComboBox::onKeyDown(int keyCode) {
         return false;
     default:
         return false;
+    }
+}
+
+int ComboBox::findTypeaheadMatch(int startFrom) const {
+    if (_typeaheadBuffer.empty()) return -1;
+    const int n = static_cast<int>(_items.size());
+    if (n == 0) return -1;
+    // Walk from startFrom wrapping around until we revisit startFrom
+    // (which means we've covered everything). Linear scan; with
+    // realistic item counts (< 10k) this is cheaper than building a
+    // trie on every setItems.
+    int i = startFrom;
+    for (int checked = 0; checked < n; ++checked) {
+        const std::wstring& item = _items[static_cast<size_t>(i)];
+        if (item.size() >= _typeaheadBuffer.size()) {
+            bool match = true;
+            for (size_t k = 0; k < _typeaheadBuffer.size(); ++k) {
+                // Case-insensitive ASCII compare. CJK items whose
+                // first character matches exactly are accepted by the
+                // default else branch — `std::towlower` may not fold
+                // CJK, but towlower(item[0]) == towlower(buffer[0])
+                // holds for plain ASCII either way.
+                wchar_t a = item[k];
+                wchar_t b = _typeaheadBuffer[k];
+                if (a >= L'A' && a <= L'Z') a = static_cast<wchar_t>(a + (L'a' - L'A'));
+                if (a != b) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        i = (i + 1) % n;
+    }
+    return -1;
+}
+
+void ComboBox::tick(float dt) {
+    // PR-C2 — typeahead timer. CompoundFocusableWidget::tick cascades
+    // into children first, then we'd want to advance our own state.
+    // The dt comes from UIManager::update → _root->tick which recurses
+    // via CompoundWidget::tick (see AYWidget.cpp:37).
+    //
+    // _typeaheadTimer counts UP from the last letter; when it crosses
+    // kTypeaheadTimeout the buffer clears so the next letter starts a
+    // fresh prefix. We don't clear on every tick — only on threshold
+    // cross — to avoid mid-keystroke churn if the host pumps uneven
+    // dt values.
+    if (!_typeaheadBuffer.empty()) {
+        _typeaheadTimer += dt;
+        if (_typeaheadTimer > kTypeaheadTimeout) {
+            _typeaheadBuffer.clear();
+            _typeaheadTimer = 0.0f;
+        }
     }
 }
 
