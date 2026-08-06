@@ -772,10 +772,19 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     // drags a finger — same code path as a real wheel on a desktop.
     struct TouchState {
         bool    active       = false;
+        // PR-B5 — dragStarted flips true once the finger crosses the
+        // drag threshold. While false, the gesture is a "tentative tap"
+        // and we suppress the synthesized mouse-down so a ListView
+        // row click doesn't fire before the user has shown they want
+        // to scroll (touchscreen users naturally flick instead of
+        // press-and-drag like a mouse).
+        bool    dragStarted  = false;
         float   lastY        = 0.0f;
         float   accumulatedDy = 0.0f; // // positive = finger moved down
         float   x            = 0.0f;
         float   y            = 0.0f;
+        float   startX       = 0.0f;
+        float   startY       = 0.0f;
         DWORD   pointerId    = 0;
     };
     static thread_local TouchState gTouch;
@@ -783,6 +792,10 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     // (typical deltaY = 120). Flip sign so dragging finger UP scrolls
     // content DOWN (matches native scrolling convention).
     constexpr float kTouchWheelScale = 1.2f;
+    // Threshold beyond which a tentative tap becomes a drag-scroll:
+    // beyond this distance, the gesture is treated as a scroll and
+    // the mouse-down (which would have selected a row) is suppressed.
+    constexpr float kTouchDragThresholdPx = 6.0f;
 
     switch (msg) {
     case WM_SIZE: {
@@ -907,8 +920,17 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         }
 
         if (sawDown) {
-            // First contact — synthesize mouse-down.
+            // First contact — record the tentative tap. We DO NOT
+            // synthesize mouse-down yet; the previously-shipped code
+            // fired onMouseButtonDown immediately, which on a ListView
+            // selected a row before the user had a chance to scroll.
+            // The new flow: track start, fire mouse-down only after
+            // we're sure the gesture is a tap (no drag within the
+            // threshold). dragStarted flips true on the first move
+            // past kTouchDragThresholdPx and the gesture becomes a
+            // pure scroll.
             gTouch.active        = true;
+            gTouch.dragStarted   = false;
             gTouch.lastY         = gTouch.y;
             gTouch.accumulatedDy = 0.0f;
             gTouch.pointerId     = inputs.empty() ? 0 : inputs[0].dwID;
@@ -923,36 +945,53 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
             ::ScreenToClient(static_cast<HWND>(state->devices->window().getWindowHandle()), &pt);
             gTouch.x = static_cast<float>(pt.x);
             gTouch.y = static_cast<float>(pt.y);
+            gTouch.startX = gTouch.x;
+            gTouch.startY = gTouch.y;
             state->ui->onMouseMove(gTouch.x, gTouch.y);
-            state->ui->onMouseButtonDown(gTouch.x, gTouch.y, 0);
         } else if (sawMove && gTouch.active) {
             const float dy = gTouch.y - gTouch.lastY;
             gTouch.accumulatedDy += dy;
             gTouch.lastY = gTouch.y;
             state->ui->onMouseMove(gTouch.x, gTouch.y);
 
-            // When finger has accumulated enough drag, fire a wheel
-            // event. onMouseWheel routes via UIManager's hit-test to
-            // the topmost scroll container (ScrollView / ListView /
-            // ComboBox popup).
-            //
-            // Threshold = 8 px (one wheel notch ≈ 6-8 px on most
-            // precision touchpads).
-            constexpr float kTouchWheelThresholdPx = 8.0f;
-            if (std::fabs(gTouch.accumulatedDy) >= kTouchWheelThresholdPx) {
-                // Sign convention: UIManager::onMouseWheel deltaY is
-                // "content to move by -deltaY in y" (scroll wheel up
-                // has positive deltaY per Win32 convention). Our
-                // accumulatedDy is "finger moved down" which feels
-                // like "scroll content up" — so we negate.
-                const float wheelDelta =
-                    -gTouch.accumulatedDy * kTouchWheelScale;
-                state->ui->onMouseWheel(gTouch.x, gTouch.y, wheelDelta);
-                gTouch.accumulatedDy = 0.0f;
+            // PR-B5 — once the finger crosses the drag threshold,
+            // commit the gesture as a scroll. We DON'T synthesize a
+            // mouse-down (which would have selected a row); the
+            // accumulated dy is fed straight into onMouseWheel.
+            if (!gTouch.dragStarted) {
+                const float totalDx = gTouch.x - gTouch.startX;
+                const float totalDy = gTouch.y - gTouch.startY;
+                if (std::fabs(totalDy) >= kTouchDragThresholdPx ||
+                    std::fabs(totalDx) >= kTouchDragThresholdPx) {
+                    gTouch.dragStarted = true;
+                }
+            }
+            if (gTouch.dragStarted) {
+                // Threshold = 8 px (one wheel notch ≈ 6-8 px on most
+                // precision touchpads).
+                constexpr float kTouchWheelThresholdPx = 8.0f;
+                if (std::fabs(gTouch.accumulatedDy) >= kTouchWheelThresholdPx) {
+                    // Sign convention: UIManager::onMouseWheel deltaY is
+                    // "content to move by -deltaY in y" (scroll wheel up
+                    // has positive deltaY per Win32 convention). Our
+                    // accumulatedDy is "finger moved down" which feels
+                    // like "scroll content up" — so we negate.
+                    const float wheelDelta =
+                        -gTouch.accumulatedDy * kTouchWheelScale;
+                    state->ui->onMouseWheel(gTouch.x, gTouch.y, wheelDelta);
+                    gTouch.accumulatedDy = 0.0f;
+                }
             }
         } else if (sawUp && gTouch.active) {
-            state->ui->onMouseButtonUp(gTouch.x, gTouch.y, 0);
+            // Only fire mouse-up if the gesture was actually a tap
+            // (no drag). For a drag-scroll, we never sent a
+            // mouse-down, so the up is a no-op.
+            if (!gTouch.dragStarted) {
+                state->ui->onMouseButtonDown(gTouch.x, gTouch.y, 0);
+                state->ui->onMouseButtonUp(gTouch.x, gTouch.y, 0);
+            }
             gTouch.active        = false;
+            gTouch.dragStarted   = false;
             gTouch.accumulatedDy = 0.0f;
             gTouch.pointerId     = 0;
         }
