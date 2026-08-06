@@ -22,6 +22,13 @@ public:
     void setGravity(Gravity gravity) { _gravity = gravity; }
     Gravity getGravity() const { return _gravity; }
 
+    // PR-B3 hotfix — natural content size = sum of visible children's
+    // heights + spacing + padding for VBox; max child width + extra
+    // padding for HBox. Used by ScrollView to compute the scrollable
+    // extent when the content widget's own size is dictated by the
+    // parent (content-fills-viewport case).
+    math::FVector2 getPreferredContentSize() const override;
+
     void layoutChildren() override;
 
 protected:
@@ -38,6 +45,11 @@ public:
     void addWidget(Widget* widget, float height = 0.0f);
     void insertWidget(int index, Widget* widget, float height = 0.0f);
     void removeWidget(Widget* widget);
+
+    // PR-B3 hotfix override — sum visible children's slot heights +
+    // spacing + padding (vs BoxBase default which returns getSize()).
+    // HBox stays on BoxBase default (no override in this commit).
+    math::FVector2 getPreferredContentSize() const override;
 
     void layoutChildren() override;
     void performLayout() override;
