@@ -141,6 +141,14 @@ public:
         markBoundsDirty();
     }
 
+    // PR-B3 hotfix — scrollable content size separate from the widget's
+    // *current* render size. By default this is just getSize(); VBox /
+    // HBox override it to compute the natural stacked size of visible
+    // children so a ScrollView wrapping a content-fills-viewport VBox
+    // can still report a scrollable extent (the visible page's natural
+    // height, not the VBox's viewport-bound height).
+    virtual math::FVector2 getPreferredContentSize() const { return _size; }
+
     float getWidth() const { return _size.x; }
     float getHeight() const { return _size.y; }
 

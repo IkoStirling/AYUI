@@ -84,6 +84,75 @@ void VBox::removeWidget(Widget* widget) {
     }
 }
 
+math::FVector2 BoxBase::getPreferredContentSize() const {
+    // Default: just return the widget's own size. VBox overrides to
+    // sum visible children. HBox override (declared below) returns the
+    // widest visible child's width.
+    return getSize();
+}
+
+namespace {
+// PR-B3 hotfix — walk a widget subtree and sum the natural height of
+// visible children. A leaf widget (no children) returns its own size;
+// a CompoundWidget sumas visible children recursively. This lets
+// getPreferredContentSize drill through nested VBox/CompoundWidget
+// stacks to find the real content height — when a VBox wraps a VBox
+// that wraps the page widgets, the parent's getSize() is the viewport
+// but the inner VBox's stack of fixed-height children tells us the
+// real content height.
+float walkNaturalHeight(const Widget* w) {
+    if (w == nullptr) return 0.0f;
+    if (!w->isVisible()) return 0.0f;
+    if (w->getChildren().empty()) return w->getSize().y;
+    float total = 0.0f;
+    for (const Widget* c : w->getChildren()) {
+        total += walkNaturalHeight(c);
+    }
+    return total;
+}
+float walkNaturalMaxWidth(const Widget* w) {
+    if (w == nullptr || !w->isVisible()) return 0.0f;
+    if (w->getChildren().empty()) return w->getSize().x;
+    float maxW = 0.0f;
+    for (const Widget* c : w->getChildren()) {
+        const float cw = w->getSize().x > 0.0f ? w->getSize().x : walkNaturalMaxWidth(c);
+        if (cw > maxW) maxW = cw;
+    }
+    return maxW;
+}
+} // namespace
+
+math::FVector2 VBox::getPreferredContentSize() const {
+    // Sum visible children's heights (or their slot.height if set),
+    // plus spacing between consecutive visible children, plus
+    // top/bottom padding. Width is the VBox's own width (children
+    // already fit horizontally in a VBox).
+    float totalH = _padding.y + _padding.w;
+    float maxW = 0.0f;
+    size_t visibleCount = 0;
+    for (const auto& slot : _slots) {
+        if (slot.widget == nullptr || !slot.widget->isVisible()
+            || slot.widget->getParent() != this) {
+            continue;
+        }
+        // PR-B3 hotfix: prefer the slot's natural height (sum of the
+        // child's grandchildren) over the child's *current* size,
+        // which the VBox just laid out to fillHeight=viewport.
+        const float slotH = (slot.height > 0.0f)
+            ? slot.height
+            : walkNaturalHeight(slot.widget);
+        totalH += slotH;
+        if (visibleCount > 0) totalH += _spacing;
+        ++visibleCount;
+        const float cw = std::max(
+            slot.widget->getSize().x,
+            walkNaturalMaxWidth(slot.widget));
+        if (cw > maxW) maxW = cw;
+    }
+    const float w = std::max(maxW, getSize().x);
+    return math::FVector2(w, totalH);
+}
+
 void VBox::layoutChildren() {
     math::FVector2 size = getSize();
     float availableWidth = std::max(0.0f, size.x - _padding.x - _padding.z);

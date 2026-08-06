@@ -510,5 +510,76 @@ TEST_CASE(splitter_leave_after_reveal_stays_invisible_across_ticks) {
     delete split;
 }
 
+// PR-B3 hotfix — VBox::getPreferredContentSize() sums the natural
+// heights of visible children (not the VBox's own viewport-bound
+// size). This is what ScrollView's auto-derive uses to compute the
+// scrollable extent. Without this, a content-fills-viewport VBox
+// would always report contentSize = viewport, leaving the scroll
+// offset permanently at 0.
+//
+// Note: getPreferredContentSize() must be called BEFORE performLayout()
+// because VBox::layoutChildren stretches children to fillHeight, after
+// which the children's getSize().y is the stretched value, not the
+// natural one. In production, ScrollView calls performLayout AFTER
+// capturing the preferred content size, in the right order so the
+// pre-layout natural sizes are visible to getPreferredContentSize().
+TEST_CASE(vbox_preferred_content_size_sums_visible_children) {
+    VBox outer;
+    outer.setSize(FVector2(320.0f, 110.0f));   // small viewport
+    outer.setPadding(0, 0, 0, 0);
+    outer.setSpacing(0);
+
+    // Two children with fixed heights. VBox will lay them out at
+    // 110 / 2 = 55 each (fillHeight), but their natural stacking
+    // should be 30 + 50 = 80 + spacing.
+    auto* a = new ayt::ui::Widget();
+    a->setSize(FVector2(320.0f, 30.0f));
+    auto* b = new ayt::ui::Widget();
+    b->setSize(FVector2(320.0f, 50.0f));
+    outer.addWidget(a);
+    outer.addWidget(b);
+
+    // Capture preferred size BEFORE layout — children are still at
+    // their natural heights (30 + 50 = 80).
+    const FVector2 pref = outer.getPreferredContentSize();
+    CHECK_FLOAT_EQ(pref.y, 80.0f, 1e-3f);
+    CHECK_FLOAT_EQ(pref.x, 320.0f, 1e-3f);
+
+    outer.performLayout();
+    // After layout the VBox fills its viewport; children are stretched.
+    CHECK(outer.getSize().y == 110.0f);
+    CHECK(a->getSize().y == 55.0f);
+    CHECK(b->getSize().y == 55.0f);
+
+    delete a;
+    delete b;
+}
+
+// PR-B3 hotfix — VBox with hidden children. Hidden children should
+// not contribute to preferred content size (a page-switch scenario:
+// switching to a tall page hides the other pages, and the visible
+// page's natural height should be the only thing in the stack).
+TEST_CASE(vbox_preferred_content_size_ignores_hidden) {
+    VBox outer;
+    outer.setSize(FVector2(320.0f, 600.0f));
+    outer.setPadding(0, 0, 0, 0);
+    outer.setSpacing(10.0f);
+
+    auto* visible = new ayt::ui::Widget();
+    visible->setSize(FVector2(320.0f, 200.0f));
+    auto* hidden = new ayt::ui::Widget();
+    hidden->setSize(FVector2(320.0f, 999.0f));
+    outer.addWidget(visible);
+    outer.addWidget(hidden);
+    hidden->setVisible(false);
+
+    // Capture before layout. Visible=200, hidden skipped → 200.
+    const FVector2 pref = outer.getPreferredContentSize();
+    CHECK_FLOAT_EQ(pref.y, 200.0f, 1e-3f);
+
+    delete visible;
+    delete hidden;
+}
+
 TEST_SUITE_END
 
