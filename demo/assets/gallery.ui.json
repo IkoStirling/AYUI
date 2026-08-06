@@ -278,8 +278,9 @@
                 { "type": "TextLabel", "id": "cap_b3_state", "text": "wheel: (idle)", "size": { "w": 500, "h": 20 } }
               ]
             }
+              ]
+            }
           ]
-        }
         }
       ]
     },

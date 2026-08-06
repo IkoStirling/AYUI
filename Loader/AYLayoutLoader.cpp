@@ -272,6 +272,14 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     }
     catch (const std::exception& e) {
         std::fprintf(stderr, "[UILayoutLoader] parse error: %s\n", e.what());
+        // Also dump to a fixed file so we can debug when stderr is
+        // detached (Gallery AllocConsole + GUI apps lose stderr under
+        // bash redirect).
+        std::FILE* f = std::fopen("ayui_loader_error.txt", "w");
+        if (f) {
+            std::fprintf(f, "[UILayoutLoader] parse error: %s\n", e.what());
+            std::fclose(f);
+        }
         // Restore the old index so callers that hold pointers to the
         // previous tree can still find them. Wipe the (incomplete)
         // index that buildWidgetTree may have partially populated.

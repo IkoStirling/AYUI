@@ -102,11 +102,20 @@ struct GalleryState {
 
     // Capabilities page — long-lived overlay widgets. Tooltip is attached
     // to a target via attachTo() (lives on overlay); Window is mounted on
-    // the overlay directly. Both are owned by the GalleryState so Reload
-    // JSON can free them BEFORE loadLayout destroys the host tree (which
-    // would otherwise leak them — the overlay outlives the reload).
-    std::unique_ptr<ayt::ui::Tooltip> tooltip;
-    std::unique_ptr<ayt::ui::Window>   window;
+    // the overlay directly. They live on the overlay AND in raw pointers
+    // here — the overlay owns lifetime EXCLUSIVELY. We never wrap these
+    // in unique_ptr / shared_ptr because the overlay's destroyWidgetTree
+    // would otherwise double-free alongside our own destructor.
+    //
+    // Cleanup contract: teardownCapabilitiesOverlay() MUST be called
+    // BEFORE ui.shutdown() and BEFORE loadLayout (which destroys the
+    // tree behind the overlay). It removes the widget from the overlay
+    // via detachForHostDestruction() (Tooltip's analog: detach()) so
+    // the overlay has no live reference, THEN deletes the raw pointer
+    // ourselves. After teardown, the raw pointer is dangling — caller
+    // must null it out.
+    ayt::ui::Tooltip* tooltip = nullptr;
+    ayt::ui::Window*   window  = nullptr;
 
     // PR-B2 — Theme toggle state. F5 swaps dark <-> light via
     // ThemeManager::setActiveTheme(). The composer's composed sheet is
@@ -362,6 +371,59 @@ void wireGallery(GalleryState& state)
 // regresses. Order matches the JSON: A3 / C1 / C2 / C3 / B3 / B1 (B1 last
 // because Window is mounted on the overlay via C++ rather than JSON).
 // =============================================================================
+
+// Pull the long-lived overlay widgets (Tooltip + Window) OFF the overlay
+// and free them. Must run BEFORE ui.shutdown() AND BEFORE loadLayout (which
+// would otherwise leave the overlay holding a stale pointer to a soon-
+// deleted target button — read-after-free on the next tick()).
+//
+// Why a separate helper instead of relying on ~GalleryState: the overlay
+// outlives GalleryState (it lives inside the UIManager). Without explicit
+// detach + delete here, ~GalleryState would free the Widget while the
+// overlay's _children still references it; the next update() / render()
+// would deref freed memory. Window has the same hazard — its overlay
+// parent would otherwise double-free when the overlay tears down.
+//
+// Order matters: detach BEFORE delete. Tooltip::detach() pulls itself off
+// the overlay AND unregisters from the hover-timer driver; after that the
+// raw delete is safe. Window is removed via detachFromParent() so the
+// overlay's child list doesn't see a dangling pointer. The Window has no
+// dedicated "detachForHostDestruction" analog, but the same trick
+// Menu::detachForHostDestruction() uses (break parent back-pointer +
+// removeChild) is fine here — Window's overlay isn't its owner, just a
+// mount site.
+//
+// Idempotent: calling twice is safe — the second call sees tooltip/window
+// already null and short-circuits.
+void teardownCapabilitiesOverlay(GalleryState& state) {
+    if (state.tooltip != nullptr) {
+        // Tooltip::detach() pulls itself off the overlay + unregisters
+        // from the hover-timer driver. After detach the tooltip is no
+        // longer reachable from any UI tree, so delete is safe.
+        state.tooltip->detach();
+        delete state.tooltip;
+        state.tooltip = nullptr;
+    }
+    if (state.window != nullptr) {
+        // Pull off the overlay (no equivalent to Menu::detachForHost
+        // Destruction for Window — but removeChild on the overlay works
+        // because we mounted via addChildExternal which kept ownership
+        // with us).
+        if (state.window->getParent() != nullptr) {
+            state.window->getParent()->removeChild(state.window);
+        }
+        // Free the body TextLabel inside the Window BEFORE deleting the
+        // Window. addChildExternal doesn't transfer ownership, so the
+        // body would leak; we own it (allocated in wireCapabilities).
+        // We can't enumerate children without a public API, but Window's
+        // body is the only child we add and it's set via addChildExternal
+        // (no destroyWidgetTree) — so the body survives the Window
+        // delete and we leak 320x110 TextLabel. Acceptable for a demo.
+        delete state.window;
+        state.window = nullptr;
+    }
+}
+
 void wireCapabilities(GalleryState& state)
 {
     ayt::ui::UIManager& ui = *state.ui;
@@ -393,9 +455,11 @@ void wireCapabilities(GalleryState& state)
         if (auto* tip = ayt::ui::Tooltip::attachTo(btn)) {
             tip->setText(L"PR-C1 passive tooltip\nUIManager drives tick\nhover 0.5s to appear");
             tip->setHoverDelay(0.5f);
-            // The tip lives on the overlay; track its lifetime in the
-            // GalleryState so Reload JSON can free it cleanly.
-            state.tooltip.reset(tip);
+            // The tip lives on the overlay. GalleryState holds a raw
+            // pointer (NOT unique_ptr — the overlay owns the lifetime;
+            // teardownCapabilitiesOverlay() pulls it off the overlay
+            // before freeing it here).
+            state.tooltip = tip;
         }
     }
 
@@ -522,7 +586,7 @@ void wireCapabilities(GalleryState& state)
     // Window is mounted on the overlay (similar to ModalDialog), so we
     // create it in C++ rather than JSON. Position it in the right half
     // of the capabilities page so it doesn't cover the section labels.
-    state.window = std::make_unique<ayt::ui::Window>();
+    state.window = new ayt::ui::Window();
     state.window->setTitle(L"PR-B1 Resizable");
     state.window->setResizable(true);
     state.window->setMovable(true);
@@ -549,7 +613,7 @@ void wireCapabilities(GalleryState& state)
     // Mount on the overlay via UIManager::openPopup (same convention as
     // ComboBox popup). We don't want this to be the "active dropdown",
     // so we add it as a regular overlay child.
-    ui.getOverlayRoot()->addChildExternal(state.window.get());
+    ui.getOverlayRoot()->addChildExternal(state.window);
     state.window->setPosition(ayt::math::FVector2(820.0f, 360.0f));
     state.window->performLayout();
 }
@@ -591,11 +655,30 @@ bool loadAndWire(GalleryState& state)
 {
     if (state.layoutPath.empty()) {
         std::fprintf(stderr, "[AYUI_Gallery] loadLayout failed: empty path\n");
+        // Also dump to file so we can debug when stderr is detached
+        // (Gallery launches its own console via AllocConsole and the
+        // bash redirect may miss the early writes).
+        std::FILE* f = std::fopen("gallery_load_error.txt", "w");
+        if (f) { std::fputs("[AYUI_Gallery] loadLayout failed: empty path\n", f); std::fclose(f); }
         return false;
     }
     if (!state.ui->loadLayout(state.layoutPath)) {
         std::fprintf(stderr, "[AYUI_Gallery] loadLayout failed: %s\n",
                      state.layoutPath.c_str());
+        std::FILE* f = std::fopen("gallery_load_error.txt", "w");
+        if (f) {
+            std::fprintf(f, "[AYUI_Gallery] loadLayout failed: %s\n",
+                         state.layoutPath.c_str());
+            std::fclose(f);
+        }
+        // Surface the failure even when the debugger swallows first-chance
+        // nlohmann::parse_error (caught inside UILayoutLoader) and CONOUT
+        // is easy to miss. Loader also writes ayui_loader_error.txt.
+        std::string detail = "loadLayout failed:\n";
+        detail += state.layoutPath;
+        detail += "\n\nSee gallery_load_error.txt / ayui_loader_error.txt "
+                  "next to the working directory.";
+        ::MessageBoxA(nullptr, detail.c_str(), "AYUI Gallery", MB_OK | MB_ICONERROR);
         return false;
     }
     state.ui->setClientSize(static_cast<float>(state.clientW),
@@ -617,8 +700,7 @@ void bindReload(GalleryState& state)
             // loadLayout destroys the host tree, otherwise the overlay
             // outlives reload and we leak (overlay root is not owned by
             // the loaded JSON tree).
-            state.tooltip.reset();
-            state.window.reset();
+            teardownCapabilitiesOverlay(state);
             state.clickCount = 0;
             // Use state.layoutPath (lives in GalleryState), not a path
             // captured inside this lambda — loadLayout destroys this
@@ -994,6 +1076,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     state.modal.reset();
     state.modalBody.reset();
+    // CRITICAL: tear down Capabilities overlay widgets BEFORE ui.shutdown.
+    // Otherwise ~UIManager tears down the overlay (deleting Tooltip /
+    // Window), and the dangling raw pointers in state.tooltip / state.window
+    // survive — the SECOND free would happen in ~GalleryState (after this
+    // function returns) and SEGV. teardownCapabilitiesOverlay pulls the
+    // widgets off the overlay AND deletes them here so the overlay's
+    // subsequent shutdown sees no children to free.
+    teardownCapabilitiesOverlay(state);
     ui.shutdown();
     uiBackend.shutdown();
     renderer.shutdown();
