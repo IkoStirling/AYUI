@@ -94,11 +94,23 @@ public:
 protected:
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    // Content + bars are drawn explicitly in onRender (content offset by
+    // -scroll). Default renderChildren would paint content again at the
+    // layout position and cover the scrolled frame.
+    void renderChildren(IRenderBackend& renderer) override;
+    // Prefer bars over content — setContent appends after bars, so the
+    // default reverse child walk would give content the gutter hits.
+    Widget* hitTest(const math::FVector2& worldPos) override;
 
 private:
     void ensureBarsCreated();
     void syncBarsToOffset();
+    // Keep content local pos at -scrollOffset so paint and hitTest agree.
+    // Render-only temporary offsets (then restore) cause "visual moved,
+    // clicks stay" — same class of bug Window fixed with body clip.
+    void syncContentPosition();
     math::FVector2 getViewportSize() const;
+    math::FRectangle contentClipRect() const;
 
     Widget*  _content = nullptr;
     ScrollBar* _vbar = nullptr;

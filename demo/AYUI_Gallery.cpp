@@ -141,6 +141,14 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
             w->setVisible(std::strcmp(id, pageId) == 0);
         }
     }
+    // Page height changes on switch — reset scroll so a tall page's
+    // scrollbar/start offset aren't left over from a short page (or vice
+    // versa). Content size is refreshed in ScrollView::performLayout.
+    if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
+            ui.findById("content_scroll"))) {
+        scroll->setContentSize(ayt::math::FVector2(0.0f, 0.0f));
+        scroll->setScrollOffset(ayt::math::FVector2(0.0f, 0.0f));
+    }
     // Visibility changes which VBox fill slot owns content_host — force a
     // layout pass so the newly shown page gets real width/height.
     ui.clearDragStateNoDispatch(nullptr);
@@ -638,20 +646,16 @@ void wireCapabilities(GalleryState& state)
                 lbl->setText(msg);
             }
         });
-        if (auto* vbar = list->getVerticalScrollBar()) {
-            vbar->setOnValueChanged([list, &ui](float v) {
-                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
-                        ui.findById("cap_b3_state"))) {
-                    std::wstring msg = L"wheel/list: scrollOffset.y=";
-                    msg += std::to_wstring(static_cast<int>(v));
-                    const int firstVisible = list->getFirstVisibleIndex();
-                    msg += L", firstVisible=list[";
-                    msg += std::to_wstring(firstVisible);
-                    msg += L"]";
-                    lbl->setText(msg);
-                }
-            });
-        }
+        // Do NOT replace vbar->setOnValueChanged — that wipes ListView's
+        // scroll/rebind mapping. Use setOnScroll for status feedback.
+        list->setOnScroll([&ui](const ayt::math::FVector2& off) {
+            if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                    ui.findById("cap_b3_state"))) {
+                std::wstring msg = L"wheel/list: scrollOffset.y=";
+                msg += std::to_wstring(static_cast<int>(off.y));
+                lbl->setText(msg);
+            }
+        });
     }
 
     // --- B1 Window: 4-edge + 4-corner resize ---
@@ -690,10 +694,12 @@ void wireCapabilities(GalleryState& state)
     // doesn't reserve a body region itself (no Window::setBodyInsets),
     // so the host is responsible for picking the inset.
     state.windowBody = new ayt::ui::TextLabel();
-    state.windowBody->setText(L"Drag any edge or corner.\nCursor hint follows.\nClose X or click 'Dismiss'.");
+    state.windowBody->setText(
+        L"Title bar (center) = move.\n"
+        L"Outer rim / corners = resize.\n"
+        L"Body text follows the window.");
     state.windowBody->setSize(ayt::math::FVector2(320.0f, 110.0f));
-    state.windowBody->setPosition(ayt::math::FVector2(
-        12.0f, 36.0f));  // 12px left pad, 36px down (28 title + 8 margin)
+    // layoutChildren places body below the title bar; local (0,0) is fine.
     state.window->addChildExternal(state.windowBody);
     // Mount on the overlay via UIManager::openPopup (same convention as
     // ComboBox popup). We don't want this to be the "active dropdown",
@@ -1170,6 +1176,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     while (state.running && window.isWindowValid()) {
         devices.pollEvents();
+
+        // Bridge Device mouse wheel → UI. Trackpads / mice deliver
+        // WM_MOUSEWHEEL into MouseDevice; Gallery only synthesized wheel
+        // from WM_TOUCH before, so ListView/ScrollView ignored trackpad.
+        if (ayt::device::MouseDevice* mouse = devices.mouse()) {
+            const float notches = mouse->getWheelDelta();
+            if (notches != 0.0f) {
+                constexpr float kPixelsPerNotch = 40.0f;
+                const ayt::device::Vector2 pos = mouse->getPosition();
+                ui.onMouseWheel(pos.x, pos.y, notches * kPixelsPerNotch);
+            }
+        }
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);

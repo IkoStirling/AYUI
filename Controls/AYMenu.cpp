@@ -323,6 +323,15 @@ bool Menu::onKeyDown(int keyCode) {
     // PR-C3 — typeahead letter handling. Same buffer + timeout shape as
     // ComboBox::onKeyDown's typeahead block; same buffer semantics on
     // Down/Up/Enter/Escape below (each clears the buffer).
+    //
+    // PR-C3 hotfix — wrap-to-first behavior on repeat-letter press. When
+    // the user types the same letter twice and only ONE item matches
+    // (e.g. menu = {Apple, Apricot, Banana, ...}, type 'B' twice, only
+    // "Banana" matches), the second 'B' must wrap back to "Banana"
+    // (Windows convention) — NOT clear the buffer and fall through.
+    // Without this, single-match letters feel broken: 'A' switches
+    // between Apple/Apricot on repeat, 'B' sits at Banana with no
+    // feedback for the second keystroke.
     if (keyCode >= UIKey_A && keyCode <= UIKey_Z) {
         if (_typeaheadTimer > kTypeaheadTimeout) {
             _typeaheadBuffer.clear();
@@ -335,20 +344,32 @@ bool Menu::onKeyDown(int keyCode) {
                                                   : (_hoveredIndex + 1) % n;
         const int match = findTypeaheadMatch(startFrom);
         if (match < 0) {
-            // No full-prefix match. Try the prefix minus the last char
-            // (Windows-style typo recovery) — same pattern as ComboBox.
+            // No match for the full prefix. If the user switched letters
+            // (A then B → buffer "ab"), restart with the new letter only
+            // — Windows listbox behavior. Keep cycling on repeated letters
+            // by searching from hoveredIndex+1, then wrap from 0.
             if (_typeaheadBuffer.size() > 1) {
-                _typeaheadBuffer.pop_back();
+                const wchar_t last = _typeaheadBuffer.back();
+                _typeaheadBuffer.clear();
+                _typeaheadBuffer.push_back(last);
                 const int retryStart = (_hoveredIndex < 0) ? 0
                     : (_hoveredIndex + 1) % n;
-                const int retry = findTypeaheadMatch(retryStart);
+                int retry = findTypeaheadMatch(retryStart);
+                if (retry < 0) {
+                    retry = findTypeaheadMatch(0);
+                }
                 if (retry >= 0) {
                     setHoveredIndex(retry);
                     return true;
                 }
+            } else if (_typeaheadBuffer.size() == 1) {
+                // Single-letter wrap (only one 'B' item, already hovered).
+                const int wrapMatch = findTypeaheadMatch(0);
+                if (wrapMatch >= 0) {
+                    setHoveredIndex(wrapMatch);
+                    return true;
+                }
             }
-            // Still nothing — clear the buffer but DON'T consume the key
-            // (let the host app or focused widget see it).
             _typeaheadBuffer.clear();
             return false;
         }

@@ -41,31 +41,58 @@ math::FRectangle ScrollBar::getTrackRect() const {
 math::FRectangle ScrollBar::getThumbRect() const {
     math::FRectangle track = getTrackRect();
     const float tl = trackLength();
-    if (tl <= 0.0f || _max <= _min || _viewportSize >= (_max - _min)) {
+    const float content = _max - _min;
+    if (tl <= 0.0f || content <= 0.0f || _viewportSize >= content) {
         // No scrolling needed: thumb fills the track.
         return track;
     }
-    float ratio = _viewportSize / (_max - _min);
+    float ratio = _viewportSize / content;
     if (ratio > 1.0f) ratio = 1.0f;
     float thumbLength = tl * ratio;
     if (thumbLength < kMinThumbLength) thumbLength = kMinThumbLength;
     if (thumbLength > tl) thumbLength = tl;
 
+    // Thumb travels over (track - thumb); value is scroll offset in
+    // [min, min + maxScroll] where maxScroll = content - viewport.
+    const float maxScroll = content - _viewportSize;
+    float t = (maxScroll > 1e-5f)
+        ? ((_value - _min) / maxScroll)
+        : 0.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
     float thumbStart;
     if (_orientation == Orientation::Horizontal) {
-        thumbStart = track.minX + (_value - _min) / (_max - _min)
-                                * (tl - thumbLength);
+        thumbStart = track.minX + t * (tl - thumbLength);
         return math::FRectangle(thumbStart, track.minY,
                                 thumbStart + thumbLength, track.maxY);
     }
-    thumbStart = track.minY + (_value - _min) / (_max - _min)
-                                * (tl - thumbLength);
+    thumbStart = track.minY + t * (tl - thumbLength);
     return math::FRectangle(track.minX, thumbStart,
                             track.maxX, thumbStart + thumbLength);
 }
 
 void ScrollBar::applyNormalized(float nx) {
-    setValue(_min + nx * (_max - _min));
+    const float content = _max - _min;
+    if (content <= 0.0f || _viewportSize >= content) {
+        setValue(_min);
+        return;
+    }
+    const float tl = trackLength();
+    float ratio = _viewportSize / content;
+    if (ratio > 1.0f) ratio = 1.0f;
+    float thumbLength = (tl > 0.0f) ? (tl * ratio) : 0.0f;
+    if (thumbLength < kMinThumbLength) thumbLength = kMinThumbLength;
+    if (thumbLength > tl) thumbLength = tl;
+    const float travel = tl - thumbLength;
+    const float maxScroll = content - _viewportSize;
+    // nx is mouse position along the full track; map so thumb center
+    // under the cursor → offset in [0, maxScroll].
+    float thumbStart = nx * tl - thumbLength * 0.5f;
+    float t = (travel > 1e-5f) ? (thumbStart / travel) : 0.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    setValue(_min + t * maxScroll);
 }
 
 UiCursorHint ScrollBar::getCursorHint() const {
@@ -91,15 +118,10 @@ bool ScrollBar::onMouseButtonDown(const UIMouseEvent& e) {
         nx = (tl > 0.0f) ? ((e.mousePos.y - getTrackRect().minY) / tl) : 0.5f;
     }
     nx = clampValueToRange(nx, 0.0f, 1.0f);
-    if (onThumb) {
-        // Continuous tracking — apply normalized position.
-        applyNormalized(nx);
-    } else {
-        // Page-jump — center the click on the thumb.
-        const float ratio = _viewportSize / (_max - _min);
-        nx -= ratio * 0.5f;
-        applyNormalized(nx);
-    }
+    // applyNormalized maps track-normalized mouse Y to scroll offset with
+    // the thumb centered under the cursor (click-to-jump and thumb drag).
+    (void)onThumb;
+    applyNormalized(nx);
     _state = ButtonState::Pressed;
     return true;
 }

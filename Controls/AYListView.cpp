@@ -257,10 +257,11 @@ void ListView::rebindPoolRows() {
         }
         row->setVisible(true);
         row->setSize(math::FVector2(rowW, _itemHeight));
-        // Pool slot s is at local y = s * itemHeight. World bounds walk
-        // gives the painted y. No per-row scroll-offset math.
+        // Fractional scroll: offset rows by the sub-item remainder so
+        // content tracks the thumb continuously (not only on row boundaries).
+        const float fracY = yOff - static_cast<float>(_firstVisibleIndex) * _itemHeight;
         row->setPosition(math::FVector2(0.0f,
-            static_cast<float>(slot) * _itemHeight));
+            static_cast<float>(slot) * _itemHeight - fracY));
         row->setText(_items[logical]);
         row->setIndex(logical);
         row->setSelected(isSelected(logical));
@@ -404,9 +405,14 @@ void ListView::setScrollOffset(const math::FVector2& offset) {
     // G2 — _scrollState is has-a, not base, so no virtual hook fires
     // here. ListView owns the chokepoint: every site that mutates the
     // scrollOffset must call rebindPoolRows() to refresh the pool.
+    const math::FVector2 prev = _scrollState.getScrollOffset();
     _scrollState.setScrollOffset(clamped);
     syncBarToOffset();
     rebindPoolRows();
+    if (_onScroll && (std::fabs(clamped.x - prev.x) > 0.01f
+                      || std::fabs(clamped.y - prev.y) > 0.01f)) {
+        _onScroll(clamped);
+    }
 }
 
 // PR-B3 — public scrollBy for wheel routing and any other callers
@@ -444,12 +450,9 @@ void ListView::ensureBarCreated() {
         const math::FVector2 vp = getViewportSize();
         const float maxOff = (_contentSize.y - vp.y);
         if (maxOff <= 0.0f) return;
-        // Map v (0..contentHeight) to scrollOffset.y. G2 chokepoint:
-        // the ScrollableWidget is has-a not base, so we call
-        // rebindPoolRows() here too (not relying on a virtual hook).
-        _scrollState.setScrollOffset(math::FVector2(
+        // Route through setScrollOffset so clamp + rebind + onScroll fire.
+        setScrollOffset(math::FVector2(
             _scrollState.getScrollOffset().x, v));
-        rebindPoolRows();
         (void)vp;
     });
     addChildExternal(_vbar);
@@ -573,15 +576,53 @@ void ListView::onRender(IRenderBackend& renderer) {
     renderer.drawRect(listBounds, bg);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
-    // G2 — rows: iterate the pool, not N items. Each pool slot's
-    // local y is fixed (slot * itemHeight); the row's getWorldBounds()
-    // walks parents to give the painted y.
+    // Clip rows to the list strip (Window body uses the same pushClip
+    // pattern). Fractional scroll can park a pool row partly outside
+    // the viewport — without clip it paints over neighbors above/below.
+    renderer.pushClip(listBounds);
     for (Row* r : _rowPool) {
         if (r != nullptr && r->isVisible()) {
             r->render(renderer);
         }
     }
+    renderer.popClip();
     if (_vbar != nullptr) _vbar->render(renderer);
+}
+
+void ListView::renderChildren(IRenderBackend& /*renderer*/) {
+    // Intentionally empty — see onRender (clipped row pass + vbar).
+}
+
+Widget* ListView::hitTest(const math::FVector2& worldPos) {
+    if (!_visible) return nullptr;
+    const math::FRectangle bounds = getWorldBounds();
+    if (!bounds.contains(worldPos)) return nullptr;
+
+    const bool vbarShown =
+        (_vbar != nullptr) && _vbar->isVisible();
+    const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
+    if (vbarShown) {
+        if (Widget* hit = _vbar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+
+    const math::FRectangle listBounds(
+        bounds.minX, bounds.minY,
+        bounds.maxX - barW, bounds.maxY);
+    if (!listBounds.contains(worldPos)) {
+        return this;
+    }
+
+    // Prefer topmost visible pool row under the cursor.
+    for (auto it = _rowPool.rbegin(); it != _rowPool.rend(); ++it) {
+        Row* row = *it;
+        if (row == nullptr || !row->isVisible()) continue;
+        if (Widget* hit = row->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    return this;
 }
 
 void ListView::handleRowClick(int index, uint32_t mods) {

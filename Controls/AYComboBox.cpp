@@ -409,16 +409,18 @@ bool ComboBox::onKeyDown(int keyCode) {
                                                   : (_selectedIndex + 1) % n;
         const int match = findTypeaheadMatch(startFrom);
         if (match < 0) {
-            // No match for the full prefix. Reset and try the first
-            // character only — matches Windows behavior where typing
-            // 'zx' when nothing starts with 'zx' falls back to items
-            // starting with 'z'. Without this fallback the user would
-            // get no feedback at all on a typo.
+            // Letter-switch recovery: "ab" miss → restart with 'b' (not
+            // typo-pop back to 'a', which blocked A→B highlight jumps).
             if (_typeaheadBuffer.size() > 1) {
-                _typeaheadBuffer.pop_back();
+                const wchar_t last = _typeaheadBuffer.back();
+                _typeaheadBuffer.clear();
+                _typeaheadBuffer.push_back(last);
                 const int retryStart = (_selectedIndex < 0) ? 0
                     : (_selectedIndex + 1) % n;
-                const int retry = findTypeaheadMatch(retryStart);
+                int retry = findTypeaheadMatch(retryStart);
+                if (retry < 0) {
+                    retry = findTypeaheadMatch(0);
+                }
                 if (retry >= 0) {
                     _silentPopupSync = true;
                     setSelectedIndex(retry);
@@ -433,9 +435,6 @@ bool ComboBox::onKeyDown(int keyCode) {
                     return true;
                 }
             }
-            // Still nothing — clear the buffer so the next keypress
-            // starts fresh, but DON'T consume the key (let the host
-            // app or the focused widget see it).
             _typeaheadBuffer.clear();
             return false;
         }

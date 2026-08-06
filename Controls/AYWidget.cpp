@@ -2,6 +2,8 @@
 #include "AYCompoundFocusableWidget.h"
 #include "aymath/MathUtils.h"
 
+#include <cmath>
+
 namespace ayt::ui {
 
 // =============================================================================
@@ -183,16 +185,24 @@ void Widget::updateWorldBounds() {
 }
 
 math::FRectangle Widget::getWorldBounds() const {
-    // Lazy propagate: walk up the parent chain. If any ancestor is dirty,
-    // we need to recompute our own bounds too — because getWorldPosition
-    // depends on the parent's world position. This avoids the need to
-    // pre-emptively dirty every descendant on every setter call.
+    // Lazy propagate with cache validation: parent may have moved, run
+    // updateWorldBounds (clearing its dirty flag), then render children
+    // whose local pos did not change. Those children still hold a stale
+    // _bounds — compare against parentOrigin+local and refresh.
+    if (_parent != nullptr) {
+        (void)_parent->getWorldBounds();
+    }
     if (_boundsDirty) {
         const_cast<Widget*>(this)->updateWorldBounds();
         return _bounds;
     }
-    if (_parent != nullptr && _parent->_boundsDirty) {
-        const_cast<Widget*>(this)->updateWorldBounds();
+    if (_parent != nullptr) {
+        const math::FVector2 expected =
+            _parent->getWorldBounds().getMin() + _position;
+        if (std::fabs(_bounds.minX - expected.x) > 0.01f
+            || std::fabs(_bounds.minY - expected.y) > 0.01f) {
+            const_cast<Widget*>(this)->updateWorldBounds();
+        }
     }
     return _bounds;
 }

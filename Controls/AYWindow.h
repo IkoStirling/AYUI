@@ -118,6 +118,10 @@ protected:
     bool _isResizing = false;
     math::FVector2 _resizeStartSize{};
     math::FVector2 _resizeStartMousePos{};
+    // PR-B1 — origin at resize-down. Left/Top edges must re-anchor from
+    // this start each move (not getPosition()+delta), or absolute
+    // start→current deltas accumulate and the window flies.
+    math::FVector2 _resizeStartPos{};
 
     // PR-B1 — cached mouse position (world coords) for hover-cursor hint.
     // onMouseMove updates _lastMouseWorldPos so getCursorHint can do an

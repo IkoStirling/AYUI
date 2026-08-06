@@ -3,6 +3,9 @@
 #include "AYStyle.h"
 #include "aymath/MathUtils.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace ayt::ui {
 
 ScrollView::ScrollView() {
@@ -62,9 +65,10 @@ void ScrollView::ensureBarsCreated() {
             const float maxOff = (_scrollState.getContentSize().y -
                                   getViewportSize().y);
             if (maxOff <= 0.0f) return;
-            // Map v (0..contentHeight) to scrollOffset.y.
+            const float clamped = std::clamp(v, 0.0f, maxOff);
             _scrollState.setScrollOffset(math::FVector2(
-                _scrollState.getScrollOffset().x, v));
+                _scrollState.getScrollOffset().x, clamped));
+            syncContentPosition();
             if (_onScroll) _onScroll(_scrollState.getScrollOffset());
         });
         addChildExternal(_vbar);
@@ -76,9 +80,11 @@ void ScrollView::ensureBarsCreated() {
             const float maxOff = (_scrollState.getContentSize().x -
                                   getViewportSize().x);
             if (maxOff <= 0.0f) return;
+            const float clamped = std::clamp(v, 0.0f, maxOff);
             _scrollState.setScrollOffset(math::FVector2(
-                v, _scrollState.getScrollOffset().y));
-            if (_onScroll) _scrollState.getScrollOffset();
+                clamped, _scrollState.getScrollOffset().y));
+            syncContentPosition();
+            if (_onScroll) _onScroll(_scrollState.getScrollOffset());
         });
         addChildExternal(_hbar);
     }
@@ -86,6 +92,24 @@ void ScrollView::ensureBarsCreated() {
 
 math::FVector2 ScrollView::getViewportSize() const {
     return math::FVector2(getWidth(), getHeight());
+}
+
+void ScrollView::syncContentPosition() {
+    if (_content == nullptr) return;
+    const math::FVector2 off = _scrollState.getScrollOffset();
+    _content->setPosition(math::FVector2(-off.x, -off.y));
+}
+
+math::FRectangle ScrollView::contentClipRect() const {
+    math::FRectangle clip = getWorldBounds();
+    const float barW = ScrollBar::kDefaultBarWidth;
+    if (_vbar != nullptr && _vbar->isVisible()) {
+        clip.maxX = std::max(clip.minX, clip.maxX - barW);
+    }
+    if (_hbar != nullptr && _hbar->isVisible()) {
+        clip.maxY = std::max(clip.minY, clip.maxY - barW);
+    }
+    return clip;
 }
 
 void ScrollView::syncBarsToOffset() {
@@ -106,6 +130,7 @@ void ScrollView::syncBarsToOffset() {
 bool ScrollView::scrollBy(const math::FVector2& delta) {
     const bool changed = _scrollState.scrollBy(delta, getViewportSize());
     if (changed) {
+        syncContentPosition();
         syncBarsToOffset();
         if (_onScroll) _onScroll(_scrollState.getScrollOffset());
     }
@@ -143,18 +168,26 @@ void ScrollView::performLayout() {
             getWidth() - (_vbar ? barW : 0.0f), barW));
     }
 
-    // If content has no explicit content size, derive it from the
-    // content widget's own size.
-    if (_content != nullptr) {
-        const math::FVector2 known = _scrollState.getContentSize();
-        if (known.x <= 0.0f && known.y <= 0.0f) {
-            _scrollState.setContentSize(_content->getPreferredContentSize());
-            syncBarsToOffset();
-        }
-    }
-
-    // Default CompoundWidget cascade (recurse into children).
+    // Refresh content size AFTER children layout so page switches
+    // (e.g. short Basics → tall Capabilities) update maxScrollOffset /
+    // vbar. Sampling only when content size was still (0,0) froze the
+    // first page's height and left later pages without a scrollbar.
     CompoundWidget::performLayout();
+
+    if (_content != nullptr) {
+        const math::FVector2 pref = _content->getPreferredContentSize();
+        const math::FVector2 sz = _content->getSize();
+        const math::FVector2 next(
+            std::max(pref.x, sz.x),
+            std::max(pref.y, sz.y));
+        const math::FVector2 known = _scrollState.getContentSize();
+        if (std::fabs(next.x - known.x) > 0.5f
+            || std::fabs(next.y - known.y) > 0.5f) {
+            _scrollState.setContentSize(next);
+        }
+        syncContentPosition();
+        syncBarsToOffset();
+    }
 }
 
 void ScrollView::onRender(IRenderBackend& renderer) {
@@ -169,28 +202,48 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     renderer.drawBorderRect(bounds,
         math::FVector4(0.45f, 0.45f, 0.5f, 1.0f), 1.0f, 2.0f);
 
-    // Render children — content first (with offset), bars last.
+    // Clip + permanently-offset content (see syncContentPosition). Same
+    // pattern as Window::renderChildren — without pushClip, scrolled
+    // pages paint over chrome ("内容没有被裁剪").
     if (_content != nullptr) {
-        // Apply scroll offset to content. We don't mutate the content
-        // widget's position (it stays at its layout-determined place);
-        // we instead push a translate transform. For now (no transform
-        // stack abstraction in v1), we synthesize the worldPosition
-        // via a clip and by overriding the content's draw calls. To
-        // keep implementation simple and testable, setPosition the
-        // content widget by the negative offset, render, restore.
-        const math::FVector2 origPos = _content->getPosition();
-        _content->setPosition(math::FVector2(
-            origPos.x - _scrollState.getScrollOffset().x,
-            origPos.y - _scrollState.getScrollOffset().y));
+        syncContentPosition();
+        renderer.pushClip(contentClipRect());
         _content->render(renderer);
-        _content->setPosition(origPos);
+        renderer.popClip();
     }
-    // Render bars via standard children loop (CompoundWidget provides
-    // render/renderChildren). Done via renderChildren — but we want
-    // content drawn before bars. Simplest: drop the default render
-    // recursion and pick: content -> vbar -> hbar.
     if (_vbar != nullptr) _vbar->render(renderer);
     if (_hbar != nullptr) _hbar->render(renderer);
+}
+
+void ScrollView::renderChildren(IRenderBackend& /*renderer*/) {
+    // Intentionally empty — see onRender. Bars/content are drawn there
+    // so a second unoffset content paint cannot cover the scrolled view.
+}
+
+Widget* ScrollView::hitTest(const math::FVector2& worldPos) {
+    if (!_visible) return nullptr;
+    const math::FRectangle bounds = getWorldBounds();
+    if (!bounds.contains(worldPos)) return nullptr;
+
+    if (_vbar != nullptr && _vbar->isVisible()) {
+        if (Widget* hit = _vbar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    if (_hbar != nullptr && _hbar->isVisible()) {
+        if (Widget* hit = _hbar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    // Clip hits to the visible content rect — scrolled-off children must
+    // not remain clickable at their old on-screen slots.
+    if (_content != nullptr && contentClipRect().contains(worldPos)) {
+        syncContentPosition();
+        if (Widget* hit = _content->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    return this;
 }
 
 Widget* createScrollViewWidget() {

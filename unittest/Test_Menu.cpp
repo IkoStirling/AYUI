@@ -351,6 +351,29 @@ TEST_CASE(menu_typeahead_multi_letter_within_timeout) {
     ui.shutdown();
 }
 
+// PR-C3.3b — letter switch (A then B) restarts with the new letter.
+// Old typo-recovery popped 'b' and retried 'a', leaving highlight stuck.
+TEST_CASE(menu_typeahead_letter_switch_restarts_prefix) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    menu->addItem(L"Apple");
+    menu->addItem(L"Apricot");
+    menu->addItem(L"Banana");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    menu->onKeyDown(UIKey_A);   // → Apricot (1)
+    CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_B);   // "ab" miss → restart with 'b' → Banana (2)
+    CHECK(menu->getHoveredIndex() == 2);
+
+    menu->close();
+    ui.shutdown();
+}
+
 // PR-C3.4 — arrow keys invalidate the typeahead buffer; the next letter
 // starts a fresh single-char prefix. Search still begins at current+1
 // (the wrap-around rule) but on a clean buffer — so 'A' from any

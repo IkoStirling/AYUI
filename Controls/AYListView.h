@@ -225,8 +225,21 @@ public:
 
     ScrollBar* getVerticalScrollBar() const { return _vbar; }
 
+    // Host observer for scroll offset changes (wheel, bar drag, scrollToIndex).
+    // Prefer this over replacing getVerticalScrollBar()->setOnValueChanged —
+    // that would wipe ListView's internal offset/rebind mapping.
+    void setOnScroll(std::function<void(const math::FVector2&)> cb) {
+        _onScroll = std::move(cb);
+    }
+
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    // Rows + vbar are drawn in onRender (rows inside pushClip). Default
+    // renderChildren would paint them again unclipped over neighbors.
+    void renderChildren(IRenderBackend& renderer) override;
+    // Clip hit-tests to the visible list strip so fractional-scroll rows
+    // sticking outside the box are not clickable there.
+    Widget* hitTest(const math::FVector2& worldPos) override;
 
     // Forward clicks to the row under the cursor. CompoundWidget default
     // doesn't descend into children when handed a mouse event directly
@@ -332,6 +345,7 @@ private:
     std::function<void(int)> _onSelectionChanged;
     std::function<void(const std::vector<int>&)> _onSelectionIndicesChanged;
     std::function<void(int)> _onItemActivated;
+    std::function<void(const math::FVector2&)> _onScroll;
 
     // G4 — visible row count cap. -1 = no cap (v1 behavior).
     int _visibleRowCount = -1;

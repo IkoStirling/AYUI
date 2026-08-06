@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYWindow.h"
+#include "AYTextLabel.h"
 #include "AYMockRenderer.h"
 
 // =============================================================================
@@ -114,6 +115,40 @@ TEST_CASE(resize_top_left_corner_inverts_position_and_size) {
     CHECK_FALSE(window.isResizing());
 }
 
+// 3b. Multi-step TopLeft drag must not accumulate (fly-away regression).
+TEST_CASE(resize_top_left_multi_move_keeps_bottom_right_pinned) {
+    Widget root;
+    root.setSize(FVector2(800.0f, 600.0f));
+
+    Window window;
+    window.setPosition(FVector2(200.0f, 150.0f));
+    window.setSize(FVector2(400.0f, 300.0f));
+    window.setResizable(true);
+    window.setMinSize(100.0f, 60.0f);
+    root.addChildExternal(&window);
+
+    const float tlX = window.getPosition().x + 5.0f;
+    const float tlY = window.getPosition().y + 5.0f;
+    CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(tlX, tlY), 0)));
+    CHECK(window.getActiveResizeEdge() == ResizeEdge::TopLeft);
+
+    CHECK(window.onMouseMove(UIMouseEvent(FVector2(tlX - 50.0f, tlY - 30.0f), 0)));
+    CHECK(window.getPosition().x == 150.0f);
+    CHECK(window.getPosition().y == 120.0f);
+
+    // Second move with a larger absolute delta from the original press —
+    // old code did getPosition()+(-actualD*) and flew to (50, 60).
+    CHECK(window.onMouseMove(UIMouseEvent(FVector2(tlX - 100.0f, tlY - 60.0f), 0)));
+    CHECK(window.getSize().x == 500.0f);
+    CHECK(window.getSize().y == 360.0f);
+    CHECK(window.getPosition().x == 100.0f);
+    CHECK(window.getPosition().y == 90.0f);
+    CHECK(window.getPosition().x + window.getSize().x == 600.0f);
+    CHECK(window.getPosition().y + window.getSize().y == 450.0f);
+
+    CHECK(window.onMouseButtonUp(UIMouseEvent(FVector2(tlX - 100.0f, tlY - 60.0f), 0)));
+}
+
 // 4. Left edge — keeps right edge pinned ------------------------------------
 
 TEST_CASE(resize_left_edge_keeps_right_anchor) {
@@ -197,8 +232,8 @@ TEST_CASE(cursor_hint_changes_per_edge_when_idle_hover) {
     // No mouse yet → Default.
     CHECK(window.getCursorHint() == UiCursorHint::Default);
 
-    // Top edge band.
-    window.onMouseMove(UIMouseEvent(FVector2(300.0f, 105.0f), 0));
+    // Top edge band (outer 4px of title — SizeNs).
+    window.onMouseMove(UIMouseEvent(FVector2(300.0f, 102.0f), 0));
     CHECK(window.getCursorHint() == UiCursorHint::SizeNs);
 
     // Bottom edge.
@@ -270,11 +305,11 @@ TEST_CASE(cursor_hint_during_drag_matches_active_edge) {
     window.setResizable(true);
     window.setMovable(false);
 
-    // Top edge — SizeNs (vertical edge).
-    CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(300.0f, 105.0f), 0)));
+    // Top edge — SizeNs (vertical edge). Outer rim only (y ≤ minY+4).
+    CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(300.0f, 102.0f), 0)));
     CHECK(window.getActiveResizeEdge() == ResizeEdge::Top);
     CHECK(window.getCursorHint() == UiCursorHint::SizeNs);
-    CHECK(window.onMouseButtonUp(UIMouseEvent(FVector2(300.0f, 105.0f), 0)));
+    CHECK(window.onMouseButtonUp(UIMouseEvent(FVector2(300.0f, 102.0f), 0)));
 
     // NE corner — SizeNesw.
     CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(495.0f, 105.0f), 0)));
@@ -287,6 +322,47 @@ TEST_CASE(cursor_hint_during_drag_matches_active_edge) {
     CHECK(window.getActiveResizeEdge() == ResizeEdge::BottomLeft);
     CHECK(window.getCursorHint() == UiCursorHint::SizeNesw);
     CHECK(window.onMouseButtonUp(UIMouseEvent(FVector2(105.0f, 395.0f), 0)));
+}
+
+// Title-bar center prefers Move over Top resize when movable.
+TEST_CASE(title_bar_center_drags_not_top_resize) {
+    Window window;
+    window.setPosition(FVector2(100.0f, 100.0f));
+    window.setSize(FVector2(400.0f, 300.0f));
+    window.setResizable(true);
+    window.setMovable(true);
+
+    // Mid-title (y = 100+14): must drag, not Top resize.
+    CHECK(window.onMouseButtonDown(UIMouseEvent(FVector2(300.0f, 114.0f), 0)));
+    CHECK(window.isDragging());
+    CHECK_FALSE(window.isResizing());
+    CHECK(window.getCursorHint() == UiCursorHint::Move);
+    CHECK(window.onMouseButtonUp(UIMouseEvent(FVector2(300.0f, 114.0f), 0)));
+}
+
+// Child world bounds follow parent move without local-pos change.
+TEST_CASE(window_body_world_bounds_follow_parent_move) {
+    Widget root;
+    root.setSize(FVector2(800.0f, 600.0f));
+
+    Window window;
+    window.setPosition(FVector2(100.0f, 80.0f));
+    window.setSize(FVector2(240.0f, 180.0f));
+    window.setMovable(true);
+    root.addChildExternal(&window);
+
+    TextLabel body;
+    body.setSize(FVector2(200.0f, 40.0f));
+    window.addChildExternal(&body);
+    window.performLayout();
+
+    const FRectangle before = body.getWorldBounds();
+    window.setPosition(FVector2(160.0f, 120.0f));
+    // Simulate render order: parent refreshes first (clears dirty).
+    (void)window.getWorldBounds();
+    const FRectangle after = body.getWorldBounds();
+    CHECK_FLOAT_EQ(after.minX - before.minX, 60.0f, 0.5f);
+    CHECK_FLOAT_EQ(after.minY - before.minY, 40.0f, 0.5f);
 }
 
 TEST_SUITE_END

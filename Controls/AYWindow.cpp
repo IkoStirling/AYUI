@@ -27,6 +27,9 @@ float clampAxis(float value, float parentSize, float windowSize, float minKeepVi
 // vscode / native OS chrome — 16px catches a mouse-drag reliably without
 // claiming the entire lower-right body).
 constexpr float kResizeBandPx = 16.0f;
+// Top edge (title-bar overlap): only the outer few pixels resize. The rest
+// of the title bar is window drag so move vs resize stays unambiguous.
+constexpr float kTitleTopResizeBandPx = 4.0f;
 constexpr float kResizeGripDotSize = 1.5f;
 
 // PR-B1 — map a ResizeEdge to the OS cursor the OS expects to see. Source
@@ -97,21 +100,30 @@ Widget* Window::hitTest(const math::FVector2& worldPos) {
     math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 
-    // Phase D (D1) — SE-corner resize hit-zone wins BEFORE the title-bar
-    // and BEFORE child iteration, so a click landing in the SE band
-    // always starts a resize and never reaches children underneath. This
-    // is the same priority sibling-override pattern SplitterHandle uses
-    // (Layout/AYSplitterHandle.cpp hitTest).
-    if (_resizable && hitTestResizeEdge(worldPos) != ResizeEdge::None) {
-        return this;
-    }
-
+    // Prefer title-bar move over Top-edge resize so hover cursor matches
+    // onMouseButtonDown (Move in title interior, Size* on corners/rim).
     if (_movable) {
         math::FRectangle titleBar(bounds.minX, bounds.minY,
                                   bounds.maxX, bounds.minY + _titleBarHeight);
         if (titleBar.contains(worldPos)) {
+            if (_resizable) {
+                const ResizeEdge edge = hitTestResizeEdge(worldPos);
+                const bool corner =
+                    edge == ResizeEdge::TopLeft ||
+                    edge == ResizeEdge::TopRight;
+                const bool topRim =
+                    edge == ResizeEdge::Top
+                    && worldPos.y <= bounds.minY + kTitleTopResizeBandPx;
+                if (corner || topRim) {
+                    return this;
+                }
+            }
             return this;
         }
+    }
+
+    if (_resizable && hitTestResizeEdge(worldPos) != ResizeEdge::None) {
+        return this;
     }
 
     // Prefer the overflow scrollbar when present.
@@ -170,7 +182,8 @@ ResizeEdge Window::hitTestResizeEdge(const math::FVector2& worldPos) const {
     }
 
     // PR-B1 — 4 edges as kResizeBandPx-thick bands AFTER the corner checks.
-    if (worldPos.y <= bounds.minY + kResizeBandPx) {
+    // Top edge uses a thinner band so the title-bar interior stays Move.
+    if (worldPos.y <= bounds.minY + kTitleTopResizeBandPx) {
         return ResizeEdge::Top;
     }
     if (worldPos.y >= bounds.maxY - kResizeBandPx) {
@@ -272,23 +285,24 @@ bool Window::onMouseMove(const UIMouseEvent& e) {
         }
         setSize(math::FVector2(newW, newH));
 
-        // PR-B1 — Left/Top edge drags re-anchor position so the opposite
-        // edge stays under the cursor. If setSize clamped to minSize,
-        // we back-shift position by the actual delta to keep the
-        // right/bottom edge pinned to the cursor.
+        // Re-anchor from resize-down origin so Left/Top stay pinned to the
+        // opposite edge without accumulating per-frame absolute deltas.
         const math::FVector2 finalSize = getSize();
+        float posX = _resizeStartPos.x;
+        float posY = _resizeStartPos.y;
         if (_resizeEdge == ResizeEdge::Left ||
             _resizeEdge == ResizeEdge::TopLeft ||
             _resizeEdge == ResizeEdge::BottomLeft) {
             const float actualDx = finalSize.x - _resizeStartSize.x;
-            setPosition(getPosition() + math::FVector2(-actualDx, 0.0f));
+            posX = _resizeStartPos.x - actualDx;
         }
         if (_resizeEdge == ResizeEdge::Top ||
             _resizeEdge == ResizeEdge::TopLeft ||
             _resizeEdge == ResizeEdge::TopRight) {
             const float actualDy = finalSize.y - _resizeStartSize.y;
-            setPosition(getPosition() + math::FVector2(0.0f, -actualDy));
+            posY = _resizeStartPos.y - actualDy;
         }
+        setPosition(math::FVector2(posX, posY));
         return true;
     }
 
@@ -306,30 +320,44 @@ bool Window::onMouseButtonDown(const UIMouseEvent& e) {
 
     math::FRectangle bounds = getWorldBounds();
 
-    // Phase D (D1) — SE-corner resize start. Hit-test independently of the
-    // existing title-bar branch (the corner can overlap neither, but a
-    // future SE-NE/SW edges upgrade will share this path).
+    math::FRectangle titleBar(bounds.minX, bounds.minY,
+                               bounds.maxX, bounds.minY + _titleBarHeight);
+
+    // Title-bar move wins over Top-edge resize (corners still resize).
+    // Matches Windows: grab the title to drag; grab the outer rim / corners
+    // to resize.
+    if (_movable && titleBar.contains(e.mousePos)) {
+        const ResizeEdge edge = _resizable
+            ? hitTestResizeEdge(e.mousePos)
+            : ResizeEdge::None;
+        const bool corner =
+            edge == ResizeEdge::TopLeft ||
+            edge == ResizeEdge::TopRight ||
+            edge == ResizeEdge::BottomLeft ||
+            edge == ResizeEdge::BottomRight;
+        const bool topRim =
+            edge == ResizeEdge::Top
+            && e.mousePos.y <= bounds.minY + kTitleTopResizeBandPx;
+        if (!corner && !topRim) {
+            _isDragging = true;
+            _dragOffset = e.mousePos - math::FVector2(bounds.minX, bounds.minY);
+            setLayoutPositionManaged(false);
+            bringToFront();
+            return true;
+        }
+    }
+
     if (_resizable) {
         const ResizeEdge edge = hitTestResizeEdge(e.mousePos);
         if (edge != ResizeEdge::None) {
             _isResizing = true;
             _resizeEdge = edge;
             _resizeStartSize = getSize();
+            _resizeStartPos = getPosition();
             _resizeStartMousePos = e.mousePos;
             bringToFront();
             return true;
         }
-    }
-
-    math::FRectangle titleBar(bounds.minX, bounds.minY,
-                               bounds.maxX, bounds.minY + _titleBarHeight);
-
-    if (_movable && titleBar.contains(e.mousePos)) {
-        _isDragging = true;
-        _dragOffset = e.mousePos - math::FVector2(bounds.minX, bounds.minY);
-        setLayoutPositionManaged(false);
-        bringToFront();
-        return true;
     }
 
     return false;
@@ -366,27 +394,32 @@ bool Window::onMouseButtonUp(const UIMouseEvent& e) {
 }
 
 UiCursorHint Window::getCursorHint() const {
-    // PR-B1 — resize cursor wins over Move/Default.
-    //
-    // Two paths feed this:
-    //   (a) in-drag: `_resizeEdge` reflects the active edge — map it
-    //       directly via cursorHintForEdge. Captured state is stable
-    //       for the whole drag.
-    //   (b) idle hover: no active edge, but `_lastMouseWorldPos` was
-    //       updated by the most recent onMouseMove. We hit-test against
-    //       hitTestResizeEdge to surface the right cursor when the user
-    //       hovers over a handle band (Windows behavior).
+    // PR-B1 — resize cursor wins over Move/Default, except title-bar
+    // interior where Move wins over Top-edge SizeNs (matches click).
     if (_resizable && _isResizing && _resizeEdge != ResizeEdge::None) {
         return cursorHintForEdge(_resizeEdge);
+    }
+    if (_movable && (_isDragging || _titleBarHover)) {
+        if (_resizable) {
+            const ResizeEdge hoverEdge = hitTestResizeEdge(_lastMouseWorldPos);
+            const bool corner =
+                hoverEdge == ResizeEdge::TopLeft ||
+                hoverEdge == ResizeEdge::TopRight;
+            const math::FRectangle bounds = getWorldBounds();
+            const bool topRim =
+                hoverEdge == ResizeEdge::Top
+                && _lastMouseWorldPos.y <= bounds.minY + kTitleTopResizeBandPx;
+            if (corner || topRim) {
+                return cursorHintForEdge(hoverEdge);
+            }
+        }
+        return UiCursorHint::Move;
     }
     if (_resizable) {
         const ResizeEdge hoverEdge = hitTestResizeEdge(_lastMouseWorldPos);
         if (hoverEdge != ResizeEdge::None) {
             return cursorHintForEdge(hoverEdge);
         }
-    }
-    if (_movable && (_isDragging || _titleBarHover)) {
-        return UiCursorHint::Move;
     }
     return UiCursorHint::Default;
 }
