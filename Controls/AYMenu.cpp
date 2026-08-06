@@ -263,6 +263,15 @@ bool Menu::onKeyDown(int keyCode) {
     // UIManager intercepts Tab before this method sees it (R2 contract).
     // Tab-while-menu-open focuses the NEXT focusable widget, leaving the
     // menu — Escape is the menu-internal dismiss path.
+    //
+    // PR-C3: extended with first-letter typeahead (UIKey_A..UIKey_Z).
+    // Behavior mirrors Windows native menus:
+    //   - Single-letter jump: highlight advances to the next item whose
+    //     first character matches.
+    //   - Multi-letter prefix within kTypeaheadTimeout: extends the match.
+    //   - Typeahead does NOT close the menu or activate the item — the
+    //     user still presses Enter to confirm. This matches the OS
+    //     convention and keeps the menu predictable for keyboard users.
 
     if (_items.empty()) {
         if (keyCode == UIKey_Escape) { close(); return true; }
@@ -270,24 +279,116 @@ bool Menu::onKeyDown(int keyCode) {
     }
     const int n = static_cast<int>(_items.size());
 
+    // PR-C3 — typeahead letter handling. Same buffer + timeout shape as
+    // ComboBox::onKeyDown's typeahead block; same buffer semantics on
+    // Down/Up/Enter/Escape below (each clears the buffer).
+    if (keyCode >= UIKey_A && keyCode <= UIKey_Z) {
+        if (_typeaheadTimer > kTypeaheadTimeout) {
+            _typeaheadBuffer.clear();
+        }
+        const wchar_t ch = static_cast<wchar_t>(
+            L'a' + (keyCode - UIKey_A));
+        _typeaheadBuffer.push_back(ch);
+        _typeaheadTimer = 0.0f;
+        const int startFrom = (_hoveredIndex < 0) ? 0
+                                                  : (_hoveredIndex + 1) % n;
+        const int match = findTypeaheadMatch(startFrom);
+        if (match < 0) {
+            // No full-prefix match. Try the prefix minus the last char
+            // (Windows-style typo recovery) — same pattern as ComboBox.
+            if (_typeaheadBuffer.size() > 1) {
+                _typeaheadBuffer.pop_back();
+                const int retryStart = (_hoveredIndex < 0) ? 0
+                    : (_hoveredIndex + 1) % n;
+                const int retry = findTypeaheadMatch(retryStart);
+                if (retry >= 0) {
+                    _hoveredIndex = retry;
+                    return true;
+                }
+            }
+            // Still nothing — clear the buffer but DON'T consume the key
+            // (let the host app or focused widget see it).
+            _typeaheadBuffer.clear();
+            return false;
+        }
+        _hoveredIndex = match;
+        return true;
+    }
+
     switch (keyCode) {
     case UIKey_Down:
+        // PR-C3 — arrow key invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         _hoveredIndex = (_hoveredIndex + 1) % n;
         return true;
     case UIKey_Up:
+        // PR-C3 — arrow key invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         _hoveredIndex = (_hoveredIndex <= 0) ? n - 1 : _hoveredIndex - 1;
         return true;
     case UIKey_Enter:
+        // PR-C3 — Enter invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         if (_hoveredIndex >= 0 && _hoveredIndex < n) {
             activateItem(_hoveredIndex);
             return true;
         }
         return false;
     case UIKey_Escape:
+        // PR-C3 — Escape invalidates the typeahead buffer.
+        _typeaheadBuffer.clear();
         close();
         return true;
     default:
         return false;
+    }
+}
+
+int Menu::findTypeaheadMatch(int startFrom) const {
+    if (_typeaheadBuffer.empty()) return -1;
+    const int n = static_cast<int>(_items.size());
+    if (n == 0) return -1;
+    int i = startFrom;
+    for (int checked = 0; checked < n; ++checked) {
+        // Skip separators / null items (Menu::addSeparator orphans them
+        // into the children list but leaves _items clean — so this is
+        // defensive against any host that pushed a nullptr).
+        const MenuItem* item = _items[static_cast<size_t>(i)];
+        if (item != nullptr) {
+            const std::wstring& text = item->getText();
+            if (text.size() >= _typeaheadBuffer.size()) {
+                bool match = true;
+                for (size_t k = 0; k < _typeaheadBuffer.size(); ++k) {
+                    wchar_t a = text[k];
+                    wchar_t b = _typeaheadBuffer[k];
+                    if (a >= L'A' && a <= L'Z') {
+                        a = static_cast<wchar_t>(a + (L'a' - L'A'));
+                    }
+                    if (a != b) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) return i;
+            }
+        }
+        i = (i + 1) % n;
+    }
+    return -1;
+}
+
+void Menu::tick(float dt) {
+    // PR-C3 — typeahead timer accumulator. Same pattern as
+    // ComboBox::tick. Driven by UIManager::update → _root->tick cascade
+    // when the Menu is in the _root subtree (the common case after open()
+    // reparents onto the overlay — the overlay is mounted in _root, so
+    // the cascade still reaches the Menu through the overlay's children).
+    if (!_typeaheadBuffer.empty()) {
+        _typeaheadTimer += dt;
+        if (_typeaheadTimer > kTypeaheadTimeout) {
+            _typeaheadBuffer.clear();
+            _typeaheadTimer = 0.0f;
+        }
     }
 }
 

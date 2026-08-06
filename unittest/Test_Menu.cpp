@@ -267,5 +267,116 @@ TEST_CASE(menu_focus_grab_on_click) {
     ui.shutdown();
 }
 
+// ============================================================================
+// PR-C3 — first-letter typeahead. Typing a letter jumps _hoveredIndex
+// to the next item whose first character matches (case-insensitive).
+// Matches Windows native menus: typeahead does NOT close the menu — the
+// user still presses Enter to activate the highlighted row.
+// ============================================================================
+
+// PR-C3.1 — single-letter jump highlights the next matching item.
+TEST_CASE(menu_typeahead_letter_jumps_highlight) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    menu->addItem(L"Open");
+    menu->addItem(L"Save");
+    menu->addItem(L"Quit");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    // _hoveredIndex defaults to 0. After 'S' it should jump to 1 (Save).
+    CHECK(menu->getHoveredIndex() == 0);
+    const bool consumed = menu->onKeyDown(UIKey_S);
+    CHECK(consumed);
+    CHECK(menu->getHoveredIndex() == 1);
+
+    menu->close();
+    ui.shutdown();
+}
+
+// PR-C3.2 — repeating the same letter cycles through matching items.
+// Search starts at current+1 so the first 'S' from index 0 advances to
+// the NEXT 'S' (Save As), matching Windows native behavior where
+// pressing the same letter advances through matches.
+TEST_CASE(menu_typeahead_repeat_letter_cycles) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    menu->addItem(L"Save");
+    menu->addItem(L"Save As");
+    menu->addItem(L"Quit");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    menu->onKeyDown(UIKey_S);   // search starts at (0+1)%3=1 → Save As (1)
+    CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_S);   // search from (1+1)%3=2 → wraps → Save (0)
+    CHECK(menu->getHoveredIndex() == 0);
+    menu->onKeyDown(UIKey_S);   // search from (0+1)%3=1 → Save As (1)
+    CHECK(menu->getHoveredIndex() == 1);
+
+    menu->close();
+    ui.shutdown();
+}
+
+// PR-C3.3 — multi-letter prefix within timeout extends the match.
+// "Sa" should land on Save or Save As (both start with "Sa"), not Quit.
+// After 'S' jumps from index 0 → 1 (Save As), the next letter 'A'
+// searches from 2 (Quit) and wraps; the first matching item is Save
+// (index 0). Both Save and Save As start with "sa" so the result is
+// whichever the wrap-around finds first (Save, since we wrap to 0).
+TEST_CASE(menu_typeahead_multi_letter_within_timeout) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    menu->addItem(L"Save");
+    menu->addItem(L"Save As");
+    menu->addItem(L"Quit");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    menu->onKeyDown(UIKey_S);   // → Save As (1, search starts at 1)
+    CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_A);   // "Sa" prefix — wraps, lands on Save (0)
+    CHECK(menu->getHoveredIndex() == 0);
+
+    menu->close();
+    ui.shutdown();
+}
+
+// PR-C3.4 — arrow keys invalidate the typeahead buffer; the next letter
+// starts a fresh single-char prefix. Search still begins at current+1
+// (the wrap-around rule) but on a clean buffer — so 'A' from any
+// index finds the NEXT 'A' item, not the same one.
+TEST_CASE(menu_typeahead_invalidated_by_navigation_keys) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    menu->addItem(L"Apple");
+    menu->addItem(L"Apricot");
+    menu->addItem(L"Banana");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    menu->onKeyDown(UIKey_A);   // → Apricot (1, search starts at 1)
+    CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_Down);  // arrow invalidates buffer, advances 1→2
+    CHECK(menu->getHoveredIndex() == 2);
+    menu->onKeyDown(UIKey_A);   // fresh "a" — search from (2+1)%3=0 → Apple (0)
+    CHECK(menu->getHoveredIndex() == 0);
+
+    menu->close();
+    ui.shutdown();
+}
+
 TEST_SUITE_END
 

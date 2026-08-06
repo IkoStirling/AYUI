@@ -695,6 +695,17 @@ void UIManager::update(float dt) {
         dumpSplitterLayoutOnce(_root);
         _root->tick(dt);
     }
+    // PR-C3 — tick the overlay subtree too. Menus live on the overlay
+    // (via openPopup → _overlayRoot->addChild) and need tick(dt) to
+    // drive their typeahead timer (Menu::tick accumulates the buffer
+    // reset window). Tooltips get an explicit driver loop below; menus
+    // get the cascade here. The overlay root itself is a plain Widget
+    // with no tick override, so calling tick() just returns immediately
+    // and the cascade walks its children (Menu, ComboBox popup, etc.)
+    // through CompoundWidget::tick.
+    if (_overlayRoot != nullptr) {
+        _overlayRoot->tick(dt);
+    }
 
     // Re-validate hover against the last known pointer. Pure-hover leave
     // for SplitterHandle depends on updateHoverWidget firing onMouseLeave;
