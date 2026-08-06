@@ -64,7 +64,9 @@ public:
     // Detach from the overlay (no-op if not mounted) and disarm _target
     // so subsequent tick() calls early-return without dereferencing a
     // possibly-destroyed anchor. Idempotent. Caller still owns the
-    // Tooltip* and must delete it (or destroyWidgetTree it).
+    // Tooltip* and must destroyWidgetTree it (NOT `delete` — Tooltip owns
+    // its TextLabel child via addChild; UI-OWN-1 invariant: ~Widget does
+    // not free children. destroyWidgetTree walks the tree recursively).
     void detach();
 
     // Text payload.

@@ -206,6 +206,16 @@ void Window::clampPositionWithinParent() {
     const float windowWidth  = getWidth();
     const float windowHeight = getHeight();
 
+    // PR-B1 hotfix: Window is mounted on the overlay (size 0,0 in production
+    // because the overlay is a hit-test funnel, not a real layout region).
+    // Clamping against a 0-sized parent forces y into [-keepVis, -keepVis]
+    // which makes the window fly off-screen the first frame the user drags
+    // the title bar. Skip the clamp when the parent doesn't have a real
+    // bounding region — that's the convention for "free-floating" parents.
+    if (parentWidth <= 0.0f || parentHeight <= 0.0f) {
+        return;
+    }
+
     const float minKeepWidth  = std::max(_minSize.x, _titleBarHeight);
     const float minKeepHeight = std::max(_minSize.y, _titleBarHeight);
 

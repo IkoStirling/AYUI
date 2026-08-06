@@ -148,7 +148,7 @@ void ScrollView::performLayout() {
     if (_content != nullptr) {
         const math::FVector2 known = _scrollState.getContentSize();
         if (known.x <= 0.0f && known.y <= 0.0f) {
-            _scrollState.setContentSize(_content->getSize());
+            _scrollState.setContentSize(_content->getPreferredContentSize());
             syncBarsToOffset();
         }
     }

@@ -206,6 +206,19 @@ void Menu::layoutItems() {
     setSize(math::FVector2(kDefaultWidth, y + kDefaultPad));
 }
 
+// PR-C3 feedback — single mutation point for _hoveredIndex so the
+// _onHoverChanged callback always fires when the highlight moves.
+// Before this method, every direct `_hoveredIndex = X` call had to
+// remember to fire the callback by hand — easy to miss on the
+// typeahead-letter path. Centralizing keeps the contract uniform.
+void Menu::setHoveredIndex(int index) {
+    if (_hoveredIndex == index) return;
+    _hoveredIndex = index;
+    if (_onHoverChanged) {
+        _onHoverChanged(_hoveredIndex);
+    }
+}
+
 void Menu::performLayout() {
     CompoundFocusableWidget::performLayout();
     layoutItems();
@@ -302,7 +315,7 @@ bool Menu::onKeyDown(int keyCode) {
                     : (_hoveredIndex + 1) % n;
                 const int retry = findTypeaheadMatch(retryStart);
                 if (retry >= 0) {
-                    _hoveredIndex = retry;
+                    setHoveredIndex(retry);
                     return true;
                 }
             }
@@ -311,7 +324,7 @@ bool Menu::onKeyDown(int keyCode) {
             _typeaheadBuffer.clear();
             return false;
         }
-        _hoveredIndex = match;
+        setHoveredIndex(match);
         return true;
     }
 
@@ -319,12 +332,12 @@ bool Menu::onKeyDown(int keyCode) {
     case UIKey_Down:
         // PR-C3 — arrow key invalidates the typeahead buffer.
         _typeaheadBuffer.clear();
-        _hoveredIndex = (_hoveredIndex + 1) % n;
+        setHoveredIndex((_hoveredIndex + 1) % n);
         return true;
     case UIKey_Up:
         // PR-C3 — arrow key invalidates the typeahead buffer.
         _typeaheadBuffer.clear();
-        _hoveredIndex = (_hoveredIndex <= 0) ? n - 1 : _hoveredIndex - 1;
+        setHoveredIndex((_hoveredIndex <= 0) ? n - 1 : _hoveredIndex - 1);
         return true;
     case UIKey_Enter:
         // PR-C3 — Enter invalidates the typeahead buffer.

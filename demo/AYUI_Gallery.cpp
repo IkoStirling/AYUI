@@ -116,6 +116,11 @@ struct GalleryState {
     // must null it out.
     ayt::ui::Tooltip* tooltip = nullptr;
     ayt::ui::Window*   window  = nullptr;
+    // Window's body TextLabel — kept separately so teardown can free
+    // it explicitly. The body was added via window->addChildExternal,
+    // which means destroyWidgetTree on the Window would detach but not
+    // delete it (UI-OWN-2 invariant for external children).
+    ayt::ui::TextLabel* windowBody = nullptr;
 
     // PR-B2 — Theme toggle state. F5 swaps dark <-> light via
     // ThemeManager::setActiveTheme(). The composer's composed sheet is
@@ -399,9 +404,12 @@ void teardownCapabilitiesOverlay(GalleryState& state) {
     if (state.tooltip != nullptr) {
         // Tooltip::detach() pulls itself off the overlay + unregisters
         // from the hover-timer driver. After detach the tooltip is no
-        // longer reachable from any UI tree, so delete is safe.
+        // longer reachable from any UI tree, so destroyWidgetTree (NOT
+        // `delete` — Tooltip owns its TextLabel child via addChild, and
+        // UI-OWN-1 says ~Widget does not free children; destroyWidgetTree
+        // walks the tree and frees every reachable widget recursively).
         state.tooltip->detach();
-        delete state.tooltip;
+        ayt::ui::destroyWidgetTree(state.tooltip);
         state.tooltip = nullptr;
     }
     if (state.window != nullptr) {
@@ -412,13 +420,18 @@ void teardownCapabilitiesOverlay(GalleryState& state) {
         if (state.window->getParent() != nullptr) {
             state.window->getParent()->removeChild(state.window);
         }
-        // Free the body TextLabel inside the Window BEFORE deleting the
-        // Window. addChildExternal doesn't transfer ownership, so the
-        // body would leak; we own it (allocated in wireCapabilities).
-        // We can't enumerate children without a public API, but Window's
-        // body is the only child we add and it's set via addChildExternal
-        // (no destroyWidgetTree) — so the body survives the Window
-        // delete and we leak 320x110 TextLabel. Acceptable for a demo.
+        // Body TextLabel was attached via addChildExternal (we own it).
+        // destroyWidgetTree skips external children, so we free it first.
+        if (state.windowBody != nullptr) {
+            // Detach so Window's destructor doesn't see a stale parent
+            // back-pointer (it doesn't free children either way, but
+            // keeping the tree consistent helps sanitizers).
+            if (state.windowBody->getParent() != nullptr) {
+                state.windowBody->getParent()->removeChild(state.windowBody);
+            }
+            delete state.windowBody;
+            state.windowBody = nullptr;
+        }
         delete state.window;
         state.window = nullptr;
     }
@@ -502,6 +515,23 @@ void wireCapabilities(GalleryState& state)
             fruits->addItem(L"Banana");
             fruits->addItem(L"Blueberry");
             fruits->addItem(L"Cherry");
+            fruits->setOnHoverChanged([&ui](int idx) {
+                // PR-C3 feedback — typeahead jumps the highlight via
+                // setHoveredIndex; the state label mirrors it so the
+                // user sees 'A' → Apple, 'B' → Banana, etc. without
+                // needing to look at the menu bar's highlight color.
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_c3_state"))) {
+                    if (auto* item = fruits->getItem(static_cast<size_t>(idx))) {
+                        std::wstring msg = L"menu: Fruits highlight=[";
+                        msg += std::to_wstring(idx);
+                        msg += L"] \"";
+                        msg += item->getText();
+                        msg += L"\" (typeahead pre-activation)";
+                        lbl->setText(msg);
+                    }
+                }
+            });
             fruits->setOnItemActivated([&ui](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
@@ -530,6 +560,19 @@ void wireCapabilities(GalleryState& state)
             colors->addItem(L"Red");
             colors->addItem(L"Green");
             colors->addItem(L"Blue");
+            colors->setOnHoverChanged([&ui](int idx) {
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_c3_state"))) {
+                    if (auto* item = colors->getItem(static_cast<size_t>(idx))) {
+                        std::wstring msg = L"menu: Colors highlight=[";
+                        msg += std::to_wstring(idx);
+                        msg += L"] \"";
+                        msg += item->getText();
+                        msg += L"\" (typeahead pre-activation)";
+                        lbl->setText(msg);
+                    }
+                }
+            });
             colors->setOnItemActivated([&ui](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
@@ -605,11 +648,13 @@ void wireCapabilities(GalleryState& state)
                          "[AYUI_Gallery] Window resized: %.0fx%.0f -> %.0fx%.0f\n",
                          oldSize.x, oldSize.y, newSize.x, newSize.y);
         });
-    // Body: a tiny text label so the window has visible content.
-    auto* body = new ayt::ui::TextLabel();
-    body->setText(L"Drag any edge or corner.\nCursor hint follows.\nClose X or click 'Dismiss'.");
-    body->setSize(ayt::math::FVector2(320.0f, 110.0f));
-    state.window->addChildExternal(body);
+    // Body: a tiny text label so the window has visible content. We keep
+    // the pointer in state.windowBody so teardown can free it explicitly
+    // (addChildExternal makes destroyWidgetTree skip it).
+    state.windowBody = new ayt::ui::TextLabel();
+    state.windowBody->setText(L"Drag any edge or corner.\nCursor hint follows.\nClose X or click 'Dismiss'.");
+    state.windowBody->setSize(ayt::math::FVector2(320.0f, 110.0f));
+    state.window->addChildExternal(state.windowBody);
     // Mount on the overlay via UIManager::openPopup (same convention as
     // ComboBox popup). We don't want this to be the "active dropdown",
     // so we add it as a regular overlay child.

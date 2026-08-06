@@ -125,11 +125,20 @@ public:
     // setOnClose fires when the menu closes for any reason (item pick,
     // Escape, click-outside — the latter is the host's responsibility
     // via DropdownManager).
+    //
+    // PR-C3 — setOnHoverChanged fires whenever _hoveredIndex changes
+    // (mouse hover, keyboard Up/Down, typeahead letter jump). The
+    // Gallery uses this to surface typeahead feedback in the status
+    // label — without it the user has no visible signal that pressing
+    // 'A' actually highlighted "Apple" instead of just sitting there.
     void setOnItemActivated(std::function<void(int)> cb) {
         _onItemActivated = std::move(cb);
     }
     void setOnClose(std::function<void()> cb) {
         _onClose = std::move(cb);
+    }
+    void setOnHoverChanged(std::function<void(int)> cb) {
+        _onHoverChanged = std::move(cb);
     }
 
     void performLayout() override;
@@ -152,6 +161,11 @@ private:
     // match _typeaheadBuffer, starting at `startFrom` and wrapping.
     // Returns -1 if nothing matches. Skips separators (null items).
     int  findTypeaheadMatch(int startFrom) const;
+
+    // PR-C3 — set _hoveredIndex and fire _onHoverChanged if it changed.
+    // Single source of truth for every path that moves the highlight
+    // (Up/Down, typeahead letter, mouse hover).
+    void setHoveredIndex(int index);
 
     std::vector<MenuItem*> _items;
     std::vector<Menu*>     _submenus;       // owned sub-menus
@@ -184,6 +198,7 @@ private:
 
     std::function<void(int)> _onItemActivated;
     std::function<void()>    _onClose;
+    std::function<void(int)> _onHoverChanged;   // PR-C3 feedback
 };
 
 Widget* createMenuWidget();

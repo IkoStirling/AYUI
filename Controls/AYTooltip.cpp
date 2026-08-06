@@ -21,8 +21,6 @@ Tooltip::~Tooltip() {
     // CompoundWidget's destructor handles child cleanup.
     // Code-review 2026-08-02 #7: clear _target back-pointer so any
     // post-destruction path that checks getTarget() observes null.
-    // detach()'s overlay-close side is unnecessary here because
-    // ~UIManager::shutdown will tear down the overlay tree.
     //
     // PR-C1 — also unregister from UIManager's hover-timer driver so
     // the next update() doesn't deref this dead pointer. After
@@ -30,6 +28,10 @@ Tooltip::~Tooltip() {
     // so this is a silent no-op in the orderly path; the standalone
     // `delete tip` path (e.g. `Tooltip* tip = attachTo(...); delete tip;`)
     // is what this guards against.
+    //
+    // P3: the overlay parent does NOT destroy us (addChildExternal in
+    // attachTo), so ~Widget leaving children intact is fine — the host
+    // owns lifetime and is responsible for calling detach() first.
     _target = nullptr;
     if (UIManager* ui = UIManager::tryGet()) {
         ui->unregisterTooltip(this);
@@ -57,8 +59,22 @@ Tooltip* Tooltip::attachTo(Widget* target) {
     UIManager* uiPtr = UIManager::tryGet();
     if (uiPtr == nullptr) return tip;   // tooltip usable without overlay
     UIManager& ui = *uiPtr;
-    ui.openPopup(target, tip);
-    // PR-C1 — register AFTER openPopup so the overlay owns the tip
+    // P3 fix (Gallery exit-crash 0xFFFFFFFFFFFFFFFF): mount via
+    // addChildExternal, NOT openPopup. openPopup sets _activeDropdown=tip,
+    // which makes the click-outside detector in onMouseButtonUp call
+    // closePopup(_activeDropdown, destroy=true) the moment the user clicks
+    // anywhere outside the anchor button — that destroyWidgetTree's the
+    // tooltip and leaves the host's raw pointer dangling. Mounting as a
+    // plain overlay sibling keeps the tip alive until the host explicitly
+    // destroys it (matches the documented "caller owns the Tooltip*"
+    // contract on the public header).
+    if (Widget* overlay = ui.getOverlayRoot()) {
+        overlay->addChildExternal(tip);
+    }
+    // PR-C1 — register AFTER attaching to the overlay so the hover-timer
+    // driver sees the tooltip mounted before it starts ticking. update()
+    // snapshots _tooltips before iterating, so a late register is safe
+    // (next frame picks it up). Order doesn't matter for correctness.
     // before the driver starts ticking. update() snapshots _tooltips
     // before iterating, so a late register is safe (next frame picks
     // it up). Order doesn't matter for correctness — both calls are
@@ -86,9 +102,16 @@ void Tooltip::detach() {
     _target = nullptr;
     if (UIManager* ui = UIManager::tryGet()) {
         ui->unregisterTooltip(this);
-        if (getParent() != nullptr) {
-            ui->closePopup(this, /*destroy=*/false);
-        }
+    }
+    // P3 fix: removeChild directly from the overlay. detach() must NOT go
+    // through closePopup — the tooltip is no longer registered as
+    // _activeDropdown (attachTo bypassed openPopup), so closePopup's
+    // _activeDropdown / hover / capture guards would silently skip the
+    // bookkeeping we already did and leave the overlay still holding the
+    // tip. Direct removeChild is the matching pair of the addChildExternal
+    // we did in attachTo.
+    if (Widget* p = getParent()) {
+        p->removeChild(this);
     }
     hide();
 }
@@ -219,14 +242,25 @@ void Tooltip::performLayout() {
 void Tooltip::onRender(IRenderBackend& renderer) {
     const math::FRectangle b = getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
-    // Background plate with slight alpha.
-    renderer.drawRect(b, math::FVector4(0.10f, 0.10f, 0.13f, 0.92f));
-    // Subtle border in lighter shade.
+    // Background plate with slight alpha — matches Menu palette so the
+    // tooltip reads as a dialog-style frame, not a bare TextLabel slab.
+    renderer.drawRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f));
+    // 4-sided border, 1px wide, matches Menu::onRender for visual parity
+    // with the dropdown popups. Previous code only drew top+bottom strips,
+    // which left the tooltip looking like a horizontal band instead of a
+    // wrapped dialog box.
+    constexpr float bw = 1.0f;
     renderer.drawRect(
-        math::FRectangle(b.minX, b.minY, b.maxX, b.minY + 1.0f),
+        math::FRectangle(b.minX, b.minY, b.maxX, b.minY + bw),
         math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
     renderer.drawRect(
-        math::FRectangle(b.minX, b.maxY - 1.0f, b.maxX, b.maxY),
+        math::FRectangle(b.minX, b.maxY - bw, b.maxX, b.maxY),
+        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
+    renderer.drawRect(
+        math::FRectangle(b.minX, b.minY, b.minX + bw, b.maxY),
+        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
+    renderer.drawRect(
+        math::FRectangle(b.maxX - bw, b.minY, b.maxX, b.maxY),
         math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
 }
 

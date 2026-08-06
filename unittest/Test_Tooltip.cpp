@@ -24,6 +24,9 @@ TEST_CASE(tooltip_initial_state) {
     CHECK(tip->getTarget() == &btn);
     CHECK_FALSE(tip->isShowing());
     CHECK_FALSE(tip->isHovered());
+    // P3: tip is host-owned (no UIManager → attachTo returned early
+    // before registering). Free it directly.
+    destroyWidgetTree(tip);
 }
 
 // Hovering the target for >= hoverDelay makes the tooltip visible.
@@ -47,6 +50,8 @@ TEST_CASE(tooltip_appears_on_hover_delay) {
     // Tick again at 0.4s (cumulative >= 0.5s) -> visible
     tip->tick(0.4f, mousePos, viewport);
     CHECK(tip->isShowing());
+
+    destroyWidgetTree(tip);
 }
 
 // Leaving the target hides the tooltip (after one tick).
@@ -66,13 +71,17 @@ TEST_CASE(tooltip_hides_on_mouse_leave) {
     // Move outside.
     tip->tick(0.1f, FVector2(900.0f, 900.0f), FVector2(800.0f, 600.0f));
     CHECK_FALSE(tip->isShowing());
+
+    destroyWidgetTree(tip);
 }
 
 // Phase A (A2): the tooltip lives on UIManager's overlay root, NOT as a
-// child of the target. Tooltip lifetime is owned by the overlay. After
-// `Tooltip::attachTo`, calling `UIManager::shutdown()` (or closePopup on
-// the tooltip) frees the tooltip — the target can be torn down
-// independently without UAF.
+// child of the target. P3 update: the tooltip is mounted via
+// addChildExternal (NOT addChild) so the overlay does NOT free it on
+// shutdown — the caller (the host that called attachTo) owns the
+// lifetime. The target can be torn down independently without UAF on
+// `_target`, and the host can choose when to destroy the tip (typically
+// via `tip->detach(); destroyWidgetTree(tip);` before shutting down UIManager).
 TEST_CASE(tooltip_owned_via_destroy_widget_tree) {
     MockRenderer backend;
     UIManager ui;
@@ -92,12 +101,14 @@ TEST_CASE(tooltip_owned_via_destroy_widget_tree) {
     CHECK(foundOnOverlay);
     CHECK(btn->getChildren().empty());
 
-    // Tear down `btn` — overlay still owns the tip, no UAF on the target.
+    // Tear down `btn` — overlay still holds the tip, no UAF on the target.
     destroyWidgetTree(btn);
 
-    // UIManager shutdown destroys overlay children (the tip).
+    // Host frees the tip (overlay does NOT free it for us).
+    tip->detach();
+    destroyWidgetTree(tip);
+
     ui.shutdown();
-    // If we get here without a crash, the tooltip was freed cleanly.
 }
 
 TEST_CASE(tooltip_factory_and_serializer_round_trip) {
@@ -127,7 +138,8 @@ TEST_CASE(tooltip_factory_and_serializer_round_trip) {
 }
 
 // Phase A (A2): Tooltip::attachTo mounts the tip on the overlay, not as a
-// child of the target.
+// child of the target. P3 update: tip is externally-owned — host must
+// detach + delete it; ui.shutdown() will not free it.
 TEST_CASE(tooltip_attach_to_mounts_on_overlay) {
     MockRenderer backend;
     UIManager ui;
@@ -148,6 +160,8 @@ TEST_CASE(tooltip_attach_to_mounts_on_overlay) {
     CHECK(foundOnOverlay);
     CHECK(btn.getChildren().empty());
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -180,6 +194,8 @@ TEST_CASE(tooltip_tick_viewport_fallback_to_uimanager) {
     // After flip, tip should be ABOVE the anchor (anchor minY=60).
     CHECK(tb.maxY <= 60.0f);
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -217,6 +233,8 @@ TEST_CASE(tooltip_uimanager_drives_tick_no_manual_call) {
 
     CHECK(tip->isShowing());
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -247,6 +265,8 @@ TEST_CASE(tooltip_uimanager_drives_hide_on_mouse_leave) {
     ui.update(0.1f);
     CHECK_FALSE(tip->isShowing());
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -278,6 +298,8 @@ TEST_CASE(tooltip_hover_still_accumulates_across_frames) {
     }
     CHECK(tip->isShowing());
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -307,6 +329,8 @@ TEST_CASE(tooltip_no_mouse_pos_does_not_show) {
     ui.update(1.0f);
     CHECK_FALSE(tip->isShowing());
 
+    tip->detach();
+    destroyWidgetTree(tip);
     ui.shutdown();
 }
 
@@ -347,14 +371,16 @@ TEST_CASE(tooltip_detach_unregisters_from_uimanager) {
 
     // Manual destroy after detach: ~Tooltip's unregisterTooltip is a
     // no-op (already detached) but shouldn't crash.
-    delete tip;
+    destroyWidgetTree(tip);
 
     ui.shutdown();
 }
 
-// PR-C1.5 — overlay teardown (closePopup with destroy=true OR shutdown)
-// clears the driver list. Subsequent update() must not crash even if
-// the tooltip was never explicitly detached.
+// PR-C1.5 — overlay teardown (closePopup OR shutdown) clears the driver
+// list. Subsequent update() must not crash even if the tooltip was
+// never explicitly detached. P3 update: tooltip is now externally-owned,
+// so closePopup(destroy=true) only detaches — the host must `delete` the
+// tip itself (matches the public header contract "caller owns lifetime").
 TEST_CASE(tooltip_overlay_unmount_unregisters_from_uimanager_list) {
     MockRenderer backend;
     UIManager ui;
@@ -376,8 +402,9 @@ TEST_CASE(tooltip_overlay_unmount_unregisters_from_uimanager_list) {
     }
     CHECK(foundOnOverlay);
 
-    // Destroy via closePopup path — typical for hosts that own the
-    // tooltip via `new Tooltip()` and want the manager to free it.
+    // closePopup removes the tip from the overlay AND unregisters from
+    // the driver list. The externally-owned flag suppresses destroyWidgetTree
+    // from `delete`-ing the tip — the host frees it below.
     ui.closePopup(tip, /*destroy=*/true);
 
     // Tip should be gone from the overlay now.
@@ -391,6 +418,9 @@ TEST_CASE(tooltip_overlay_unmount_unregisters_from_uimanager_list) {
     // in closePopup's Tooltip unregister branch.
     ui.onMouseMove(60.0f, 60.0f);
     ui.update(1.0f);
+
+    // Host frees the tip (P3 contract).
+    destroyWidgetTree(tip);
 
     ui.shutdown();
 }

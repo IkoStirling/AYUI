@@ -954,6 +954,14 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
         }
     }
 
+    // Snapshot the external-owned flag BEFORE removeChild clears it.
+    // P3 (Tooltip attachTo change): externally-owned popups are NOT
+    // freed by closePopup — the host owns the lifetime and is
+    // responsible for the matching `destroyWidgetTree(tip)`. Without
+    // this snapshot, the flag would be lost and we'd double-free the
+    // popup's internal children (e.g. Tooltip::_label).
+    const bool externallyOwned = popup->isExternallyOwned();
+
     if (popup->getParent() != nullptr) {
         popup->getParent()->removeChild(popup);
     }
@@ -970,6 +978,9 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
     if (destroy) {
         if (notifyCombo && anchor != nullptr) {
             static_cast<ComboBox*>(anchor)->onPopupDismissedByManager();
+        }
+        if (externallyOwned) {
+            return;
         }
         destroyWidgetTree(popup);
     }
