@@ -36,6 +36,7 @@
 #include "aymath/MathUtils.h"
 #include "AYWidgetFactory.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -342,6 +343,33 @@ void UIManager::initialize(IRenderBackend* backend) {
     g_activeUIManager = this;
 }
 
+// PR-C1 — Tooltip driver hooks (passive hover-timer).
+//
+// registerTooltip is called by Tooltip::attachTo AFTER the overlay
+// mount succeeds; unregisterTooltip by Tooltip::detach / ~Tooltip.
+// Idempotent: registering twice is a no-op; unregistering an unknown
+// tooltip is also a no-op (defends against double-unregister races).
+//
+// The list is non-owning; destroyWidgetTree on the overlay frees the
+// Tooltip nodes, but the `unregister` call MUST happen before the
+// destroy so the next update() doesn't deref a freed pointer — hence
+// the explicit `_tooltips.clear()` at the top of tearDownOverlayChildren
+// and the per-popup erase in closePopup.
+void UIManager::registerTooltip(Tooltip* tip) {
+    if (tip == nullptr) return;
+    if (std::find(_tooltips.begin(), _tooltips.end(), tip) != _tooltips.end()) {
+        return;   // already registered
+    }
+    _tooltips.push_back(tip);
+}
+
+void UIManager::unregisterTooltip(Tooltip* tip) {
+    if (tip == nullptr) return;
+    auto it = std::find(_tooltips.begin(), _tooltips.end(), tip);
+    if (it == _tooltips.end()) return;
+    _tooltips.erase(it);
+}
+
 void UIManager::tearDownOverlayChildren() {
     // Notify ComboBox anchors BEFORE free — otherwise a stack-local
     // ComboBox still holds `_popup` and its destructor double-frees the
@@ -382,6 +410,14 @@ void UIManager::tearDownOverlayChildren() {
         _activeModal = nullptr;
         _activeModalRoot = nullptr;
     }
+
+    // PR-C1 — drop the Tooltip registry BEFORE destroyWidgetTree runs
+    // on the overlay's children. The destroy loop frees the Tooltip
+    // nodes (openPopup mounted them via addChild, not addChildExternal),
+    // and the next update() would deref the dead pointers if we kept
+    // them in `_tooltips`. Same R3 landmine class as the _activeDropdown
+    // and _activeModal clears above.
+    _tooltips.clear();
 
     if (_overlayRoot == nullptr) {
         return;
@@ -678,6 +714,34 @@ void UIManager::update(float dt) {
         }
         updateHoverWidget(_hoverWidget, hit);
     }
+
+    // PR-C1 — drive all registered Tooltips. tick(dt, mousePos, viewport)
+    // advances the hover-timer using the current mouse position; the
+    // tooltip's hit test (target's worldBounds.contains(mousePos)) decides
+    // whether the timer accumulates or resets. Tooltip::tick already
+    // guards `_target == nullptr` and falls back to UIManager::getClientSize
+    // when given (0,0), so this driver needs no extra logic.
+    //
+    // Skip the entire loop when `_hasLastMouse == false` — passing
+    // (0,0) would falsely trigger any tooltip whose anchor happens to
+    // contain the origin. The tooltip stays in whatever state it was
+    // before initialize() — typically hidden — which matches "no mouse
+    // state yet → no hover intent".
+    //
+    // We snapshot the list before iterating because a Tooltip's tick path
+    // could trigger detach() (e.g. an edge case where the user wires a
+    // callback that calls detach() under a hover) which would mutate
+    // `_tooltips` mid-loop. The snapshot keeps the iteration stable.
+    if (_hasLastMouse && !_tooltips.empty()) {
+        const std::vector<Tooltip*> snapshot = _tooltips;
+        const math::FVector2 mousePos(_lastMouseX, _lastMouseY);
+        const math::FVector2 viewport(_clientWidth, _clientHeight);
+        for (Tooltip* tip : snapshot) {
+            if (tip != nullptr) {
+                tip->tick(dt, mousePos, viewport);
+            }
+        }
+    }
 }
 
 void UIManager::invalidateLayout() {
@@ -881,6 +945,15 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
 
     if (popup->getParent() != nullptr) {
         popup->getParent()->removeChild(popup);
+    }
+
+    // PR-C1 — if the popup being closed is a Tooltip, drop it from the
+    // hover-timer driver list BEFORE destroyWidgetTree (matches the
+    // tearDownOverlayChildren clear pattern). Tooltip::detach already
+    // unregisters, but hosts calling closePopup(tip, true) directly
+    // bypass detach and would otherwise leave a dangling pointer.
+    if (Tooltip* tip = dynamic_cast<Tooltip*>(popup)) {
+        unregisterTooltip(tip);
     }
 
     if (destroy) {

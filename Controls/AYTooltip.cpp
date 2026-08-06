@@ -23,7 +23,17 @@ Tooltip::~Tooltip() {
     // post-destruction path that checks getTarget() observes null.
     // detach()'s overlay-close side is unnecessary here because
     // ~UIManager::shutdown will tear down the overlay tree.
+    //
+    // PR-C1 — also unregister from UIManager's hover-timer driver so
+    // the next update() doesn't deref this dead pointer. After
+    // shutdown() the active manager is nullptr (tryGet returns null)
+    // so this is a silent no-op in the orderly path; the standalone
+    // `delete tip` path (e.g. `Tooltip* tip = attachTo(...); delete tip;`)
+    // is what this guards against.
     _target = nullptr;
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->unregisterTooltip(this);
+    }
 }
 
 Tooltip* Tooltip::attachTo(Widget* target) {
@@ -48,6 +58,14 @@ Tooltip* Tooltip::attachTo(Widget* target) {
     if (uiPtr == nullptr) return tip;   // tooltip usable without overlay
     UIManager& ui = *uiPtr;
     ui.openPopup(target, tip);
+    // PR-C1 — register AFTER openPopup so the overlay owns the tip
+    // before the driver starts ticking. update() snapshots _tooltips
+    // before iterating, so a late register is safe (next frame picks
+    // it up). Order doesn't matter for correctness — both calls are
+    // independent — but the openPopup-first ordering matches the
+    // destroy-order contract in tearDownOverlayChildren (clear list
+    // before destroyWidgetTree), which keeps the two paths symmetric.
+    ui.registerTooltip(tip);
     tip->setVisible(false);
     return tip;
 }
@@ -58,8 +76,16 @@ void Tooltip::detach() {
     // _target so tick() early-returns on the next call instead of
     // dereferencing a freed anchor. Also pull ourselves off the overlay
     // so the manager doesn't keep ticking / rendering a stranded popup.
+    //
+    // PR-C1 — unregister from the hover-timer driver BEFORE pulling
+    // ourselves off the overlay. The driver's update() loop snapshots
+    // _tooltips but the snapshot doesn't survive the unregister call,
+    // so unregister-first guarantees no concurrent deref. closePopup's
+    // own Tooltip check would also unregister, but doing it here keeps
+    // the contract symmetric with ~Tooltip.
     _target = nullptr;
     if (UIManager* ui = UIManager::tryGet()) {
+        ui->unregisterTooltip(this);
         if (getParent() != nullptr) {
             ui->closePopup(this, /*destroy=*/false);
         }

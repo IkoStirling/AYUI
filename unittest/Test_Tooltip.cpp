@@ -183,5 +183,217 @@ TEST_CASE(tooltip_tick_viewport_fallback_to_uimanager) {
     ui.shutdown();
 }
 
+// ============================================================================
+// PR-C1 — passive hover-timer driver: UIManager::update(dt) ticks every
+// attached Tooltip automatically, host doesn't call tip->tick() directly.
+// ============================================================================
+
+// PR-C1.1 — UIManager drives tick without any manual tip->tick call.
+TEST_CASE(tooltip_uimanager_drives_tick_no_manual_call) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+    // Tooltip is overlay-mounted; doesn't need to live under _root,
+    // but a host that uses a rootless Button is fine for tick purposes
+    // since the test asserts target-bounds.contains(mousePos).
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.3f);
+    tip->setText(L"Passive hover test");
+
+    // Move the cursor over the button; the driver uses the latest
+    // onMouseMove position from _hasLastMouse/_lastMouseX/_lastMouseY.
+    ui.onMouseMove(60.0f, 60.0f);
+
+    // One big update(dt) past the delay → tooltip should appear.
+    // We assert >= delay so the test isn't sensitive to slight dt rounding.
+    ui.update(0.4f);
+
+    CHECK(tip->isShowing());
+
+    ui.shutdown();
+}
+
+// PR-C1.2 — leaving the target hides the tip on the next update().
+TEST_CASE(tooltip_uimanager_drives_hide_on_mouse_leave) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.3f);
+    tip->setText(L"Leave hides");
+
+    ui.onMouseMove(60.0f, 60.0f);
+    ui.update(0.2f);   // 0.2 < 0.3 → still hidden
+    CHECK_FALSE(tip->isShowing());
+    ui.update(0.2f);   // cumulative 0.4 >= 0.3 → shown
+    CHECK(tip->isShowing());
+
+    // Move outside target bounds.
+    ui.onMouseMove(900.0f, 900.0f);
+    ui.update(0.1f);
+    CHECK_FALSE(tip->isShowing());
+
+    ui.shutdown();
+}
+
+// PR-C1.3 — hover-still accumulates: cursor parked inside the target
+// across multiple frames still triggers the tooltip (Windows convention).
+// Bonus check: with no onMouseMove seen yet (tryGet state before the
+// first move), update(1.0f) must NOT show the tooltip because
+// getMousePos() returns (0,0) and (0,0) is outside the button bounds.
+TEST_CASE(tooltip_hover_still_accumulates_across_frames) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.3f);
+    tip->setText(L"Still");
+
+    // One onMouseMove, then several update() frames with the cursor
+    // parked. Total dt sums to 0.3 ≥ delay.
+    ui.onMouseMove(60.0f, 60.0f);
+    for (int i = 0; i < 3; ++i) {
+        ui.update(0.1f);
+    }
+    CHECK(tip->isShowing());
+
+    ui.shutdown();
+}
+
+// PR-C1.3b — no mouse state ⇒ no false hover. _hasLastMouse guards
+// getMousePos() so (0,0) can't trigger a tip on a target whose bounds
+// happen to contain the origin (none in our tests, but the contract
+// matters for hosts that attach a tooltip to a (0,0) anchor).
+TEST_CASE(tooltip_no_mouse_pos_does_not_show) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    // Anchor at origin (0,0); without the _hasLastMouse guard,
+    // getMousePos() returning (0,0) would falsely trigger hover.
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(0.0f, 0.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.1f);
+    tip->setText(L"No mouse yet");
+
+    // No onMouseMove → _hasLastMouse == false.
+    CHECK_FALSE(ui.hasMousePos());
+    ui.update(1.0f);
+    CHECK_FALSE(tip->isShowing());
+
+    ui.shutdown();
+}
+
+// PR-C1.4 — detach removes from the driver list; further update() calls
+// don't deref the (now-cleared) tooltip. Also: a tooltip still alive on
+// the overlay after detach should not show up again on a subsequent
+// mouse-move.
+TEST_CASE(tooltip_detach_unregisters_from_uimanager) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.1f);
+    tip->setText(L"Will detach");
+
+    ui.onMouseMove(60.0f, 60.0f);
+    ui.update(0.2f);
+    CHECK(tip->isShowing());
+
+    tip->detach();
+    CHECK(tip->getTarget() == nullptr);
+    CHECK_FALSE(tip->isShowing());
+
+    // Move back over the (now detached) target's bounds. The tooltip
+    // must not appear again because it was unregistered from the
+    // driver. (`btn` still exists; the bounds are unchanged — only the
+    // tooltip's reference to the target was cleared.)
+    ui.onMouseMove(60.0f, 60.0f);
+    ui.update(1.0f);
+    CHECK_FALSE(tip->isShowing());
+
+    // Manual destroy after detach: ~Tooltip's unregisterTooltip is a
+    // no-op (already detached) but shouldn't crash.
+    delete tip;
+
+    ui.shutdown();
+}
+
+// PR-C1.5 — overlay teardown (closePopup with destroy=true OR shutdown)
+// clears the driver list. Subsequent update() must not crash even if
+// the tooltip was never explicitly detached.
+TEST_CASE(tooltip_overlay_unmount_unregisters_from_uimanager_list) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.1f);
+
+    // Confirm tip is on the overlay (sanity).
+    bool foundOnOverlay = false;
+    for (Widget* w : ui.getOverlayRoot()->getChildren()) {
+        if (w == tip) { foundOnOverlay = true; break; }
+    }
+    CHECK(foundOnOverlay);
+
+    // Destroy via closePopup path — typical for hosts that own the
+    // tooltip via `new Tooltip()` and want the manager to free it.
+    ui.closePopup(tip, /*destroy=*/true);
+
+    // Tip should be gone from the overlay now.
+    bool stillOnOverlay = false;
+    for (Widget* w : ui.getOverlayRoot()->getChildren()) {
+        if (w == tip) { stillOnOverlay = true; break; }
+    }
+    CHECK_FALSE(stillOnOverlay);
+
+    // Subsequent updates must not crash — the driver list was cleared
+    // in closePopup's Tooltip unregister branch.
+    ui.onMouseMove(60.0f, 60.0f);
+    ui.update(1.0f);
+
+    ui.shutdown();
+}
+
 TEST_SUITE_END
 

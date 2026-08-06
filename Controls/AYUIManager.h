@@ -203,6 +203,32 @@ public:
     // ScrollView. Returns true iff any widget consumed the event.
     bool onMouseWheel(float x, float y, float deltaY);
 
+    // =====================================================================
+    // PR-C1 — Tooltip driver (passive hover-timer).
+    // =====================================================================
+    // Each call to update(dt) walks the registered tooltip list and ticks
+    // every Tooltip with the current mousePos + clientSize, so a tooltip
+    // attached to a target widget shows/hides based on real hover time
+    // without the host wiring a per-frame driver. Hosts that want the
+    // legacy behaviour can still call Tooltip::tick directly; the driver
+    // is purely additive.
+    //
+    // registerTooltip / unregisterTooltip are wired into Tooltip::attachTo
+    // and Tooltip::detach respectively (and ~Tooltip). The list is
+    // non-owning — Tooltip lifetime is owned by the overlay root via
+    // openPopup / closePopup (or destroyWidgetTree on the overlay).
+    void registerTooltip(class Tooltip* tip);
+    void unregisterTooltip(class Tooltip* tip);
+
+    // Last mouse position from onMouseMove. Returns (0,0) if no move has
+    // arrived yet (initialize() → before first cursor event). Tooltip
+    // ticks use this to test `_target->getWorldBounds().contains(mousePos)`.
+    math::FVector2 getMousePos() const {
+        return _hasLastMouse ? math::FVector2(_lastMouseX, _lastMouseY)
+                             : math::FVector2(0.0f, 0.0f);
+    }
+    bool hasMousePos() const { return _hasLastMouse; }
+
     // C-3 focus + keyboard routing. setFocus replaces the currently
     // focused widget (if any) with the new one; pass nullptr to drop
     // focus. onKeyDown / onKeyUp route to the focused widget if it
@@ -490,6 +516,12 @@ private:
     // extra safety net we null the slot before destruction in cancelComposition.
     Widget* _compositionOwner = nullptr;
     bool    _composing = false;
+
+    // PR-C1 — list of attached Tooltips driven by update(dt). Non-owning;
+    // the overlay root owns lifetime. Cleared on tearDownOverlayChildren /
+    // shutdown BEFORE destroyWidgetTree runs so the next update doesn't
+    // deref a freed Tooltip*.
+    std::vector<class Tooltip*> _tooltips;
 
     // Phase C helper: true if `w` is a text-editing widget per the
     // isTextEditingWidget() virtual. Used by setFocus to drive the
