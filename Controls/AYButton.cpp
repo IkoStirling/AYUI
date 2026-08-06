@@ -1,6 +1,7 @@
 #include "AYButton.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
+#include "AYTextMeasure.h"
 #include "aymath/MathUtils.h"
 
 namespace ayt::ui {
@@ -28,16 +29,17 @@ math::FRectangle Button::getTextBounds() const {
     );
 }
 
-// Phase D (D4) — preferred-size heuristic for TabStrip-driven layout. Each
-// character is approximated as 8 pixels wide at the 14pt font the Button
-// draws, plus horizontal padding on both sides. Height defaults to the
-// kMinButtonHeight if the widget hasn't been sized yet, otherwise reports
-// the current height so vertical-grow containers don't keep extending it.
-// v1.1 swap: real text shaper once AYFont.measureText is exposed publicly.
+// Phase D (D4) — preferred-size heuristic for TabStrip-driven layout.
+// PR-B2: now resolves the actual glyph run width via
+// ayt::ui::measurePrefixWidth (PR-A1 header). The backend path (bgfx Font)
+// produces a true em-tracked width; without a backend the helper falls
+// back to a 7px-per-ASCII / fontSize-per-wide per-char estimate that
+// matches the pre-PR behaviour. Height defaults to kMinButtonHeight if
+// the widget hasn't been sized yet, otherwise reports the current height
+// so vertical-grow containers don't keep extending it.
 math::FVector2 Button::getPreferredSize() const {
-    constexpr float kAvgCharWidth = 8.0f;
     constexpr float kMinButtonHeight = 24.0f;
-    const float textW = static_cast<float>(_text.size()) * kAvgCharWidth;
+    const float textW = measurePrefixWidth(_text, _text.size());
     const float preferredH = std::max(kMinButtonHeight, getHeight());
     return math::FVector2(textW + _padding.x + _padding.z, preferredH);
 }

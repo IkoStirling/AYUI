@@ -40,6 +40,7 @@
 #include "AYUIRenderBackend.h"
 #include "AYRenderer.h"
 #include "AYRenderTypes.h"
+#include "AYTheme.h"
 
 #include "AYDeviceManager.h"
 
@@ -96,6 +97,13 @@ struct GalleryState {
     int clickCount = 0;
     std::unique_ptr<ayt::ui::ModalDialog> modal;
     std::unique_ptr<ayt::ui::TextLabel> modalBody;
+
+    // PR-B2 — Theme toggle state. F5 swaps dark <-> light via
+    // ThemeManager::setActiveTheme(). The composer's composed sheet is
+    // re-applied automatically, and onThemeChanged listeners (if any)
+    // get notified. We track the active name on the host so the next
+    // F5 knows which way to flip.
+    std::string activeThemeName = "dark";
 };
 
 void showPage(ayt::ui::UIManager& ui, const char* pageId)
@@ -323,6 +331,37 @@ void wireGallery(GalleryState& state)
 
 void bindReload(GalleryState& state);
 
+// PR-B2 — flip dark <-> light via F5. Uses ThemeManager::setActiveTheme
+// so the composer's composed sheet is swapped into the global
+// StyleManager and any onThemeChanged listeners get notified. We do NOT
+// touch individual widget style ids — resolveStyle() reads the active
+// theme's tokens at draw time, so the next render() pass picks up the
+// new colors without a reload.
+//
+// VK_F5 = 0x74. We intercept this at the WM_KEYDOWN layer rather than
+// the UIManager key tree (UIManager doesn't define UIKey_F5 today and
+// adding it just for Gallery would leak a dev hotkey into the public
+// surface).
+void toggleTheme(GalleryState& state) {
+    if (state.activeThemeName == "dark") {
+        state.activeThemeName = "light";
+    } else {
+        state.activeThemeName = "dark";
+    }
+    ayt::ui::ThemeManager::get().setActiveTheme(state.activeThemeName);
+    if (auto* status = dynamic_cast<ayt::ui::StatusBar*>(state.ui->findById("status"))) {
+        if (ayt::ui::TextLabel* lbl = status->getPanel(0)) {
+            std::wstring msg = L"theme: ";
+            msg += ayt::ui::ThemeManager::get().getActiveThemeName().empty()
+                       ? L"none"
+                       : std::wstring(
+                             state.activeThemeName.begin(),
+                             state.activeThemeName.end());
+            lbl->setText(msg);
+        }
+    }
+}
+
 bool loadAndWire(GalleryState& state)
 {
     if (state.layoutPath.empty()) {
@@ -426,6 +465,15 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
+        // PR-B2 — F5 toggles dark <-> light. Intercept BEFORE the UI key
+        // tree so the keystroke never reaches the focused widget (a
+        // future TextInput with setShortcut("F5") would otherwise eat
+        // it). VK_F5 = 0x74.
+        if (wParam == VK_F5) {
+            toggleTheme(*state);
+            handled = true;
+            return 0;
+        }
         state->ui->onKeyDown(static_cast<int>(wParam));
         handled = true;
         return 0;
@@ -496,6 +544,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
+
+    // PR-B2 — install built-in dark theme. ensureDefaultThemes is
+    // idempotent (no-op if a host registered a theme already) and
+    // setActiveTheme pushes the composed sheet into the StyleManager
+    // so resolveStyle() returns token-driven colors from this point on.
+    ayt::ui::ThemeManager::get().ensureDefaultThemes();
+    ayt::ui::ThemeManager::get().setActiveTheme("dark");
 
     GalleryState state{};
     state.ui = &ui;

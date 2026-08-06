@@ -1,6 +1,7 @@
 #include "AYStatusBar.h"
 #include "AYTextLabel.h"
 #include "IAYRenderBackend.h"
+#include "AYTextMeasure.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -117,9 +118,12 @@ void StatusBar::performLayout() {
         const auto ps = p->getSize();
         float w = ps.x;
         if (w <= 0.0f) {
-            // Default width: 8px pad + 7px per char estimate.
+            // Default width: 8px pad + measurePrefixWidth of the text.
+            // PR-B2: backend-aware so a real font produces correct width;
+            // falls back to 7px/char when no backend (tests, MockRenderer).
             if (auto* lbl = dynamic_cast<TextLabel*>(p)) {
-                w = static_cast<float>(lbl->getText().size()) * 7.0f + 8.0f;
+                const std::wstring& t = lbl->getText();
+                w = measurePrefixWidth(t, t.size()) + 8.0f;
             } else {
                 w = 60.0f; // generic panel fallback
             }

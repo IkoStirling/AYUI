@@ -1,6 +1,7 @@
 #include "AYMenuItem.h"
 #include "IAYRenderBackend.h"
 #include "AYMenu.h"
+#include "AYTextMeasure.h"
 #include "UIKeyCode.h"
 #include <algorithm>
 #include <cctype>
@@ -201,8 +202,11 @@ void MenuItem::onRender(IRenderBackend& renderer) {
         const math::FVector4 scColor = isEnabled()
             ? math::FVector4(0.70f, 0.70f, 0.74f, 1.0f)
             : math::FVector4(0.40f, 0.40f, 0.42f, 1.0f);
-        // Approximate right-align by drawing the text near the right edge.
-        const float approxW = static_cast<float>(_shortcut.size()) * 7.0f;
+        // Right-align by drawing the text near the right edge.
+        // PR-B2: backend-aware measurePrefixWidth — produces true glyph
+        // width when a real font backend is wired (PR-A1 header). Falls
+        // back to 7px/char when no backend (tests / MockRenderer).
+        const float approxW = measurePrefixWidth(_shortcut, _shortcut.size(), nullptr, 13);
         scBounds.minX = b.maxX - approxW - padR;
         scBounds.maxX = b.maxX - padR;
         renderer.drawText(scBounds, _shortcut, 13, scColor);

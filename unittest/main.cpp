@@ -68,6 +68,7 @@
 #include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接口
 #include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
 #include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
+#include "Test_Theme_Gallery.cpp"       // PR-B2 measurePrefixWidth + Theme swap
 
 void runTest()
 {
