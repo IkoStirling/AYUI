@@ -151,6 +151,16 @@ void Menu::detachForHostDestruction()
 void Menu::close() {
     if (!_open) return;
     _open = false;
+    // PR-C3 hotfix — clear keyboard-hover flag on the previously-highlighted
+    // row so a re-open starts from a clean slate (otherwise the same row
+    // would still appear highlighted when the user reopens the menu, even
+    // though no typeahead letter was pressed).
+    if (_hoveredIndex >= 0 && _hoveredIndex < static_cast<int>(_items.size())) {
+        if (auto* prev = _items[static_cast<size_t>(_hoveredIndex)]) {
+            prev->setKeyboardHovered(false);
+        }
+    }
+    _hoveredIndex = -1;
     setVisible(false);
     // Soft unmount: MenuBar keeps a durable Menu* for the session.
     // closePopup(..., destroy=true) used to free the tree here, which
@@ -211,9 +221,27 @@ void Menu::layoutItems() {
 // Before this method, every direct `_hoveredIndex = X` call had to
 // remember to fire the callback by hand — easy to miss on the
 // typeahead-letter path. Centralizing keeps the contract uniform.
+//
+// PR-C3 hotfix — also flip MenuItem::_isKeyboardHovered on the matching
+// row (and clear it on the previous one) so the highlight bar actually
+// PAINTS at the new index. Without this, typeahead was logically correct
+// but visually silent — the user saw no feedback when pressing 'A' on
+// an open menu.
 void Menu::setHoveredIndex(int index) {
     if (_hoveredIndex == index) return;
+    // Clear keyboard-hover flag on the outgoing row.
+    if (_hoveredIndex >= 0 && _hoveredIndex < static_cast<int>(_items.size())) {
+        if (auto* prev = _items[static_cast<size_t>(_hoveredIndex)]) {
+            prev->setKeyboardHovered(false);
+        }
+    }
     _hoveredIndex = index;
+    // Set keyboard-hover flag on the incoming row.
+    if (_hoveredIndex >= 0 && _hoveredIndex < static_cast<int>(_items.size())) {
+        if (auto* next = _items[static_cast<size_t>(_hoveredIndex)]) {
+            next->setKeyboardHovered(true);
+        }
+    }
     if (_onHoverChanged) {
         _onHoverChanged(_hoveredIndex);
     }

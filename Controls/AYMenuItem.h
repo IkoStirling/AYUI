@@ -94,6 +94,14 @@ public:
     bool hasSubmenu() const { return _submenu != nullptr; }
     void setSubmenu(Menu* m) { _submenu = m; markBoundsDirty(); }
 
+    // PR-C3 hotfix — keyboard-hover state. Menu::setHoveredIndex flips
+    // this on the matching item so onRender draws a highlight bar even
+    // when the user pressed a letter (no mouse ever landed on the row).
+    // isMouseOver() (the existing mouse hover flag) is a separate axis:
+    // the row can be keyboard-hovered AND mouse-hovered simultaneously.
+    void setKeyboardHovered(bool h) { _isKeyboardHovered = h; }
+    bool isKeyboardHovered() const { return _isKeyboardHovered; }
+
     // Activate callback. Fires on click after the menu typically closes.
     void setOnActivate(std::function<void()> cb) { _onActivate = std::move(cb); }
 
@@ -109,6 +117,7 @@ private:
     std::wstring _shortcut;
     Menu*        _submenu = nullptr;
     std::function<void()> _onActivate;
+    bool         _isKeyboardHovered = false;  // PR-C3 hotfix
 
     // Polish (P3): cached parse result for _shortcut. _accelKey = 0
     // means unparseable — setShortcut failed to recognize a key token.

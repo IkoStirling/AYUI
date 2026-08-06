@@ -515,7 +515,12 @@ void wireCapabilities(GalleryState& state)
             fruits->addItem(L"Banana");
             fruits->addItem(L"Blueberry");
             fruits->addItem(L"Cherry");
-            fruits->setOnHoverChanged([&ui](int idx) {
+            // PR-C3 hotfix — capture `fruits` (not just `&ui`) so the
+            // hover/activate callbacks can dereference it. Previous build
+            // silently fell back to the stale exe (lambda capture was a
+            // compile error that ships never caught because the Gallery
+            // wasn't rebuilt after the PR-C3 wire-up).
+            fruits->setOnHoverChanged([&ui, fruits](int idx) {
                 // PR-C3 feedback — typeahead jumps the highlight via
                 // setHoveredIndex; the state label mirrors it so the
                 // user sees 'A' → Apple, 'B' → Banana, etc. without
@@ -532,7 +537,7 @@ void wireCapabilities(GalleryState& state)
                     }
                 }
             });
-            fruits->setOnItemActivated([&ui](int idx) {
+            fruits->setOnItemActivated([&ui, fruits](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
                     std::wstring msg = L"menu: Fruits -> [";
@@ -560,7 +565,9 @@ void wireCapabilities(GalleryState& state)
             colors->addItem(L"Red");
             colors->addItem(L"Green");
             colors->addItem(L"Blue");
-            colors->setOnHoverChanged([&ui](int idx) {
+            // PR-C3 hotfix — see Fruits above; same lambda-capture fix needed
+            // for Colors to avoid referencing a non-captured local.
+            colors->setOnHoverChanged([&ui, colors](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
                     if (auto* item = colors->getItem(static_cast<size_t>(idx))) {
@@ -573,7 +580,7 @@ void wireCapabilities(GalleryState& state)
                     }
                 }
             });
-            colors->setOnItemActivated([&ui](int idx) {
+            colors->setOnItemActivated([&ui, colors](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
                     std::wstring msg = L"menu: Colors -> [";
@@ -614,15 +621,37 @@ void wireCapabilities(GalleryState& state)
             std::swprintf(buf, 32, L"row-%02d", i);
             list->addItem(buf);
         }
+        // B3 hotfix — fire on BOTH selection AND scroll so the user sees
+        // feedback whether they clicked a row or just wheel-scrolled.
+        // Previously setOnSelectionChanged only fired on click, so a
+        // pure wheel-scroll left the label stuck at "(idle)" and the
+        // user thought the wheel wasn't routing. The scrollbar callback
+        // fires for both wheel (which routes through onMouseWheel →
+        // scrollBy → setScrollOffset → syncBarToOffset which mutates the
+        // bar's value) and direct vbar drag.
         list->setOnSelectionChanged([&ui](int idx) {
             if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                     ui.findById("cap_b3_state"))) {
                 std::wstring msg = L"wheel/list: list[";
                 msg += std::to_wstring(idx);
-                msg += L"] scrolled to";
+                msg += L"] selected";
                 lbl->setText(msg);
             }
         });
+        if (auto* vbar = list->getVerticalScrollBar()) {
+            vbar->setOnValueChanged([list, &ui](float v) {
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_b3_state"))) {
+                    std::wstring msg = L"wheel/list: scrollOffset.y=";
+                    msg += std::to_wstring(static_cast<int>(v));
+                    const int firstVisible = list->getFirstVisibleIndex();
+                    msg += L", firstVisible=list[";
+                    msg += std::to_wstring(firstVisible);
+                    msg += L"]";
+                    lbl->setText(msg);
+                }
+            });
+        }
     }
 
     // --- B1 Window: 4-edge + 4-corner resize ---
@@ -651,9 +680,20 @@ void wireCapabilities(GalleryState& state)
     // Body: a tiny text label so the window has visible content. We keep
     // the pointer in state.windowBody so teardown can free it explicitly
     // (addChildExternal makes destroyWidgetTree skip it).
+    //
+    // PR-B1 hotfix — offset below the title bar (28px) with a small
+    // breathing margin. Previous wire-up placed the body at local
+    // (0,0), which lives under the title bar's gray strip — the text
+    // was technically following the window's drag/resize (Widget's
+    // worldPosition chains via _parent), but visually it overlapped
+    // the chrome and looked "stuck" to the user. The Window class
+    // doesn't reserve a body region itself (no Window::setBodyInsets),
+    // so the host is responsible for picking the inset.
     state.windowBody = new ayt::ui::TextLabel();
     state.windowBody->setText(L"Drag any edge or corner.\nCursor hint follows.\nClose X or click 'Dismiss'.");
     state.windowBody->setSize(ayt::math::FVector2(320.0f, 110.0f));
+    state.windowBody->setPosition(ayt::math::FVector2(
+        12.0f, 36.0f));  // 12px left pad, 36px down (28 title + 8 margin)
     state.window->addChildExternal(state.windowBody);
     // Mount on the overlay via UIManager::openPopup (same convention as
     // ComboBox popup). We don't want this to be the "active dropdown",

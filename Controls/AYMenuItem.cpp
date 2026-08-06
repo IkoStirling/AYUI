@@ -181,6 +181,13 @@ void MenuItem::onRender(IRenderBackend& renderer) {
     // Hover / press highlight.
     if (isMouseOver() && isEnabled()) {
         renderer.drawRect(b, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
+    } else if (_isKeyboardHovered && isEnabled()) {
+        // PR-C3 hotfix — keyboard-hover (typeahead letter jump) also
+        // paints a highlight bar so the user sees 'A' actually moved
+        // the focus. Without this the typeahead state is invisible —
+        // a non-visual change leaves the user wondering if the keystroke
+        // was even delivered.
+        renderer.drawRect(b, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
     }
 
     const float padL = 16.0f;
