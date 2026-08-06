@@ -46,6 +46,13 @@ public:
     void insertWidget(int index, Widget* widget, float height = 0.0f);
     void removeWidget(Widget* widget);
 
+    // PR-B3 hotfix (Bug #4 follow-up) — exposed for the
+    // walkNaturalHeight walker in AYBox.cpp so a nested VBox can
+    // report its pre-fill-stretch natural height without us having
+    // to re-derive it. Returns -1.0f if layout hasn't run yet
+    // (the walker falls back to the recursive walk in that case).
+    float getCachedNaturalHeight() const { return _naturalHeight; }
+
     // PR-B3 hotfix override — sum visible children's slot heights +
     // spacing + padding (vs BoxBase default which returns getSize()).
     // HBox stays on BoxBase default (no override in this commit).
@@ -60,6 +67,13 @@ private:
         float height;
     };
     std::vector<Slot> _slots;
+
+    // PR-B3 hotfix (Bug #4 follow-up) — natural height = sum of
+    // children's natural heights (without fill stretch). Cached each
+    // layoutChildren pass so getPreferredContentSize can return it
+    // without recomputing. Falls back to getSize().y if layout hasn't
+    // run yet (freshly added children, before first tick).
+    float _naturalHeight = -1.0f;
 };
 
 class HBox : public BoxBase {

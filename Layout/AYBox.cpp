@@ -103,6 +103,17 @@ namespace {
 float walkNaturalHeight(const Widget* w) {
     if (w == nullptr) return 0.0f;
     if (!w->isVisible()) return 0.0f;
+    // PR-B3 follow-up: if this widget is itself a VBox, prefer its
+    // cached natural height (sum of children's natural heights
+    // before fill stretch). The walker otherwise sums the stretched
+    // heights of every descendant and reports a content extent
+    // equal to the viewport — which makes ScrollView conclude "no
+    // overflow" and disable the scrollbar even when pages actually
+    // overflow.
+    if (const auto* vb = dynamic_cast<const VBox*>(w)) {
+        const float cached = vb->getCachedNaturalHeight();
+        if (cached >= 0.0f) return cached;
+    }
     if (w->getChildren().empty()) return w->getSize().y;
     float total = 0.0f;
     for (const Widget* c : w->getChildren()) {
@@ -123,33 +134,47 @@ float walkNaturalMaxWidth(const Widget* w) {
 } // namespace
 
 math::FVector2 VBox::getPreferredContentSize() const {
-    // Sum visible children's heights (or their slot.height if set),
-    // plus spacing between consecutive visible children, plus
-    // top/bottom padding. Width is the VBox's own width (children
-    // already fit horizontally in a VBox).
-    float totalH = _padding.y + _padding.w;
+    // PR-B3 hotfix (Bug #4 follow-up) — prefer the cached natural
+    // height (computed in layoutChildren BEFORE the fill stretch).
+    // The natural height is the sum of children's natural heights +
+    // spacing + padding, which is what a ScrollView wrapping this
+    // VBox needs to know to compute its scrollable extent.
+    //
+    // Fallback: if layout hasn't run yet (_naturalHeight == -1.0f),
+    // compute on the fly via the walkNaturalHeight walker. The
+    // walker itself remains in place — tests and hosts that call
+    // getPreferredContentSize without first laying out the tree
+    // still get a sensible answer.
     float maxW = 0.0f;
-    size_t visibleCount = 0;
     for (const auto& slot : _slots) {
         if (slot.widget == nullptr || !slot.widget->isVisible()
             || slot.widget->getParent() != this) {
             continue;
         }
-        // PR-B3 hotfix: prefer the slot's natural height (sum of the
-        // child's grandchildren) over the child's *current* size,
-        // which the VBox just laid out to fillHeight=viewport.
-        const float slotH = (slot.height > 0.0f)
-            ? slot.height
-            : walkNaturalHeight(slot.widget);
-        totalH += slotH;
-        if (visibleCount > 0) totalH += _spacing;
-        ++visibleCount;
         const float cw = std::max(
             slot.widget->getSize().x,
             walkNaturalMaxWidth(slot.widget));
         if (cw > maxW) maxW = cw;
     }
     const float w = std::max(maxW, getSize().x);
+    float totalH = _naturalHeight;
+    if (totalH < 0.0f) {
+        // Layout hasn't run — fall back to the walker.
+        totalH = _padding.y + _padding.w;
+        size_t visibleCount = 0;
+        for (const auto& slot : _slots) {
+            if (slot.widget == nullptr || !slot.widget->isVisible()
+                || slot.widget->getParent() != this) {
+                continue;
+            }
+            const float slotH = (slot.height > 0.0f)
+                ? slot.height
+                : walkNaturalHeight(slot.widget);
+            totalH += slotH;
+            if (visibleCount > 0) totalH += _spacing;
+            ++visibleCount;
+        }
+    }
     return math::FVector2(w, totalH);
 }
 
@@ -158,7 +183,7 @@ void VBox::layoutChildren() {
     float availableWidth = std::max(0.0f, size.x - _padding.x - _padding.z);
 
     size_t childCount = _slots.size();
-    if (childCount == 0) return;
+    if (childCount == 0) { _naturalHeight = 0.0f; return; }
 
     float totalFixedHeight = 0.0f;
     size_t fillCount = 0;
@@ -183,6 +208,36 @@ void VBox::layoutChildren() {
     float availableHeight = std::max(0.0f, size.y - _padding.y - _padding.w);
     float fillHeight = (fillCount > 0) ? (availableHeight - totalFixedHeight) / fillCount : 0.0f;
     fillHeight = std::max(0.0f, fillHeight);
+
+    // PR-B3 hotfix (Bug #4 follow-up) — cache the natural height (sum
+    // of children's natural heights, *no fill stretch*) so
+    // getPreferredContentSize can return a truthful content extent.
+    // Without this, a content-fills-viewport VBox reports a preferred
+    // size equal to the viewport (children stretched to absorb the
+    // space), and the wrapping ScrollView concludes "no overflow,
+    // scrollbar disabled" — even though a tall page like
+    // page_capabilities (30+ items) genuinely overflows.
+    //
+    // Computing on each layout pass is O(n) where n = number of slots;
+    // walking recursively would be O(n^2) in nested-VBox cases. Caching
+    // here also lets widget swaps (e.g. setContent) invalidate cleanly:
+    // the next layoutChildren call updates _naturalHeight.
+    float naturalH = _padding.y + _padding.w;
+    for (size_t k = 0; k < _slots.size(); ++k) {
+        const auto& slot = _slots[k];
+        if (slot.widget == nullptr || !slot.widget->isVisible()
+            || slot.widget->getParent() != this) {
+            continue;
+        }
+        const float naturalChildH = (slot.height > 0.0f)
+            ? slot.height
+            : walkNaturalHeight(slot.widget);
+        naturalH += naturalChildH + _spacing;
+    }
+    if (visibleSlotCount > 0) {
+        naturalH -= _spacing;
+    }
+    _naturalHeight = naturalH;
 
     float x = _padding.x;
     float y = _padding.y;

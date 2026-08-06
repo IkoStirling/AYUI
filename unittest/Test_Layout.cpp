@@ -581,5 +581,87 @@ TEST_CASE(vbox_preferred_content_size_ignores_hidden) {
     delete hidden;
 }
 
+// PR-B3 hotfix (Bug #4 follow-up) — preferred content size MUST
+// report the natural stacked height (sum of children's natural
+// heights) even AFTER the VBox has stretched its children to fill
+// the viewport. Previously, getPreferredContentSize returned the
+// stretched sum, which made a ScrollView wrapping a content-fills-
+// viewport VBox conclude "no overflow, scrollbar disabled" — even
+// when the visible page's true content (text + widgets) was
+// genuinely taller than the viewport.
+//
+// The fix caches the natural height in VBox::layoutChildren BEFORE
+// applying fillHeight stretches, and getPreferredContentSize
+// returns the cached value.
+TEST_CASE(vbox_preferred_content_size_after_layout_uses_natural_not_stretched) {
+    VBox outer;
+    outer.setSize(FVector2(320.0f, 100.0f));   // small viewport
+    outer.setPadding(0, 0, 0, 0);
+    outer.setSpacing(0);
+
+    // Two children with fixed natural heights 30 + 50 = 80.
+    auto* a = new ayt::ui::Widget();
+    a->setSize(FVector2(320.0f, 30.0f));
+    auto* b = new ayt::ui::Widget();
+    b->setSize(FVector2(320.0f, 50.0f));
+    outer.addWidget(a);
+    outer.addWidget(b);
+
+    outer.performLayout();   // stretches both to 50 each (fillHeight)
+    CHECK(a->getSize().y == 50.0f);
+    CHECK(b->getSize().y == 50.0f);
+
+    // After layout, preferred size should still report the natural
+    // 80 — not the stretched 100 (= viewport).
+    const FVector2 pref = outer.getPreferredContentSize();
+    CHECK_FLOAT_EQ(pref.y, 80.0f, 1e-3f);
+
+    delete a;
+    delete b;
+}
+
+// PR-B3 hotfix (Bug #4 follow-up) — nested VBox: outer walks into
+// inner via walkNaturalHeight which prefers the inner's cached
+// natural height. Without the cache, walkNaturalHeight recurses
+// into the inner's stretched children and reports the inner's
+// stretched (viewport-bound) height — the very bug this commit fixes.
+TEST_CASE(vbox_preferred_content_size_walks_into_nested_vbox_using_natural) {
+    VBox outer;
+    outer.setSize(FVector2(320.0f, 200.0f));   // outer viewport
+    outer.setPadding(0, 0, 0, 0);
+    outer.setSpacing(0);
+
+    auto* inner = new VBox();
+    inner->setSize(FVector2(320.0f, 50.0f));   // inner viewport
+    inner->setPadding(0, 0, 0, 0);
+    inner->setSpacing(0);
+
+    // Inner's natural children: 30 + 70 = 100. After layout in
+    // viewport 50, both stretched to 25 each (stretched sum = 50).
+    auto* x = new ayt::ui::Widget();
+    x->setSize(FVector2(320.0f, 30.0f));
+    auto* y = new ayt::ui::Widget();
+    y->setSize(FVector2(320.0f, 70.0f));
+    inner->addWidget(x);
+    inner->addWidget(y);
+    inner->performLayout();
+    CHECK(x->getSize().y == 25.0f);
+    CHECK(y->getSize().y == 25.0f);
+    // Inner's cached natural height should be 100.
+    CHECK_FLOAT_EQ(inner->getCachedNaturalHeight(), 100.0f, 1e-3f);
+
+    outer.addWidget(inner);
+    outer.performLayout();
+
+    // Outer's preferred size should be 100 (inner's natural), not
+    // 200 (inner's stretched-to-outer-viewport height).
+    const FVector2 pref = outer.getPreferredContentSize();
+    CHECK_FLOAT_EQ(pref.y, 100.0f, 1e-3f);
+
+    delete x;
+    delete y;
+    delete inner;
+}
+
 TEST_SUITE_END
 
