@@ -53,6 +53,7 @@
             { "type": "Button", "id": "nav_collections", "text": "3. Collections", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_overlay", "text": "4. Overlay", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_layout", "text": "5. Layout", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_capabilities", "text": "6. Capabilities", "size": { "w": 160, "h": 28 } },
             { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
             { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
           ]
@@ -226,6 +227,48 @@
                   ]
                 },
                 { "type": "TextLabel", "id": "lbl_dock_ping", "text": "dock: idle", "size": { "w": 300, "h": 22 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_capabilities",
+              "spacing": 10,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "cap_hdr", "text": "Capabilities - shipped PR demos (A3 TextInput / B1 Window / C1 Tooltip / C2 ComboBox / C3 Menu / B3 Wheel)", "size": { "w": 920, "h": 24 } },
+
+                { "type": "Separator", "id": "cap_sep_a3", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "cap_a3_lbl", "text": "A3 - TextInput: shift+arrows to extend selection, double-click to select word, Ctrl+Z/Y to undo/redo", "size": { "w": 900, "h": 20 } },
+                { "type": "TextInput", "id": "cap_a3_txt", "text": "double-click here to test", "size": { "w": 360, "h": 28 } },
+                { "type": "TextLabel", "id": "cap_a3_state", "text": "state: (untouched)", "size": { "w": 700, "h": 20 } },
+
+                { "type": "Separator", "id": "cap_sep_c1", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "cap_c1_lbl", "text": "C1 - Tooltip: hover the button below; passive timer (UIManager-driven) shows the tip after 0.5s", "size": { "w": 900, "h": 20 } },
+                { "type": "Button", "id": "cap_c1_btn", "text": "Hover me", "size": { "w": 140, "h": 28 } },
+                { "type": "TextLabel", "id": "cap_c1_state", "text": "tooltip: (idle)", "size": { "w": 500, "h": 20 } },
+
+                { "type": "Separator", "id": "cap_sep_c2", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "cap_c2_lbl", "text": "C2 - ComboBox typeahead: focus the box and type a letter; popup opens and jumps to matching item", "size": { "w": 900, "h": 20 } },
+                { "type": "ComboBox", "id": "cap_c2_cmb", "size": { "w": 260, "h": 28 } },
+                { "type": "TextLabel", "id": "cap_c2_state", "text": "typeahead: (idle)", "size": { "w": 500, "h": 20 } },
+
+                { "type": "Separator", "id": "cap_sep_c3", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "cap_c3_lbl", "text": "C3 - Menu typeahead: open the menu, then type a letter to jump highlight (does not close menu)", "size": { "w": 900, "h": 20 } },
+                {
+                  "type": "MenuBar",
+                  "id": "cap_c3_bar",
+                  "size": { "w": 320, "h": 28 }
+                },
+                { "type": "TextLabel", "id": "cap_c3_state", "text": "menu: (idle)", "size": { "w": 500, "h": 20 } },
+
+                { "type": "Separator", "id": "cap_sep_b3", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "cap_b3_lbl", "text": "B3 - Wheel routing: scroll the wheel over the ListView below; outer ScrollView stays put", "size": { "w": 900, "h": 20 } },
+                {
+                  "type": "ListView",
+                  "id": "cap_b3_list",
+                  "size": { "w": 320, "h": 110 }
+                },
+                { "type": "TextLabel", "id": "cap_b3_state", "text": "wheel: (idle)", "size": { "w": 500, "h": 20 } }
               ]
             }
           ]
