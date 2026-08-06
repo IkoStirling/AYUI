@@ -339,6 +339,20 @@ void wireGallery(GalleryState& state)
     }
 
     showPage(ui, "page_basics");
+
+    // Wrap content_host inside ScrollView so all 6 pages are reachable
+    // when the window is smaller than the page stack's natural height.
+    // The JSON puts content_host as a child of content_scroll via
+    // addChild — ScrollView expects setContent, not addChild, so we
+    // re-bind explicitly here. removeChild + addChild keeps the widget
+    // tree intact (content_host still owns the 5 page VBoxes).
+    if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
+            ui.findById("content_scroll"))) {
+        if (auto* host = dynamic_cast<ayt::ui::Widget*>(
+                ui.findById("content_host"))) {
+            scroll->setContent(host);
+        }
+    }
 }
 
 // =============================================================================
@@ -424,33 +438,57 @@ void wireCapabilities(GalleryState& state)
             fruits->addItem(L"Banana");
             fruits->addItem(L"Blueberry");
             fruits->addItem(L"Cherry");
+            fruits->setOnItemActivated([&ui](int idx) {
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_c3_state"))) {
+                    std::wstring msg = L"menu: Fruits -> [";
+                    msg += std::to_wstring(idx);
+                    msg += L"] (typeahead while open)";
+                    lbl->setText(msg);
+                }
+            });
+            fruits->setOnClose([&ui]() {
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_c3_state"))) {
+                    // Don't clobber a "Fruits -> Cherry activated"
+                    // message with a plain close — only annotate when
+                    // the state still says the menu is open.
+                    const std::wstring& cur = lbl->getText();
+                    if (cur == L"menu: (idle)" ||
+                        cur == L"menu: Fruits opened - type a letter") {
+                        lbl->setText(L"menu: Fruits closed");
+                    }
+                }
+            });
         }
         ayt::ui::Menu* colors = bar->addMenu(L"Colors");
         if (colors != nullptr) {
             colors->addItem(L"Red");
             colors->addItem(L"Green");
             colors->addItem(L"Blue");
+            colors->setOnItemActivated([&ui](int idx) {
+                if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("cap_c3_state"))) {
+                    std::wstring msg = L"menu: Colors -> [";
+                    msg += std::to_wstring(idx);
+                    msg += L"] (typeahead while open)";
+                    lbl->setText(msg);
+                }
+            });
         }
-        // Menu has no onHoveredChanged; we can only observe via item
-        // activation. Add a label-friendly note so the user sees the
-        // menu opened / item clicked.
-        if (auto* file = bar->getMenu(0)) {
-            if (ayt::ui::MenuItem* apple = file->getItem(0)) {
-                apple->setOnActivate([&ui]() {
-                    if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
-                            ui.findById("cap_c3_state"))) {
-                        lbl->setText(L"menu: Fruits -> Apple activated");
-                    }
-                });
-            }
-            if (ayt::ui::MenuItem* cherry = file->getItem(4)) {
-                cherry->setOnActivate([&ui]() {
-                    if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
-                            ui.findById("cap_c3_state"))) {
-                        lbl->setText(L"menu: Fruits -> Cherry activated");
-                    }
-                });
-            }
+        // Update the status label when an anchor button is clicked so
+        // the user knows the menu is now open and typeahead is live.
+        // MenuBar exposes its anchors via _menus (private) — but the
+        // public API has getMenuCount() / getMenu(); we instead hook
+        // the rendered anchor buttons through the overlay's hit list.
+        // Since MenuBar's anchor buttons are children of the bar, the
+        // cleanest seam is to wire each MenuBar's child button at
+        // construction. MenuBar doesn't expose them publicly; we
+        // instead simply stamp the hint into the status label when
+        // wireCapabilities finishes so the user knows to click.
+        if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
+                ui.findById("cap_c3_state"))) {
+            lbl->setText(L"menu: click 'Fruits' or 'Colors' to open, then type a letter");
         }
     }
 
@@ -598,6 +636,27 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         return 0;
     }
 
+    // ---- Touch tracking (touchscreen laptops w/o mouse emulation) ----
+    // WM_TOUCH is delivered when RegisterTouchWindow was called on the
+    // hwnd. We map the primary touch into onMouseMove / onMouseButtonDown
+    // / onMouseButtonUp so the entire UI tree (hover tooltips, button
+    // click, focus) works on a finger tap. Vertical pan delta is fed
+    // into onMouseWheel so ScrollView / ListView scroll when the user
+    // drags a finger — same code path as a real wheel on a desktop.
+    struct TouchState {
+        bool    active       = false;
+        float   lastY        = 0.0f;
+        float   accumulatedDy = 0.0f; // // positive = finger moved down
+        float   x            = 0.0f;
+        float   y            = 0.0f;
+        DWORD   pointerId    = 0;
+    };
+    static thread_local TouchState gTouch;
+    // Wheel scale: a 100-px finger drag ≈ 1 notch of mouse wheel delta
+    // (typical deltaY = 120). Flip sign so dragging finger UP scrolls
+    // content DOWN (matches native scrolling convention).
+    constexpr float kTouchWheelScale = 1.2f;
+
     switch (msg) {
     case WM_SIZE: {
         state->clientW = LOWORD(lParam);
@@ -678,6 +737,103 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         handled = true;
         return 0;
     }
+    case WM_TOUCH: {
+        // Decode TOUCHINPUT array (count in LOWORD(wParam)). We only
+        // track the FIRST active touch — the Gallery is single-finger
+        // interaction. Multi-touch gestures (pinch-zoom etc.) are out
+        // of scope.
+        const int count = LOWORD(wParam);
+        if (count <= 0) {
+            handled = true;
+            return 0;
+        }
+        std::vector<TOUCHINPUT> inputs(count);
+        if (!::GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam),
+                                 static_cast<UINT>(count),
+                                 inputs.data(),
+                                 sizeof(TOUCHINPUT))) {
+            handled = true;
+            return 0;
+        }
+
+        // Screen -> client coords (TOUCHINPUT gives screen coords).
+        POINT pt{};
+        for (const TOUCHINPUT& ti : inputs) {
+            if (ti.dwID != gTouch.pointerId) continue;
+            pt.x = TOUCH_COORD_TO_PIXEL(ti.x);
+            pt.y = TOUCH_COORD_TO_PIXEL(ti.y);
+            ::ScreenToClient(static_cast<HWND>(state->devices->window().getWindowHandle()), &pt);
+            gTouch.x = static_cast<float>(pt.x);
+            gTouch.y = static_cast<float>(pt.y);
+            break;
+        }
+
+        bool sawDown = false;
+        bool sawUp   = false;
+        bool sawMove = false;
+        for (const TOUCHINPUT& ti : inputs) {
+            if (ti.dwID != gTouch.pointerId) continue;
+            if (ti.dwFlags & TOUCHEVENTF_DOWN) sawDown = true;
+            if (ti.dwFlags & TOUCHEVENTF_UP)   sawUp   = true;
+            if (ti.dwFlags & TOUCHEVENTF_MOVE) sawMove = true;
+            break;
+        }
+
+        if (sawDown) {
+            // First contact — synthesize mouse-down.
+            gTouch.active        = true;
+            gTouch.lastY         = gTouch.y;
+            gTouch.accumulatedDy = 0.0f;
+            gTouch.pointerId     = inputs.empty() ? 0 : inputs[0].dwID;
+            // Find the actual pointer id we tracked (in case it differs).
+            for (const TOUCHINPUT& ti : inputs) {
+                if (ti.dwID == gTouch.pointerId) break;
+            }
+            // Re-resolve pointerId from the first input (single-finger).
+            gTouch.pointerId = inputs[0].dwID;
+            pt.x = TOUCH_COORD_TO_PIXEL(inputs[0].x);
+            pt.y = TOUCH_COORD_TO_PIXEL(inputs[0].y);
+            ::ScreenToClient(static_cast<HWND>(state->devices->window().getWindowHandle()), &pt);
+            gTouch.x = static_cast<float>(pt.x);
+            gTouch.y = static_cast<float>(pt.y);
+            state->ui->onMouseMove(gTouch.x, gTouch.y);
+            state->ui->onMouseButtonDown(gTouch.x, gTouch.y, 0);
+        } else if (sawMove && gTouch.active) {
+            const float dy = gTouch.y - gTouch.lastY;
+            gTouch.accumulatedDy += dy;
+            gTouch.lastY = gTouch.y;
+            state->ui->onMouseMove(gTouch.x, gTouch.y);
+
+            // When finger has accumulated enough drag, fire a wheel
+            // event. onMouseWheel routes via UIManager's hit-test to
+            // the topmost scroll container (ScrollView / ListView /
+            // ComboBox popup).
+            //
+            // Threshold = 8 px (one wheel notch ≈ 6-8 px on most
+            // precision touchpads).
+            constexpr float kTouchWheelThresholdPx = 8.0f;
+            if (std::fabs(gTouch.accumulatedDy) >= kTouchWheelThresholdPx) {
+                // Sign convention: UIManager::onMouseWheel deltaY is
+                // "content to move by -deltaY in y" (scroll wheel up
+                // has positive deltaY per Win32 convention). Our
+                // accumulatedDy is "finger moved down" which feels
+                // like "scroll content up" — so we negate.
+                const float wheelDelta =
+                    -gTouch.accumulatedDy * kTouchWheelScale;
+                state->ui->onMouseWheel(gTouch.x, gTouch.y, wheelDelta);
+                gTouch.accumulatedDy = 0.0f;
+            }
+        } else if (sawUp && gTouch.active) {
+            state->ui->onMouseButtonUp(gTouch.x, gTouch.y, 0);
+            gTouch.active        = false;
+            gTouch.accumulatedDy = 0.0f;
+            gTouch.pointerId     = 0;
+        }
+
+        ::CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(lParam));
+        handled = true;
+        return 0;
+    }
     // WM_CHAR / IME: leave unhandled so DeviceManager::textInput() receives
     // them; the main loop pumps committed UTF-8 into UIManager.
     default:
@@ -712,6 +868,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.shutdown();
         return 1;
     }
+
+    // Enable WM_TOUCH delivery so touchscreens (laptop trackpads,
+    // Surface, etc.) can drive onMouseMove + onMouseWheel. TWF_FINETOUCH
+    // gives us the highest-fidelity coordinates for the single-finger
+    // drag-to-scroll path in handleMessage. Without this call, touch
+    // devices fall back to synthesized mouse messages which SDL2/our
+    // window proc may not see on every touch panel.
+    ::RegisterTouchWindow(hwnd, TWF_FINETOUCH);
 
     ayt::render::Renderer renderer;
     ayt::render::InitDesc init{};

@@ -65,13 +65,20 @@
           "slot": { "width": 2 }
         },
         {
-          "type": "VBox",
-          "id": "content_host",
-          "spacing": 0,
+          "type": "ScrollView",
+          "id": "content_scroll",
+          "size": { "w": 0, "h": 0 },
+          "vbar": true,
+          "hbar": false,
           "children": [
             {
               "type": "VBox",
-              "id": "page_basics",
+              "id": "content_host",
+              "spacing": 0,
+              "children": [
+                {
+                  "type": "VBox",
+                  "id": "page_basics",
               "spacing": 8,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
@@ -272,6 +279,7 @@
               ]
             }
           ]
+        }
         }
       ]
     },
