@@ -55,12 +55,15 @@ struct UIMouseEvent {
 enum class UiCursorHint {
     Default,
     Hand,
-    SizeHorizontal,
-    SizeVertical,
-    // Phase D (D1) — diagonal cursor for SE/NW resize corners.
-    // The base widget returns Default; concrete resize edges return SizeNwse
-    // for the SE corner. Future 4-corner resize can branch on edge.
-    SizeNwse,
+    // PR-B1: split SizeHorizontal/SizeVertical into SizeWe/SizeNs so the
+    // names match Windows cursor conventions. Existing call sites use
+    // SizeHorizontal/SizeVertical (legacy aliases) and remain compatible.
+    SizeHorizontal,  // legacy alias for SizeWe
+    SizeVertical,    // legacy alias for SizeNs
+    SizeWe,          // ⇔ ↔ (left-right edge or horizontal splitter)
+    SizeNs,          // ⇕ (top-bottom edge or vertical splitter)
+    SizeNwse,        // ⤡ (NW-SE diagonal: SE / NW corners)
+    SizeNesw,        // ⤢ (NE-SW diagonal: NE / SW corners)
     Move,
     Beam,
 };

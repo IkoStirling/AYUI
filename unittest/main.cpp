@@ -67,6 +67,7 @@
 #include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText 贯通
 #include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接口
 #include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
+#include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
 
 void runTest()
 {

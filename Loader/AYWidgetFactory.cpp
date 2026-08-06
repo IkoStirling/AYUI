@@ -89,7 +89,7 @@ struct DefaultWidgetRegistrar {
     WidgetFactory::get().registerCreator("ToolBarSeparator", createToolBarSeparatorWidget);
         WidgetFactory::get().registerCreator("StatusBar", createStatusBarWidget);
         REGISTER_WIDGET("Image", Image);
-        REGISTER_WIDGET("Window", Window);
+        WidgetFactory::get().registerCreator("Window", createWindowWidget);
         REGISTER_WIDGET("Panel", Panel);
         REGISTER_WIDGET("VBox", VBox);
         REGISTER_WIDGET("HBox", HBox);

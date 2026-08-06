@@ -270,7 +270,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("ListView")) f.registerCreator("ListView", createListViewWidget);
     if (!f.isRegistered("ComboBox")) f.registerCreator("ComboBox", createComboBoxWidget);
     if (!f.isRegistered("TabControl")) f.registerCreator("TabControl", createTabControlWidget);
-    if (!f.isRegistered("Window"))    f.registerCreator("Window",    []() { return new Window(); });
+    if (!f.isRegistered("Window"))    f.registerCreator("Window",    createWindowWidget);
     // VBox/HBox/SplitterHandle also live in anonymous-namespace self-
     // registrars (AYBox.cpp / AYSplitterHandle.cpp). On MSVC those are
     // vulnerable to COMDAT stripping when the executable's link-order

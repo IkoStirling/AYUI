@@ -6,15 +6,20 @@
 namespace ayt::ui {
 
 // =============================================================================
-// Phase D (D1) — Resize hit-zone enum (Q1).
+// Phase D (D1) + PR-B1 — Resize hit-zone enum.
 // =============================================================================
-//
-// v1 ships ONLY the bottom-right (SE) corner. The enum is a deliberate hook so
-// the future "all 4 corners + 4 edges" upgrade is a one-line branch addition
-// inside hitTestResizeEdge without touching the public API.
+// PR-B1 upgrades v1 (BottomRight-only) to the full industrial Window set:
+// 4 corners + 4 edges.
 // =============================================================================
 enum class ResizeEdge {
     None,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
     BottomRight,
 };
 
@@ -114,6 +119,13 @@ protected:
     math::FVector2 _resizeStartSize{};
     math::FVector2 _resizeStartMousePos{};
 
+    // PR-B1 — cached mouse position (world coords) for hover-cursor hint.
+    // onMouseMove updates _lastMouseWorldPos so getCursorHint can do an
+    // edge hit-test WITHOUT requiring a mousePos parameter (the base
+    // UiCursorHint getter is zero-arg — UIManager's cursor funnel queries
+    // this on every mouse-move regardless of whether we're in a drag).
+    math::FVector2 _lastMouseWorldPos{};
+
     // Overflow scroll for stacked body children (Render / Inspector).
     bool _bodyScrollEnabled = true;
     float _scrollY = 0.0f;
@@ -121,5 +133,10 @@ protected:
     float _bodyViewportH = 0.0f;
     ScrollBar* _bodyVBar = nullptr;
 };
+
+// Factory entry — lives in AYWindow.cpp so `new Window()` always uses the
+// same TU's sizeof(Window) as the ctor (avoids stale AYWidgetFactory.obj
+// allocating a smaller block when only AYWindow.cpp was rebuilt).
+Widget* createWindowWidget();
 
 } // namespace ayt::ui

@@ -29,6 +29,28 @@ float clampAxis(float value, float parentSize, float windowSize, float minKeepVi
 constexpr float kResizeBandPx = 16.0f;
 constexpr float kResizeGripDotSize = 1.5f;
 
+// PR-B1 — map a ResizeEdge to the OS cursor the OS expects to see. Source
+// of truth for both in-drag (during a resize) and hover (idle) hints.
+UiCursorHint cursorHintForEdge(ResizeEdge edge) {
+    switch (edge) {
+        case ResizeEdge::Top:
+        case ResizeEdge::Bottom:
+            return UiCursorHint::SizeNs;
+        case ResizeEdge::Left:
+        case ResizeEdge::Right:
+            return UiCursorHint::SizeWe;
+        case ResizeEdge::TopLeft:
+        case ResizeEdge::BottomRight:
+            return UiCursorHint::SizeNwse;
+        case ResizeEdge::TopRight:
+        case ResizeEdge::BottomLeft:
+            return UiCursorHint::SizeNesw;
+        case ResizeEdge::None:
+        default:
+            return UiCursorHint::Default;
+    }
+}
+
 } // namespace
 
 Window::Window()
@@ -120,11 +142,47 @@ Widget* Window::hitTest(const math::FVector2& worldPos) {
 ResizeEdge Window::hitTestResizeEdge(const math::FVector2& worldPos) const {
     if (!_resizable || !_visible) return ResizeEdge::None;
     const math::FRectangle bounds = getWorldBounds();
-    const math::FRectangle se(bounds.maxX - kResizeBandPx,
-                              bounds.maxY - kResizeBandPx,
-                              bounds.maxX,
-                              bounds.maxY);
-    if (se.contains(worldPos)) return ResizeEdge::BottomRight;
+
+    // PR-B1 — guard against outside-window points. v1 SE-only test never
+    // hit this case (it only checked inside-window band points) but PR-B1
+    // tests outside-window too (50, 50 etc.). Without this guard, a point
+    // like (0, 0) outside a (100, 100)-(500, 400) window matches the TL
+    // corner band (x ≤ minX + kBand AND y ≤ minY + kBand).
+    if (!bounds.contains(worldPos)) return ResizeEdge::None;
+
+    // PR-B1 — 4 corners checked FIRST so a click on the intersection lands
+    // on the corner rather than the adjacent edge (Windows convention).
+    if (worldPos.x <= bounds.minX + kResizeBandPx &&
+        worldPos.y <= bounds.minY + kResizeBandPx) {
+        return ResizeEdge::TopLeft;
+    }
+    if (worldPos.x >= bounds.maxX - kResizeBandPx &&
+        worldPos.y <= bounds.minY + kResizeBandPx) {
+        return ResizeEdge::TopRight;
+    }
+    if (worldPos.x <= bounds.minX + kResizeBandPx &&
+        worldPos.y >= bounds.maxY - kResizeBandPx) {
+        return ResizeEdge::BottomLeft;
+    }
+    if (worldPos.x >= bounds.maxX - kResizeBandPx &&
+        worldPos.y >= bounds.maxY - kResizeBandPx) {
+        return ResizeEdge::BottomRight;
+    }
+
+    // PR-B1 — 4 edges as kResizeBandPx-thick bands AFTER the corner checks.
+    if (worldPos.y <= bounds.minY + kResizeBandPx) {
+        return ResizeEdge::Top;
+    }
+    if (worldPos.y >= bounds.maxY - kResizeBandPx) {
+        return ResizeEdge::Bottom;
+    }
+    if (worldPos.x <= bounds.minX + kResizeBandPx) {
+        return ResizeEdge::Left;
+    }
+    if (worldPos.x >= bounds.maxX - kResizeBandPx) {
+        return ResizeEdge::Right;
+    }
+
     return ResizeEdge::None;
 }
 
@@ -158,19 +216,69 @@ void Window::clampPositionWithinParent() {
 }
 
 bool Window::onMouseMove(const UIMouseEvent& e) {
+    // PR-B1 — cache last mouse position for hover-cursor hint.
+    _lastMouseWorldPos = e.mousePos;
+
     math::FRectangle bounds = getWorldBounds();
     math::FRectangle titleBar(bounds.minX, bounds.minY,
                                bounds.maxX, bounds.minY + _titleBarHeight);
     _titleBarHover = _movable && titleBar.contains(e.mousePos);
 
-    // Phase D (D1) — SE resize drag in progress. setSize clamps via _minSize
-    // (existing behavior), so a drag past the min does NOT need explicit
-    // clamping here. Q2 — every move calls setSize, no dirty-bounds state.
-    if (_isResizing && _resizeEdge == ResizeEdge::BottomRight) {
+    // PR-B1 — full 8-edge resize drag. Edge determines which dimension(s)
+    // of the rect change AND whether the position shifts (Left/Top edges
+    // and corners whose component is Left/Top pull the rect's anchor
+    // along with the mouse, so the opposite edge stays under the cursor).
+    if (_isResizing) {
         const float dx = e.mousePos.x - _resizeStartMousePos.x;
         const float dy = e.mousePos.y - _resizeStartMousePos.y;
-        setSize(math::FVector2(_resizeStartSize.x + dx,
-                               _resizeStartSize.y + dy));
+
+        float newW = _resizeStartSize.x;
+        float newH = _resizeStartSize.y;
+        switch (_resizeEdge) {
+            case ResizeEdge::Right:
+            case ResizeEdge::TopRight:
+            case ResizeEdge::BottomRight:
+                newW = _resizeStartSize.x + dx;
+                break;
+            case ResizeEdge::Left:
+            case ResizeEdge::TopLeft:
+            case ResizeEdge::BottomLeft:
+                newW = _resizeStartSize.x - dx;
+                break;
+            default: break;
+        }
+        switch (_resizeEdge) {
+            case ResizeEdge::Bottom:
+            case ResizeEdge::BottomLeft:
+            case ResizeEdge::BottomRight:
+                newH = _resizeStartSize.y + dy;
+                break;
+            case ResizeEdge::Top:
+            case ResizeEdge::TopLeft:
+            case ResizeEdge::TopRight:
+                newH = _resizeStartSize.y - dy;
+                break;
+            default: break;
+        }
+        setSize(math::FVector2(newW, newH));
+
+        // PR-B1 — Left/Top edge drags re-anchor position so the opposite
+        // edge stays under the cursor. If setSize clamped to minSize,
+        // we back-shift position by the actual delta to keep the
+        // right/bottom edge pinned to the cursor.
+        const math::FVector2 finalSize = getSize();
+        if (_resizeEdge == ResizeEdge::Left ||
+            _resizeEdge == ResizeEdge::TopLeft ||
+            _resizeEdge == ResizeEdge::BottomLeft) {
+            const float actualDx = finalSize.x - _resizeStartSize.x;
+            setPosition(getPosition() + math::FVector2(-actualDx, 0.0f));
+        }
+        if (_resizeEdge == ResizeEdge::Top ||
+            _resizeEdge == ResizeEdge::TopLeft ||
+            _resizeEdge == ResizeEdge::TopRight) {
+            const float actualDy = finalSize.y - _resizeStartSize.y;
+            setPosition(getPosition() + math::FVector2(0.0f, -actualDy));
+        }
         return true;
     }
 
@@ -248,18 +356,23 @@ bool Window::onMouseButtonUp(const UIMouseEvent& e) {
 }
 
 UiCursorHint Window::getCursorHint() const {
-    // Phase D (D1) — SE resize cursor wins over Move/Default. The host is
-    // expected to map SizeNwse to a diagonal cursor at OS level; UIManager
-    // already routes UiCursorHint through its cursor funnel (Phase B).
+    // PR-B1 — resize cursor wins over Move/Default.
+    //
+    // Two paths feed this:
+    //   (a) in-drag: `_resizeEdge` reflects the active edge — map it
+    //       directly via cursorHintForEdge. Captured state is stable
+    //       for the whole drag.
+    //   (b) idle hover: no active edge, but `_lastMouseWorldPos` was
+    //       updated by the most recent onMouseMove. We hit-test against
+    //       hitTestResizeEdge to surface the right cursor when the user
+    //       hovers over a handle band (Windows behavior).
+    if (_resizable && _isResizing && _resizeEdge != ResizeEdge::None) {
+        return cursorHintForEdge(_resizeEdge);
+    }
     if (_resizable) {
-        // Test seam: hitTestResizeEdge uses world-coords. We can't know the
-        // mouse position from getCursorHint (no mousePos parameter), so we
-        // use the resize state-machine alone for the in-drag case, and fall
-        // back to Default when not dragging. (Production code reaches SE
-        // hover via UIManager's pickTopmostWidget + hint aggregation, not
-        // this getter.)
-        if (_isResizing && _resizeEdge == ResizeEdge::BottomRight) {
-            return UiCursorHint::SizeNwse;
+        const ResizeEdge hoverEdge = hitTestResizeEdge(_lastMouseWorldPos);
+        if (hoverEdge != ResizeEdge::None) {
+            return cursorHintForEdge(hoverEdge);
         }
     }
     if (_movable && (_isDragging || _titleBarHover)) {
@@ -467,6 +580,10 @@ void Window::layoutChildren() {
         _bodyVBar->setSize(math::FVector2(barW, _bodyViewportH));
         syncBodyScrollBar();
     }
+}
+
+Widget* createWindowWidget() {
+    return new Window();
 }
 
 } // namespace ayt::ui
