@@ -20,9 +20,9 @@
 
 | ID | 操作 | 期望视觉 | 期望点击·焦点 | 状态 | 日期 | 备注 |
 |----|------|----------|----------------|------|------|------|
-| S1 | Capabilities 页：拖主滚动条拖到中段 / 触控板两指滚 | 内容裁在视口内，无溢出；scrollbar thumb 跟手 | 点按钮点到的是画面上看到的那一个，不是旧坐标下的按钮 | ☐ PASS / ☐ FAIL | ____-__-__ | |
-| S2 | B3 ListView：拖垂直条到底 / 鼠标滚轮连续 5 下 | 行跟着滚；row pool 复用；thumb 跟手 | 点哪一行选中的是当前可见的那行，不是被滚动遮住的旧行 | ☐ PASS / ☐ FAIL | ____-__-__ | |
-| S3 | C3 Menu：连按 A→B | 高亮跳到第一个以 B 开头的项 | 按 Enter 激活当前高亮项 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S1 | Capabilities 页：拖主滚动条拖到中段 / 触控板两指滚 | 内容裁在视口内，无溢出；scrollbar thumb 跟手 | 点按钮点到的是画面上看到的那一个，不是旧坐标下的按钮 | ☒ FAIL | 2026-08-07 | 滚动条不跟手，只有中心段跟手（猜测区域不匹配）；触控板两指没反应。等用户决定方案后再排查 |
+| S2 | B3 ListView：拖垂直条到底 / 鼠标滚轮连续 5 下 | 行跟着滚；row pool 复用；thumb 跟手 | 点哪一行选中的是当前可见的那行，不是被滚动遮住的旧行 | ☒ FAIL | 2026-08-07 | 鼠标滚轮没反应。Gallery 注释说"wrap in ScrollView"实际未做；ListView 已 nested in content_scroll。等用户决定方案 |
+| S3 | C3 Menu：连按 A→B | 高亮跳到第一个以 B 开头的项 | 按 Enter 激活当前高亮项 | ☒ FAIL | 2026-08-07 | 首次按 A 直接跳到第二个 A 开头单词（Apricot 而非 Apple）；按 R 完全无反应。根因：`Menu::_hoveredIndex` 默认 = 0（AYMenu.h:169）→ typeahead startFrom = (0+1)%n 跳过 idx 0；R 单独：startFrom=1 找不到 R → single-letter wrap fallback → setHoveredIndex(0) 但 _hoveredIndex 已 = 0 → setHoveredIndex early-return 无变化 = "无反应"。用户决定暂不动手 |
 | S4 | C2 ComboBox：键入 "ap" | typeahead 匹配 + 弹层打开 | 弹层不被父级裁切；点 ComboBox 外部关闭弹层 | ☐ PASS / ☐ FAIL | ____-__-__ | |
 | S5 | B1 Window：拖标题中段移动 / 顶缘 4px / 四角 | 光标形态与行为一致（move / ns-resize / nwse-resize） | 拖动过程中正文区域跟着 resize；松开后状态稳定 | ☐ PASS / ☐ FAIL | ____-__-__ | |
 | S6 | C1 Tooltip：hover 显页元素 → 切到隐页 → 切回显页 → 再 hover | 隐页时不弹 tip；显页重新计时 | 切回显页 hover 计时重置；不会立刻弹旧 tip | ☐ PASS / ☐ FAIL | ____-__-__ | |
@@ -38,7 +38,13 @@
 
 | 日期 | 改动 | 跑表人 | 整体结果 |
 |------|------|--------|----------|
-| 2026-08-07 | 基线（PR-Container-Contract-Cut2 + PR-TypeaheadBuffer + PR-SyncVerticalBar ship 后启表） | — | — |
+| 2026-08-07 | 基线（PR-Container-Contract-Cut2 + PR-TypeaheadBuffer + PR-SyncVerticalBar ship 后启表） | — | 3 FAIL (S1/S2/S3) — 见各行备注 |
+
+## 已知 bug（暂不动手，等用户决定）
+
+- **S1** ScrollView thumb 不跟手 — 仅中心段跟手（猜测区域不匹配）；触控板两指无反应
+- **S2** ListView 鼠标滚轮无反应 — 备注：Gallery `wireCapabilities` line 617-625 注释说 "wrap ListView in ScrollView" 实际未做；ListView 已经在嵌套的 content_scroll 内
+- **S3** Menu 首字母 typeahead — `_hoveredIndex` 默认 0（AYMenu.h:169）→ startFrom 跳过 idx 0。R 单按：wrap fallback setHoveredIndex(0) 但已 == 0 → early-return = "无反应"
 
 ## 关联
 
