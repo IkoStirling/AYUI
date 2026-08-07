@@ -582,9 +582,11 @@ void ListView::onRender(IRenderBackend& renderer) {
     renderer.drawRect(listBounds, bg);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
-    // Clip rows to the list strip (Window body uses the same pushClip
-    // pattern). Fractional scroll can park a pool row partly outside
-    // the viewport — without clip it paints over neighbors above/below.
+    // Clip rows to the list strip INTERSECTED with the active parent
+    // clip (pushClip nests via UIRenderBackend). Using getClientRect
+    // alone is correct for in-list fractional scroll; nesting is what
+    // keeps ListView from painting over Gallery page ScrollView chrome
+    // when only partially scrolled into view.
     renderer.pushClip(listBounds);
     for (Row* r : _rowPool) {
         if (r != nullptr && r->isVisible()) {
@@ -623,7 +625,13 @@ Widget* ListView::hitTest(const math::FVector2& worldPos) {
     if (Widget* hit = compoundDescendHitTestClipped(this, worldPos)) {
         if (hit != this) return hit;
     }
-    // Pool rows: walk in reverse so the topmost row wins.
+    // Pool rows live outside _children. Gate on getClientRect so rows
+    // parked outside the list strip by fractional scroll are not
+    // clickable (and cannot steal wheel picks) above/below the box —
+    // same rect onRender pushClip uses.
+    if (!getClientRect().contains(worldPos)) {
+        return this;
+    }
     for (auto it = _rowPool.rbegin(); it != _rowPool.rend(); ++it) {
         Row* row = *it;
         if (row == nullptr || !row->isVisible()) continue;

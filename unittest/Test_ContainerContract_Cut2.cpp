@@ -109,12 +109,13 @@ TEST_CASE(scrollview_get_client_rect_excludes_visible_bars) {
     sv->setSize(FVector2(200.0f, 100.0f));
     sv->setContentSize(FVector2(200.0f, 500.0f));   // vbar visible
     const float barW = ScrollBar::kDefaultBarWidth;
-    // World bounds = (0,0,200,100); vbar visible → clientRect = (0,0,200-barW,100).
+    constexpr float kBorder = 1.0f;
+    // World bounds = (0,0,200,100); inset by frame border, then exclude vbar.
     const ayt::math::FRectangle cr = sv->getClientRect();
-    CHECK(cr.minX == 0.0f);
-    CHECK(cr.minY == 0.0f);
-    CHECK(cr.maxX == 200.0f - barW);
-    CHECK(cr.maxY == 100.0f);
+    CHECK(cr.minX == kBorder);
+    CHECK(cr.minY == kBorder);
+    CHECK(cr.maxX == 200.0f - kBorder - barW);
+    CHECK(cr.maxY == 100.0f - kBorder);
     delete sv;
 }
 

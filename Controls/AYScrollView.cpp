@@ -110,6 +110,18 @@ void ScrollView::syncContentPosition() {
 // want to be explicit can still use it).
 math::FRectangle ScrollView::getClientRect() const {
     math::FRectangle clip = getWorldBounds();
+    // Inset by the frame stroke so scrolled children (e.g. ListView)
+    // cannot paint over the border pixels — Gallery "page edge covered
+    // by list" was getClientRect == full bounds while border was drawn
+    // underneath content.
+    constexpr float kBorder = 1.0f;
+    clip.minX += kBorder;
+    clip.minY += kBorder;
+    clip.maxX -= kBorder;
+    clip.maxY -= kBorder;
+    if (clip.maxX < clip.minX) clip.maxX = clip.minX;
+    if (clip.maxY < clip.minY) clip.maxY = clip.minY;
+
     const float barW = ScrollBar::kDefaultBarWidth;
     if (_vbar != nullptr && _vbar->isVisible()) {
         clip.maxX = std::max(clip.minX, clip.maxX - barW);
@@ -206,12 +218,11 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     math::FVector4 bg = math::FVector4(0.12f, 0.12f, 0.13f, 1.0f);
     if (style.hasStyle) bg = style.backgroundColor;
     renderer.drawRect(bounds, bg);
-    renderer.drawBorderRect(bounds,
-        math::FVector4(0.45f, 0.45f, 0.5f, 1.0f), 1.0f, 2.0f);
 
-    // Clip + permanently-offset content (see syncContentPosition). Same
-    // pattern as Window::renderChildren — without pushClip, scrolled
-    // pages paint over chrome ("内容没有被裁剪").
+    // Clip + permanently-offset content (see syncContentPosition).
+    // getClientRect is inset by the frame border so content cannot cover
+    // the stroke. Border is painted AFTER content/bars so chrome wins
+    // z-order even if a child kisses the clip edge.
     if (_content != nullptr) {
         syncContentPosition();
         renderer.pushClip(getClientRect());
@@ -220,6 +231,9 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     }
     if (_vbar != nullptr) _vbar->render(renderer);
     if (_hbar != nullptr) _hbar->render(renderer);
+
+    renderer.drawBorderRect(bounds,
+        math::FVector4(0.45f, 0.45f, 0.5f, 1.0f), 1.0f, 2.0f);
 }
 
 void ScrollView::renderChildren(IRenderBackend& renderer) {

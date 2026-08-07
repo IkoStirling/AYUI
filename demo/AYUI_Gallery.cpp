@@ -128,6 +128,11 @@ struct GalleryState {
     // get notified. We track the active name on the host so the next
     // F5 knows which way to flip.
     std::string activeThemeName = "dark";
+
+    // Set when handleMessage consumes WM_MOUSEWHEEL this poll. Prevents
+    // the Device→UI bridge from double-applying the same gesture when
+    // WM_INPUT RI_MOUSE_WHEEL also fires (precision trackpads).
+    bool wheelHandledThisFrame = false;
 };
 
 void showPage(ayt::ui::UIManager& ui, const char* pageId)
@@ -867,6 +872,37 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         const float x = static_cast<float>(GET_X_LPARAM(lParam));
         const float y = static_cast<float>(GET_Y_LPARAM(lParam));
         state->ui->onMouseMove(x, y);
+        // Keep handled=false so Device also updates MouseDevice position.
+        // Returning handled=true previously starved getWheelDelta bridging
+        // of a valid cursor (Device pos stayed at 0,0 → pickTopmost miss).
+        return 0;
+    }
+    case WM_MOUSEWHEEL: {
+        // Primary wheel path: client coords from the message (not Device
+        // mouse pos). Gallery swallows move for UI but must own wheel too
+        // — otherwise only the post-poll Device bridge runs, often at a
+        // stale (0,0) pick point.
+        //
+        // Sign: Win32 positive = wheel away / natural trackpad "swipe up"
+        // often arrives as negative. UI scrollOffset increases to reveal
+        // lower content (browser-like: finger up → content up). Negate
+        // Win32 notches so swipe/wheel matches browser natural scrolling.
+        constexpr float kPixelsPerNotch = 40.0f;
+        const short raw = static_cast<short>(HIWORD(wParam));
+        const float deltaY =
+            -(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA))
+            * kPixelsPerNotch;
+        POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        if (state->devices != nullptr) {
+            HWND hwnd = static_cast<HWND>(
+                state->devices->window().getWindowHandle());
+            if (hwnd != nullptr) {
+                ::ScreenToClient(hwnd, &pt);
+            }
+        }
+        state->ui->onMouseWheel(static_cast<float>(pt.x),
+                                static_cast<float>(pt.y), deltaY);
+        state->wheelHandledThisFrame = true;
         handled = true;
         return 0;
     }
@@ -1175,17 +1211,25 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ::QueryPerformanceCounter(&qpcPrev);
 
     while (state.running && window.isWindowValid()) {
+        state.wheelHandledThisFrame = false;
         devices.pollEvents();
 
-        // Bridge Device mouse wheel → UI. Trackpads / mice deliver
-        // WM_MOUSEWHEEL into MouseDevice; Gallery only synthesized wheel
-        // from WM_TOUCH before, so ListView/ScrollView ignored trackpad.
-        if (ayt::device::MouseDevice* mouse = devices.mouse()) {
-            const float notches = mouse->getWheelDelta();
-            if (notches != 0.0f) {
-                constexpr float kPixelsPerNotch = 40.0f;
-                const ayt::device::Vector2 pos = mouse->getPosition();
-                ui.onMouseWheel(pos.x, pos.y, notches * kPixelsPerNotch);
+        // Fallback bridge: precision trackpads may deliver wheel only via
+        // WM_INPUT → MouseDevice (no WM_MOUSEWHEEL). Use UIManager's last
+        // mouse (updated by WM_MOUSEMOVE), never Device pos alone — move
+        // used to be handled=true and starved Device coordinates.
+        if (!state.wheelHandledThisFrame) {
+            if (ayt::device::MouseDevice* mouse = devices.mouse()) {
+                const float notches = mouse->getWheelDelta();
+                if (notches != 0.0f) {
+                    constexpr float kPixelsPerNotch = 40.0f;
+                    const ayt::math::FVector2 pos = ui.hasMousePos()
+                        ? ui.getMousePos()
+                        : ayt::math::FVector2(mouse->getPosition().x,
+                                              mouse->getPosition().y);
+                    // Same Win32→UI sign flip as WM_MOUSEWHEEL handler.
+                    ui.onMouseWheel(pos.x, pos.y, -notches * kPixelsPerNotch);
+                }
             }
         }
 
