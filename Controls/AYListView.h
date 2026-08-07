@@ -234,6 +234,10 @@ public:
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    // PR-Container-Contract-Cut2: getClientRect + hitTest are public
+    // (matches Widget base). They're the test surface for the
+    // container's clip + descent contract.
+    math::FRectangle getClientRect() const override;
     // Rows + vbar are drawn in onRender (rows inside pushClip). Default
     // renderChildren would paint them again unclipped over neighbors.
     void renderChildren(IRenderBackend& renderer) override;

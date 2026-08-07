@@ -96,6 +96,16 @@ void Window::setSize(const math::FVector2& size) {
     Widget::setSize(math::FVector2(std::max(size.x, _minSize.x), std::max(size.y, _minSize.y)));
 }
 
+// PR-Container-Contract-Cut2: getClientRect = world bounds minus title
+// bar. Used by both renderChildren's clip and hitTest's body-descent
+// gate so they can't drift. Title-bar clicks (above the rect) fall
+// through to self via the shared helper — the window IS the chrome.
+math::FRectangle Window::getClientRect() const {
+    const math::FRectangle bounds = getWorldBounds();
+    return math::FRectangle(bounds.minX, bounds.minY + _titleBarHeight,
+                            bounds.maxX, bounds.maxY);
+}
+
 Widget* Window::hitTest(const math::FVector2& worldPos) {
     if (!_visible) return nullptr;
 
@@ -135,22 +145,11 @@ Widget* Window::hitTest(const math::FVector2& worldPos) {
         }
     }
 
-    // Clip body hits to the client rect so scrolled-off children
-    // don't steal clicks outside the window body.
-    math::FRectangle body(bounds.minX, bounds.minY + _titleBarHeight,
-                          bounds.maxX, bounds.maxY);
-    if (body.contains(worldPos)) {
-        for (auto it = _children.rbegin(); it != _children.rend(); ++it) {
-            Widget* child = *it;
-            if (child == nullptr || child == _bodyVBar) {
-                continue;
-            }
-            Widget* hit = child->hitTest(worldPos);
-            if (hit) return hit;
-        }
-    }
-
-    return this;
+    // PR-Container-Contract-Cut2: defer to the shared clipped helper.
+    // The helper gates by getClientRect() (= body rect) so scrolled-off
+    // children can't claim clicks outside the body, and vbar (a child)
+    // is in the helper's descent path but already handled above.
+    return compoundDescendHitTestClipped(this, worldPos);
 }
 
 ResizeEdge Window::hitTestResizeEdge(const math::FVector2& worldPos) const {
@@ -452,14 +451,11 @@ void Window::onRender(IRenderBackend& renderer) {
 }
 
 void Window::renderChildren(IRenderBackend& renderer) {
-    // Clip body children (+ scrollbar) to the client rect so scrolled
-    // content cannot paint over the title bar ("内容超过上部").
-    const math::FRectangle bounds = getWorldBounds();
-    const math::FRectangle body(bounds.minX, bounds.minY + _titleBarHeight,
-                                bounds.maxX, bounds.maxY);
-    renderer.pushClip(body);
-    CompoundWidget::renderChildren(renderer);
-    renderer.popClip();
+    // PR-Container-Contract-Cut2: helper handles push/pop balance and
+    // uses getClientRect() (= body rect) as the clip. _bodyVBar is
+    // excluded so it stays painted after popClip — vbar is chrome,
+    // it must not be clipped to the body.
+    compoundDescendClippedRender(this, renderer, {_bodyVBar});
 }
 
 void Window::renderResizeGrip(IRenderBackend& renderer) const {

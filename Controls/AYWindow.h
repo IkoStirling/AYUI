@@ -61,6 +61,10 @@ public:
     void setSize(const math::FVector2& size);
 
     Widget* hitTest(const math::FVector2& worldPos) override;
+    // PR-Container-Contract-Cut2: getClientRect = world bounds minus the
+    // title bar. Same rect used by renderChildren's clip and hitTest's
+    // body-descent gate, so they can't drift.
+    math::FRectangle getClientRect() const override;
     bool onMouseMove(const UIMouseEvent& e) override;
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onMouseButtonUp(const UIMouseEvent& e) override;

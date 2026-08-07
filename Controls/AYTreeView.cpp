@@ -249,6 +249,28 @@ void TreeView::handleNodeClick(int flatIndex) {
     setSelectedIndex(flatIndex);
 }
 
+void TreeView::renderChildren(IRenderBackend& renderer) {
+    // PR-Container-Contract-Cut2: defense-in-depth helper. onRender
+    // above already paints nodes inside a pushClip; this override
+    // catches any add-child-after-cut2 call (e.g. a debug overlay)
+    // so it renders inside the clientRect clip rather than leaking
+    // onto the vbar gutter. _vbar is excluded so it stays painted
+    // after popClip in onRender.
+    compoundDescendClippedRender(this, renderer, {_vbar});
+}
+
+Widget* TreeView::hitTest(const math::FVector2& worldPos) {
+    if (!_visible) return nullptr;
+    const math::FRectangle bounds = getWorldBounds();
+    if (!bounds.contains(worldPos)) return nullptr;
+
+    // PR-Container-Contract-Cut2: defer to the shared clipped helper.
+    // _vbar is a child and gets first crack via reverse-order walk;
+    // the helper's clientRect gate (= getClientRect()) excludes the
+    // vbar gutter, so gutter clicks fall through to self.
+    return compoundDescendHitTestClipped(this, worldPos);
+}
+
 Widget* createTreeViewWidget() { return new TreeView(); }
 
 } // namespace ayt::ui

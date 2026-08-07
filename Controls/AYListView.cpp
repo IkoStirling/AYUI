@@ -552,6 +552,18 @@ void ListView::rebuildRows() {
     rebindPoolRows();
 }
 
+// PR-Container-Contract-Cut2: getClientRect is the single source of truth
+// for both render clip and hit-test gate. Same math as the legacy
+// local `listBounds` (still computed inline in onRender for the chrome
+// pass; helper consumes this rect for the clipped cascade + hit gate).
+math::FRectangle ListView::getClientRect() const {
+    const math::FRectangle bounds = getWorldBounds();
+    const bool vbarShown = (_vbar != nullptr) && _vbar->isVisible();
+    const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
+    return math::FRectangle(bounds.minX, bounds.minY,
+                            bounds.maxX - barW, bounds.maxY);
+}
+
 void ListView::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
@@ -566,12 +578,7 @@ void ListView::onRender(IRenderBackend& renderer) {
     float bw = style.hasStyle ? style.borderWidth : 1.0f;
 
     // G4 — background fills the row strip; vbar paints itself when visible.
-    const bool vbarShown =
-        (_vbar != nullptr) && _vbar->isVisible();
-    const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
-    const math::FRectangle listBounds(
-        bounds.minX, bounds.minY,
-        bounds.maxX - barW, bounds.maxY);
+    const math::FRectangle listBounds = getClientRect();
     renderer.drawRect(listBounds, bg);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
@@ -588,8 +595,13 @@ void ListView::onRender(IRenderBackend& renderer) {
     if (_vbar != nullptr) _vbar->render(renderer);
 }
 
-void ListView::renderChildren(IRenderBackend& /*renderer*/) {
-    // Intentionally empty — see onRender (clipped row pass + vbar).
+void ListView::renderChildren(IRenderBackend& renderer) {
+    // PR-Container-Contract-Cut2: helper handles push/pop balance; vbar
+    // is excluded so it stays painted after popClip (in onRender above)
+    // rather than being clipped out by the cascade. Rows live in the
+    // pool, not as direct children, so they continue to render in the
+    // explicit loop inside onRender.
+    compoundDescendClippedRender(this, renderer, {_vbar});
 }
 
 Widget* ListView::hitTest(const math::FVector2& worldPos) {
@@ -597,23 +609,21 @@ Widget* ListView::hitTest(const math::FVector2& worldPos) {
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 
-    const bool vbarShown =
-        (_vbar != nullptr) && _vbar->isVisible();
-    const float barW = vbarShown ? ScrollBar::kDefaultBarWidth : 0.0f;
-    if (vbarShown) {
+    // PR-Container-Contract-Cut2: vbar is a direct child, gets first
+    // crack via reverse-order walk in the shared helper. The helper's
+    // clientRect gate (= getClientRect()) excludes the vbar gutter, so
+    // gutter clicks fall through to self (chrome); clicks inside the
+    // list strip descend into any non-row children. Pool rows aren't
+    // children, so we still walk them explicitly after the helper.
+    if (_vbar != nullptr && _vbar->isVisible()) {
         if (Widget* hit = _vbar->hitTest(worldPos)) {
             return hit;
         }
     }
-
-    const math::FRectangle listBounds(
-        bounds.minX, bounds.minY,
-        bounds.maxX - barW, bounds.maxY);
-    if (!listBounds.contains(worldPos)) {
-        return this;
+    if (Widget* hit = compoundDescendHitTestClipped(this, worldPos)) {
+        if (hit != this) return hit;
     }
-
-    // Prefer topmost visible pool row under the cursor.
+    // Pool rows: walk in reverse so the topmost row wins.
     for (auto it = _rowPool.rbegin(); it != _rowPool.rend(); ++it) {
         Row* row = *it;
         if (row == nullptr || !row->isVisible()) continue;

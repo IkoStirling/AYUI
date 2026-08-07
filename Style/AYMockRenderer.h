@@ -115,6 +115,23 @@ public:
     int getTriangleCount() const override { return _triangleCount; }
     int getVertexCount() const override { return _vertexCount; }
 
+    // PR-Container-Contract-Cut2: clip-stack recording. pushClip/popClip
+    // are virtual-with-default `{}` in IRenderBackend; we override them
+    // so tests can assert container renderChildren implementations keep
+    // their push/pop balanced. Pre-PR cut2 these were silent no-ops —
+    // nothing could detect a forgotten popClip until the next push
+    // silently overwrote the prior stack frame.
+    void pushClip(const math::FRectangle& bounds) override;
+    void popClip() override;
+
+    // Clip stack introspection (for tests).
+    struct ClipEvent {
+        math::FRectangle bounds;
+    };
+    int  getClipDepth() const { return static_cast<int>(_clipStack.size()); }
+    bool isClipStackBalanced() const { return _clipStack.empty(); }
+    const std::vector<ClipEvent>& getClipStack() const { return _clipStack; }
+
     void pushPerformanceMarker(const char* name) override;
     void popPerformanceMarker() override;
 
@@ -147,6 +164,9 @@ private:
         math::FVector4 vec4From, vec4To, vec4Current;
     };
     std::unordered_map<int, AnimationData> _animations;
+
+    // PR-Container-Contract-Cut2: clip stack frames (bounds per push).
+    std::vector<ClipEvent> _clipStack;
 };
 
 } // namespace ayt::ui

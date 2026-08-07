@@ -91,6 +91,16 @@ public:
     // router stops bubbling the event to outer scroll containers.
     bool onMouseWheel(const UIMouseWheelEvent& e) override;
 
+    // PR-Container-Contract-Cut2: getClientRect + hitTest are public
+    // (matches Widget base). They're the 2 entry points tests + the
+    // UIManager pickWidgetAt path use to interrogate the container's
+    // clip + descent contract — promoting them out of `protected:` so
+    // the test surface can call them directly.
+    math::FRectangle getClientRect() const override;
+    // Prefer bars over content — setContent appends after bars, so the
+    // default reverse child walk would give content the gutter hits.
+    Widget* hitTest(const math::FVector2& worldPos) override;
+
 protected:
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
@@ -98,9 +108,6 @@ protected:
     // -scroll). Default renderChildren would paint content again at the
     // layout position and cover the scrolled frame.
     void renderChildren(IRenderBackend& renderer) override;
-    // Prefer bars over content — setContent appends after bars, so the
-    // default reverse child walk would give content the gutter hits.
-    Widget* hitTest(const math::FVector2& worldPos) override;
 
 private:
     void ensureBarsCreated();

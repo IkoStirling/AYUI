@@ -85,6 +85,38 @@ Widget* compoundDescendHitTestClipped(Widget* self,
     return self;
 }
 
+// PR-Container-Contract-Cut2: single-arg overload that derives the
+// clientRect from self. Containers whose getClientRect() override is
+// the single source of truth for both hit-test and render clip use
+// this overload — keeps the call site symmetric (no need to type
+// "this->getClientRect()" inline next to "this->" again).
+Widget* compoundDescendHitTestClipped(Widget* self,
+                                      const math::FVector2& worldPos) {
+    if (self == nullptr) return nullptr;
+    return compoundDescendHitTestClipped(self, self->getClientRect(), worldPos);
+}
+
+// PR-Container-Contract-Cut2: pushClip(clientRect) + render non-excluded
+// children + popClip. Matches the 3-arg hit-test gate so a child
+// painted via this helper is bounded by the same rect that contains
+// its hit-testable area. The `exclude` list lets callers keep children
+// they draw explicitly after popClip (typical: scrollbars, which need
+// to be drawn over the chrome area, not under the content clip).
+void compoundDescendClippedRender(Widget* self, IRenderBackend& renderer,
+                                  std::initializer_list<Widget*> exclude) {
+    if (self == nullptr) return;
+    renderer.pushClip(self->getClientRect());
+    for (Widget* child : self->getChildren()) {
+        if (child == nullptr) continue;
+        bool skip = false;
+        for (Widget* e : exclude) {
+            if (e == child) { skip = true; break; }
+        }
+        if (!skip) child->render(renderer);
+    }
+    renderer.popClip();
+}
+
 void compoundDescendLeave(Widget* self) {
     if (self == nullptr) return;
     for (Widget* child : self->getChildren()) {

@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <initializer_list>
 
 namespace ayt::ui {
     
@@ -447,6 +448,29 @@ void compoundDescendLeave(Widget* self);
 Widget* compoundDescendHitTestClipped(Widget* self,
                                       const math::FRectangle& clientRect,
                                       const math::FVector2& worldPos);
+
+// PR-Container-Contract-Cut2: single-arg overload that derives the
+// clientRect from self. Containers whose getClientRect() override is
+// the single source of truth for both hit-test and render clip can
+// call this instead of recomputing the rect inline. Declaration must
+// come AFTER the 3-arg overload above (it's a thin wrapper, not a
+// template — no risk of overload-resolution surprises, but the
+// signature is distinct enough that either order compiles).
+Widget* compoundDescendHitTestClipped(Widget* self,
+                                      const math::FVector2& worldPos);
+
+// PR-Container-Contract-Cut2: pushClip(clientRect) + render non-excluded
+// children + popClip. Sibling of compoundDescendClippedRender that
+// threads through the same clientRect the hit-test gate uses, so any
+// add-child-after-cut2 call renders inside the container's clip box
+// instead of leaking onto chrome. `exclude` solves the "vbar was
+// addChild-ed but the container draws it after popClip" pattern —
+// passing {_vbar, _hbar} keeps the bars out of the clipped cascade
+// so the container's explicit bar paint after popClip stays
+// authoritative.
+void compoundDescendClippedRender(Widget* self,
+                                  IRenderBackend& renderer,
+                                  std::initializer_list<Widget*> exclude = {});
 
 // =============================================================================
 // Single-owner destruction helper (Phase UI-OWN-1).

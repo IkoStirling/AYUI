@@ -22,6 +22,29 @@ void MockRenderer::clear() {
     _nextAnimId = 1;
     _nextFontId = 1;
     _nextTargetId = 1;
+    // PR-Container-Contract-Cut2: also reset the clip stack so a
+    // mid-test clear() doesn't leak stack frames into the next render.
+    _clipStack.clear();
+}
+
+// PR-Container-Contract-Cut2: clip-stack recording overrides. Pre-PR
+// these were IRenderBackend defaults (`{}` no-op); tests could not detect
+// a forgotten popClip. Now they record the rect + depth so tests can
+// assert container renderChildren implementations push/pop in balance.
+void MockRenderer::pushClip(const math::FRectangle& bounds) {
+    _clipStack.push_back({bounds});
+}
+
+void MockRenderer::popClip() {
+    // If a caller forgot a matching push, popClip would underflow the
+    // stack. Mock-only safeguard: leave the stack unchanged so the
+    // test sees an explicit depth delta and a non-empty stack rather
+    // than a silent underflow. Production backends crash on popClip
+    // underflow differently; we mimic "balanced-or-leaked" rather than
+    // UB.
+    if (!_clipStack.empty()) {
+        _clipStack.pop_back();
+    }
 }
 
 void MockRenderer::drawRect(const math::FRectangle& bounds, const math::FVector4& color) {

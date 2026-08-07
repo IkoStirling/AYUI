@@ -89,6 +89,10 @@ public:
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    // PR-Container-Contract-Cut2: fill the empty renderChildren stub +
+    // add hitTest override. Same contract as the other 3 containers.
+    void renderChildren(IRenderBackend& renderer) override;
+    Widget* hitTest(const math::FVector2& worldPos) override;
 
     // PR-Container-Shared-Contract: client rect = world bounds minus
     // vbar width. Used by hit-test gating if/when TreeView overrides

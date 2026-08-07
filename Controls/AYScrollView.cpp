@@ -104,7 +104,11 @@ void ScrollView::syncContentPosition() {
     _content->setPosition(math::FVector2(-off.x, -off.y));
 }
 
-math::FRectangle ScrollView::contentClipRect() const {
+// PR-Container-Contract-Cut2: getClientRect is the single source of truth
+// for both render clip and hit-test gate. Same math as the legacy
+// contentClipRect() helper (kept below as a thin alias so call sites that
+// want to be explicit can still use it).
+math::FRectangle ScrollView::getClientRect() const {
     math::FRectangle clip = getWorldBounds();
     const float barW = ScrollBar::kDefaultBarWidth;
     if (_vbar != nullptr && _vbar->isVisible()) {
@@ -114,6 +118,11 @@ math::FRectangle ScrollView::contentClipRect() const {
         clip.maxY = std::max(clip.minY, clip.maxY - barW);
     }
     return clip;
+}
+
+math::FRectangle ScrollView::contentClipRect() const {
+    // Legacy alias — kept so call sites that read this name still compile.
+    return getClientRect();
 }
 
 void ScrollView::syncBarsToOffset() {
@@ -205,7 +214,7 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     // pages paint over chrome ("内容没有被裁剪").
     if (_content != nullptr) {
         syncContentPosition();
-        renderer.pushClip(contentClipRect());
+        renderer.pushClip(getClientRect());
         _content->render(renderer);
         renderer.popClip();
     }
@@ -213,9 +222,14 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     if (_hbar != nullptr) _hbar->render(renderer);
 }
 
-void ScrollView::renderChildren(IRenderBackend& /*renderer*/) {
-    // Intentionally empty — see onRender. Bars/content are drawn there
-    // so a second unoffset content paint cannot cover the scrolled view.
+void ScrollView::renderChildren(IRenderBackend& renderer) {
+    // PR-Container-Contract-Cut2: helper handles push/pop balance and
+    // skips _vbar/_hbar so bars remain painted after popClip (in
+    // onRender above) instead of being clipped out by the cascade.
+    // _content is also skipped — it has its own onRender path because
+    // of the -scrollOffset sync; double-painting it under the helper
+    // would redraw the scrolled frame over the chrome.
+    compoundDescendClippedRender(this, renderer, {_vbar, _hbar, _content});
 }
 
 Widget* ScrollView::hitTest(const math::FVector2& worldPos) {
@@ -223,6 +237,10 @@ Widget* ScrollView::hitTest(const math::FVector2& worldPos) {
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 
+    // PR-Container-Contract-Cut2: bars get first crack at the click
+    // (they're chrome — visible above content). After bars, defer to
+    // the shared clipped helper so the descent path matches the
+    // render clip exactly (same getClientRect gate).
     if (_vbar != nullptr && _vbar->isVisible()) {
         if (Widget* hit = _vbar->hitTest(worldPos)) {
             return hit;
@@ -233,15 +251,13 @@ Widget* ScrollView::hitTest(const math::FVector2& worldPos) {
             return hit;
         }
     }
-    // Clip hits to the visible content rect — scrolled-off children must
-    // not remain clickable at their old on-screen slots.
-    if (_content != nullptr && contentClipRect().contains(worldPos)) {
+    // syncContentPosition must run BEFORE the helper so the descendant
+    // tree (rooted at _content) has the -scrollOffset layout that the
+    // clipped gate was derived against.
+    if (_content != nullptr) {
         syncContentPosition();
-        if (Widget* hit = _content->hitTest(worldPos)) {
-            return hit;
-        }
     }
-    return this;
+    return compoundDescendHitTestClipped(this, worldPos);
 }
 
 Widget* createScrollViewWidget() {
