@@ -1,6 +1,7 @@
 #include "AYScrollView.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
+#include "AYScrollBarSync.h"
 #include "aymath/MathUtils.h"
 
 #include <algorithm>
@@ -118,16 +119,10 @@ math::FRectangle ScrollView::contentClipRect() const {
 void ScrollView::syncBarsToOffset() {
     const math::FVector2 vp = getViewportSize();
     const math::FVector2 content = _scrollState.getContentSize();
-    if (_vbar != nullptr) {
-        _vbar->setRange(0.0f, content.y);
-        _vbar->setViewportSize(vp.y);
-        _vbar->setValue(_scrollState.getScrollOffset().y);
-    }
-    if (_hbar != nullptr) {
-        _hbar->setRange(0.0f, content.x);
-        _hbar->setViewportSize(vp.x);
-        _hbar->setValue(_scrollState.getScrollOffset().x);
-    }
+    // PR-SyncVerticalBar: direction-agnostic helper. ScrollView is the
+    // only H consumer — passing .x keeps the contract identical.
+    syncVerticalBar(_vbar, content.y, vp.y, _scrollState.getScrollOffset().y);
+    syncVerticalBar(_hbar, content.x, vp.x, _scrollState.getScrollOffset().x);
 }
 
 bool ScrollView::scrollBy(const math::FVector2& delta) {

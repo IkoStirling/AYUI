@@ -363,6 +363,11 @@ TEST_CASE(listview_vbar_visible_when_items_exceed) {
     lv.performLayout();
     CHECK_NOT_NULL(lv.getVerticalScrollBar());
     CHECK(lv.getVerticalScrollBar()->isVisible());
+
+    // PR-SyncVerticalBar: scrollBy() (float dy overload) triggers
+    // syncBarToOffset() internally; bar value tracks scroll offset.
+    lv.scrollBy(96.0f);   // 4 rows down
+    CHECK(lv.getVerticalScrollBar()->getValue() == lv.getScrollOffset().y);
 }
 
 // G4: setVisibleRowCount clamps non-positive values to -1 (v1 default)

@@ -1,5 +1,6 @@
 #include "AYTreeView.h"
 #include "IAYRenderBackend.h"
+#include "AYScrollBarSync.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -182,10 +183,11 @@ void TreeView::ensureBarCreated() {
 }
 
 void TreeView::syncBarToOffset() {
-    if (_vbar == nullptr) return;
-    _vbar->setRange(0.0f, _contentSize.y);
-    _vbar->setViewportSize(getHeight());
-    _vbar->setValue(_scrollState.getScrollOffset().y);
+    // PR-SyncVerticalBar: helper handles null-bar guard + locked order.
+    // TreeView passes getHeight() directly as viewport size (the vbar
+    // sits inside TreeView bounds; no clientRect offset to subtract).
+    syncVerticalBar(_vbar, _contentSize.y, getHeight(),
+                    _scrollState.getScrollOffset().y);
 }
 
 void TreeView::performLayout() {

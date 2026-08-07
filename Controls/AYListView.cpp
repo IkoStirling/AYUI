@@ -1,6 +1,7 @@
 #include "AYListView.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
+#include "AYScrollBarSync.h"
 #include "AYUIManager.h"
 #include "UIKeyCode.h"
 #include "aymath/MathUtils.h"
@@ -459,11 +460,9 @@ void ListView::ensureBarCreated() {
 }
 
 void ListView::syncBarToOffset() {
-    if (_vbar == nullptr) return;
+    // PR-SyncVerticalBar: helper handles null-bar guard + locked order.
     const math::FVector2 vp = getViewportSize();
-    _vbar->setRange(0.0f, _contentSize.y);
-    _vbar->setViewportSize(vp.y);
-    _vbar->setValue(_scrollState.getScrollOffset().y);
+    syncVerticalBar(_vbar, _contentSize.y, vp.y, _scrollState.getScrollOffset().y);
 }
 
 math::FVector2 ListView::getViewportSize() const {

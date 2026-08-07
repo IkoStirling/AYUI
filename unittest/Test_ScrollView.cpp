@@ -39,6 +39,14 @@ TEST_CASE(scrollview_scrollby_and_bar_drive_share_clamp) {
     vbar->setValue(9999.0f);
     CHECK_FLOAT_EQ(sv->getScrollOffset().y, 400.0f, 1e-5f);
 
+    // PR-SyncVerticalBar: scrollBy() triggers syncBarsToOffset() internally,
+    // so the bar's value tracks the scroll state's offset. Reset to 0
+    // then scroll a non-clamped delta to force the sync path to run.
+    sv->scrollBy(FVector2(0.0f, -9999.0f));    // state → 0
+    sv->scrollBy(FVector2(0.0f, 250.0f));      // state → 250, bar re-synced
+    CHECK_FLOAT_EQ(sv->getVerticalScrollBar()->getValue(),
+                   sv->getScrollOffset().y, 1e-5f);
+
     delete sv;
 }
 

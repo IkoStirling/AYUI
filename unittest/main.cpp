@@ -73,6 +73,7 @@
 #include "Test_ContainerContract.cpp"   // PR-Container-Shared-Contract (clip+offset+hitTest unified)
 #include "Test_ScrollView.cpp"          // PR-Container-Shared-Contract (ScrollView bar clamp through shared helper)
 #include "Test_TypeaheadBuffer.cpp"     // PR-TypeaheadBuffer (ComboBox + Menu shared prefix-accumulator)
+#include "Test_SyncVerticalBar.cpp"     // PR-SyncVerticalBar (header-only helper + 4 owner migration)
 
 void runTest()
 {

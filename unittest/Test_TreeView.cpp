@@ -91,6 +91,9 @@ TEST_CASE(treeview_scroll_offset_updates_bar) {
     CHECK(tv.getScrollOffset().y == 0.0f);
     tv.setScrollOffset(FVector2(0.0f, 16.0f));
     CHECK(tv.getScrollOffset().y == 16.0f);
+    // PR-SyncVerticalBar: setScrollOffset calls syncBarToOffset on the
+    // change path — bar value tracks scroll offset.
+    CHECK(tv.getVerticalScrollBar()->getValue() == tv.getScrollOffset().y);
     tv.setScrollOffset(FVector2(0.0f, 9999.0f));   // clamp
     CHECK(tv.getScrollOffset().y <= 32.0f);
 }

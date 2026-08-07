@@ -1,5 +1,6 @@
 #include "AYWindow.h"
 #include "AYScrollableWidget.h"
+#include "AYScrollBarSync.h"
 #include "IAYRenderBackend.h"
 #include "aymath/MathUtils.h"
 
@@ -525,12 +526,11 @@ void Window::syncBodyScrollBar() {
         _scrollY = 0.0f;
         return;
     }
-    // Thumb size uses viewport/content; value is the scroll offset in
-    // [0, content-viewport]. Matches ScrollView's bar contract.
-    _bodyVBar->setRange(0.0f, _contentExtentY);
-    _bodyVBar->setViewportSize(_bodyViewportH);
+    // PR-SyncVerticalBar: helper locks range→viewport→value order.
+    // Visibility toggle + scrollY reset above are intentionally NOT
+    // folded into the helper — they're Window-specific epilogue.
     _scrollY = std::clamp(_scrollY, 0.0f, maxScroll);
-    _bodyVBar->setValue(_scrollY);
+    syncVerticalBar(_bodyVBar, _contentExtentY, _bodyViewportH, _scrollY);
 }
 
 bool Window::scrollBodyBy(float dy) {
