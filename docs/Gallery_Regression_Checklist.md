@@ -1,0 +1,48 @@
+# Gallery 语义验收表（AYUI）
+
+> **用法**：每次 AYUI 改动后（或发版前整表过一遍），按 ID 跑一遍手测。
+> 表内每行四列：操作 / 期望视觉 / 期望点击·焦点 / 状态。
+> **基线日期**：2026-08-07（PR-Container-Contract-Cut2 + PR-TypeaheadBuffer + PR-SyncVerticalBar ship 后）。
+
+## 验收范围
+
+| ID | 类别 | 操作 |
+|----|------|------|
+| S1 | Capabilities / ScrollView | 拖主滚动条 / 触控板滚 |
+| S2 | B3 ListView | 拖条 + 滚轮 |
+| S3 | C3 Menu | A→B、同字母循环 |
+| S4 | C2 ComboBox | typeahead + 弹层 |
+| S5 | B1 Window | 标题中拖 / 顶缘 4px / 四角 |
+| S6 | C1 Tooltip | 切页隐藏 |
+| S7 | 嵌套滚轮 | List 在 ScrollView 里 |
+
+## 验收表
+
+| ID | 操作 | 期望视觉 | 期望点击·焦点 | 状态 | 日期 | 备注 |
+|----|------|----------|----------------|------|------|------|
+| S1 | Capabilities 页：拖主滚动条拖到中段 / 触控板两指滚 | 内容裁在视口内，无溢出；scrollbar thumb 跟手 | 点按钮点到的是画面上看到的那一个，不是旧坐标下的按钮 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S2 | B3 ListView：拖垂直条到底 / 鼠标滚轮连续 5 下 | 行跟着滚；row pool 复用；thumb 跟手 | 点哪一行选中的是当前可见的那行，不是被滚动遮住的旧行 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S3 | C3 Menu：连按 A→B | 高亮跳到第一个以 B 开头的项 | 按 Enter 激活当前高亮项 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S4 | C2 ComboBox：键入 "ap" | typeahead 匹配 + 弹层打开 | 弹层不被父级裁切；点 ComboBox 外部关闭弹层 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S5 | B1 Window：拖标题中段移动 / 顶缘 4px / 四角 | 光标形态与行为一致（move / ns-resize / nwse-resize） | 拖动过程中正文区域跟着 resize；松开后状态稳定 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S6 | C1 Tooltip：hover 显页元素 → 切到隐页 → 切回显页 → 再 hover | 隐页时不弹 tip；显页重新计时 | 切回显页 hover 计时重置；不会立刻弹旧 tip | ☐ PASS / ☐ FAIL | ____-__-__ | |
+| S7 | ScrollView 包 ListView，鼠标在内层 ListView 行上滚轮 | 内层 ListView 滚动；外层 ScrollView 不动 | 内层吃掉滚轮事件，外层 viewport 不变 | ☐ PASS / ☐ FAIL | ____-__-__ | |
+
+## 跑表节奏
+
+- **每次改容器/焦点/滚动/弹层**：跑相关 UT + 本表对应 2-3 条
+- **AYUI 发版/bump 前**：整表过一遍（15-30 分钟）
+- **踩到新语义 bug**：先加一条场景 UT（复现 hitTest / 按键序列），再改代码——比只修现象更稳
+
+## 历史
+
+| 日期 | 改动 | 跑表人 | 整体结果 |
+|------|------|--------|----------|
+| 2026-08-07 | 基线（PR-Container-Contract-Cut2 + PR-TypeaheadBuffer + PR-SyncVerticalBar ship 后启表） | — | — |
+
+## 关联
+
+- 场景级 UT 复现这些语义：`unittest/Test_Scene_Suite_G.cpp`（post-scroll clip / nested wheel / typeahead+enter end-to-end）
+- PR-Container-Contract-Cut2 root pin：`aac3b74`
+- Scene_Suite_G root pin：`f23598d`
+- 分层验证策略说明：见 `C:\Users\zhqmx\.claude\projects\d--Projects\memory\ay-ui.md` §分层验证策略

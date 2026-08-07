@@ -1,4 +1,5 @@
 build/
 *.md
+!docs/Gallery_Regression_Checklist.md
 design/
 report/
