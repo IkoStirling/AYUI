@@ -333,38 +333,37 @@ bool Menu::onKeyDown(int keyCode) {
     // between Apple/Apricot on repeat, 'B' sits at Banana with no
     // feedback for the second keystroke.
     if (keyCode >= UIKey_A && keyCode <= UIKey_Z) {
-        if (_typeaheadTimer > kTypeaheadTimeout) {
-            _typeaheadBuffer.clear();
-        }
         const wchar_t ch = static_cast<wchar_t>(
             L'a' + (keyCode - UIKey_A));
-        _typeaheadBuffer.push_back(ch);
-        _typeaheadTimer = 0.0f;
+        _typeaheadBuffer.append(ch);
         const int startFrom = (_hoveredIndex < 0) ? 0
                                                   : (_hoveredIndex + 1) % n;
-        const int match = findTypeaheadMatch(startFrom);
+        // Lambda getter lets us skip separator/nullptr items: an empty
+        // wstring fails the size check inside findMatch, so those
+        // entries are treated as no-match naturally.
+        auto getter = [this](int i) -> const std::wstring& {
+            const MenuItem* item = _items[static_cast<size_t>(i)];
+            if (item == nullptr) {
+                static const std::wstring empty;
+                return empty;
+            }
+            return item->getText();
+        };
+        int match = _typeaheadBuffer.findMatch(startFrom, n, getter);
         if (match < 0) {
-            // No match for the full prefix. If the user switched letters
-            // (A then B → buffer "ab"), restart with the new letter only
-            // — Windows listbox behavior. Keep cycling on repeated letters
-            // by searching from hoveredIndex+1, then wrap from 0.
+            // Letter-switch recovery: "ab" miss → restart with 'b'.
             if (_typeaheadBuffer.size() > 1) {
-                const wchar_t last = _typeaheadBuffer.back();
-                _typeaheadBuffer.clear();
-                _typeaheadBuffer.push_back(last);
-                const int retryStart = (_hoveredIndex < 0) ? 0
-                    : (_hoveredIndex + 1) % n;
-                int retry = findTypeaheadMatch(retryStart);
-                if (retry < 0) {
-                    retry = findTypeaheadMatch(0);
-                }
-                if (retry >= 0) {
-                    setHoveredIndex(retry);
+                match = _typeaheadBuffer.recoverFromLetterSwitch(startFrom, n, getter);
+                if (match >= 0) {
+                    setHoveredIndex(match);
                     return true;
                 }
             } else if (_typeaheadBuffer.size() == 1) {
-                // Single-letter wrap (only one 'B' item, already hovered).
-                const int wrapMatch = findTypeaheadMatch(0);
+                // Menu-only single-letter wrap (Windows listbox
+                // convention): user types the same letter twice and
+                // only ONE item matches; second press must wrap back to
+                // that match. ComboBox does NOT do this.
+                const int wrapMatch = _typeaheadBuffer.findMatch(0, n, getter);
                 if (wrapMatch >= 0) {
                     setHoveredIndex(wrapMatch);
                     return true;
@@ -406,52 +405,13 @@ bool Menu::onKeyDown(int keyCode) {
     }
 }
 
-int Menu::findTypeaheadMatch(int startFrom) const {
-    if (_typeaheadBuffer.empty()) return -1;
-    const int n = static_cast<int>(_items.size());
-    if (n == 0) return -1;
-    int i = startFrom;
-    for (int checked = 0; checked < n; ++checked) {
-        // Skip separators / null items (Menu::addSeparator orphans them
-        // into the children list but leaves _items clean — so this is
-        // defensive against any host that pushed a nullptr).
-        const MenuItem* item = _items[static_cast<size_t>(i)];
-        if (item != nullptr) {
-            const std::wstring& text = item->getText();
-            if (text.size() >= _typeaheadBuffer.size()) {
-                bool match = true;
-                for (size_t k = 0; k < _typeaheadBuffer.size(); ++k) {
-                    wchar_t a = text[k];
-                    wchar_t b = _typeaheadBuffer[k];
-                    if (a >= L'A' && a <= L'Z') {
-                        a = static_cast<wchar_t>(a + (L'a' - L'A'));
-                    }
-                    if (a != b) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) return i;
-            }
-        }
-        i = (i + 1) % n;
-    }
-    return -1;
-}
-
 void Menu::tick(float dt) {
-    // PR-C3 — typeahead timer accumulator. Same pattern as
-    // ComboBox::tick. Driven by UIManager::update → _root->tick cascade
-    // when the Menu is in the _root subtree (the common case after open()
-    // reparents onto the overlay — the overlay is mounted in _root, so
-    // the cascade still reaches the Menu through the overlay's children).
-    if (!_typeaheadBuffer.empty()) {
-        _typeaheadTimer += dt;
-        if (_typeaheadTimer > kTypeaheadTimeout) {
-            _typeaheadBuffer.clear();
-            _typeaheadTimer = 0.0f;
-        }
-    }
+    // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
+    // Driven by UIManager::update → _root->tick cascade when the Menu
+    // is in the _root subtree (the common case after open() reparents
+    // onto the overlay — the overlay is mounted in _root, so the
+    // cascade still reaches the Menu through the overlay's children).
+    _typeaheadBuffer.tick(dt);
 }
 
 void Menu::activateItem(int index) {

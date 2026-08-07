@@ -4,6 +4,7 @@
 #include "AYWidget.h"
 #include "AYListView.h"
 #include "AYTextLabel.h"
+#include "AYTypeaheadBuffer.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -159,11 +160,6 @@ public:
     static constexpr float kArrowWidth = 18.0f;
     static constexpr float kTextPadX = 8.0f;
 
-    // PR-C2 — typeahead timeout. After this many seconds without a new
-    // letter, the buffer is cleared so the next letter starts a fresh
-    // prefix match. Matches the Windows native dropdown's 0.5s.
-    static constexpr float kTypeaheadTimeout = 0.5f;
-
     ComboBox();
     ~ComboBox() override;
 
@@ -275,21 +271,11 @@ private:
 
     bool _enabled = true;
 
-    // PR-C2 — typeahead state. _typeaheadBuffer accumulates the user's
-    // recent letters; _typeaheadTimer counts down since the last letter
-    // so a pause resets the prefix (matches Windows native dropdown).
-    // _typeaheadStartingIndex is the index we started the search FROM
-    // (typically current selection + 1, wrapping at end) so repeated
-    // presses of the same letter cycle through matching items instead
-    // of always landing on the first.
-    std::wstring _typeaheadBuffer;
-    float        _typeaheadTimer   = 0.0f;
-    int          _typeaheadStartingIndex = -1;
-
-    // PR-C2 — find the next item whose first _typeaheadBuffer.size()
-    // chars (case-insensitive) match _typeaheadBuffer, starting the
-    // search at `startFrom` and wrapping. Returns -1 if nothing matches.
-    int  findTypeaheadMatch(int startFrom) const;
+    // PR-C2 → PR-TypeaheadBuffer: typeahead state is now encapsulated in
+    // a small reusable struct shared with Menu. Prefix accumulator lives
+    // on `_typeaheadBuffer`; timeout (0.5s) lives on the struct's
+    // `kTimeout` constant.
+    TypeaheadBuffer _typeaheadBuffer;
 
     // Phase B (B2): mute flag for the popup's selection callback. When
     // onKeyDown's open-state path mirrors `_selectedIndex` into the popup

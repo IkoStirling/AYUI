@@ -72,6 +72,7 @@
 #include "Test_WheelRouting.cpp"        // PR-B3 nested wheel routing
 #include "Test_ContainerContract.cpp"   // PR-Container-Shared-Contract (clip+offset+hitTest unified)
 #include "Test_ScrollView.cpp"          // PR-Container-Shared-Contract (ScrollView bar clamp through shared helper)
+#include "Test_TypeaheadBuffer.cpp"     // PR-TypeaheadBuffer (ComboBox + Menu shared prefix-accumulator)
 
 void runTest()
 {

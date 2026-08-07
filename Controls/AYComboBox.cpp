@@ -386,49 +386,25 @@ bool ComboBox::onKeyDown(int keyCode) {
 
     // PR-C2 — typeahead: A-Z (case-insensitive). Each match is a single
     // character so we accept exactly one VK per press. The buffer can
-    // grow if the user keeps typing within kTypeaheadTimeout.
+    // grow if the user keeps typing within TypeaheadBuffer::kTimeout.
     if (keyCode >= UIKey_A && keyCode <= UIKey_Z) {
-        // Reset the buffer if the previous letter aged out (defensive:
-        // tick() should already have cleared it).
-        if (_typeaheadTimer > kTypeaheadTimeout) {
-            _typeaheadBuffer.clear();
-        }
-        // Append the lowercase letter. Lowercasing here keeps the
-        // matching case-insensitive without per-char branching later.
+        // Append the lowercase letter (TypeaheadBuffer resets its own
+        // timer; tick() may have already cleared an expired buffer).
         const wchar_t ch = static_cast<wchar_t>(
             L'a' + (keyCode - UIKey_A));
-        _typeaheadBuffer.push_back(ch);
-        _typeaheadTimer = 0.0f;
+        _typeaheadBuffer.append(ch);
         const int startFrom = (_selectedIndex < 0) ? 0
                                                   : (_selectedIndex + 1) % n;
-        const int match = findTypeaheadMatch(startFrom);
-        if (match < 0) {
+        auto getter = [this](int i) -> const std::wstring& {
+            return _items[static_cast<size_t>(i)];
+        };
+        int match = _typeaheadBuffer.findMatch(startFrom, n, getter);
+        if (match < 0 && _typeaheadBuffer.size() > 1) {
             // Letter-switch recovery: "ab" miss → restart with 'b' (not
             // typo-pop back to 'a', which blocked A→B highlight jumps).
-            if (_typeaheadBuffer.size() > 1) {
-                const wchar_t last = _typeaheadBuffer.back();
-                _typeaheadBuffer.clear();
-                _typeaheadBuffer.push_back(last);
-                const int retryStart = (_selectedIndex < 0) ? 0
-                    : (_selectedIndex + 1) % n;
-                int retry = findTypeaheadMatch(retryStart);
-                if (retry < 0) {
-                    retry = findTypeaheadMatch(0);
-                }
-                if (retry >= 0) {
-                    _silentPopupSync = true;
-                    setSelectedIndex(retry);
-                    if (_popup != nullptr) {
-                        _popup->setSelectedIndex(retry);
-                        _popup->scrollToIndex(retry);
-                    }
-                    _silentPopupSync = false;
-                    if (!isPopupOpen()) {
-                        openPopup();
-                    }
-                    return true;
-                }
-            }
+            match = _typeaheadBuffer.recoverFromLetterSwitch(startFrom, n, getter);
+        }
+        if (match < 0) {
             _typeaheadBuffer.clear();
             return false;
         }
@@ -512,58 +488,11 @@ bool ComboBox::onKeyDown(int keyCode) {
     }
 }
 
-int ComboBox::findTypeaheadMatch(int startFrom) const {
-    if (_typeaheadBuffer.empty()) return -1;
-    const int n = static_cast<int>(_items.size());
-    if (n == 0) return -1;
-    // Walk from startFrom wrapping around until we revisit startFrom
-    // (which means we've covered everything). Linear scan; with
-    // realistic item counts (< 10k) this is cheaper than building a
-    // trie on every setItems.
-    int i = startFrom;
-    for (int checked = 0; checked < n; ++checked) {
-        const std::wstring& item = _items[static_cast<size_t>(i)];
-        if (item.size() >= _typeaheadBuffer.size()) {
-            bool match = true;
-            for (size_t k = 0; k < _typeaheadBuffer.size(); ++k) {
-                // Case-insensitive ASCII compare. CJK items whose
-                // first character matches exactly are accepted by the
-                // default else branch — `std::towlower` may not fold
-                // CJK, but towlower(item[0]) == towlower(buffer[0])
-                // holds for plain ASCII either way.
-                wchar_t a = item[k];
-                wchar_t b = _typeaheadBuffer[k];
-                if (a >= L'A' && a <= L'Z') a = static_cast<wchar_t>(a + (L'a' - L'A'));
-                if (a != b) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) return i;
-        }
-        i = (i + 1) % n;
-    }
-    return -1;
-}
-
 void ComboBox::tick(float dt) {
-    // PR-C2 — typeahead timer. CompoundFocusableWidget::tick cascades
-    // into children first, then we'd want to advance our own state.
-    // The dt comes from UIManager::update → _root->tick which recurses
-    // via CompoundWidget::tick (see AYWidget.cpp:37).
-    //
-    // _typeaheadTimer counts UP from the last letter; when it crosses
-    // kTypeaheadTimeout the buffer clears so the next letter starts a
-    // fresh prefix. We don't clear on every tick — only on threshold
-    // cross — to avoid mid-keystroke churn if the host pumps uneven
-    // dt values.
-    if (!_typeaheadBuffer.empty()) {
-        _typeaheadTimer += dt;
-        if (_typeaheadTimer > kTypeaheadTimeout) {
-            _typeaheadBuffer.clear();
-            _typeaheadTimer = 0.0f;
-        }
-    }
+    // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
+    // Driven by UIManager::update → _root->tick which recurses via
+    // CompoundWidget::tick (see AYWidget.cpp:37).
+    _typeaheadBuffer.tick(dt);
 }
 
 void ComboBox::performLayout() {

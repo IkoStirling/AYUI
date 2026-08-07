@@ -36,6 +36,7 @@ set(SRC_FILES
     Controls/AYListView.cpp
     Controls/AYComboBox.cpp
     Controls/AYTabControl.cpp
+    Controls/AYTypeaheadBuffer.cpp
     Controls/AYCompoundFocusableWidget.cpp
     Controls/AYPanel.cpp
     Controls/AYTextLabel.cpp
@@ -92,6 +93,7 @@ set(HEAD_FILES
     Controls/AYListView.h
     Controls/AYComboBox.h
     Controls/AYTabControl.h
+    Controls/AYTypeaheadBuffer.h
     Controls/AYCompoundFocusableWidget.h
     Controls/AYSelectableWidget.h
     Controls/AYTooltip.h

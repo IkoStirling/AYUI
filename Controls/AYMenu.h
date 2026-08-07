@@ -50,6 +50,7 @@
 #include "AYCompoundFocusableWidget.h"
 #include "AYWidget.h"
 #include "AYMenuItem.h"
+#include "AYTypeaheadBuffer.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -61,11 +62,6 @@ public:
     static constexpr float kDefaultWidth = 220.0f;
     static constexpr float kDefaultHeight = 32.0f;        // per-item height
     static constexpr float kDefaultPad = 4.0f;
-
-    // PR-C3 — typeahead timeout. After this many seconds without a new
-    // letter, the buffer is cleared so the next letter starts a fresh
-    // prefix match. Matches the ComboBox::kTypeaheadTimeout.
-    static constexpr float kTypeaheadTimeout = 0.5f;
 
     Menu();
     ~Menu() override;
@@ -157,11 +153,6 @@ private:
     // Enter path doesn't need to call MenuItem's protected handleClick.
     void activateItem(int index);
 
-    // PR-C3 — find next MenuItem whose first N chars (case-insensitive)
-    // match _typeaheadBuffer, starting at `startFrom` and wrapping.
-    // Returns -1 if nothing matches. Skips separators (null items).
-    int  findTypeaheadMatch(int startFrom) const;
-
     // PR-C3 — set _hoveredIndex and fire _onHoverChanged if it changed.
     // Single source of truth for every path that moves the highlight
     // (Up/Down, typeahead letter, mouse hover).
@@ -188,13 +179,11 @@ private:
     // host CompoundWidget still destroys us.
     Widget* _ownerHost = nullptr;
 
-    // PR-C3 — typeahead state. See ComboBox for the contract; the same
-    // pattern applies here. The key difference from ComboBox: Menu does
-    // NOT auto-open (it must already be open for keys to reach it) and
-    // does NOT close on match — the user still presses Enter to commit
-    // the highlighted row. Matches Windows native menu behavior.
-    std::wstring _typeaheadBuffer;
-    float        _typeaheadTimer = 0.0f;
+    // PR-TypeaheadBuffer: typeahead state now encapsulated in the shared
+// struct (same as ComboBox). Menu retains the single-letter wrap
+// (Windows listbox convention) as caller logic since ComboBox does
+// not use it.
+    TypeaheadBuffer _typeaheadBuffer;
 
     std::function<void(int)> _onItemActivated;
     std::function<void()>    _onClose;
