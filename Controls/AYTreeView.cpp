@@ -2,6 +2,7 @@
 #include "IAYRenderBackend.h"
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 namespace ayt::ui {
 
@@ -153,16 +154,21 @@ void TreeView::toggleExpand(int flatIndex) {
 }
 
 void TreeView::setScrollOffset(const math::FVector2& offset) {
+    // PR-Container-Shared-Contract: clamp through the shared pure
+    // function. TreeView tracks _contentSize in its own field (set
+    // during rebuildNodes), not inside _scrollState — same pattern as
+    // Window. scrollBy() would clamp against _scrollState._contentSize
+    // which is always (0,0) here; clampScrollOffset takes the content
+    // size as a parameter, so it works regardless of which container
+    // owns the field.
     const math::FVector2 vp(getWidth(), getHeight());
-    const float maxX = (_contentSize.x > vp.x) ? (_contentSize.x - vp.x) : 0.0f;
-    const float maxY = (_contentSize.y > vp.y) ? (_contentSize.y - vp.y) : 0.0f;
-    math::FVector2 clamped(offset);
-    if (clamped.x < 0.0f) clamped.x = 0.0f;
-    if (clamped.x > maxX) clamped.x = maxX;
-    if (clamped.y < 0.0f) clamped.y = 0.0f;
-    if (clamped.y > maxY) clamped.y = maxY;
-    _scrollState.setScrollOffset(clamped);
-    syncBarToOffset();
+    const math::FVector2 clamped =
+        ScrollableWidget::clampScrollOffset(offset, vp, _contentSize);
+    if (std::fabs(clamped.x - _scrollState.getScrollOffset().x) > 1e-5f ||
+        std::fabs(clamped.y - _scrollState.getScrollOffset().y) > 1e-5f) {
+        _scrollState.setScrollOffset(clamped);
+        syncBarToOffset();
+    }
 }
 
 void TreeView::ensureBarCreated() {
@@ -170,10 +176,7 @@ void TreeView::ensureBarCreated() {
     _vbar = new ScrollBar();
     _vbar->setOrientation(ScrollBar::Orientation::Vertical);
     _vbar->setOnValueChanged([this](float v) {
-        const float maxOff = (_contentSize.y - getHeight());
-        if (maxOff <= 0.0f) return;
-        _scrollState.setScrollOffset(math::FVector2(
-            _scrollState.getScrollOffset().x, v));
+        setScrollOffset(math::FVector2(_scrollState.getScrollOffset().x, v));
     });
     addChild(_vbar);
 }
@@ -195,6 +198,15 @@ void TreeView::performLayout() {
     layoutChildren();
 }
 
+math::FRectangle TreeView::getClientRect() const {
+    // PR-Container-Shared-Contract: world bounds minus vbar width. Matches
+    // the listBounds used in onRender() above and in hitTestSlot on
+    // DockArea. Single source of truth for the visible (clipped) area.
+    const math::FRectangle b = getWorldBounds();
+    const float barW = (_vbar != nullptr) ? ScrollBar::kDefaultBarWidth : 0.0f;
+    return math::FRectangle(b.minX, b.minY, b.maxX - barW, b.maxY);
+}
+
 void TreeView::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
@@ -204,12 +216,19 @@ void TreeView::onRender(IRenderBackend& renderer) {
     renderer.drawBorderRect(bounds,
         math::FVector4(0.45f, 0.45f, 0.5f, 1.0f), 1.0f);
 
-    // Nodes (scroll-clipped implicitly by draw order + parent world bounds).
+    // PR-Container-Shared-Contract: same pushClip/popClip pattern as
+    // ListView.cpp:582-588. The previous "implicit clip via draw order
+    // + parent world bounds" comment was wrong — fractional scroll
+    // offset leaves partial nodes outside the viewport that painted
+    // over chrome. Clip via getClientRect() so only visible nodes draw.
+    const math::FRectangle listBounds = getClientRect();
+    renderer.pushClip(listBounds);
     for (TreeNode* n : _nodes) {
         if (n != nullptr && n->isVisible()) {
             n->render(renderer);
         }
     }
+    renderer.popClip();
     if (_vbar != nullptr) _vbar->render(renderer);
 }
 

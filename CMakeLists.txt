@@ -25,6 +25,7 @@ set(SRC_FILES
     Controls/AYInteractiveWidget.cpp
     Controls/AYSelectableWidget.cpp
     Controls/AYTooltip.cpp
+    Controls/AYPopupAnchor.cpp
     Controls/AYSeparator.cpp
     Controls/AYMenuItem.cpp
     Controls/AYMenu.cpp
@@ -94,6 +95,7 @@ set(HEAD_FILES
     Controls/AYCompoundFocusableWidget.h
     Controls/AYSelectableWidget.h
     Controls/AYTooltip.h
+    Controls/AYPopupAnchor.h
     Controls/AYSeparator.h
     Controls/AYMenuItem.h
     Controls/AYMenu.h

@@ -50,6 +50,35 @@ float layoutSlotWeight(const DockArea& area, DockArea::Slot slot) {
     return effectiveWeight(area, slot);
 }
 
+// PR-Container-Shared-Contract: shared 6-value arithmetic used by
+// performLayout() and hitTestSlot(). Weights order: Top, Bottom, Left,
+// Right, Center. Call sites still choose their own weight source
+// (layoutSlotWeight vs effectiveWeight — the difference is
+// intentional, see comment at hitTestSlot line 501-502 above).
+struct SlotRegions {
+    float topH, botH;
+    float midY, midH;
+    float leftW, rightW, centerW;
+};
+SlotRegions computeSlotRegions(float w, float h, const float weights[5]) {
+    SlotRegions r;
+    const float wtTop = weights[0];
+    const float wtBot = weights[1];
+    const float wtLeft = weights[2];
+    const float wtRight = weights[3];
+    const float wtCenter = weights[4];
+    const float sumVert = wtTop + wtBot + 1.0f;  // middle row takes the rest
+    r.topH = h * (wtTop / sumVert);
+    r.botH = h * (wtBot / sumVert);
+    r.midY = r.topH;
+    r.midH = h - r.topH - r.botH;
+    const float sumHoriz = wtLeft + wtCenter + wtRight;
+    r.leftW   = (sumHoriz > 0.0f) ? w * (wtLeft   / sumHoriz) : 0.0f;
+    r.rightW  = (sumHoriz > 0.0f) ? w * (wtRight  / sumHoriz) : 0.0f;
+    r.centerW = w - r.leftW - r.rightW;
+    return r;
+}
+
 void fillContainerChildren(Widget* container, float width, float height) {
     if (container == nullptr || width <= 0.0f || height <= 0.0f) {
         return;
@@ -256,17 +285,25 @@ void DockArea::performLayout() {
     const float w = sz.x;
     const float h = sz.y;
 
-    const float wtTop    = layoutSlotWeight(*this, Slot::Top);
-    const float wtBottom = layoutSlotWeight(*this, Slot::Bottom);
-    const float wtLeft   = layoutSlotWeight(*this, Slot::Left);
-    const float wtRight  = layoutSlotWeight(*this, Slot::Right);
-    const float wtCenter = layoutSlotWeight(*this, Slot::Center);
-
-    const float sumVert = wtTop + wtBottom + 1.0f; // middle row takes the rest
-    const float topH    = h * (wtTop    / sumVert);
-    const float botH    = h * (wtBottom / sumVert);
-    const float midY    = topH;
-    const float midH    = h - topH - botH;
+    // PR-Container-Shared-Contract: use computeSlotRegions for the 6-value
+    // arithmetic shared with hitTestSlot. Each call site still chooses
+    // its own weight source (layoutSlotWeight here, effectiveWeight in
+    // hitTestSlot) — only the arithmetic is shared.
+    const float layoutWeights[5] = {
+        layoutSlotWeight(*this, Slot::Top),
+        layoutSlotWeight(*this, Slot::Bottom),
+        layoutSlotWeight(*this, Slot::Left),
+        layoutSlotWeight(*this, Slot::Right),
+        layoutSlotWeight(*this, Slot::Center),
+    };
+    const SlotRegions r = computeSlotRegions(w, h, layoutWeights);
+    const float topH    = r.topH;
+    const float botH    = r.botH;
+    const float midY    = r.midY;
+    const float midH    = r.midH;
+    const float leftW   = r.leftW;
+    const float rightW  = r.rightW;
+    const float centerW = r.centerW;
 
     if (Widget* top = _slotContainers[(int)Slot::Top]) {
         top->setPosition(math::FVector2(0.0f, 0.0f));
@@ -276,11 +313,6 @@ void DockArea::performLayout() {
         bot->setPosition(math::FVector2(0.0f, midY + midH));
         bot->setSize(math::FVector2(w, botH));
     }
-
-    const float sumHoriz = wtLeft + wtCenter + wtRight;
-    const float leftW  = (sumHoriz > 0.0f) ? w * (wtLeft   / sumHoriz) : 0.0f;
-    const float rightW = (sumHoriz > 0.0f) ? w * (wtRight  / sumHoriz) : 0.0f;
-    const float centerW = w - leftW - rightW;
 
     if (Widget* left = _slotContainers[(int)Slot::Left]) {
         left->setPosition(math::FVector2(0.0f, midY));
@@ -500,22 +532,21 @@ DockArea::Slot DockArea::hitTestSlot(const math::FVector2& worldPos) const {
 
     // Drop targeting uses configured weights so empty slots remain
     // valid dock targets even when performLayout collapses them.
-    const float wtTop    = effectiveWeight(*this, Slot::Top);
-    const float wtBottom = effectiveWeight(*this, Slot::Bottom);
-    const float wtLeft   = effectiveWeight(*this, Slot::Left);
-    const float wtRight  = effectiveWeight(*this, Slot::Right);
-    const float wtCenter = effectiveWeight(*this, Slot::Center);
-
-    const float sumVert = wtTop + wtBottom + 1.0f;
-    const float topH    = h * (wtTop    / sumVert);
-    const float botH    = h * (wtBottom / sumVert);
-    const float midY    = topH;
-    const float midH    = h - topH - botH;
-
-    const float sumHoriz = wtLeft + wtCenter + wtRight;
-    const float leftW  = (sumHoriz > 0.0f) ? w * (wtLeft   / sumHoriz) : 0.0f;
-    const float rightW = (sumHoriz > 0.0f) ? w * (wtRight  / sumHoriz) : 0.0f;
-    const float centerW = w - leftW - rightW;
+    // PR-Container-Shared-Contract: same computeSlotRegions helper as
+    // performLayout. Only the weight source differs (effectiveWeight
+    // here vs layoutSlotWeight there) — the arithmetic is now shared.
+    const float hitTestWeights[5] = {
+        effectiveWeight(*this, Slot::Top),
+        effectiveWeight(*this, Slot::Bottom),
+        effectiveWeight(*this, Slot::Left),
+        effectiveWeight(*this, Slot::Right),
+        effectiveWeight(*this, Slot::Center),
+    };
+    const SlotRegions r = computeSlotRegions(w, h, hitTestWeights);
+    const float midY    = r.midY;
+    const float midH    = r.midH;
+    const float leftW   = r.leftW;
+    const float centerW = r.centerW;
 
     // Test Top / Bottom first (full-width strips).
     if (worldPos.y < midY) {

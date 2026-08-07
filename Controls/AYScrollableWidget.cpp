@@ -1,5 +1,7 @@
 #include "AYScrollableWidget.h"
 
+#include <algorithm>
+
 namespace ayt::ui {
 
 void ScrollableWidget::setScrollOffset(const math::FVector2& offset) {
@@ -31,6 +33,20 @@ bool ScrollableWidget::scrollBy(const math::FVector2& delta, const math::FVector
     _scrollOffset = newOff;
     onScrollChanged();
     return true;
+}
+
+// PR-Container-Shared-Contract: pure-function clamp. Window body has its
+// own _scrollY field and only needs the math, not the state mutation.
+math::FVector2 ScrollableWidget::clampScrollOffset(const math::FVector2& target,
+                                                   const math::FVector2& viewportSize,
+                                                   const math::FVector2& contentSize) {
+    const float maxX = (contentSize.x > viewportSize.x)
+        ? (contentSize.x - viewportSize.x) : 0.0f;
+    const float maxY = (contentSize.y > viewportSize.y)
+        ? (contentSize.y - viewportSize.y) : 0.0f;
+    return math::FVector2(
+        std::clamp(target.x, 0.0f, maxX),
+        std::clamp(target.y, 0.0f, maxY));
 }
 
 } // namespace ayt::ui

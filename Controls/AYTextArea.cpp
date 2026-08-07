@@ -341,6 +341,15 @@ public:
         const math::FVector2 origin = getWorldBounds().getMin();
         const float fontSize = lh - 4.0f;     // rough visual mapping
 
+        // PR-Container-Shared-Contract: pushClip(pushClip(getClientRect()))).
+        // TextDocument has no chrome of its own so getClientRect() ==
+        // getWorldBounds(), but the wrapper guarantees partial-line / caret
+        // / IME underline at the document edge cannot paint outside the
+        // document rect (latent bug when long lines or scrolled content
+        // bleeds into neighbouring widgets).
+        const math::FRectangle docBounds = getClientRect();
+        renderer.pushClip(docBounds);
+
         // Selection highlight (single rectangular block for v1).
         if (_owner->hasSelection()) {
             // Compute selection rect. v1 simplification: only highlight
@@ -412,6 +421,9 @@ public:
             renderer.drawRect(math::FRectangle(ulX, ulY, ulX + ulW, ulY + ulH),
                               ulColor);
         }
+
+        // PR-Container-Shared-Contract: matches pushClip(docBounds) above.
+        renderer.popClip();
     }
 
 private:

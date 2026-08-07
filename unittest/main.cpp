@@ -70,6 +70,8 @@
 #include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
 #include "Test_Theme_Gallery.cpp"       // PR-B2 measurePrefixWidth + Theme swap
 #include "Test_WheelRouting.cpp"        // PR-B3 nested wheel routing
+#include "Test_ContainerContract.cpp"   // PR-Container-Shared-Contract (clip+offset+hitTest unified)
+#include "Test_ScrollView.cpp"          // PR-Container-Shared-Contract (ScrollView bar clamp through shared helper)
 
 void runTest()
 {

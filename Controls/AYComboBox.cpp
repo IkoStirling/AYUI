@@ -1,6 +1,7 @@
 #include "AYComboBox.h"
 #include "AYScrollBar.h"
 #include "IAYRenderBackend.h"
+#include "AYPopupAnchor.h"
 #include "AYStyle.h"
 #include "AYUIManager.h"
 #include "UIKeyCode.h"
@@ -260,24 +261,17 @@ void ComboBox::openPopup() {
     _popup->setSize(math::FVector2(getWidth(), popupH));
 
     const float popupW = _popup->getSize().x;
-    math::FVector2 pos(anchor.minX, anchor.maxY + kPopupGap);
 
     // Flip upward if it would overflow the viewport bottom.
-    if (client.y > 0.0f && pos.y + popupH > client.y
-        && anchor.minY - popupH - kPopupGap >= 0.0f) {
-        pos.y = anchor.minY - popupH - kPopupGap;
-    }
-
-    // Clamp x within viewport. If popup is wider than viewport, pin to 0.
-    if (client.x > 0.0f) {
-        if (popupW > client.x) {
-            pos.x = 0.0f;
-        } else if (pos.x + popupW > client.x) {
-            pos.x = client.x - popupW;
-        } else if (pos.x < 0.0f) {
-            pos.x = 0.0f;
-        }
-    }
+    // PR-Container-Shared-Contract: route through popupAnchorPlacement so
+    // the flip+clamp math is shared with Tooltip (which had the missing
+    // x-clamp bug). helper is at Controls/AYPopupAnchor.cpp.
+    const math::FVector2 popupSize(popupW, popupH);
+    const math::FVector2 belowPos(anchor.minX, anchor.maxY + kPopupGap);
+    const math::FVector2 abovePos(anchor.minX,
+                                  anchor.minY - popupH - kPopupGap);
+    const math::FVector2 pos = popupAnchorPlacement(
+        belowPos, abovePos, popupSize, client);
 
     _popup->setPosition(pos);
     _popup->markBoundsDirty();

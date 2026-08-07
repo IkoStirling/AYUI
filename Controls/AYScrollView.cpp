@@ -62,14 +62,17 @@ void ScrollView::ensureBarsCreated() {
         _vbar = new ScrollBar();
         _vbar->setOrientation(ScrollBar::Orientation::Vertical);
         _vbar->setOnValueChanged([this](float v) {
-            const float maxOff = (_scrollState.getContentSize().y -
-                                  getViewportSize().y);
-            if (maxOff <= 0.0f) return;
-            const float clamped = std::clamp(v, 0.0f, maxOff);
-            _scrollState.setScrollOffset(math::FVector2(
-                _scrollState.getScrollOffset().x, clamped));
-            syncContentPosition();
-            if (_onScroll) _onScroll(_scrollState.getScrollOffset());
+            // PR-Container-Shared-Contract: route through ScrollableWidget::scrollBy
+            // for the canonical clamp. Preserves ScrollView's behaviour: syncContent
+            // position + fire _onScroll whenever the offset actually moved.
+            const math::FVector2 vp = getViewportSize();
+            const math::FVector2 delta(
+                0.0f,
+                v - _scrollState.getScrollOffset().y);
+            if (_scrollState.scrollBy(delta, vp)) {
+                syncContentPosition();
+                if (_onScroll) _onScroll(_scrollState.getScrollOffset());
+            }
         });
         addChildExternal(_vbar);
     }
@@ -77,14 +80,14 @@ void ScrollView::ensureBarsCreated() {
         _hbar = new ScrollBar();
         _hbar->setOrientation(ScrollBar::Orientation::Horizontal);
         _hbar->setOnValueChanged([this](float v) {
-            const float maxOff = (_scrollState.getContentSize().x -
-                                  getViewportSize().x);
-            if (maxOff <= 0.0f) return;
-            const float clamped = std::clamp(v, 0.0f, maxOff);
-            _scrollState.setScrollOffset(math::FVector2(
-                clamped, _scrollState.getScrollOffset().y));
-            syncContentPosition();
-            if (_onScroll) _onScroll(_scrollState.getScrollOffset());
+            const math::FVector2 vp = getViewportSize();
+            const math::FVector2 delta(
+                v - _scrollState.getScrollOffset().x,
+                0.0f);
+            if (_scrollState.scrollBy(delta, vp)) {
+                syncContentPosition();
+                if (_onScroll) _onScroll(_scrollState.getScrollOffset());
+            }
         });
         addChildExternal(_hbar);
     }

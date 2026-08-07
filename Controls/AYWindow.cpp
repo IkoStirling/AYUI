@@ -1,4 +1,5 @@
 #include "AYWindow.h"
+#include "AYScrollableWidget.h"
 #include "IAYRenderBackend.h"
 #include "aymath/MathUtils.h"
 
@@ -485,12 +486,17 @@ void Window::ensureBodyScrollBar() {
     _bodyVBar = new ScrollBar();
     _bodyVBar->setOrientation(ScrollBar::Orientation::Vertical);
     _bodyVBar->setOnValueChanged([this](float v) {
-        const float maxScroll = std::max(0.0f, _contentExtentY - _bodyViewportH);
-        const float clamped = std::clamp(v, 0.0f, maxScroll);
-        if (std::fabs(clamped - _scrollY) < 0.01f) {
+        // PR-Container-Shared-Contract: Window manages its own _scrollY,
+        // so we use the pure-function clampScrollOffset rather than the
+        // mutating scrollBy. The 0.01f visual threshold is preserved.
+        const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+            math::FVector2(0.0f, v),
+            math::FVector2(0.0f, _bodyViewportH),
+            math::FVector2(0.0f, _contentExtentY));
+        if (std::fabs(clamped.y - _scrollY) < 0.01f) {
             return;
         }
-        _scrollY = clamped;
+        _scrollY = clamped.y;
         const float paddingLeft = 8.0f;
         const float paddingTop = 8.0f;
         const float spacing = 6.0f;
@@ -531,15 +537,17 @@ bool Window::scrollBodyBy(float dy) {
     if (!_bodyScrollEnabled) {
         return false;
     }
-    const float maxOff = std::max(0.0f, _contentExtentY - _bodyViewportH);
-    if (maxOff <= 0.0f) {
+    const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+        math::FVector2(0.0f, _scrollY + dy),
+        math::FVector2(0.0f, _bodyViewportH),
+        math::FVector2(0.0f, _contentExtentY));
+    if (clamped.y <= 0.0f && _contentExtentY <= _bodyViewportH) {
         return false;
     }
-    const float next = std::clamp(_scrollY + dy, 0.0f, maxOff);
-    if (std::fabs(next - _scrollY) < 0.01f) {
+    if (std::fabs(clamped.y - _scrollY) < 0.01f) {
         return false;
     }
-    _scrollY = next;
+    _scrollY = clamped.y;
     if (_bodyVBar != nullptr) {
         _bodyVBar->setValue(_scrollY);
     }

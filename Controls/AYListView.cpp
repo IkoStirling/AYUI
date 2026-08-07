@@ -395,23 +395,23 @@ const std::wstring& ListView::getSelectedItem() const {
 }
 
 void ListView::setScrollOffset(const math::FVector2& offset) {
+    // PR-Container-Shared-Contract: route through ScrollableWidget::scrollBy
+    // for the canonical clamp + mutation. G2 invariant (line 405-407 above)
+    // still holds: ScrollableWidget::onScrollChanged is empty for ListView
+    // (has-a, not is-a), so rebindPoolRows() must be called explicitly.
+    // Preserve ListView's own 0.01f visual threshold (ScrollableWidget's
+    // internal epsilon is 1e-5f and would fire _onScroll too eagerly).
     const math::FVector2 vp = getViewportSize();
-    const math::FVector2 maxOff = _scrollState.getMaxScrollOffset(vp);
-    math::FVector2 clamped(offset);
-    if (clamped.x < 0.0f) clamped.x = 0.0f;
-    if (clamped.x > maxOff.x) clamped.x = maxOff.x;
-    if (clamped.y < 0.0f) clamped.y = 0.0f;
-    if (clamped.y > maxOff.y) clamped.y = maxOff.y;
-    // G2 — _scrollState is has-a, not base, so no virtual hook fires
-    // here. ListView owns the chokepoint: every site that mutates the
-    // scrollOffset must call rebindPoolRows() to refresh the pool.
     const math::FVector2 prev = _scrollState.getScrollOffset();
-    _scrollState.setScrollOffset(clamped);
-    syncBarToOffset();
-    rebindPoolRows();
-    if (_onScroll && (std::fabs(clamped.x - prev.x) > 0.01f
-                      || std::fabs(clamped.y - prev.y) > 0.01f)) {
-        _onScroll(clamped);
+    const math::FVector2 delta = offset - prev;
+    if (_scrollState.scrollBy(delta, vp)) {
+        syncBarToOffset();
+        rebindPoolRows();
+        const math::FVector2 next = _scrollState.getScrollOffset();
+        if (_onScroll && (std::fabs(next.x - prev.x) > 0.01f
+                          || std::fabs(next.y - prev.y) > 0.01f)) {
+            _onScroll(next);
+        }
     }
 }
 

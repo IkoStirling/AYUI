@@ -90,6 +90,11 @@ public:
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
 
+    // PR-Container-Shared-Contract: client rect = world bounds minus
+    // vbar width. Used by hit-test gating if/when TreeView overrides
+    // hitTest; for now it documents the visible area consistently.
+    math::FRectangle getClientRect() const override;
+
     // Forward clicks to the node under the cursor.
     bool onMouseButtonUp(const UIMouseEvent& e) override;
 

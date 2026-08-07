@@ -59,6 +59,32 @@ Widget* compoundDescendHitTest(Widget* self, const math::FVector2& worldPos) {
     return nullptr;
 }
 
+// PR-Container-Shared-Contract: same shape as compoundDescendHitTest but
+// gates descent by clientRect first. Use this from containers with chrome
+// (scrollbars, title bar) that wants hits OUTSIDE the client area to fall
+// through to `self` (so chrome still catches them) but to NOT descend into
+// children outside the client area (so stale off-screen slots don't claim
+// clicks).
+Widget* compoundDescendHitTestClipped(Widget* self,
+                                      const math::FRectangle& clientRect,
+                                      const math::FVector2& worldPos) {
+    if (self == nullptr) return nullptr;
+    if (!self->isVisible()) return nullptr;
+    // Outside client area — only return self if the point still lies in
+    // world bounds (chrome / background). Children outside the client
+    // area are unreachable through this gate.
+    if (!clientRect.contains(worldPos)) {
+        return self->getWorldBounds().contains(worldPos) ? self : nullptr;
+    }
+    // Inside client area — reverse-order descent into children.
+    for (auto it = self->getChildren().rbegin(); it != self->getChildren().rend(); ++it) {
+        if (Widget* hit = (*it)->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    return self;
+}
+
 void compoundDescendLeave(Widget* self) {
     if (self == nullptr) return;
     for (Widget* child : self->getChildren()) {

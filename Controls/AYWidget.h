@@ -167,6 +167,30 @@ public:
     const math::FRectangle& getBounds() const { return _bounds; }
     math::FRectangle getWorldBounds() const;
 
+    // ====================================================================
+    // Container contract for clip + offset + hitTest.
+    // All container widgets (CompoundWidget, ScrollView, ListView, Window,
+    // HBox, TextArea, TreeView) MUST honour this 3-piece contract in
+    // lockstep:
+    //   1) renderChildren: pushClip(this->getClientRect()) before painting
+    //      any child that has scroll offset applied or that may overflow
+    //      the visible area; popClip() after.
+    //   2) hitTest: gate child descent with this->getClientRect() so a
+    //      scrolled-off child cannot be clicked at its stale on-screen
+    //      slot. The CompoundWidget default does NOT do this — a derived
+    //      container with chrome (scrollbars / title bar) MUST override
+    //      and gate with the helper compoundDescendHitTestClipped.
+    //   3) scrolling: route every scrollOffset mutation through
+    //      ScrollableWidget::scrollBy() (the canonical clamp) or the
+    //      pure-function clampScrollOffset() (Window body). Do not
+    //      hand-roll std::clamp at the call site.
+    //
+    // Default getClientRect() returns getWorldBounds(). Override only when
+    // the container has chrome that eats into the world bounds
+    // (scrollbars, title bar, etc.).
+    // ====================================================================
+    virtual math::FRectangle getClientRect() const { return getWorldBounds(); }
+
     // Hit test - overridden by subclasses
     virtual Widget* hitTest(const math::FVector2& worldPos);
 
@@ -414,6 +438,15 @@ void compoundDescendLayout(Widget* self);
 void compoundDescendTick(Widget* self, float dt);
 Widget* compoundDescendHitTest(Widget* self, const math::FVector2& worldPos);
 void compoundDescendLeave(Widget* self);
+
+// PR-Container-Shared-Contract: sibling of compoundDescendHitTest that
+// gates descent by clientRect first. Use this from any container that
+// has chrome eating into getWorldBounds() (scrollbars, title bar). The
+// default compoundDescendHitTest is unchanged; it still serves
+// CompoundWidget / CompoundFocusableWidget which have no chrome.
+Widget* compoundDescendHitTestClipped(Widget* self,
+                                      const math::FRectangle& clientRect,
+                                      const math::FVector2& worldPos);
 
 // =============================================================================
 // Single-owner destruction helper (Phase UI-OWN-1).

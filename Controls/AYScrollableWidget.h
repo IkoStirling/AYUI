@@ -50,6 +50,14 @@ public:
     // Returns true if the offset changed after clamping.
     bool scrollBy(const math::FVector2& delta, const math::FVector2& viewportSize);
 
+    // PR-Container-Shared-Contract: pure-function clamp so callers that
+    // manage their own scroll state (Window body) can clamp without
+    // touching the ScrollableWidget state machine. Mutating callers
+    // should prefer scrollBy() above.
+    static math::FVector2 clampScrollOffset(const math::FVector2& target,
+                                             const math::FVector2& viewportSize,
+                                             const math::FVector2& contentSize);
+
 protected:
     // Subclass overrides; ScrollableWidget's default impl fires the
     // callback if attached.
