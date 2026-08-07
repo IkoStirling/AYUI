@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <typeinfo>
 #include <vector>
 
 namespace ayt::ui {
@@ -50,6 +51,21 @@ bool splitterDebugEnabled()
     static int cached = -1;
     if (cached < 0) {
         const char* env = std::getenv("AY_UI_SPLITTER_DEBUG");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
+
+// AYUI_TRACE_INPUT — opt-in stderr trace for input-related root type and
+// pickTopmostWidget routing. Used to verify Gallery S1/S2 (2026-08-07):
+// is _root actually CompoundWidget (so pickTopmostWidget descends), or
+// is it plain Widget (so hitTest only matches self, blocking bar drags)?
+// Run: set AYUI_TRACE_INPUT=1 in env before launching AYUI_Gallery.
+bool ayuiTraceInputEnabled()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* env = std::getenv("AYUI_TRACE_INPUT");
         cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
     }
     return cached != 0;
@@ -341,6 +357,27 @@ void UIManager::initialize(IRenderBackend* backend) {
     // Route UIManager::get() (used by ComboBox/Menu/Tooltip popup mounts)
     // to this instance for the lifetime of initialize()..shutdown().
     g_activeUIManager = this;
+
+    // PR-InputTrace: pure-additive stderr trace guarded by AYUI_TRACE_INPUT.
+    // Gallery S1/S2 (2026-08-07) root-cause verification: is _root actually
+    // a CompoundWidget (so pickTopmostWidget descends into VBox children)
+    // or a plain Widget (so hitTest only matches self, blocking ScrollBar
+    // drag/click routing from UIManager::onMouseButtonDown)? Also surface
+    // overlay root type and client size for cross-check.
+    if (ayuiTraceInputEnabled()) {
+        const bool rootCompound =
+            (dynamic_cast<CompoundWidget*>(_root) != nullptr);
+        const bool overlayCompound =
+            (dynamic_cast<CompoundWidget*>(_overlayRoot) != nullptr);
+        std::fprintf(stderr,
+            "[AYUI-InputTrace] UIManager::initialize: _root type=%s isCompound=%d"
+            " _overlayRoot type=%s isCompound=%d"
+            " clientSize=(%.1f, %.1f)\n",
+            typeid(*_root).name(), rootCompound ? 1 : 0,
+            typeid(*_overlayRoot).name(), overlayCompound ? 1 : 0,
+            static_cast<double>(_clientWidth),
+            static_cast<double>(_clientHeight));
+    }
 }
 
 // PR-C1 — Tooltip driver hooks (passive hover-timer).
