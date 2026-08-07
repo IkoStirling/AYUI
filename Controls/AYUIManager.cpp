@@ -71,6 +71,29 @@ bool ayuiTraceInputEnabled()
     return cached != 0;
 }
 
+// PR-InputTrace: emit root/overlay type info at any point — used both
+// after UIManager::initialize (default canvas) and after loadLayout /
+// loadFromString (where Gallery replaces _root with the loaded tree).
+void traceRootType(const char* tag, Widget* root, Widget* overlay)
+{
+    if (!ayuiTraceInputEnabled()) {
+        return;
+    }
+    const bool rootCompound =
+        (dynamic_cast<CompoundWidget*>(root) != nullptr);
+    const bool overlayCompound =
+        (dynamic_cast<CompoundWidget*>(overlay) != nullptr);
+    std::fprintf(stderr,
+        "[AYUI-InputTrace] %s: _root type=%s isCompound=%d"
+        " _overlayRoot type=%s isCompound=%d"
+        " rootSize=(%.1f, %.1f)\n",
+        tag,
+        typeid(*root).name(), rootCompound ? 1 : 0,
+        typeid(*overlay).name(), overlayCompound ? 1 : 0,
+        static_cast<double>(root ? root->getWidth() : 0.0f),
+        static_cast<double>(root ? root->getHeight() : 0.0f));
+}
+
 const char* widgetLabel(const Widget* w)
 {
     if (w == nullptr) {
@@ -364,20 +387,7 @@ void UIManager::initialize(IRenderBackend* backend) {
     // or a plain Widget (so hitTest only matches self, blocking ScrollBar
     // drag/click routing from UIManager::onMouseButtonDown)? Also surface
     // overlay root type and client size for cross-check.
-    if (ayuiTraceInputEnabled()) {
-        const bool rootCompound =
-            (dynamic_cast<CompoundWidget*>(_root) != nullptr);
-        const bool overlayCompound =
-            (dynamic_cast<CompoundWidget*>(_overlayRoot) != nullptr);
-        std::fprintf(stderr,
-            "[AYUI-InputTrace] UIManager::initialize: _root type=%s isCompound=%d"
-            " _overlayRoot type=%s isCompound=%d"
-            " clientSize=(%.1f, %.1f)\n",
-            typeid(*_root).name(), rootCompound ? 1 : 0,
-            typeid(*_overlayRoot).name(), overlayCompound ? 1 : 0,
-            static_cast<double>(_clientWidth),
-            static_cast<double>(_clientHeight));
-    }
+    traceRootType("UIManager::initialize", _root, _overlayRoot);
 }
 
 // PR-C1 — Tooltip driver hooks (passive hover-timer).
@@ -630,6 +640,7 @@ bool UIManager::loadLayout(const std::string& path) {
             layout();
         }
     }
+    traceRootType("UIManager::loadLayout", _root, _overlayRoot);
     return _root != nullptr;
 }
 
@@ -664,6 +675,7 @@ bool UIManager::loadFromString(const std::string& json) {
             layout();
         }
     }
+    traceRootType("UIManager::loadFromString", _root, _overlayRoot);
     return _root != nullptr;
 }
 
