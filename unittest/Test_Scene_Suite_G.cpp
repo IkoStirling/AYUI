@@ -150,15 +150,14 @@ TEST_CASE(menu_typeahead_letter_then_enter_activates_match) {
         activatedIndex = idx;
     });
 
-    // Default _hoveredIndex is 0 (set in AYMenu.h:169), so the typeahead
-    // startFrom computes as (0+1)%4 = 1. First-letter typeahead from a
-    // fresh menu therefore advances to the FIRST 'B' item past index 0
-    // — i.e. Blueberry (idx 1), not Banana. The existing single-widget
-// tests in Test_Menu.cpp (menu_typeahead_letter_jumps_highlight) pin
-// this exact "skip-current" semantics; the scenario test reproduces
-// the same end-to-end path with the onItemActivated callback wired.
+    // PR-S3: with _hoveredIndex defaulting to -1 (AYMenu.h:175), the
+    // first-letter typeahead from a fresh menu includes idx 0. 'B'
+    // matches Banana (idx 0) first; subsequent 'L' (buffer "bl")
+    // advances to Blueberry (idx 1).
     menu.onKeyDown(UIKey_B);
-    CHECK(menu.getHoveredIndex() == 1);          // Blueberry (B past 0)
+    CHECK(menu.getHoveredIndex() == 0);          // Banana
+    menu.onKeyDown(UIKey_L);
+    CHECK(menu.getHoveredIndex() == 1);          // Blueberry (buffer "bl")
 
     // Enter activates the hovered row → _onItemActivated fires with 1.
     menu.onKeyDown(UIKey_Enter);

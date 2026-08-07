@@ -145,9 +145,11 @@ TEST_CASE(menu_arrow_keys_then_enter_activates) {
     int activated = -99;
     menu->setOnItemActivated([&](int idx) { activated = idx; });
 
-    // _hoveredIndex starts at 0. Down x2 → 2.
-    menu->onKeyDown(UIKey_Down);
-    menu->onKeyDown(UIKey_Down);
+    // PR-S3: _hoveredIndex starts at -1 (no item highlighted yet).
+    // Down x3 → 0 → 1 → 2.
+    menu->onKeyDown(UIKey_Down);   // -1 → 0
+    menu->onKeyDown(UIKey_Down);   // 0  → 1
+    menu->onKeyDown(UIKey_Down);   // 1  → 2
     menu->onKeyDown(UIKey_Enter);
     // After close() the menu tree is destroyed — we must NOT read from
     // `menu` after this point. The capture above copied `idx` by value
@@ -287,8 +289,10 @@ TEST_CASE(menu_typeahead_letter_jumps_highlight) {
     menu->addItem(L"Quit");
     menu->open(&host, FVector2(0.0f, 20.0f));
 
-    // _hoveredIndex defaults to 0. After 'S' it should jump to 1 (Save).
-    CHECK(menu->getHoveredIndex() == 0);
+    // PR-S3: _hoveredIndex now defaults to -1 (no item highlighted yet).
+    // 'S' on a fresh menu starts the search at idx 0; first 'S' match
+    // is Save at idx 1 (Open doesn't start with 'S').
+    CHECK(menu->getHoveredIndex() == -1);
     const bool consumed = menu->onKeyDown(UIKey_S);
     CHECK(consumed);
     CHECK(menu->getHoveredIndex() == 1);
@@ -297,10 +301,13 @@ TEST_CASE(menu_typeahead_letter_jumps_highlight) {
     ui.shutdown();
 }
 
-// PR-C3.2 — repeating the same letter cycles through matching items.
-// Search starts at current+1 so the first 'S' from index 0 advances to
-// the NEXT 'S' (Save As), matching Windows native behavior where
-// pressing the same letter advances through matches.
+// PR-C3.2 + PR-S3 — repeating the same letter cycles through matching
+// items. First 'S' from a fresh menu lands on Save (idx 0). Subsequent
+// presses advance through the matches: Save (0) → Save As (1) → wrap
+// → Save (0). Windows native behavior; this is also the fix for the
+// Gallery S3 "R does nothing" symptom — every keystroke surfaces a
+// hover change OR a _onHoverChanged callback (see setHoveredIndexFrom
+// Typeahead in AYMenu.cpp).
 TEST_CASE(menu_typeahead_repeat_letter_cycles) {
     MockRenderer backend;
     UIManager ui;
@@ -313,23 +320,23 @@ TEST_CASE(menu_typeahead_repeat_letter_cycles) {
     menu->addItem(L"Quit");
     menu->open(&host, FVector2(0.0f, 20.0f));
 
-    menu->onKeyDown(UIKey_S);   // search starts at (0+1)%3=1 → Save As (1)
-    CHECK(menu->getHoveredIndex() == 1);
-    menu->onKeyDown(UIKey_S);   // search from (1+1)%3=2 → wraps → Save (0)
+    CHECK(menu->getHoveredIndex() == -1);
+    menu->onKeyDown(UIKey_S);   // fresh menu, startFrom=0 → Save (0)
     CHECK(menu->getHoveredIndex() == 0);
     menu->onKeyDown(UIKey_S);   // search from (0+1)%3=1 → Save As (1)
     CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_S);   // search from (1+1)%3=2 → Quit miss → wrap fallback → Save (0)
+    CHECK(menu->getHoveredIndex() == 0);
 
     menu->close();
     ui.shutdown();
 }
 
-// PR-C3.3 — multi-letter prefix within timeout extends the match.
-// "Sa" should land on Save or Save As (both start with "Sa"), not Quit.
-// After 'S' jumps from index 0 → 1 (Save As), the next letter 'A'
-// searches from 2 (Quit) and wraps; the first matching item is Save
-// (index 0). Both Save and Save As start with "sa" so the result is
-// whichever the wrap-around finds first (Save, since we wrap to 0).
+// PR-C3.3 + PR-S3 — multi-letter prefix within timeout extends the
+// match. "Sa" prefix should land on a Save-prefixed item, not Quit.
+// With _hoveredIndex defaulting to -1, the first 'S' lands on Save (0).
+// The second 'A' (buffer="sa") starts from (0+1)%3=1 and finds Save As
+// (1) which also starts with "sa".
 TEST_CASE(menu_typeahead_multi_letter_within_timeout) {
     MockRenderer backend;
     UIManager ui;
@@ -342,17 +349,20 @@ TEST_CASE(menu_typeahead_multi_letter_within_timeout) {
     menu->addItem(L"Quit");
     menu->open(&host, FVector2(0.0f, 20.0f));
 
-    menu->onKeyDown(UIKey_S);   // → Save As (1, search starts at 1)
-    CHECK(menu->getHoveredIndex() == 1);
-    menu->onKeyDown(UIKey_A);   // "Sa" prefix — wraps, lands on Save (0)
+    menu->onKeyDown(UIKey_S);   // → Save (0, startFrom=0 on fresh menu)
     CHECK(menu->getHoveredIndex() == 0);
+    menu->onKeyDown(UIKey_A);   // "Sa" prefix — startFrom=1 → Save As (1)
+    CHECK(menu->getHoveredIndex() == 1);
 
     menu->close();
     ui.shutdown();
 }
 
-// PR-C3.3b — letter switch (A then B) restarts with the new letter.
-// Old typo-recovery popped 'b' and retried 'a', leaving highlight stuck.
+// PR-C3.3b + PR-S3 — letter switch (A then B) restarts with the new
+// letter. Old typo-recovery popped 'b' and retried 'a', leaving
+// highlight stuck. With _hoveredIndex defaulting to -1, the first 'A'
+// lands on Apple (0); the second 'B' starts from (0+1)%3=1, finds
+// no 'B' at Apricot (1), wraps and finds Banana (2).
 TEST_CASE(menu_typeahead_letter_switch_restarts_prefix) {
     MockRenderer backend;
     UIManager ui;
@@ -365,8 +375,8 @@ TEST_CASE(menu_typeahead_letter_switch_restarts_prefix) {
     menu->addItem(L"Banana");
     menu->open(&host, FVector2(0.0f, 20.0f));
 
-    menu->onKeyDown(UIKey_A);   // → Apricot (1)
-    CHECK(menu->getHoveredIndex() == 1);
+    menu->onKeyDown(UIKey_A);   // → Apple (0, startFrom=0 on fresh menu)
+    CHECK(menu->getHoveredIndex() == 0);
     menu->onKeyDown(UIKey_B);   // "ab" miss → restart with 'b' → Banana (2)
     CHECK(menu->getHoveredIndex() == 2);
 
@@ -374,10 +384,9 @@ TEST_CASE(menu_typeahead_letter_switch_restarts_prefix) {
     ui.shutdown();
 }
 
-// PR-C3.4 — arrow keys invalidate the typeahead buffer; the next letter
-// starts a fresh single-char prefix. Search still begins at current+1
-// (the wrap-around rule) but on a clean buffer — so 'A' from any
-// index finds the NEXT 'A' item, not the same one.
+// PR-C3.4 + PR-S3 — arrow keys invalidate the typeahead buffer; the
+// next letter starts a fresh single-char prefix. After Down moves
+// 0→1, fresh 'A' searches from (1+1)%3=2 and wraps to Apple (0).
 TEST_CASE(menu_typeahead_invalidated_by_navigation_keys) {
     MockRenderer backend;
     UIManager ui;
@@ -390,11 +399,11 @@ TEST_CASE(menu_typeahead_invalidated_by_navigation_keys) {
     menu->addItem(L"Banana");
     menu->open(&host, FVector2(0.0f, 20.0f));
 
-    menu->onKeyDown(UIKey_A);   // → Apricot (1, search starts at 1)
+    menu->onKeyDown(UIKey_A);   // → Apple (0, startFrom=0 on fresh menu)
+    CHECK(menu->getHoveredIndex() == 0);
+    menu->onKeyDown(UIKey_Down);  // arrow invalidates buffer, advances 0→1
     CHECK(menu->getHoveredIndex() == 1);
-    menu->onKeyDown(UIKey_Down);  // arrow invalidates buffer, advances 1→2
-    CHECK(menu->getHoveredIndex() == 2);
-    menu->onKeyDown(UIKey_A);   // fresh "a" — search from (2+1)%3=0 → Apple (0)
+    menu->onKeyDown(UIKey_A);   // fresh "a" — search from (1+1)%3=2 → wraps → Apple (0)
     CHECK(menu->getHoveredIndex() == 0);
 
     menu->close();

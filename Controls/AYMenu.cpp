@@ -247,6 +247,20 @@ void Menu::setHoveredIndex(int index) {
     }
 }
 
+// PR-S3 — typeahead-aware hover setter. Same as setHoveredIndex but
+// also fires _onHoverChanged when the new index equals the current
+// one (setHoveredIndex's identity-check early-returns). Without this,
+// a typeahead letter that resolves to the already-hovered item (e.g.
+// colors menu {Red, Green, Blue}, user types 'R' on a fresh menu
+// where _hoveredIndex is already 0 = Red) produces no feedback for
+// the host's status label.
+void Menu::setHoveredIndexFromTypeahead(int index) {
+    setHoveredIndex(index);
+    if (index == _hoveredIndex && _onHoverChanged) {
+        _onHoverChanged(_hoveredIndex);
+    }
+}
+
 void Menu::performLayout() {
     CompoundFocusableWidget::performLayout();
     layoutItems();
@@ -336,8 +350,15 @@ bool Menu::onKeyDown(int keyCode) {
         const wchar_t ch = static_cast<wchar_t>(
             L'a' + (keyCode - UIKey_A));
         _typeaheadBuffer.append(ch);
-        const int startFrom = (_hoveredIndex < 0) ? 0
-                                                  : (_hoveredIndex + 1) % n;
+        // PR-S3 fix: with _hoveredIndex now defaulting to -1 (see AYMenu.h),
+        // the standard (_hoveredIndex + 1) % n formula correctly resolves
+        // startFrom to 0 on a fresh menu (first-letter typeahead includes
+        // idx 0) and to _hoveredIndex + 1 on subsequent presses (skip self,
+        // which is the Windows native cycle behavior). The setHoveredIndex
+        // call in this branch goes through setHoveredIndexFromTypeahead so
+        // a 'R' that lands on the already-hovered idx 0 still fires
+        // _onHoverChanged and the host's status label gets feedback.
+        const int startFrom = (_hoveredIndex < 0) ? 0 : (_hoveredIndex + 1) % n;
         // Lambda getter lets us skip separator/nullptr items: an empty
         // wstring fails the size check inside findMatch, so those
         // entries are treated as no-match naturally.
@@ -355,7 +376,7 @@ bool Menu::onKeyDown(int keyCode) {
             if (_typeaheadBuffer.size() > 1) {
                 match = _typeaheadBuffer.recoverFromLetterSwitch(startFrom, n, getter);
                 if (match >= 0) {
-                    setHoveredIndex(match);
+                    setHoveredIndexFromTypeahead(match);
                     return true;
                 }
             } else if (_typeaheadBuffer.size() == 1) {
@@ -365,14 +386,14 @@ bool Menu::onKeyDown(int keyCode) {
                 // that match. ComboBox does NOT do this.
                 const int wrapMatch = _typeaheadBuffer.findMatch(0, n, getter);
                 if (wrapMatch >= 0) {
-                    setHoveredIndex(wrapMatch);
+                    setHoveredIndexFromTypeahead(wrapMatch);
                     return true;
                 }
             }
             _typeaheadBuffer.clear();
             return false;
         }
-        setHoveredIndex(match);
+        setHoveredIndexFromTypeahead(match);
         return true;
     }
 

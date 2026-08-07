@@ -157,6 +157,12 @@ private:
     // Single source of truth for every path that moves the highlight
     // (Up/Down, typeahead letter, mouse hover).
     void setHoveredIndex(int index);
+    // PR-S3 — typeahead-aware variant. Same as setHoveredIndex but also
+    // fires _onHoverChanged when the new index equals the current one,
+    // so a typeahead letter that resolves to the already-hovered item
+    // still surfaces feedback (status label, etc). Internal — callers
+    // outside the typeahead path should keep using setHoveredIndex.
+    void setHoveredIndexFromTypeahead(int index);
 
     std::vector<MenuItem*> _items;
     std::vector<Menu*>     _submenus;       // owned sub-menus
@@ -164,9 +170,15 @@ private:
     int  _lastActivatedIndex = -1;          // for the close callback
 
     // Phase B (B3): keyboard-driven hover index. Rendered as the
-    // "highlighted row" via the same row-flag ListView uses. Starts at 0
-    // so Up arrow wraps to the last item on first press.
-    int _hoveredIndex = 0;
+    // "highlighted row" via the same row-flag ListView uses.
+    // PR-S3 fix: default is -1 (no item highlighted yet) so first-letter
+    // typeahead from a fresh menu includes idx 0 in the search. The
+    // previous default of 0 caused 'A' on {Apple, Apricot, ...} to jump
+    // straight to Apricot (skipping Apple) and 'R' on {Red, Green, Blue}
+    // to appear unresponsive (Red was already at idx 0). Up/Down arrow
+    // paths check `<= 0` so both -1 and 0 wrap to the last/first item
+    // respectively — no regression in arrow navigation.
+    int _hoveredIndex = -1;
 
     // Phase B (B3) R3: the widget that had keyboard focus BEFORE the
     // menu opened. Saved in Menu::open() so Menu::close() can restore it
