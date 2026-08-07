@@ -163,7 +163,22 @@ void Tooltip::tick(float dt, const math::FVector2& mousePos,
     }
     const math::FRectangle tBounds = _target->getWorldBounds();
 
-    const bool inside = tBounds.contains(mousePos);
+    // Tooltip follows target visibility. When the target's page is
+    // hidden (e.g. user switches from Capabilities -> Input via nav),
+    // the target's world bounds may STILL geometrically intersect the
+    // mouse cursor if the bounds were last computed when the page was
+    // visible — setVisible(false) does NOT move children, it only
+    // hides them. Without this gate, the tooltip could trigger over a
+    // hidden ancestor whose geometry overlaps the current mouse pos.
+    // Gallery-reported: hover TextInput on Input page fired the
+    // Capabilities C1 tooltip because page_basics...page_capabilities
+    // are siblings inside the same ScrollView; positions are stacked
+    // vertically so a hidden page's geometry doesn't intersect the
+    // visible viewport — but ANY host layout where hidden ancestors
+    // span the visible area (scrolled-out pages, dialog-stacked
+    // overlays) would trip this. Treat invisible targets as "not inside".
+    const bool inside =
+        _target->isVisible() && tBounds.contains(mousePos);
     if (inside) {
         if (!_hovering) {
             _hovering = true;

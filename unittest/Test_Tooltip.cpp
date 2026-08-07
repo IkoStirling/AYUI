@@ -425,5 +425,46 @@ TEST_CASE(tooltip_overlay_unmount_unregisters_from_uimanager_list) {
     ui.shutdown();
 }
 
+// Tooltip must NOT fire when its target is setVisible(false), even if
+// mouse coords still geometrically intersect the target's stale world
+// bounds. Catches the Gallery symptom where hovering a TextInput on
+// the Input page fired the Capabilities C1 tooltip — page_capabilities
+// is setVisible(false) by showPage(), but the target pointer remains
+// registered in UIManager::_tooltips, so any layout where hidden
+// geometry overlaps the live mouse position would have triggered.
+TEST_CASE(tooltip_does_not_fire_when_target_invisible) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Button btn;
+    btn.setSize(FVector2(100.0f, 32.0f));
+    btn.setPosition(FVector2(50.0f, 50.0f));
+    btn.performLayout();
+
+    Tooltip* tip = Tooltip::attachTo(&btn);
+    tip->setHoverDelay(0.2f);
+    tip->setText(L"Should not show");
+
+    // Park the mouse inside the target's bounds, then hide the target.
+    // Without the visibility gate, the hover timer would accumulate and
+    // show the tip.
+    ui.onMouseMove(60.0f, 60.0f);
+    btn.setVisible(false);
+    ui.update(0.3f);   // cumulative 0.3 >= 0.2 — would show if no gate
+    CHECK_FALSE(tip->isShowing());
+
+    // Re-showing the target should re-arm the timer (treat as fresh
+    // hover intent: user just "discovered" the target).
+    btn.setVisible(true);
+    ui.update(0.3f);
+    CHECK(tip->isShowing());
+
+    tip->detach();
+    destroyWidgetTree(tip);
+    ui.shutdown();
+}
+
 TEST_SUITE_END
 
