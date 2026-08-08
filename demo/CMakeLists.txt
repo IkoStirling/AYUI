@@ -37,7 +37,13 @@ endif()
 
 get_filename_component(AY_SHADER_SHADERC_PATH "${AY_SHADER_SHADERC_PATH}" ABSOLUTE)
 
-add_executable(AYUI_Gallery WIN32 AYUI_Gallery.cpp)
+add_executable(AYUI_Gallery WIN32
+    AYUI_Gallery.cpp
+    GalleryChildBackend.h
+    GalleryChildBackend.cpp
+    GalleryChildWindows.h
+    GalleryChildWindows.cpp
+)
 
 target_link_libraries(AYUI_Gallery PRIVATE
     AYUI

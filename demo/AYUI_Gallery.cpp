@@ -39,7 +39,9 @@
 #include "AYWindow.h"
 #include "AYWidget.h"
 #include "AYDockArea.h"
+#include "AYDockCard.h"
 #include "AYDockTrace.h"
+#include "GalleryChildWindows.h"
 
 #include "AYUIRenderBackend.h"
 #include "AYRenderer.h"
@@ -135,6 +137,13 @@ struct GalleryState {
     // the Device→UI bridge from double-applying the same gesture when
     // WM_INPUT RI_MOUSE_WHEEL also fires (precision trackpads).
     bool wheelHandledThisFrame = false;
+
+    // PR-Dock-TearOff: promoted DockCards' top-level child windows.
+    // Constructed ONCE in wWinMain BEFORE the first loadAndWire (the
+    // promote callback captured by wireDockPromotion closes over this
+    // pointer); reset() before ui.shutdown() so child windows die
+    // before the primary UI (K-INV-D5-6).
+    std::unique_ptr<ayt::gallery::GalleryChildWindows> childWindows;
 };
 
 void showPage(ayt::ui::UIManager& ui, const char* pageId)
@@ -388,6 +397,56 @@ void wireGallery(GalleryState& state)
             scroll->setContent(host);
         }
     }
+}
+
+// PR-Dock-TearOff: wire the promote callback into every DockCard of the
+// mini_dock (slot cards + overlay floating cards). Dragging a card's
+// title bar OUTSIDE the dock now detaches it into a real top-level OS
+// window (live-card migration, no JSON rebuild).
+//
+// MUST run after every loadAndWire (including btn_reload hot reload) —
+// loadLayout rebuilds the dock tree with fresh DockCards that have no
+// callback. The promote callback is a member of each DockCard, so wiring
+// once per card lifetime is enough (float/dock moves don't reset it).
+void wireDockPromotion(GalleryState& state)
+{
+    ayt::ui::DockArea* dock = dynamic_cast<ayt::ui::DockArea*>(
+        state.ui->findById("mini_dock"));
+    if (dock == nullptr) {
+        std::fprintf(stderr,
+            "[AYUI_Gallery] wireDockPromotion: mini_dock not found\n");
+        return;
+    }
+    // Mirror Editor's wirePromoteCallbackRecursive: walk the slot +
+    // overlay enumerations, DON'T descend into card subtrees (the dock
+    // owns its whole tree through these two enumerations).
+    const auto wire = [&state](ayt::ui::DockCard* card) {
+        if (card == nullptr) {
+            return;
+        }
+        card->setPromoteCallback(
+            [&state](
+                ayt::ui::DockCard* promoted,
+                const std::wstring& title,
+                int x, int y, int w, int h) -> bool {
+                // Live-card migration: the host reparents the card
+                // ITSELF into the child window's UIManager root.
+                return state.childWindows->promoteCard(
+                    promoted, title, x, y, w, h);
+            });
+    };
+    for (int s = 0; s < static_cast<int>(ayt::ui::DockArea::Slot::Count); ++s) {
+        const size_t n = dock->getCardCount(static_cast<ayt::ui::DockArea::Slot>(s));
+        for (size_t i = 0; i < n; ++i) {
+            wire(dock->getCard(static_cast<ayt::ui::DockArea::Slot>(s), i));
+        }
+    }
+    if (auto* overlay = dock->getOverlay()) {
+        for (size_t i = 0; i < overlay->getFloatingCardCount(); ++i) {
+            wire(overlay->getFloatingCard(i));
+        }
+    }
+    std::fprintf(stderr, "[AYUI_Gallery] dock promote wired\n");
 }
 
 // =============================================================================
@@ -790,12 +849,15 @@ bool loadAndWire(GalleryState& state)
     wireGallery(state);
     wireCapabilities(state);
     bindReload(state);
+    // PR-Dock-TearOff: reload rebuilt the dock tree with fresh cards —
+    // re-inject the promote callback every load (hot reload included).
+    wireDockPromotion(state);
     std::fprintf(stderr, "[AYUI_Gallery] loaded %s\n", state.layoutPath.c_str());
 
     // Unmistakable build fingerprint (console can be missed under WIN32).
     // Window title + file next to cwd: if you don't see these, wrong exe.
     constexpr const char* kDockBuildId =
-        "DockArea-20260808c-CtorInCpp";
+        "DockArea-20260808d-PromoteChild";
     std::fprintf(stderr, "[AYUI_Gallery] BUILD %s\n", kDockBuildId);
     std::fprintf(stderr, "[AYUI_Gallery] dock trace log: %s\n",
                  ayt::ui::dockTracePath());
@@ -1172,7 +1234,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
     // hunting the AllocConsole window.
-    cfg.window.title = "AYUI Gallery [DockArea-20260808c-CtorInCpp]";
+    cfg.window.title = "AYUI Gallery [DockArea-20260808d-PromoteChild]";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg)) {
@@ -1256,6 +1318,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
             ui.onDeviceCompositionUpdate(text, caret);
         };
 
+    // PR-Dock-TearOff: child-window host — must exist BEFORE the first
+    // loadAndWire because wireDockPromotion's lambdas close over
+    // state.childWindows.
+    state.childWindows =
+        std::make_unique<ayt::gallery::GalleryChildWindows>(window, ui);
+
     state.layoutPath = resolveLayoutPath();
     if (!loadAndWire(state)) {
         ui.shutdown();
@@ -1324,6 +1392,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
         uiBackend.setFramebufferSize(static_cast<uint16_t>(state.clientW),
                                      static_cast<uint16_t>(state.clientH));
+        // PR-Dock-TearOff: tick promoted child windows BEFORE the primary
+        // (each child updates + GDI-renders under its own ActiveScope,
+        // then the primary takes the active slot back).
+        state.childWindows->tickAll(dt);
         ui.update(dt); // caret blink, hover revalidate, hot-reload
         ui.layout();
         // Split populate/flush so DockArea drop guides paint AFTER the
@@ -1356,6 +1428,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     // widgets off the overlay AND deletes them here so the overlay's
     // subsequent shutdown sees no children to free.
     teardownCapabilitiesOverlay(state);
+    // PR-Dock-TearOff: destroy child windows BEFORE the primary UI
+    // (K-INV-D5-6) — the child UIManagers (and the promoted cards living
+    // in their roots) free here; the primary's shutdown then finds a
+    // clean tree.
+    state.childWindows.reset();
     ui.shutdown();
     uiBackend.shutdown();
     renderer.shutdown();
