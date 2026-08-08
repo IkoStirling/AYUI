@@ -42,15 +42,13 @@ DockCard::DockCard() {
         // and queries _cardIndex[id] for the current slot.
         p.userData = 0;
         setDragPayload(p);
-        // Hide the docked copy while the ghost follows the cursor.
-        setVisible(false);
-    });
-    setOnDragEnd([this](bool /*accepted*/) {
-        setVisible(true);
-        // Drag session ended (drop fired OR cancel). Cursor reset is
-        // driven by UIManager re-polling cursor hint; we don't need to
-        // explicitly clear _titleBarHover here because the next
-        // onMouseMove / onMouseLeave will refresh it.
+        // PR-S5e: the card STAYS visible while dragging — the ghost is
+        // a drop preview, not a replacement for the original content
+        // (the old setVisible(false) made the docked copy vanish, which
+        // reads as "the content disappears when I drag"). The card
+        // keeps its slot position until the drop commits (moveInSlot /
+        // floatCard / dockCard relocate it); a cancelled drag leaves it
+        // exactly where it started. No onDragEnd restoration needed.
     });
 }
 

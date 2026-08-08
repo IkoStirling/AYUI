@@ -69,6 +69,10 @@ protected:
     void onRender(IRenderBackend& renderer) override;
 
     void applyNormalized(float nx);
+    // Maps an absolute thumb-start position along the track (in track
+    // space, 0 = track start) to a scroll offset. Shared by click-to-jump
+    // (thumb centered under cursor) and thumb drag (pressed offset kept).
+    void applyThumbStart(float thumbStartAlong);
     float trackLength() const;
 
     Orientation _orientation = Orientation::Vertical;
@@ -81,6 +85,11 @@ protected:
     // (scrollable = content - 1) and breaks setRange/setValue clamp.
     float _viewportSize = 0.0f;
     bool _dragging = false;
+    // PR-S1b: offset from the pressed cursor to the thumb's leading edge
+    // at mouse-down. Thumb press keeps the offset fixed while dragging
+    // (thumb travels with the cursor, no jump); track press uses
+    // thumbLen/2 so drag keeps the thumb centered under the cursor.
+    float _dragOffset = 0.0f;
     std::function<void(float)> _onValueChanged;
 };
 

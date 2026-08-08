@@ -202,6 +202,38 @@ TEST_CASE(test_esc_during_drag_cancels) {
 }
 
 // -------------------------------------------------------------------------
+// 4b. PR-S5e: dragging keeps the docked copy VISIBLE — the ghost is a
+//     drop preview, the original content must not vanish (previously
+//     onDragStart hid the card and onDragEnd restored it).
+// -------------------------------------------------------------------------
+TEST_CASE(test_drag_keeps_docked_copy_visible) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    DockCard* card = dock->findCard("console");
+    CHECK(card != nullptr);
+    if (card == nullptr) return;
+
+    const bool started = simulateTitleBarClick(card, FVector2(2.0f, 2.0f));
+    CHECK(started);
+    CHECK(f.ui.isDragging());
+
+    // The docked copy stays in place AND visible during the drag.
+    CHECK(card->isVisible());
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+
+    // Esc cancels — card untouched (still visible, still docked).
+    f.ui.onKeyDown(UIKey_Escape);
+    CHECK_FALSE(f.ui.isDragging());
+    CHECK(card->isVisible());
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+}
+
+// -------------------------------------------------------------------------
 // 5. Non-floatable card ignores title-bar drag (K-INV-D3-2).
 // -------------------------------------------------------------------------
 TEST_CASE(test_non_floatable_card_ignores_drag) {

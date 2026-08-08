@@ -1505,12 +1505,22 @@ bool UIManager::beginDrag(Widget* source) {
     ensureGhostCreated();
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(true);
-        // Default initial position is the source's center; the next
-        // onMouseMove will refine via updateDrag → updateGhostPosition.
-        const math::FRectangle sb = source->getWorldBounds();
-        updateGhostPosition(math::FVector2(
-            (sb.minX + sb.maxX) * 0.5f,
-            (sb.minY + sb.maxY) * 0.5f));
+        // PR-S5e: start the ghost at the PRESS position (last known
+        // cursor), not the source's center. The old code spawned it at
+        // the card's center and the first onMouseMove snapped it to the
+        // cursor — dock title drags read as "the label lags the pointer
+        // for one frame, then teleports". _lastMouseX/_lastMouseY are
+        // the most recent cursor position (the down that triggered
+        // beginDrag); source-center remains the fallback for the
+        // no-mouse-yet edge.
+        if (_hasLastMouse) {
+            updateGhostPosition(math::FVector2(_lastMouseX, _lastMouseY));
+        } else {
+            const math::FRectangle sb = source->getWorldBounds();
+            updateGhostPosition(math::FVector2(
+                (sb.minX + sb.maxX) * 0.5f,
+                (sb.minY + sb.maxY) * 0.5f));
+        }
     }
     return true;
 }
@@ -2114,6 +2124,14 @@ bool UIManager::isHoverInteractive() const {
 }
 
 UiCursorHint UIManager::getCursorHint() const {
+    // During a drag the captured widget owns the cursor. NO geometry
+    // gate here: Window resize/title drags are state-driven
+    // (_isResizing/_isDragging, AYWindow.cpp) and the pointer
+    // legitimately leaves the window when the size/position is clamped
+    // (min-size / parent edge) — a contains() gate killed the Size*/
+    // Move cursor mid-drag (PR-B1 regression, reverted). ScrollBars
+    // report Default themselves, so dragging a thumb past the bar's
+    // bounds already reverts to the arrow without a gate.
     if (_capturedWidget != nullptr) {
         const UiCursorHint capturedHint = _capturedWidget->getCursorHint();
         if (capturedHint != UiCursorHint::Default) {

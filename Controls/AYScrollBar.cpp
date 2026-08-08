@@ -72,7 +72,7 @@ math::FRectangle ScrollBar::getThumbRect() const {
                             track.maxX, thumbStart + thumbLength);
 }
 
-void ScrollBar::applyNormalized(float nx) {
+void ScrollBar::applyThumbStart(float thumbStartAlong) {
     const float content = _max - _min;
     if (content <= 0.0f || _viewportSize >= content) {
         setValue(_min);
@@ -86,20 +86,32 @@ void ScrollBar::applyNormalized(float nx) {
     if (thumbLength > tl) thumbLength = tl;
     const float travel = tl - thumbLength;
     const float maxScroll = content - _viewportSize;
-    // nx is mouse position along the full track; map so thumb center
-    // under the cursor → offset in [0, maxScroll].
-    float thumbStart = nx * tl - thumbLength * 0.5f;
-    float t = (travel > 1e-5f) ? (thumbStart / travel) : 0.0f;
+    // thumbStartAlong is the thumb's leading edge in track space;
+    // offset in [0, maxScroll] follows [0, travel].
+    float t = (travel > 1e-5f) ? (thumbStartAlong / travel) : 0.0f;
     if (t < 0.0f) t = 0.0f;
     if (t > 1.0f) t = 1.0f;
     setValue(_min + t * maxScroll);
 }
 
+void ScrollBar::applyNormalized(float nx) {
+    const float tl = trackLength();
+    const float content = _max - _min;
+    float ratio = (content > 0.0f) ? (_viewportSize / content) : 1.0f;
+    if (ratio > 1.0f) ratio = 1.0f;
+    float thumbLength = (tl > 0.0f) ? (tl * ratio) : 0.0f;
+    if (thumbLength < kMinThumbLength) thumbLength = kMinThumbLength;
+    if (thumbLength > tl) thumbLength = tl;
+    // nx is mouse position along the full track; map so thumb center
+    // under the cursor → offset in [0, maxScroll].
+    applyThumbStart(nx * tl - thumbLength * 0.5f);
+}
+
 UiCursorHint ScrollBar::getCursorHint() const {
-    if (!_enabled) return UiCursorHint::Default;
-    return (_orientation == Orientation::Vertical)
-        ? UiCursorHint::SizeVertical
-        : UiCursorHint::Default;
+    // PR-S5c: scrollbars keep the arrow cursor. Native UIs never change
+    // the pointer over a scrollbar; the Size* hints are reserved for the
+    // window rim / slider / splitter handle.
+    return UiCursorHint::Default;
 }
 
 bool ScrollBar::onMouseButtonDown(const UIMouseEvent& e) {
@@ -118,10 +130,24 @@ bool ScrollBar::onMouseButtonDown(const UIMouseEvent& e) {
         nx = (tl > 0.0f) ? ((e.mousePos.y - getTrackRect().minY) / tl) : 0.5f;
     }
     nx = clampValueToRange(nx, 0.0f, 1.0f);
-    // applyNormalized maps track-normalized mouse Y to scroll offset with
-    // the thumb centered under the cursor (click-to-jump and thumb drag).
-    (void)onThumb;
-    applyNormalized(nx);
+    if (onThumb) {
+        // PR-S1b: pressing the thumb arms a pure drag — keep the
+        // pressed cursor's offset from the thumb's leading edge so the
+        // thumb does NOT jump (clicking the thumb edge no longer snaps
+        // the page to the cursor).
+        _dragOffset = (_orientation == Orientation::Horizontal)
+            ? (e.mousePos.x - thumb.minX)
+            : (e.mousePos.y - thumb.minY);
+    } else {
+        // Track press = click-to-jump: thumb center lands under the
+        // cursor. Keep the thumb centered while dragging from a track
+        // press (matches the pre-PR-S1b drag behavior).
+        const float thumbLen = (_orientation == Orientation::Horizontal)
+            ? (thumb.maxX - thumb.minX)
+            : (thumb.maxY - thumb.minY);
+        _dragOffset = thumbLen * 0.5f;
+        applyNormalized(nx);
+    }
     _state = ButtonState::Pressed;
     return true;
 }
@@ -131,14 +157,12 @@ bool ScrollBar::onMouseMove(const UIMouseEvent& e) {
     if (!_enabled || !_dragging) return false;
     const float tl = trackLength();
     if (tl <= 0.0f) return true;
-    float nx;
-    if (_orientation == Orientation::Horizontal) {
-        nx = (e.mousePos.x - getTrackRect().minX) / tl;
-    } else {
-        nx = (e.mousePos.y - getTrackRect().minY) / tl;
-    }
-    nx = clampValueToRange(nx, 0.0f, 1.0f);
-    applyNormalized(nx);
+    // Drag maps the thumb's leading edge to (cursor - pressed offset)
+    // along the track. applyThumbStart clamps to [0, travel].
+    const float along = (_orientation == Orientation::Horizontal)
+        ? (e.mousePos.x - getTrackRect().minX)
+        : (e.mousePos.y - getTrackRect().minY);
+    applyThumbStart(along - _dragOffset);
     return true;
 }
 

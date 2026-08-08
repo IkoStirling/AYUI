@@ -2,6 +2,8 @@
 #include "AYMenuBar.h"
 #include "AYMenu.h"
 #include "AYMenuItem.h"
+#include "AYButton.h"
+#include "AYUIManager.h"
 #include "AYMockRenderer.h"
 #include "AYWidgetFactory.h"
 #include "AYWidgetSerializer.h"
@@ -62,6 +64,63 @@ TEST_CASE(menubar_render) {
         if (dc.type == MockRenderer::DrawCall::Rect) ++rectCount;
     }
     CHECK(rectCount >= 1);   // at least background + border
+}
+
+// PR-S1c (Gallery Menu): click-outside closes a menu via UIManager →
+// Menu::close() without updating MenuBar::_openIdx. The next anchor
+// click must still reopen it (previously the stale _openIdx hit the
+// toggle-close branch and swallowed the click).
+TEST_CASE(menubar_anchor_reopens_after_external_close) {
+    UIManager ui;
+    MockRenderer renderer;
+    ui.initialize(&renderer);
+
+    MenuBar bar;
+    bar.setSize(FVector2(200.0f, 26.0f));
+    bar.addMenu(L"File");
+    bar.performLayout();
+    Menu* file = bar.getMenu(0);
+    file->addItem(L"New");
+
+    // Locate the anchor Button — MenuBar addChildExternal's the menu
+    // first, then addChild's the anchor button; walk children for the
+    // first Button.
+    Button* anchor = nullptr;
+    for (Widget* w : bar.getChildren()) {
+        anchor = dynamic_cast<Button*>(w);
+        if (anchor != nullptr) break;
+    }
+    CHECK_NOT_NULL(anchor);
+    if (anchor == nullptr) {
+        ui.shutdown();
+        return;
+    }
+    const FRectangle a = anchor->getWorldBounds();
+    const FVector2 pos((a.minX + a.maxX) * 0.5f, (a.minY + a.maxY) * 0.5f);
+
+    // 1) Click anchor → menu opens (anchor wiring path).
+    anchor->onMouseButtonDown(UIMouseEvent(pos, 0));
+    anchor->onMouseButtonUp(UIMouseEvent(pos, 0));
+    CHECK(file->isOpen());
+    CHECK(bar.getOpenMenuIndex() == 0);
+
+    // 2) External close (what click-outside does). Menu::close() never
+    //    tells MenuBar → _openIdx stays stale.
+    file->close();
+    CHECK_FALSE(file->isOpen());
+    CHECK(bar.getOpenMenuIndex() == 0);   // stale, pre-fix state
+
+    // 3) Click anchor again → menu must reopen.
+    anchor->onMouseButtonDown(UIMouseEvent(pos, 0));
+    anchor->onMouseButtonUp(UIMouseEvent(pos, 0));
+    CHECK(file->isOpen());
+
+    // 4) Clicking the SAME anchor while open still toggles closed.
+    anchor->onMouseButtonDown(UIMouseEvent(pos, 0));
+    anchor->onMouseButtonUp(UIMouseEvent(pos, 0));
+    CHECK_FALSE(file->isOpen());
+
+    ui.shutdown();
 }
 
 TEST_CASE(menubar_factory_registered) {

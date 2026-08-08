@@ -806,6 +806,35 @@ void bindReload(GalleryState& state)
     }
 }
 
+// PR-S5: UiCursorHint → Win32 cursor. The UI layer computes hints
+// (Window resize edges / title-bar Move, ScrollBar SizeNs, Hand, Beam)
+// but Gallery never applied them — resize/drag felt "functional but the
+// cursor never changed". LoadCursor lazily caches the system cursors.
+static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint)
+{
+    static const HCURSOR arrow = ::LoadCursorW(nullptr, IDC_ARROW);
+    static const HCURSOR hand  = ::LoadCursorW(nullptr, IDC_HAND);
+    static const HCURSOR we    = ::LoadCursorW(nullptr, IDC_SIZEWE);
+    static const HCURSOR ns    = ::LoadCursorW(nullptr, IDC_SIZENS);
+    static const HCURSOR nwse  = ::LoadCursorW(nullptr, IDC_SIZENWSE);
+    static const HCURSOR nesw  = ::LoadCursorW(nullptr, IDC_SIZENESW);
+    static const HCURSOR move  = ::LoadCursorW(nullptr, IDC_SIZEALL);
+    static const HCURSOR beam  = ::LoadCursorW(nullptr, IDC_IBEAM);
+    switch (hint) {
+    case ayt::ui::UiCursorHint::Hand:  return hand;
+    case ayt::ui::UiCursorHint::SizeWe:
+    case ayt::ui::UiCursorHint::SizeHorizontal: return we;
+    case ayt::ui::UiCursorHint::SizeNs:
+    case ayt::ui::UiCursorHint::SizeVertical:   return ns;
+    case ayt::ui::UiCursorHint::SizeNwse: return nwse;
+    case ayt::ui::UiCursorHint::SizeNesw: return nesw;
+    case ayt::ui::UiCursorHint::Move:  return move;
+    case ayt::ui::UiCursorHint::Beam:  return beam;
+    case ayt::ui::UiCursorHint::Default:
+    default: return arrow;
+    }
+}
+
 std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
                             std::uintptr_t wParam, std::intptr_t lParam, bool& handled)
 {
@@ -875,6 +904,16 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         // Keep handled=false so Device also updates MouseDevice position.
         // Returning handled=true previously starved getWheelDelta bridging
         // of a valid cursor (Device pos stayed at 0,0 → pickTopmost miss).
+        return 0;
+    }
+    case WM_SETCURSOR: {
+        // PR-S5: apply the UI layer's cursor hint (resize edges,
+        // title-bar Move, Beam, Hand). SetCursor here
+        // and skip DefWindowProc so the OS doesn't snap back to arrow.
+        // _hoverWidget/_capturedWidget are already fresh — WM_SETCURSOR
+        // follows the WM_MOUSEMOVE that updated them.
+        ::SetCursor(cursorForHint(state->ui->getCursorHint()));
+        handled = true;
         return 0;
     }
     case WM_MOUSEWHEEL: {

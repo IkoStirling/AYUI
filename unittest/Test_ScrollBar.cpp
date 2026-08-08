@@ -25,13 +25,12 @@ TEST_CASE(scrollbar_initial_state) {
     CHECK(sb.isEnabled());
 }
 
-// C-4: Cursor hint — Vertical reports SizeVertical when enabled.
-// Horizontal reports Default (intentional — we don't want the
-// horizontal bar to claim SizeHorizontal because that's reserved for
-// the slider; horizontal-bar drag is rare enough to skip).
+// C-4 / PR-S5c: scrollbars never change the cursor — arrow over the
+// whole bar (native behavior). The Size* hints belong to the window
+// rim / slider / splitter handle, not the scrollbar.
 TEST_CASE(scrollbar_cursor_hint) {
     ScrollBar v;
-    CHECK(v.getCursorHint() == UiCursorHint::SizeVertical);
+    CHECK(v.getCursorHint() == UiCursorHint::Default);
 
     ScrollBar h;
     h.setOrientation(ScrollBar::Orientation::Horizontal);
@@ -118,6 +117,43 @@ TEST_CASE(scrollbar_drag_thumb_full_track_traversal) {
     CHECK(prevValue > 50.0f);
 
     sb.onMouseButtonUp(UIMouseEvent(FVector2(6.0f, 99.0f), 0));
+}
+
+// PR-S1b (Gallery S1): pressing the thumb must NOT jump the page.
+// Clicking inside the thumb arms a drag with the pressed offset kept;
+// only a click on empty track performs the click-to-jump.
+TEST_CASE(scrollbar_thumb_press_does_not_jump) {
+    ScrollBar sb;
+    sb.setSize(FVector2(12.0f, 100.0f));
+    sb.setPosition(FVector2(0.0f, 0.0f));
+    sb.setRange(0.0f, 100.0f);
+    sb.setViewportSize(50.0f);   // thumb ratio 0.5 -> 50px tall
+    sb.setValue(0.0f);           // thumb spans [0, 50]
+
+    int valueChanges = 0;
+    sb.setOnValueChanged([&](float) { ++valueChanges; });
+
+    // Press INSIDE the thumb (y=25 is well within [0, 50]): no jump.
+    sb.onMouseButtonDown(UIMouseEvent(FVector2(6.0f, 25.0f), 0));
+    CHECK_FLOAT_EQ(sb.getValue(), 0.0f, 1e-5f);
+    CHECK(valueChanges == 0);
+
+    // Drag down: thumb leading edge tracks the cursor minus the pressed
+    // offset (25px). thumbStart = 75 - 25 = 50 → t = 50/50 = 1 → max.
+    sb.onMouseMove(UIMouseEvent(FVector2(6.0f, 75.0f), 0));
+    CHECK_FLOAT_EQ(sb.getValue(), 50.0f, 1e-5f);
+    sb.onMouseButtonUp(UIMouseEvent(FVector2(6.0f, 75.0f), 0));
+
+    // Press on EMPTY track below the thumb → click-to-jump still works.
+    ScrollBar sb2;
+    sb2.setSize(FVector2(12.0f, 100.0f));
+    sb2.setPosition(FVector2(0.0f, 0.0f));
+    sb2.setRange(0.0f, 100.0f);
+    sb2.setViewportSize(50.0f);
+    sb2.setValue(0.0f);
+    sb2.onMouseButtonDown(UIMouseEvent(FVector2(6.0f, 90.0f), 0));
+    CHECK(sb2.getValue() > 0.0f);
+    sb2.onMouseButtonUp(UIMouseEvent(FVector2(6.0f, 90.0f), 0));
 }
 
 // C-4: ScrollableWidget clamps content offset.
@@ -333,6 +369,81 @@ TEST_CASE(scrollview_wrapping_listview_wheel_routes_to_inner_only) {
     CHECK(inner.getFirstVisibleIndex() > beforeInner);
     // Outer's offset must NOT move — inner ate the wheel.
     CHECK(outer.getScrollOffset().y == beforeOuter);
+
+    ui.shutdown();
+}
+
+// PR-S7 (Gallery S7): wheel bubbling at the boundary is BY DESIGN.
+// The inner list scrolled to its bottom returns false from scrollBy, so
+// UIManager::onMouseWheel's parent-chain walk hands the wheel to the
+// outer ScrollView (browser-style: inner exhausts, outer takes over).
+// Pins the contract — inner-only routing while the inner CAN scroll,
+// outer takeover when it cannot. Wheels go through the real
+// UIManager::onMouseWheel walk (pickTopmostWidget → parent chain).
+TEST_CASE(scrollview_wrapping_listview_wheel_bubbles_to_outer_at_bottom) {
+    UIManager ui;
+    MockRenderer renderer;
+    ui.initialize(&renderer);
+
+    ScrollView outer;
+    outer.setSize(FVector2(400.0f, 300.0f));
+    outer.setPosition(FVector2(0.0f, 0.0f));
+    outer.setContentSize(FVector2(400.0f, 1500.0f));
+
+    ListView inner;
+    inner.setSize(FVector2(380.0f, 110.0f));
+    inner.setItemHeight(24.0f);
+    for (int i = 0; i < 30; ++i) {
+        wchar_t buf[32];
+        std::swprintf(buf, 32, L"row-%02d", i);
+        inner.addItem(buf);
+    }
+    outer.setContent(&inner);
+    inner.performLayout();    // _contentSize.y = 30*24 = 720
+    ui.root()->addChildExternal(&outer);
+
+    // Route one wheel exactly like UIManager::onMouseWheel does:
+    // pick the topmost widget under the cursor, then walk up the parent
+    // chain until a widget consumes. UIManager._root is a plain Widget
+    // (hitTest only matches self) so the fixture drives the pipeline
+    // directly through outer.hitTest — same as the inner-only test
+    // above.
+    auto routeWheel = [&](float x, float y) -> bool {
+        const FVector2 pos(x, y);
+        Widget* cur = outer.hitTest(pos);
+        const UIMouseWheelEvent wheel(pos, 120.0f);
+        while (cur != nullptr) {
+            if (cur->onMouseWheel(wheel)) return true;
+            cur = cur->getParent();
+        }
+        return false;
+    };
+
+    // The wheel point (50,50) sits inside the inner list at offset 0;
+    // the list keeps its spot while IT consumes (outer doesn't move),
+    // so every wheel in Phase A hits the list again.
+    const float maxInner = 720.0f - 110.0f;    // content - viewport = 610
+
+    // Phase A: wheel until the inner list is pinned at its bottom.
+    for (int step = 0;
+         step < 200 && inner.getScrollOffset().y < maxInner - 0.5f;
+         ++step) {
+        routeWheel(50.0f, 50.0f);
+    }
+    CHECK(inner.getScrollOffset().y >= maxInner - 0.5f);  // pinned
+    // pool = ceil(110/24)+1+2 = 8 → maxFirst clamps at 30-8 = 22; the
+    // remaining rows live in the pool's tail slots.
+    CHECK(inner.getFirstVisibleIndex() >= 22);            // bottom rows shown
+    CHECK(outer.getScrollOffset().y == 0.0f);             // outer untouched
+
+    // Phase B: one more wheel at the same spot — the list cannot
+    // scroll, so the wheel bubbles to the OUTER ScrollView which takes
+    // over (browser-style).
+    const float beforeOuter = outer.getScrollOffset().y;
+    const bool handled = routeWheel(50.0f, 50.0f);
+    CHECK(handled);
+    CHECK(outer.getScrollOffset().y > beforeOuter);
+    CHECK(inner.getScrollOffset().y >= maxInner - 0.5f);  // list stays pinned
 
     ui.shutdown();
 }

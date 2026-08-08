@@ -169,8 +169,13 @@ MenuItem* MenuBar::findAccel(uint8_t mods, int keyCode) const {
 
 void MenuBar::onAnchorClicked(int index) {
     if (index < 0 || index >= static_cast<int>(_menus.size())) return;
-    if (_openIdx == index) {
-        // Same anchor → toggle.
+    // PR-S1c: gate the toggle on the menu actually being open. Clicking
+    // outside the menu closes it via UIManager → Menu::close() /
+    // dismissFromManager(), which never updates _openIdx — with only the
+    // index check, the next anchor click hit this toggle branch and
+    // refused to reopen (menu stayed closed until a second click).
+    if (_openIdx == index && _menus[index].menu->isOpen()) {
+        // Same anchor + open → toggle.
         closeOpenMenu();
         return;
     }
