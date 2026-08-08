@@ -657,7 +657,18 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
 
     // Set floating position + size and hand to overlay. addFloatingCard
     // calls addChild which re-parents and assumes ownership.
-    card->setPosition(pos);
+    //
+    // pos is a ROOT-space (world) point — hitTestSlot / the drag session
+    // both work in world coords. The card's local position is relative
+    // to its parent, and the floating card's parent chain goes back
+    // through THIS DockArea (world origin = getWorldPosition()). Store
+    // pos minus the dock origin so the card renders exactly under the
+    // cursor when the dock is nested (editor shell header / gallery
+    // padding offset the dock's world origin; without the subtraction
+    // the floating card drifts by that offset). dockCard's displaced-
+    // occupant floatPos (from getSlotRect, also world coords) hits the
+    // same correction here.
+    card->setPosition(pos - getWorldPosition());
     card->setVisible(true);
     _overlay->addFloatingCard(card);
 

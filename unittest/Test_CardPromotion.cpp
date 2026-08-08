@@ -37,6 +37,7 @@ namespace {
 struct CapturedPromote {
     bool invoked = false;
     bool returnedAccepted = true;
+    DockCard* card = nullptr;
     std::string cardId;
     std::wstring title;
     int x = 0, y = 0, w = 0, h = 0;
@@ -107,12 +108,13 @@ TEST_CASE(test_detach_with_callback_forwards_frame_and_detaches) {
     cap.returnedAccepted = true;  // simulate host accepting the promotion
 
     card->setPromoteCallback(
-        [&cap](const std::string& id,
+        [&cap](DockCard* promoted,
                const std::wstring& title,
                int x, int y, int w, int h) -> bool {
             cap.invoked = true;
-            cap.cardId = id;
-            cap.title  = title;
+            cap.card    = promoted;
+            cap.cardId  = promoted->getId();
+            cap.title   = title;
             cap.x = x; cap.y = y; cap.w = w; cap.h = h;
             return cap.returnedAccepted;
         });
@@ -120,6 +122,9 @@ TEST_CASE(test_detach_with_callback_forwards_frame_and_detaches) {
     const bool accepted = card->detachToOwnWindow();
     CHECK(accepted == true);
     CHECK(cap.invoked);
+    // PR-Dock-TearOff: the host receives the card itself (live-card
+    // migration), not just its id.
+    CHECK(cap.card == card);
 
     // Frame forwarded verbatim — ints (not float), per the API surface.
     CHECK(cap.cardId == "profiler");
@@ -148,7 +153,7 @@ TEST_CASE(test_detach_host_declined_keeps_card_in_overlay) {
 
     int callCount = 0;
     card->setPromoteCallback(
-        [&callCount](const std::string& /*id*/,
+        [&callCount](DockCard* /*card*/,
                      const std::wstring& /*title*/,
                      int, int, int, int) -> bool {
             ++callCount;
@@ -162,6 +167,100 @@ TEST_CASE(test_detach_host_declined_keeps_card_in_overlay) {
     DockOverlay* overlay = f.dock->getOverlay();
     CHECK(overlay->getFloatingCardCount() == 1);
     CHECK(overlay->getFloatingCard(0) == card);
+}
+
+// -------------------------------------------------------------------------
+// 4. PR-Dock-TearOff live-card migration: the callback reparents the
+//    card into a SECOND UIManager's tree (the child-window host). The
+//    whole live subtree moves; the source overlay forgets the card.
+// -------------------------------------------------------------------------
+TEST_CASE(test_promote_live_migration_reparents_card) {
+    // Second UIManager = the child-window host tree the card migrates to.
+    MockRenderer childBackend;
+    UIManager    childUi;
+    childUi.initialize(&childBackend);
+    childUi.setClientSize(320.0f, 220.0f);
+
+    PromotionFixture f;
+    DockCard* card = f.addProfilerCard();
+    auto* content = new Widget();
+    content->setId("live-content");
+    card->setContent(content);
+
+    card->setPromoteCallback(
+        [&childUi](DockCard* c, const std::wstring&,
+                   int, int, int w, int h) -> bool {
+            c->setPosition(FVector2(0.0f, 0.0f));
+            c->setSize(FVector2(static_cast<float>(w),
+                                      static_cast<float>(h)));
+            // addChild auto-detaches from the old parent (the overlay).
+            childUi.root()->addChild(c);
+            return true;
+        });
+
+    const bool accepted = card->detachToOwnWindow();
+    CHECK(accepted == true);
+    CHECK(card->getParent() == childUi.root());
+    // Source overlay no longer holds it.
+    CHECK(f.dock->getOverlay()->getFloatingCardCount() == 0);
+    // The live content subtree migrated with the card.
+    CHECK(card->getContent() == content);
+
+    childUi.shutdown();
+}
+
+// -------------------------------------------------------------------------
+// 5. PR-Dock-TearOff nested-dock coordinates: floatCard takes a ROOT-space
+//    point; the card lands at LOCAL (pos - dock world origin), and the
+//    promote callback receives the WORLD position (= root space).
+// -------------------------------------------------------------------------
+TEST_CASE(test_nested_dock_float_and_promote_coords) {
+    PromotionFixture f;
+    // Nest the dock inside an offset container — mirrors the editor shell
+    // (main_dock sits below the header HBox) and gallery (mini_dock in a
+    // padded page). addChildExternal = borrowed parenting, so the
+    // fixture's unique_ptr stays the owner.
+    f.dock->setPosition(FVector2(40.0f, 80.0f));
+    f.dock->setSize(FVector2(800.0f, 600.0f));
+    f.dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    f.dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(f.dock.get());
+    f.dock->performLayout();
+
+    auto card = std::make_unique<DockCard>();
+    card->setId("nested");
+    f.dock->addCard(DockArea::Slot::Left, std::move(card));
+    f.dock->performLayout();
+    DockCard* c = f.dock->findCard("nested");
+    CHECK(c != nullptr);
+
+    CapturedPromote cap;
+    cap.returnedAccepted = true;
+    c->setPromoteCallback(
+        [&cap](DockCard* promoted, const std::wstring&,
+               int x, int y, int, int) -> bool {
+            cap.invoked = true;
+            cap.card    = promoted;
+            cap.x = x; cap.y = y;
+            return cap.returnedAccepted;
+        });
+
+    // floatCard takes a ROOT-space point. Dock world origin = (40,80),
+    // so root (140,180) → local (100,100).
+    f.dock->floatCard("nested", FVector2(140.0f, 180.0f));
+    DockCard* floater = f.dock->findCard("nested");
+    CHECK(floater != nullptr);
+    const FVector2 local = floater->getPosition();
+    CHECK(std::fabs(local.x - 100.0f) < 0.01f);
+    CHECK(std::fabs(local.y - 100.0f) < 0.01f);
+
+    // detachToOwnWindow forwards the WORLD position (== root space).
+    const bool accepted = floater->detachToOwnWindow();
+    CHECK(accepted == true);
+    CHECK(cap.invoked);
+    CHECK(cap.card == floater);
+    CHECK(cap.x == 140);
+    CHECK(cap.y == 180);
 }
 
 TEST_SUITE_END

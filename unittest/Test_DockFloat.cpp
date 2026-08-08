@@ -488,10 +488,10 @@ TEST_CASE(test_drag_outside_dock_promotes_to_host) {
     bool promoted = false;
     std::string promotedId;
     card->setPromoteCallback(
-        [&](const std::string& cardId, const std::wstring&,
+        [&](DockCard* promotedCard, const std::wstring&,
             int, int, int, int) -> bool {
             promoted = true;
-            promotedId = cardId;
+            promotedId = promotedCard->getId();
             return true;   // host accepts
         });
 
@@ -535,7 +535,7 @@ TEST_CASE(test_titlebar_click_without_drag_does_not_promote) {
 
     int promoteCount = 0;
     card->setPromoteCallback(
-        [&](const std::string&, const std::wstring&,
+        [&](DockCard*, const std::wstring&,
             int, int, int, int) -> bool {
             ++promoteCount;
             return true;
@@ -608,7 +608,7 @@ TEST_CASE(test_same_slot_drop_keeps_card_docked) {
 
     int promoteCount = 0;
     card->setPromoteCallback(
-        [&](const std::string&, const std::wstring&,
+        [&](DockCard*, const std::wstring&,
             int, int, int, int) -> bool {
             ++promoteCount;
             return true;

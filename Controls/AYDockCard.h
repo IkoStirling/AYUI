@@ -97,8 +97,22 @@ public:
     // means the host accepted the promotion — DockCard then detaches
     // itself from its parent DockOverlay. Returning false aborts the
     // promotion and the card stays in the overlay.
+    //
+    // PR-Dock-TearOff live-card migration: the host receives the card
+    // ITSELF (DockCard*), not just its id — the host may reparent the
+    // live widget tree into its own UIManager (addChild auto-detaches
+    // from the old parent). x/y are the card's world position (= primary
+    // client coords when the primary root sits at (0,0)); the host is
+    // responsible for client→screen conversion on platforms that need it.
+    //
+    // K-INV-D5.5-2 — ownership contract: while the callback runs the
+    // card still belongs to the calling tree (this call happens before
+    // detachToOwnWindow's removeFloatingCard). Returning false must
+    // leave the card untouched; returning true after reparenting is
+    // safe — removeFloatingCard on an already-reparented card only
+    // clears the overlay's bookkeeping index (see AYDockOverlay.cpp).
     using PromoteCallback = std::function<bool(
-        const std::string& cardId,
+        DockCard* card,
         const std::wstring& title,
         int x, int y, int w, int h)>;
 

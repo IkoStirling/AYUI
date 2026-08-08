@@ -422,13 +422,16 @@ bool DockCard::detachToOwnWindow() {
         return false;
     }
 
-    // Pull the frame from current world position + size. The host wants
-    // the window's screen-space origin; world == local for an overlay-
-    // hosted floating card whose parent is the overlay at (0,0) by
-    // design, so we read local position. If a future caller wraps the
-    // card in a transform, switch to getWorldPosition(); for the v1
-    // editor shell this is always identity.
-    const math::FVector2 pos = getPosition();
+    // Pull the frame from the WORLD position + size. World position is
+    // what the host wants: for the primary UIManager (root at client
+    // (0,0)) it IS the primary-window client coordinate, so the host
+    // can convert to screen space with a single ClientToScreen. Local
+    // position would be wrong for a card nested in a DockArea whose
+    // world origin is offset (editor shell header / gallery padding).
+    // The card is a DockOverlay child at this point (the void-drop
+    // path floats it first), but its world origin still reflects the
+    // dock chain it came from.
+    const math::FVector2 pos = getWorldPosition();
     const math::FVector2 sz  = getSize();
 
     // Title may be empty (e.g. viewport card); pass through as-is
@@ -436,8 +439,17 @@ bool DockCard::detachToOwnWindow() {
     // default owns the UX decision. We pass _title (wstring) so the
     // editor shell can carry wide text straight into the new top-level
     // window's title bar without round-tripping through UTF-8.
+    // PR-Dock-TearOff live-card migration: pass `this` so the host can
+    // reparent the LIVE widget tree (see PromoteCallback docs /
+    // K-INV-D5.5-2). The overlay snapshot happens BEFORE the callback:
+    // the host may reparent the card during the callback, so a
+    // getParent() after it would miss the DockOverlay gate. We snapshot
+    // the overlay and call removeFloatingCard on the snapshot —
+    // removeFloatingCard's internal `parent == this` check makes it safe
+    // for an already-reparented card (index-only cleanup, no detach).
+    DockOverlay* overlay = dynamic_cast<DockOverlay*>(getParent());
     const bool accepted = _promoteCb(
-        _id,
+        this,
         _title,
         static_cast<int>(pos.x),
         static_cast<int>(pos.y),
@@ -450,12 +462,11 @@ bool DockCard::detachToOwnWindow() {
         return false;
     }
 
-    // Detach from the overlay. We require parent == DockOverlay; if
-    // somebody calls detachToOwnWindow on a slot-docked card, we treat
-    // it as a no-op rather than guessing. The slot-card-promotion path
-    // (future cut) will go through a separate API.
-    Widget* parent = getParent();
-    if (auto* overlay = dynamic_cast<DockOverlay*>(parent)) {
+    // Detach from the overlay. If the card was a slot-docked card (not a
+    // floating overlay child) we treat it as a no-op rather than
+    // guessing. The slot-card-promotion path (future cut) will go
+    // through a separate API.
+    if (overlay) {
         overlay->removeFloatingCard(this);
     }
     return true;
