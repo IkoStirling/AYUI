@@ -9,8 +9,10 @@
 // primary window's nwh and cannot switch HWNDs per frame). Only the
 // namespace differs (ayt::gallery).
 //
-// GDI is Win32-only; the Gallery target is WIN32, so no platform guard
-// is needed in this header (the .cpp guards its body for parity).
+// Draws into an offscreen bitmap and BitBlts once per frame — painting
+// directly to the window DC caused visible flicker (and felt like a
+// low framerate) because WM_PAINT / class brush cleared mid-frame while
+// FillRect/DrawText streamed to the front buffer.
 
 #include "aymath/MathDefs.h"
 #include "aymath/MathTypes.h"
@@ -31,6 +33,7 @@ using namespace ayt::math;
 class GalleryChildBackend : public ayt::ui::IRenderBackend {
 public:
     explicit GalleryChildBackend(HWND hwnd);
+    ~GalleryChildBackend() override;
 
     void setDrawTarget(HDC hdc, int width, int height);
 
@@ -49,11 +52,22 @@ public:
 private:
     static COLORREF toColorRef(const math::FVector4& color);
     RECT toRect(const math::FRectangle& bounds) const;
+    void ensureBackbuffer(int width, int height);
+    void releaseBackbuffer();
+    HFONT fontForSize(int fontSize);
 
     HWND _hwnd = nullptr;
-    HDC _hdc = nullptr;
+    HDC _windowDc = nullptr;   // front buffer (from GetDC)
+    HDC _hdc = nullptr;        // draw target (= mem DC when buffering)
+    HDC _memDc = nullptr;
+    HBITMAP _bitmap = nullptr;
+    HBITMAP _oldBitmap = nullptr;
+    HFONT _font = nullptr;
+    int _fontSize = 0;
     int _width = 0;
     int _height = 0;
+    int _bbWidth = 0;
+    int _bbHeight = 0;
 };
 
 } // namespace ayt::gallery

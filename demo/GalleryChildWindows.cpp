@@ -105,6 +105,11 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
 #else
     e.ui->initialize(nullptr);  // K-INV-D5-4 null backend = no render
 #endif
+    // initialize() claims g_activeUIManager for the child; put the
+    // Gallery primary back so tryGet() between frames stays correct.
+    // Child input/tick still use ActiveScope around each dispatch.
+    ayt::ui::UIManager::makeActive(&_primary);
+
     e.ui->setClientSize(static_cast<float>(w), static_cast<float>(h));
 
     // PR-Dock-TearOff live-card migration: reparent the LIVE card into
@@ -116,7 +121,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     card->setSize(ayt::math::FVector2(static_cast<float>(w),
                                       static_cast<float>(h)));
     e.ui->root()->addChild(card);
-    e.ui->root()->performLayout();
+    e.ui->layout();
 
     ayt::device::TopLevelWindowCallbacks cbs;
     // Capture by value. The UIManager lives in `_entries` by
@@ -187,11 +192,11 @@ void GalleryChildWindows::closeChildWindow(void* handle) {
             if (it->handle != nullptr) {
                 _wm.destroyTopLevelWindow(it->handle);
             }
-            // shared_ptr<UIManager> drops here — ~UIManager calls
-            // shutdown() which resets the active slot IF this was the
-            // active one. The primary is re-established as active by
-            // its own update path on the next main-loop frame.
+            // shared_ptr<UIManager> drops here — ~UIManager::shutdown
+            // clears g_active if the child held it. Always re-claim the
+            // Gallery primary so the next tryGet() is not nullptr.
             _entries.erase(it);
+            ayt::ui::UIManager::makeActive(&_primary);
             return;
         }
     }

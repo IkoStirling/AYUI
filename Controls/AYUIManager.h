@@ -73,6 +73,16 @@ public:
     // that all read through `tryGet()`.
     static ActiveScope pushActive(UIManager* next);
 
+    // Non-RAII claim of the process-wide active slot. Use after a
+    // secondary UIManager::initialize() (child top-level windows):
+    // initialize() always claims g_activeUIManager for `this`, which
+    // would leave tryGet() pointing at the child between frames and
+    // break primary DockCard/drag/tooltip paths. Hosts restore the
+    // primary with makeActive(&primary) immediately after child init.
+    // Pass nullptr to clear the slot (shutdown already does this when
+    // the shutting-down manager was active).
+    static void makeActive(UIManager* manager);
+
     void initialize(IRenderBackend* backend);
     void shutdown();
 

@@ -1041,6 +1041,22 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         const float x = static_cast<float>(GET_X_LPARAM(lParam));
         const float y = static_cast<float>(GET_Y_LPARAM(lParam));
         state->ui->onMouseButtonDown(x, y, 0);
+        // PR-Dock-TearOff: while a G12 dock drag is active, capture the
+        // mouse so moves + the release keep routing to the MAIN window
+        // even when the cursor crosses a promoted child top-level window
+        // (otherwise the drag session stalls over the child and the
+        // void-drop promote fires from a stale position). Released on the
+        // matching UP below (and re-synced on any DOWN if the drag was
+        // Esc-cancelled).
+        if (state->devices != nullptr) {
+            HWND hwnd = static_cast<HWND>(
+                state->devices->window().getWindowHandle());
+            if (state->ui->isDragging()) {
+                if (hwnd != nullptr) ::SetCapture(hwnd);
+            } else if (hwnd != nullptr && ::GetCapture() == hwnd) {
+                ::ReleaseCapture();
+            }
+        }
         handled = true;
         return 0;
     }
@@ -1048,6 +1064,13 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         const float x = static_cast<float>(GET_X_LPARAM(lParam));
         const float y = static_cast<float>(GET_Y_LPARAM(lParam));
         state->ui->onMouseButtonUp(x, y, 0);
+        if (state->devices != nullptr) {
+            HWND hwnd = static_cast<HWND>(
+                state->devices->window().getWindowHandle());
+            if (hwnd != nullptr && ::GetCapture() == hwnd) {
+                ::ReleaseCapture();
+            }
+        }
         handled = true;
         return 0;
     }

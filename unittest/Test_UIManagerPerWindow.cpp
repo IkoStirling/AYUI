@@ -11,6 +11,8 @@
 
 #include "AYTest.h"
 #include "AYUIManager.h"
+#include "AYWidget.h"
+#include "AYButton.h"
 #include "AYMockRenderer.h"
 
 using namespace ayt::ui;
@@ -97,6 +99,57 @@ TEST_CASE(test_focus_isolation_between_managers) {
 
     b.shutdown();
     a.shutdown();
+}
+
+// -------------------------------------------------------------------------
+// 3. Canvas root must be CompoundWidget so promote/addChild hosts receive
+//    clicks (plain Widget paints children but hitTest never descends —
+//    child HWND still eats OS input → "blocks primary + dead child UI").
+// -------------------------------------------------------------------------
+TEST_CASE(test_canvas_root_compound_hit_descends) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(200.0f, 100.0f);
+
+    CHECK(dynamic_cast<CompoundWidget*>(ui.root()) != nullptr);
+
+    auto* btn = new Button();
+    btn->setId("child_btn");
+    btn->setPosition(ayt::math::FVector2(10.0f, 10.0f));
+    btn->setSize(ayt::math::FVector2(80.0f, 30.0f));
+    bool clicked = false;
+    btn->setOnClicked([&clicked]() { clicked = true; });
+    ui.root()->addChild(btn);
+    ui.layout();
+
+    CHECK(ui.onMouseButtonDown(40.0f, 25.0f, 0));
+    CHECK(ui.onMouseButtonUp(40.0f, 25.0f, 0));
+    CHECK(clicked);
+
+    ui.shutdown();
+}
+
+// -------------------------------------------------------------------------
+// 4. makeActive restores the primary after a secondary initialize() claim
+//    (mirrors GalleryChildWindows / EditorChildWindowManager promote).
+// -------------------------------------------------------------------------
+TEST_CASE(test_make_active_restores_primary_after_child_init) {
+    MockRenderer backendA;
+    MockRenderer backendB;
+    UIManager primary;
+    UIManager child;
+    primary.initialize(&backendA);
+    CHECK(UIManager::tryGet() == &primary);
+
+    child.initialize(&backendB);
+    CHECK(UIManager::tryGet() == &child);
+
+    UIManager::makeActive(&primary);
+    CHECK(UIManager::tryGet() == &primary);
+
+    child.shutdown();
+    primary.shutdown();
 }
 
 TEST_SUITE_END

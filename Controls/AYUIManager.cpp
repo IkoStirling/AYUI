@@ -268,6 +268,10 @@ UIManager::ActiveScope UIManager::pushActive(UIManager* next) {
     return ActiveScope(next);
 }
 
+void UIManager::makeActive(UIManager* manager) {
+    g_activeUIManager = manager;
+}
+
 UIManager& UIManager::get() {
     if (g_activeUIManager != nullptr) {
         return *g_activeUIManager;
@@ -367,8 +371,14 @@ void UIManager::initialize(IRenderBackend* backend) {
     // Canvas root for hosts/tests that attach widgets without loadFromString.
     // Without this, `um.root()->addChildExternal(...)` is nullptr UB and can
     // "pass" CHECKs then SEGV later in batch (corrupt heap / static teardown).
+    //
+    // MUST be CompoundWidget — plain Widget::hitTest never descends, so a
+    // promoted DockCard (or any addChild without loadLayout) paints via
+    // renderChildren but never receives clicks. The child HWND still eats
+    // OS mouse input → "blocks the main window and its own UI is dead".
+    // loadLayout replaces this root with the JSON tree (also compound).
     if (_root == nullptr) {
-        _root = new Widget();
+        _root = new CompoundWidget();
         _root->setPosition(math::FVector2(0.0f, 0.0f));
         _root->setSize(math::FVector2(0.0f, 0.0f));
     }
@@ -713,6 +723,8 @@ void UIManager::setClientSize(float width, float height) {
 }
 
 void UIManager::update(float dt) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     if (Widget* reloaded = _loader.tryReload()) {
         // R-7: cancel any in-flight mouse capture BEFORE destroying the
         // tree. The captured widget (typically a Window being dragged) is
@@ -847,6 +859,8 @@ void UIManager::populateFrame() {
     if (!_backend || !_root) {
         return;
     }
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
 
     _backend->beginFrame();
     math::FRectangle viewport(0.0f, 0.0f, _clientWidth, _clientHeight);
@@ -873,6 +887,8 @@ void UIManager::flushFrame() {
     if (!_backend || !_root) {
         return;
     }
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
 
     // AI-1: flushBatches() removed here (moved to UIPass::execute).
     // endCanvas + endFrame remain — endFrame() inside the backend
@@ -1186,6 +1202,17 @@ bool UIManager::onMouseMove(float x, float y) {
         return false;
     }
 
+    // D5 multi-window invariant (see AYUIManager.h:39-56): input/update
+    // dispatch runs with THIS manager as g_activeUIManager, so widget-side
+    // tryGet() (DockCard::beginDrag, ComboBox/Menu popup mounts, ListView
+    // modifier reads, Tooltip ticks, ...) resolves to the manager that
+    // actually received the event. A promoted child window's initialize()
+    // re-points g_activeUIManager at the child; without this guard the
+    // PRIMARY's card drags would begin sessions inside the child manager
+    // (ghost renders in the child window, child clicks get swallowed by
+    // the phantom session via the drag-active short-circuit below).
+    const ActiveScope selfGuard(this);
+
     _lastMouseX = x;
     _lastMouseY = y;
     _hasLastMouse = true;
@@ -1262,6 +1289,8 @@ bool UIManager::onMouseWheel(float x, float y, float deltaY) {
     if (!_root) {
         return false;
     }
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     const math::FVector2 pos(x, y);
     Widget* hit = pickTopmostWidget(pos);
     if (hit == nullptr) {
@@ -1282,6 +1311,8 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
     if (!_root) {
         return false;
     }
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
 
     // G12 — drag-active short-circuit. If a drag is in progress and the
     // user presses a button, treat it as an explicit end-of-drag (e.g.
@@ -1369,6 +1400,8 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
 }
 
 bool UIManager::onMouseButtonUp(float x, float y, int button) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     // Phase A (A2): the click-outside detector already fired in
     // onMouseButtonDown; we only need to deliver the up to whatever was
     // captured (or whatever's under the cursor). When _root is null we
@@ -1620,15 +1653,6 @@ bool UIManager::endDrag(bool accepted) {
     const bool  hadTarget = (target != nullptr);
     g_lastDragHadDropTarget = hadTarget;
 
-    dockTrace(
-        "[dock] endDrag accepted=%d hadTarget=%d target=%s source=%s "
-        "kind=%s pos=(%.1f,%.1f)\n",
-        accepted ? 1 : 0, hadTarget ? 1 : 0,
-        target ? target->getId().c_str() : "(null)",
-        source ? source->getId().c_str() : "(null)",
-        payload.kind.c_str(),
-        _dragSession.lastMousePos.x, _dragSession.lastMousePos.y);
-
     if (target != nullptr) {
         target->setCurrentDropTarget(false);
     }
@@ -1829,6 +1853,8 @@ bool UIManager::isTextEditing(Widget* w) {
 }
 
 bool UIManager::onKeyDown(int keyCode) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     // Phase B (S3) keyboard nav — modifier tracking + Tab interception
     // happen BEFORE delegating to the focused widget. Widgets must NOT
     // see modifier keys or Tab (TextInput.swallow Tab defensively too).
@@ -1916,6 +1942,8 @@ bool UIManager::onKeyDown(int keyCode) {
 }
 
 bool UIManager::onKeyUp(int keyCode) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     if (keyCode == UIKey_Shift || keyCode == UIKey_Control || keyCode == UIKey_Alt) {
         const uint32_t bit = 1u << (keyCode - UIKey_Shift);
         _modifiers &= ~bit;
@@ -1926,6 +1954,8 @@ bool UIManager::onKeyUp(int keyCode) {
 }
 
 bool UIManager::onTextInput(wchar_t ch) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     if (_focusedWidget == nullptr) return false;
     return _focusedWidget->onTextInput(ch);
 }
@@ -1957,6 +1987,8 @@ bool UIManager::onDeviceKeyUp(::ayt::device::KeyCode kc) {
 // =============================================================================
 
 bool UIManager::onDeviceChar(const char* utf8, int byteCount) {
+    // D5 self-active — see the onMouseMove guard comment.
+    const ActiveScope selfGuard(this);
     // Empty/null payload is a no-op (some platforms emit zero-length
     // chunks; we don't want to fire onTextInput with nothing).
     if (utf8 == nullptr || byteCount <= 0) return false;
