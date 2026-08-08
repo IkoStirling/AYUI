@@ -206,10 +206,11 @@
                       "id": "card_center",
                       "title": "Center",
                       "floatable": true,
-                      "headerHeight": 28,
+                      "headerHeight": 22,
                       "content": {
                         "type": "Panel",
                         "id": "dock_center_body",
+                        "padding": { "left": 8, "top": 6, "right": 8, "bottom": 6 },
                         "children": [
                           { "type": "TextLabel", "id": "dock_center_lbl", "text": "Center hole - check opaque fill vs chrome", "size": { "w": 360, "h": 24 } }
                         ]

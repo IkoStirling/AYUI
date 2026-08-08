@@ -33,6 +33,7 @@
 #include "AYModalDialog.h"
 #include "AYDimmer.h"
 #include "AYSplitterHandle.h"
+#include "AYDockTrace.h"
 #include "aymath/MathUtils.h"
 #include "AYWidgetFactory.h"
 
@@ -225,10 +226,18 @@ namespace {
 // Not a owning singleton — callers still construct UIManager on the stack
 // or as a member; get() just routes popup helpers to that instance.
 UIManager* g_activeUIManager = nullptr;
+
+// Out-of-line so UIManager's sizeof/layout stays stable across rebuilds
+// of dependents (see lastDragHadDropTarget() docstring).
+bool g_lastDragHadDropTarget = false;
 } // namespace
 
 UIManager* UIManager::tryGet() {
     return g_activeUIManager;
+}
+
+bool UIManager::lastDragHadDropTarget() const {
+    return g_lastDragHadDropTarget;
 }
 
 // =============================================================================
@@ -879,7 +888,10 @@ Widget* UIManager::findById(const std::string& id) const {
 }
 
 math::FVector2 UIManager::getDragLastMousePos() const {
-    if (_dragSession.active) {
+    // endDrag clears `active` before onDrop/onDragEnd but keeps
+    // `source` until those callbacks return — prefer the session's
+    // last cursor so DockArea hit-tests the real drop point.
+    if (_dragSession.active || _dragSession.source != nullptr) {
         return _dragSession.lastMousePos;
     }
     if (_hasLastMouse) {
@@ -1361,6 +1373,15 @@ bool UIManager::onMouseButtonUp(float x, float y, int button) {
     // onMouseButtonDown; we only need to deliver the up to whatever was
     // captured (or whatever's under the cursor). When _root is null we
     // can still update hover state but there's nothing to forward to.
+    _lastMouseX = x;
+    _lastMouseY = y;
+    _hasLastMouse = true;
+    if (_dragSession.active) {
+        // Final hit-test at the release point — without this, currentTarget
+        // is stuck on the last move and a same-slot / retarget drop can
+        // miss DockArea::onDrop entirely (or use a stale target).
+        updateDrag(x, y);
+    }
     math::FVector2 pos(x, y);
     Widget* target = _capturedWidget != nullptr ? _capturedWidget : pickTopmostWidget(pos);
     _capturedWidget = nullptr;
@@ -1495,13 +1516,17 @@ bool UIManager::beginDrag(Widget* source) {
     }
     _dragSession.active        = true;
     _dragSession.source        = source;
-    _dragSession.payload       = source->getDragPayload();
     _dragSession.currentTarget = nullptr;
     _dragSession.lastMousePos  = math::FVector2(0.0f, 0.0f);
+    g_lastDragHadDropTarget    = false;
 
     if (source->_onDragStart) {
         source->_onDragStart();
     }
+    // Re-read AFTER onDragStart so hosts can refresh kind/text/data
+    // (DockCard stamps payload.data = this there). Pre-stamp before
+    // beginDrag remains required for the empty-payload gate.
+    _dragSession.payload = source->getDragPayload();
     ensureGhostCreated();
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(true);
@@ -1533,12 +1558,20 @@ void UIManager::updateDrag(float x, float y) {
 
     // Walk up from the hit widget to find the nearest accepting
     // ancestor. Skipping the source's own subtree (we don't allow
-    // dragging onto ourselves — Qt behavior).
+    // dragging onto ourselves — Qt behavior). Also ignore the drag
+    // ghost (lives on the overlay root and must not steal the drop).
     Widget* hit = pickTopmostWidget(math::FVector2(x, y));
+    if (hit == _dragGhost) {
+        hit = pickWidgetAt(_root, math::FVector2(x, y));
+    }
     Widget* newTarget = nullptr;
     Widget* w = hit;
     while (w != nullptr) {
         if (w == _root) break;   // don't target the root directly
+        if (w == _dragGhost) {
+            w = w->getParent();
+            continue;
+        }
         if (w->isAcceptDrops()) {
             newTarget = w;
             break;
@@ -1577,20 +1610,30 @@ void UIManager::updateDrag(float x, float y) {
 bool UIManager::endDrag(bool accepted) {
     if (!_dragSession.active) return false;
 
-    // Snapshot, then CLEAR session before onDrop so a crashing drop
-    // handler cannot leave a sticky ghost (payload text residue).
+    // Snapshot target/payload; keep `source` alive through onDrop /
+    // onDragEnd so DockArea can resolve getDragSource() (header contract)
+    // and DockCard can promote on void-drop. Hide the ghost and mark
+    // inactive first so isDragging() is false during callbacks.
     Widget*     source = _dragSession.source;
     Widget*     target = _dragSession.currentTarget;
     DragPayload payload = _dragSession.payload;
     const bool  hadTarget = (target != nullptr);
+    g_lastDragHadDropTarget = hadTarget;
+
+    dockTrace(
+        "[dock] endDrag accepted=%d hadTarget=%d target=%s source=%s "
+        "kind=%s pos=(%.1f,%.1f)\n",
+        accepted ? 1 : 0, hadTarget ? 1 : 0,
+        target ? target->getId().c_str() : "(null)",
+        source ? source->getId().c_str() : "(null)",
+        payload.kind.c_str(),
+        _dragSession.lastMousePos.x, _dragSession.lastMousePos.y);
 
     if (target != nullptr) {
         target->setCurrentDropTarget(false);
     }
     _dragSession.active        = false;
-    _dragSession.source        = nullptr;
     _dragSession.currentTarget = nullptr;
-    _dragSession.payload       = DragPayload{};
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(false);
     }
@@ -1598,15 +1641,28 @@ bool UIManager::endDrag(bool accepted) {
     if (target != nullptr) {
         if (accepted && target->_onDrop) {
             target->_onDrop(payload);
+        } else {
+            dockTrace("[dock] endDrag skip onDrop accepted=%d hasCb=%d\n",
+                      accepted ? 1 : 0, target->_onDrop ? 1 : 0);
         }
         if (target->_onDragLeave) {
             target->_onDragLeave();
         }
+    } else {
+        dockTrace("[dock] endDrag NO drop target — void drop path\n");
     }
 
+    // PR-Dock-TearOff: report plain `accepted` (Esc/cancel → false, mouse
+    // up → true), NOT `accepted && hadTarget`. A drag released over no
+    // accepting target is a legitimate "I dropped it in the void" signal —
+    // DockCard uses it to promote the card to a host window. Previously
+    // the void-drop collapsed to false and was indistinguishable from Esc.
     if (source != nullptr && source->_onDragEnd) {
-        source->_onDragEnd(accepted && hadTarget);
+        source->_onDragEnd(accepted);
     }
+
+    _dragSession.source  = nullptr;
+    _dragSession.payload = DragPayload{};
 
     // Dock float/hide changes slot weights without resizing the client.
     if (accepted && hadTarget) {

@@ -4,8 +4,12 @@
 #include "AYBox.h"
 #include "IAYRenderBackend.h"
 #include "AYUIManager.h"
+#include "AYDockTrace.h"
 
 #include <algorithm>
+#include <string>
+#include <typeinfo>
+#include <vector>
 
 namespace ayt::ui {
 
@@ -14,8 +18,16 @@ namespace {
 // Returns the slot's "weight" used by the layout pass when the host
 // hasn't called setSlotWeight. Stored default values are in the header;
 // this helper exists only to centralise the 0.0 = use-default rule.
+//
+// Near-zero weights (Gallery uses 1e-6 for Top/Bottom) mean "slot
+// disabled" — do NOT fall back to the defaults, or the invisible strip
+// still steals drops and the card collapses into a hairline band.
+constexpr float kSlotWeightDisabled = 1.0e-4f;
 float effectiveWeight(const DockArea& area, DockArea::Slot slot) {
     const float w = area.getSlotWeight(slot);
+    if (w > 0.0f && w < kSlotWeightDisabled) {
+        return 0.0f;
+    }
     if (w > 0.0f) {
         return w;
     }
@@ -29,6 +41,40 @@ float effectiveWeight(const DockArea& area, DockArea::Slot slot) {
         case DockArea::Slot::Center: return 0.55f;
         default: return 0.0f;
     }
+}
+
+const wchar_t* slotLabel(DockArea::Slot slot) {
+    switch (slot) {
+        case DockArea::Slot::Left:   return L"Left";
+        case DockArea::Slot::Right:  return L"Right";
+        case DockArea::Slot::Top:    return L"Top";
+        case DockArea::Slot::Bottom: return L"Bottom";
+        case DockArea::Slot::Center: return L"Center";
+        default: return L"?";
+    }
+}
+
+bool isDockCardDrag(UIManager* ui) {
+    return ui != nullptr
+        && ui->isDragging()
+        && ui->getDragPayload().kind == "DockCard";
+}
+
+bool dragBelongsToDock(const DockArea& area, UIManager* ui) {
+    if (!isDockCardDrag(ui)) {
+        return false;
+    }
+    if (DockCard* fromData = static_cast<DockCard*>(ui->getDragPayload().data)) {
+        if (!fromData->getId().empty() && area.findCard(fromData->getId()) != nullptr) {
+            return true;
+        }
+    }
+    if (DockCard* fromSrc = dynamic_cast<DockCard*>(ui->getDragSource())) {
+        if (!fromSrc->getId().empty() && area.findCard(fromSrc->getId()) != nullptr) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool slotHasVisibleCards(const DockArea& area, DockArea::Slot slot) {
@@ -79,6 +125,28 @@ SlotRegions computeSlotRegions(float w, float h, const float weights[5]) {
     return r;
 }
 
+// PR-Dock-SlotHighlight: the 5-region split with the SAME weight source
+// as hitTestSlot (configured weights via effectiveWeight — empty slots
+// stay valid drop targets even when performLayout collapses them). Used
+// by both hitTestSlot and getSlotRect so the highlight rect and the
+// hit-test stay in lockstep by construction.
+SlotRegions hitTestRegions(const DockArea& area) {
+    // Use live world-bounds size (not getSize alone). A stale/zero
+    // _size with a still-valid cached world rect produced "outer frame
+    // yes, every slot rect empty" in Gallery.
+    const math::FRectangle wb = area.getWorldBounds();
+    const float w = std::max(0.0f, wb.maxX - wb.minX);
+    const float h = std::max(0.0f, wb.maxY - wb.minY);
+    const float hitTestWeights[5] = {
+        effectiveWeight(area, DockArea::Slot::Top),
+        effectiveWeight(area, DockArea::Slot::Bottom),
+        effectiveWeight(area, DockArea::Slot::Left),
+        effectiveWeight(area, DockArea::Slot::Right),
+        effectiveWeight(area, DockArea::Slot::Center),
+    };
+    return computeSlotRegions(w, h, hitTestWeights);
+}
+
 void fillContainerChildren(Widget* container, float width, float height) {
     if (container == nullptr || width <= 0.0f || height <= 0.0f) {
         return;
@@ -101,6 +169,120 @@ void requestRelayout() {
 }
 
 } // namespace
+
+DockArea::DockArea() {
+    // The overlay is always present and a child of DockArea. Build
+    // it first so the rest of the constructor can call into it.
+    _overlay = new DockOverlay();
+    addChild(_overlay);
+
+    // Left/Right = VBox, Top/Bottom = HBox, Center = CompoundWidget
+    // (hitTest descends; NOT VBox — VBox reflows card to content height).
+    _slotContainers[(int)Slot::Left]   = new VBox();
+    _slotContainers[(int)Slot::Right]  = new VBox();
+    _slotContainers[(int)Slot::Top]    = new HBox();
+    _slotContainers[(int)Slot::Bottom] = new HBox();
+    _slotContainers[(int)Slot::Center] = new CompoundWidget();
+
+    for (int i = 0; i < (int)Slot::Count; ++i) {
+        if (_slotContainers[i]) {
+            if (auto* box = dynamic_cast<BoxBase*>(_slotContainers[i])) {
+                box->setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+                box->setSpacing(0.0f);
+            }
+            addChild(_slotContainers[i]);
+        }
+    }
+
+    setAcceptDrops(true);
+    setOnDragLeave([this]() {
+        _hoveredSlot = Slot::Count;
+        _hoveredOverlay = false;
+        markBoundsDirty();
+    });
+    setOnDrop([this](const DragPayload& payload) {
+        if (payload.kind != "DockCard") {
+            dockTrace("[dock] onDrop reject kind='%s' dock=%s\n",
+                      payload.kind.c_str(), getId().c_str());
+            return;
+        }
+        UIManager* ui = UIManager::tryGet();
+        if (ui == nullptr) {
+            dockTrace("[dock] onDrop no UIManager dock=%s\n", getId().c_str());
+            return;
+        }
+        DockCard* card = static_cast<DockCard*>(payload.data);
+        if (card == nullptr) {
+            card = dynamic_cast<DockCard*>(ui->getDragSource());
+        }
+        if (card == nullptr) {
+            dockTrace("[dock] onDrop null card dock=%s\n", getId().c_str());
+            return;
+        }
+        const std::string cardId = card->getId();
+        if (cardId.empty()) {
+            dockTrace("[dock] onDrop empty cardId dock=%s\n", getId().c_str());
+            return;
+        }
+
+        const math::FVector2 dropPos = ui->getDragLastMousePos();
+        const Slot targetSlot = hitTestSlot(dropPos);
+        const bool isDocked = (_cardIndex.find(cardId) != _cardIndex.end());
+        const bool sameSlot = isDocked && isCardInSlot(card, targetSlot);
+
+        const char* fromSlot = "?";
+        for (int i = 0; i < (int)Slot::Count; ++i) {
+            if (isCardInSlot(card, static_cast<Slot>(i))) {
+                fromSlot = dockSlotName(i);
+                break;
+            }
+        }
+
+        dockTrace(
+            "[dock] onDrop dock=%s card=%s from=%s target=%s "
+            "pos=(%.1f,%.1f) docked=%d sameSlot=%d floatCount=%zu "
+            "counts L=%zu C=%zu R=%zu\n",
+            getId().c_str(), cardId.c_str(), fromSlot,
+            dockSlotName((int)targetSlot), dropPos.x, dropPos.y,
+            isDocked ? 1 : 0, sameSlot ? 1 : 0,
+            _overlay ? _overlay->getFloatingCardCount() : 0u,
+            getCardCount(Slot::Left), getCardCount(Slot::Center),
+            getCardCount(Slot::Right));
+
+        if (isDocked) {
+            if (targetSlot != Slot::Count) {
+                // K-INV-D3-1: same-slot → no-op. Never floatCard here.
+                if (!sameSlot) {
+                    dockTrace("[dock] onDrop -> moveInSlot %s -> %s\n",
+                              fromSlot, dockSlotName((int)targetSlot));
+                    moveInSlot(cardId, targetSlot);
+                } else {
+                    dockTrace("[dock] onDrop -> same-slot NO-OP\n");
+                }
+            } else {
+                dockTrace("[dock] onDrop docked but target=Count (ignored)\n");
+            }
+        } else if (targetSlot != Slot::Count) {
+            dockTrace("[dock] onDrop -> dockCard into %s\n",
+                      dockSlotName((int)targetSlot));
+            dockCard(cardId, targetSlot);
+        } else if (hitTestOverlay(dropPos)) {
+            dockTrace("[dock] onDrop -> floatCard (overlay empty)\n");
+            floatCard(cardId, dropPos);
+        } else {
+            dockTrace("[dock] onDrop -> no action\n");
+        }
+
+        dockTrace(
+            "[dock] onDrop AFTER counts L=%zu C=%zu R=%zu float=%zu\n",
+            getCardCount(Slot::Left), getCardCount(Slot::Center),
+            getCardCount(Slot::Right),
+            _overlay ? _overlay->getFloatingCardCount() : 0u);
+        markBoundsDirty();
+    });
+
+    dockTrace("[dock] DockArea ctor cpp-body center=CompoundWidget\n");
+}
 
 DockArea::~DockArea() {
     // Clear bookkeeping aliases first — do not delete through them.
@@ -166,28 +348,20 @@ void DockArea::addCard(Slot slot, std::unique_ptr<DockCard> card) {
         }
     }
 
-    // Push the card into the slot's container. All 5 slots — including
-    // Center — route through their container so performLayout() can
-    // position the container and let the existing layout pass handle
-    // the inner card. (Center is a plain Widget, not a VBox; cards are
-    // direct children of that Widget.)
+    // Push the card into the slot's container (all five are BoxBase:
+    // Left/Right/Center = VBox, Top/Bottom = HBox).
     DockCard* raw = card.release();
     Widget* container = _slotContainers[(int)slot];
-    if (slot == Slot::Center) {
-        // Center hosts a single big panel (viewport). Detach from
-        // DockArea's children (if it was attached earlier by mistake)
-        // and re-parent under the Center container.
-        if (container) {
-            container->addChild(raw);
-        } else {
-            addChild(raw);
-        }
-    } else if (container) {
+    if (container) {
         if (auto* vbox = dynamic_cast<VBox*>(container)) {
             vbox->addWidget(raw);
         } else if (auto* hbox = dynamic_cast<HBox*>(container)) {
             hbox->addWidget(raw);
+        } else {
+            container->addChild(raw);
         }
+    } else {
+        addChild(raw);
     }
     _slotCards[(int)slot].push_back(raw);
     if (!id.empty()) {
@@ -252,25 +426,52 @@ DockCard* DockArea::getCard(Slot slot, size_t index) const {
 }
 
 void DockArea::onRender(IRenderBackend& renderer) {
+    // Slot/drop highlight is painted in render() AFTER children so
+    // opaque cards cannot cover it. onRender stays a no-op for chrome.
     AYUNREFERENCED_PARAM(renderer);
-    // D3 — drop-target highlight. Polls isCurrentDropTarget() per
-    // frame (cheap) and draws a generic outline over the DockArea
-    // bounds when active. Slot/overlay region-level highlighting
-    // would require either G12's onDragOver (not yet shipped) or
-    // UIManager exposing lastMousePos to drop targets; we accept the
-    // generic outline as good-enough visual feedback for v1.5.
-    // See K-INV-D3-8.
-    //
-    // The actual rect draw lives in a separate conditional so the
-    // common path (not dragging) skips the renderer call entirely.
-    // K-INV-D3-4 mirrors the F3 freecam isPointOnChrome contract:
-    // rendering must not add visual chrome that catches the raycast.
-    if (!isCurrentDropTarget()) {
+}
+
+void DockArea::paintDropGuide(IRenderBackend& renderer) {
+    // Only while a DockCard is being dragged, and only for the slot under
+    // the cursor — idle / foreign payloads paint nothing.
+    UIManager* ui = UIManager::tryGet();
+    if (!isDockCardDrag(ui)) {
         return;
     }
-    const math::FRectangle b = getWorldBounds();
-    renderer.drawBorderRect(b, math::FVector4(0.30f, 0.55f, 0.95f, 1.0f),
+    const Slot hover = hitTestSlot(ui->getDragLastMousePos());
+    if (hover == Slot::Count) {
+        return;
+    }
+
+    const math::FRectangle r = getSlotRect(hover);
+    if (r.maxX - r.minX < 2.0f || r.maxY - r.minY < 2.0f) {
+        return;
+    }
+
+    // Slot tint (low alpha so cards underneath stay readable).
+    math::FVector4 fill(0.25f, 0.55f, 0.95f, 0.28f);
+    switch (hover) {
+        case Slot::Left:   fill = math::FVector4(0.90f, 0.25f, 0.20f, 0.28f); break;
+        case Slot::Right:  fill = math::FVector4(0.20f, 0.40f, 0.95f, 0.28f); break;
+        case Slot::Center: fill = math::FVector4(0.20f, 0.75f, 0.35f, 0.28f); break;
+        case Slot::Top:    fill = math::FVector4(0.95f, 0.75f, 0.15f, 0.28f); break;
+        case Slot::Bottom: fill = math::FVector4(0.75f, 0.30f, 0.85f, 0.28f); break;
+        default: break;
+    }
+    renderer.drawRect(r, fill);
+    renderer.drawBorderRect(r, math::FVector4(fill.x, fill.y, fill.z, 0.85f),
                             2.0f, 0.0f);
+    renderer.drawText(r, slotLabel(hover), 14,
+                      math::FVector4(1.0f, 1.0f, 1.0f, 0.75f));
+}
+
+void DockArea::render(IRenderBackend& renderer) {
+    if (!isVisible()) {
+        return;
+    }
+    onRender(renderer);
+    renderChildren(renderer);
+    paintDropGuide(renderer);
 }
 
 void DockArea::performLayout() {
@@ -285,16 +486,17 @@ void DockArea::performLayout() {
     const float w = sz.x;
     const float h = sz.y;
 
-    // PR-Container-Shared-Contract: use computeSlotRegions for the 6-value
-    // arithmetic shared with hitTestSlot. Each call site still chooses
-    // its own weight source (layoutSlotWeight here, effectiveWeight in
-    // hitTestSlot) — only the arithmetic is shared.
+    // Same weight source as hitTestSlot / getSlotRect (effectiveWeight).
+    // Collapsing empty slots via layoutSlotWeight made visible cards fill
+    // neighboring hit bands (Left card painted under Top's hit strip →
+    // own-zone drop retargeted to Top). Keep configured bands so layout,
+    // hit-test, and the drop guide stay locked.
     const float layoutWeights[5] = {
-        layoutSlotWeight(*this, Slot::Top),
-        layoutSlotWeight(*this, Slot::Bottom),
-        layoutSlotWeight(*this, Slot::Left),
-        layoutSlotWeight(*this, Slot::Right),
-        layoutSlotWeight(*this, Slot::Center),
+        effectiveWeight(*this, Slot::Top),
+        effectiveWeight(*this, Slot::Bottom),
+        effectiveWeight(*this, Slot::Left),
+        effectiveWeight(*this, Slot::Right),
+        effectiveWeight(*this, Slot::Center),
     };
     const SlotRegions r = computeSlotRegions(w, h, layoutWeights);
     const float topH    = r.topH;
@@ -324,7 +526,11 @@ void DockArea::performLayout() {
     if (Widget* center = _slotContainers[(int)Slot::Center]) {
         center->setPosition(math::FVector2(leftW, midY));
         center->setSize(math::FVector2(centerW, midH));
-        fillContainerChildren(center, centerW, midH);
+        // Full-bleed the card AFTER any compoundDescendLayout pass —
+        // Center is CompoundWidget (not VBox) so it won't crush this size.
+        if (centerW > 0.0f && midH > 0.0f) {
+            fillContainerChildren(center, centerW, midH);
+        }
     }
     if (Widget* right = _slotContainers[(int)Slot::Right]) {
         right->setPosition(math::FVector2(leftW + centerW, midY));
@@ -339,6 +545,50 @@ void DockArea::performLayout() {
     if (_overlay) {
         _overlay->setPosition(math::FVector2(0.0f, 0.0f));
         _overlay->setSize(sz);
+    }
+
+    // Occasional layout dump for Gallery mini_dock (every ~60 layouts).
+    if (getId() == "mini_dock") {
+        static int s_layoutLog = 0;
+        if ((s_layoutLog++ % 60) == 0) {
+            Widget* center = _slotContainers[(int)Slot::Center];
+            const char* centerTy = "null";
+            if (center) {
+                if (dynamic_cast<VBox*>(center)) centerTy = "VBox";
+                else if (dynamic_cast<CompoundWidget*>(center) &&
+                         !dynamic_cast<VBox*>(center) &&
+                         !dynamic_cast<HBox*>(center))
+                    centerTy = "CompoundWidget";
+                else if (dynamic_cast<Widget*>(center) &&
+                         !dynamic_cast<CompoundWidget*>(center))
+                    centerTy = "Widget";
+                else centerTy = typeid(*center).name();
+            }
+            const math::FRectangle wb = getWorldBounds();
+            dockTrace(
+                "[dock] layout mini_dock world=(%.0f,%.0f)-(%.0f,%.0f) "
+                "centerType=%s sizes L=%.0fx%.0f C=%.0fx%.0f R=%.0fx%.0f "
+                "cards L=%zu C=%zu R=%zu float=%zu\n",
+                wb.minX, wb.minY, wb.maxX, wb.maxY, centerTy,
+                leftW, midH, centerW, midH, rightW, midH,
+                getCardCount(Slot::Left), getCardCount(Slot::Center),
+                getCardCount(Slot::Right),
+                _overlay ? _overlay->getFloatingCardCount() : 0u);
+            for (int si = 0; si < (int)Slot::Count; ++si) {
+                for (size_t ci = 0; ci < _slotCards[si].size(); ++ci) {
+                    DockCard* c = _slotCards[si][ci];
+                    if (!c) continue;
+                    const math::FRectangle cb = c->getWorldBounds();
+                    dockTrace(
+                        "[dock]   card '%s' in %s bounds=(%.0f,%.0f)-(%.0f,%.0f) "
+                        "size=%.0fx%.0f floatable=%d\n",
+                        c->getId().c_str(), dockSlotName(si),
+                        cb.minX, cb.minY, cb.maxX, cb.maxY,
+                        c->getSize().x, c->getSize().y,
+                        c->isFloatable() ? 1 : 0);
+                }
+            }
+        }
     }
 }
 
@@ -355,9 +605,12 @@ void DockArea::onChildRemoved(Widget* child) {
 // =============================================================================
 
 bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
+    dockTrace("[dock] floatCard ENTER dock=%s card=%s pos=(%.1f,%.1f)\n",
+              getId().c_str(), cardId.c_str(), pos.x, pos.y);
     if (!_overlay) return false;
     auto it = _cardIndex.find(cardId);
     if (it == _cardIndex.end()) {
+        dockTrace("[dock] floatCard FAIL not-in-index card=%s\n", cardId.c_str());
         return false;       // not in any slot — nothing to float
     }
     DockCard* card = it->second;
@@ -414,6 +667,9 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
     _hoveredOverlay = false;
     markBoundsDirty();
     requestRelayout();
+    dockTrace("[dock] floatCard OK card=%s fromSlot=%s floatCount=%zu\n",
+              cardId.c_str(), dockSlotName(oldSlotIdx),
+              _overlay->getFloatingCardCount());
     return true;
 }
 
@@ -442,6 +698,23 @@ bool DockArea::dockCard(const std::string& cardId, Slot target) {
     // DockOverlay::removeFloatingCard).
     _overlay->removeFloatingCard(card);
 
+    // Occupied target: float prior occupants instead of stacking
+    // (parity with moveInSlot's swap — floating inbound has no vacated
+    // slot to swap into).
+    if (!_slotCards[(int)target].empty()) {
+        const math::FRectangle tr = getSlotRect(target);
+        const math::FVector2 floatPos(tr.minX + 24.0f, tr.minY + 24.0f);
+        std::vector<std::string> displaceIds;
+        for (DockCard* c : _slotCards[(int)target]) {
+            if (c && !c->getId().empty()) {
+                displaceIds.push_back(c->getId());
+            }
+        }
+        for (const std::string& id : displaceIds) {
+            floatCard(id, floatPos);
+        }
+    }
+
     // Hand to addCard. addCard's `removeCard(id)` for last-write-wins
     // is a no-op here: the floating card was never inserted into
     // _cardIndex (addFloatingCard skips the index by design), so the
@@ -462,8 +735,11 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
     // the overlay. Caller is responsible for K-INV-D3-1 (same-slot no-op)
     // — the onDrop callback already pre-checks `isCardInSlot(card, target)`
     // so this function unconditionally reparents the card to `target`.
+    dockTrace("[dock] moveInSlot ENTER card=%s target=%s\n",
+              cardId.c_str(), dockSlotName((int)target));
     auto it = _cardIndex.find(cardId);
     if (it == _cardIndex.end()) {
+        dockTrace("[dock] moveInSlot FAIL not-docked card=%s\n", cardId.c_str());
         return false;   // not docked anywhere — nothing to move
     }
     if ((int)target < 0 || (int)target >= (int)Slot::Count) {
@@ -484,19 +760,28 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
     if (oldSlotIdx == (int)target) {
         // Same-slot no-op (K-INV-D3-1 safety net — the onDrop
         // pre-check should have caught this already).
+        dockTrace("[dock] moveInSlot same-slot no-op card=%s\n", cardId.c_str());
         return false;
     }
 
+    dockTrace("[dock] moveInSlot %s -> %s; targetOccupied=%zu\n",
+              dockSlotName(oldSlotIdx), dockSlotName((int)target),
+              _slotCards[(int)target].size());
+
+    auto detachCardFromContainer = [](DockCard* c) {
+        Widget* parent = c->getParent();
+        if (auto* vbox = dynamic_cast<VBox*>(parent)) {
+            vbox->removeWidget(c);
+        } else if (auto* hbox = dynamic_cast<HBox*>(parent)) {
+            hbox->removeWidget(c);
+        } else if (parent != nullptr) {
+            c->detachFromParent();
+        }
+    };
+
     // Detach from the old slot's container WITHOUT freeing. Reuse the
     // same dynamic_cast cascade as floatCard.
-    Widget* parent = card->getParent();
-    if (auto* vbox = dynamic_cast<VBox*>(parent)) {
-        vbox->removeWidget(card);
-    } else if (auto* hbox = dynamic_cast<HBox*>(parent)) {
-        hbox->removeWidget(card);
-    } else if (parent != nullptr) {
-        card->detachFromParent();
-    }
+    detachCardFromContainer(card);
 
     // Drop the old-slot entry from _slotCards; _cardIndex stays valid
     // (the card pointer didn't change).
@@ -505,9 +790,28 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
                     _slotCards[oldSlotIdx].end(), card),
         _slotCards[oldSlotIdx].end());
 
+    // Occupied target → swap: move prior occupants into the vacated
+    // slot. Side slots used to VBox-stack (Gallery Left+Right piled on
+    // one side); Center stacked full-bleed siblings. Swap keeps one
+    // card band per side and preserves draggable title bars.
+    if (!_slotCards[(int)target].empty()) {
+        std::vector<DockCard*> displaced = _slotCards[(int)target];
+        _slotCards[(int)target].clear();
+        for (DockCard* d : displaced) {
+            if (d == nullptr || d == card) {
+                continue;
+            }
+            dockTrace("[dock] moveInSlot SWAP displace '%s' -> %s\n",
+                      d->getId().c_str(), dockSlotName(oldSlotIdx));
+            detachCardFromContainer(d);
+            addCard(static_cast<Slot>(oldSlotIdx),
+                    std::unique_ptr<DockCard>(d));
+        }
+    }
+
     // Re-attach under the new slot's container. addCard's
     // removeCard-first safety net (last-write-wins) is a no-op here
-    // because the card pointer hasn't changed; the id-keyed
+    // because the card pointer didn't change; the id-keyed
     // _cardIndex lookup matches this card.
     addCard(target, std::unique_ptr<DockCard>(card));
 
@@ -515,54 +819,63 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
     _hoveredOverlay = false;
     markBoundsDirty();
     requestRelayout();
+    dockTrace(
+        "[dock] moveInSlot DONE counts L=%zu C=%zu R=%zu\n",
+        getCardCount(Slot::Left), getCardCount(Slot::Center),
+        getCardCount(Slot::Right));
     return true;
 }
 
 DockArea::Slot DockArea::hitTestSlot(const math::FVector2& worldPos) const {
-    // Mirror the region math in performLayout() — same weights, same
-    // order. If the slot containers haven't been laid out yet (their
-    // size is 0), we fall back to Slot::Count so the highlight is
-    // suppressed rather than pinned to a stale zero-size region.
-    const math::FVector2 sz = getSize();
-    if (sz.x <= 0.0f || sz.y <= 0.0f) {
+    // Same weight source as performLayout / getSlotRect (effectiveWeight).
+    // Regions are DockArea-local; mouse is world (Gallery nests under a
+    // padded VBox — local-only hits pinned every drop under Center).
+    const math::FRectangle wb = getWorldBounds();
+    if (wb.maxX - wb.minX <= 0.0f || wb.maxY - wb.minY <= 0.0f) {
         return Slot::Count;
     }
-    const float w = sz.x;
-    const float h = sz.y;
 
-    // Drop targeting uses configured weights so empty slots remain
-    // valid dock targets even when performLayout collapses them.
-    // PR-Container-Shared-Contract: same computeSlotRegions helper as
-    // performLayout. Only the weight source differs (effectiveWeight
-    // here vs layoutSlotWeight there) — the arithmetic is now shared.
-    const float hitTestWeights[5] = {
-        effectiveWeight(*this, Slot::Top),
-        effectiveWeight(*this, Slot::Bottom),
-        effectiveWeight(*this, Slot::Left),
-        effectiveWeight(*this, Slot::Right),
-        effectiveWeight(*this, Slot::Center),
-    };
-    const SlotRegions r = computeSlotRegions(w, h, hitTestWeights);
+    const math::FVector2 local(worldPos.x - wb.minX, worldPos.y - wb.minY);
+    const SlotRegions r = hitTestRegions(*this);
     const float midY    = r.midY;
     const float midH    = r.midH;
     const float leftW   = r.leftW;
     const float centerW = r.centerW;
 
-    // Test Top / Bottom first (full-width strips).
-    if (worldPos.y < midY) {
+    if (local.y < midY) {
         return Slot::Top;
     }
-    if (worldPos.y >= midY + midH) {
+    if (local.y >= midY + midH) {
         return Slot::Bottom;
     }
-    // Inside the middle row — split horizontally.
-    if (worldPos.x < leftW) {
+    if (local.x < leftW) {
         return Slot::Left;
     }
-    if (worldPos.x >= leftW + centerW) {
+    if (local.x >= leftW + centerW) {
         return Slot::Right;
     }
     return Slot::Center;
+}
+
+math::FRectangle DockArea::getSlotRect(Slot slot) const {
+    if ((int)slot < 0 || (int)slot >= (int)Slot::Count) {
+        return math::FRectangle();
+    }
+    const math::FRectangle wb = getWorldBounds();
+    const float szX = std::max(0.0f, wb.maxX - wb.minX);
+    const float szY = std::max(0.0f, wb.maxY - wb.minY);
+    const SlotRegions r = hitTestRegions(*this);
+    math::FRectangle local;
+    switch (slot) {
+        case Slot::Top:    local = math::FRectangle(0.0f, 0.0f, szX, r.topH); break;
+        case Slot::Bottom: local = math::FRectangle(0.0f, r.midY + r.midH, szX, szY); break;
+        case Slot::Left:   local = math::FRectangle(0.0f, r.midY, r.leftW, r.midY + r.midH); break;
+        case Slot::Center: local = math::FRectangle(r.leftW, r.midY, r.leftW + r.centerW, r.midY + r.midH); break;
+        case Slot::Right:  local = math::FRectangle(r.leftW + r.centerW, r.midY, szX, r.midY + r.midH); break;
+        default:           return math::FRectangle();
+    }
+    return math::FRectangle(wb.minX + local.minX, wb.minY + local.minY,
+                            wb.minX + local.maxX, wb.minY + local.maxY);
 }
 
 bool DockArea::hitTestOverlay(const math::FVector2& worldPos) const {

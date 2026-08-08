@@ -1,12 +1,26 @@
 #include "AYDockCard.h"
 #include "AYBox.h"
+#include "AYDockArea.h"
 #include "AYDockOverlay.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "AYUIManager.h"
 #include "AYDragDrop.h"
+#include "AYDockTrace.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace ayt::ui {
+
+namespace {
+
+// PR-Dock-TearOff — minimum press→release travel (Manhattan distance)
+// before a void-drop promotes the card to a host window. Guards against
+// accidental single clicks on the title bar popping a window.
+constexpr float kPromoteDragThreshold = 8.0f;
+
+} // namespace
 
 DockCard::DockCard() {
     // Default size matches a typical inspector / hierarchy panel.
@@ -22,9 +36,22 @@ DockCard::DockCard() {
     // constructed card is draggable. setFloatable(false) below mirrors
     // the flag to setDraggable(false) for K-INV-D3-2.
     setDraggable(true);
+    // PR-Dock-TearOff: stamp the payload UP FRONT. UIManager::beginDrag
+    // reads source->getDragPayload() BEFORE firing _onDragStart (see
+    // AYUIManager.cpp:1498), so the kind must be pre-set or
+    // DockArea::onDrop's `kind != "DockCard"` gate silently rejects
+    // EVERY drop (this was the "drag does nothing" symptom). The
+    // onDragStart rebuild below only refreshes the ghost title.
+    {
+        DragPayload p;
+        p.kind = "DockCard";
+        p.data = this;   // DockArea::onDrop prefers payload.data over getDragSource
+        setDragPayload(p);
+    }
     setOnDragStart([this]() {
         DragPayload p;
         p.kind = "DockCard";
+        p.data = this;
         // Ghost label shows the card title so the user sees what's
         // being dragged. UIManager copies the payload verbatim.
         p.text = _title;
@@ -38,7 +65,7 @@ DockCard::DockCard() {
         // location — but the simpler approach is to NOT pre-populate
         // userData here and let DockArea detect the "drag from own
         // slot" case via _cardIndex lookup at drop time. We therefore
-        // leave userData = 0 here; DockArea::onDrop uses payload.id
+        // leave userData = 0 here; DockArea::onDrop uses payload.data
         // and queries _cardIndex[id] for the current slot.
         p.userData = 0;
         setDragPayload(p);
@@ -49,6 +76,70 @@ DockCard::DockCard() {
         // keeps its slot position until the drop commits (moveInSlot /
         // floatCard / dockCard relocate it); a cancelled drag leaves it
         // exactly where it started. No onDragEnd restoration needed.
+    });
+    setOnDragEnd([this](bool accepted) {
+        // PR-Dock-TearOff: released over NO accepting target → promote
+        // the card to a host top-level window (IDE-style tear-off).
+        // Guards:
+        //   * accepted == false → Esc / cancel, card stays put
+        //   * no promote callback → host can't host (stays put)
+        //   * drag didn't actually move → a title-bar click without
+        //     movement must not pop a window
+        UIManager* ui = UIManager::tryGet();
+        const bool hadTarget = ui && ui->lastDragHadDropTarget();
+        dockTrace(
+            "[dock] onDragEnd card=%s accepted=%d promoteCb=%d hadTarget=%d\n",
+            getId().c_str(), accepted ? 1 : 0, _promoteCb ? 1 : 0,
+            hadTarget ? 1 : 0);
+        if (!accepted) {
+            return;
+        }
+        if (ui == nullptr || !_promoteCb) {
+            dockTrace("[dock] onDragEnd skip promote (no ui or no cb)\n");
+            return;
+        }
+        // Drop landed on an accepting target (DockArea etc.) — onDrop
+        // already relocated / no-op'd the card. Only void drops promote.
+        if (ui->lastDragHadDropTarget()) {
+            dockTrace("[dock] onDragEnd skip promote (had drop target)\n");
+            return;
+        }
+        const math::FVector2 dropPos = ui->getDragLastMousePos();
+        const float moved = std::fabs(dropPos.x - _dragStartPos.x)
+                          + std::fabs(dropPos.y - _dragStartPos.y);
+        if (moved < kPromoteDragThreshold) {
+            dockTrace("[dock] onDragEnd skip promote (moved=%.1f < thr)\n",
+                      moved);
+            return;
+        }
+        dockTrace("[dock] onDragEnd PROMOTE card=%s pos=(%.1f,%.1f)\n",
+                  getId().c_str(), dropPos.x, dropPos.y);
+        // Find the owning DockArea by walking the parent chain (the
+        // card sits in a slot VBox/HBox, or in the DockOverlay; both
+        // are DockArea children).
+        DockArea* dock = nullptr;
+        for (Widget* p = getParent(); p != nullptr; p = p->getParent()) {
+            if (auto* d = dynamic_cast<DockArea*>(p)) {
+                dock = d;
+                break;
+            }
+        }
+        if (dock == nullptr) {
+            return;
+        }
+        const std::string id = getId();
+        if (id.empty()) {
+            return;
+        }
+        // Slot-docked card → float to the release point first (the
+        // parent == DockOverlay gate in detachToOwnWindow requires a
+        // floating card). Already-floating card → floatCard no-ops and
+        // we promote in place.
+        dock->floatCard(id, dropPos);
+        // Host accepted → card detaches to the new window; rejected →
+        // it stays floating on the overlay (same as dropping on the
+        // overlay's empty area).
+        detachToOwnWindow();
     });
 }
 
@@ -118,18 +209,36 @@ void DockCard::setFloatable(bool f) {
 }
 
 void DockCard::performLayout() {
-    // Default to the CompoundFocusableWidget behavior (descend layout
-    // into children), then size _content to fit the body region below
-    // the header strip. Header is _headerHeight tall; content occupies
-    // (height - headerHeight) when not collapsed.
-    compoundDescendLayout(this);
-
+    // Size content FIRST, then descend. If compoundDescendLayout runs
+    // before the body inset, a full-bleed Center content child can keep a
+    // stale full-card rect for a frame and steal title-bar hits.
     const math::FVector2 sz = getSize();
     if (_content) {
-        const float bodyH = _collapsed ? 0.0f : (sz.y - _headerHeight);
+        const float bodyH = _collapsed ? 0.0f : std::max(0.0f, sz.y - _headerHeight);
         _content->setPosition(math::FVector2(0.0f, _headerHeight));
         _content->setSize(math::FVector2(sz.x, bodyH));
     }
+    compoundDescendLayout(this);
+}
+
+Widget* DockCard::hitTest(const math::FVector2& worldPos) {
+    if (!isVisible()) {
+        return nullptr;
+    }
+    const math::FRectangle bounds = getWorldBounds();
+    if (!bounds.contains(worldPos)) {
+        return nullptr;
+    }
+    if (_headerHeight > 0.0f) {
+        const math::FRectangle titleBar(
+            bounds.minX, bounds.minY,
+            bounds.maxX, bounds.minY + _headerHeight);
+        if (titleBar.contains(worldPos)) {
+            return this;
+        }
+    }
+    // Body / content — reverse-order children, then self.
+    return compoundDescendHitTest(this, worldPos);
 }
 
 void DockCard::onRender(IRenderBackend& renderer) {
@@ -217,6 +326,12 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
     );
 
     if (!titleBar.contains(e.mousePos)) {
+        dockTrace(
+            "[dock] titleDown MISS card=%s mouse=(%.1f,%.1f) "
+            "title=(%.1f,%.1f)-(%.1f,%.1f) bounds=(%.1f,%.1f)-(%.1f,%.1f)\n",
+            getId().c_str(), e.mousePos.x, e.mousePos.y,
+            titleBar.minX, titleBar.minY, titleBar.maxX, titleBar.maxY,
+            bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
         return false;
     }
 
@@ -229,12 +344,23 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
     // nullptr safely rather than asserting.
     if (UIManager* ui = UIManager::tryGet()) {
         if (ui->beginDrag(this)) {
+            // PR-Dock-TearOff: remember the press point so the void-drop
+            // promote path can enforce the movement threshold.
+            _dragStartPos = e.mousePos;
             // Bring the card to the front so the floating copy (if the
             // drop is on the overlay) doesn't render under another
             // floating card added earlier.
             bringToFront();
+            dockTrace(
+                "[dock] beginDrag OK card=%s mouse=(%.1f,%.1f) "
+                "titleH=%.1f parent=%s\n",
+                getId().c_str(), e.mousePos.x, e.mousePos.y, _headerHeight,
+                getParent() ? getParent()->getId().c_str() : "(null)");
             return true;
         }
+        dockTrace("[dock] beginDrag REJECTED card=%s\n", getId().c_str());
+    } else {
+        dockTrace("[dock] beginDrag no UIManager card=%s\n", getId().c_str());
     }
     return false;
 }

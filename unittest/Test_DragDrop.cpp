@@ -276,6 +276,36 @@ TEST_CASE(dragdrop_cancel_drag_does_not_fire_on_drop) {
 }
 
 // -----------------------------------------------------------------------------
+// 6b. PR-Dock-TearOff: endDrag(true) with NO accepting target under the
+//     cursor reports accepted=true to the source (a "void drop" — mouse
+//     up in empty space), distinct from Esc (cancelDrag → false).
+// -----------------------------------------------------------------------------
+TEST_CASE(dragdrop_end_drag_void_drop_fires_on_drag_end_true) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "x";
+    source.setDragPayload(p);
+    bool endAccepted = false;
+    source.setOnDragEnd([&endAccepted](bool accepted) { endAccepted = accepted; });
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK(ui.beginDrag(&source));
+    // Move over empty space — nothing accepts drops here.
+    ui.updateDrag(380.0f, 280.0f);
+    ui.endDrag(true);
+    CHECK_FALSE(ui.isDragging());
+    CHECK(endAccepted);   // void drop is still an accepted release
+}
+
+// -----------------------------------------------------------------------------
 // 7. Escape cancels an active drag session
 // -----------------------------------------------------------------------------
 TEST_CASE(dragdrop_escape_key_cancels_drag) {

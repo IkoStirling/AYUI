@@ -14,18 +14,13 @@ DockOverlay::DockOverlay() {
     // no direct setter; children added later already draw on top of
     // earlier siblings so insertion order is enough.
 
-    // D3 — drop-target wiring for the overlay. Dropping a card
-    // ON a floating card is a no-op (the card stays where it is);
-    // the design choice was made in plan §D3 ("drop on floating
-    // card = no-op", can be polished to stack-on-top later).
-    // Drops on the overlay's empty area are routed by G12 to the
-    // parent DockArea instead (overlay's hitTest pass-through means
-    // the parent-chain walk stops at DockArea, which IS the drop
-    // target for the empty-area case).
-    setAcceptDrops(true);
-    setOnDrop([](const DragPayload& /*payload*/) {
-        // Intentionally empty — see ctor comment above.
-    });
+    // Do NOT accept drops here. Overlay hitTest already pass-throughs
+    // empty area (nullptr) so G12 walks siblings/parent to DockArea.
+    // Accepting drops on the overlay made the parent-chain stop at
+    // Overlay whenever the cursor was over a floating card — DockArea
+    // never got onDrop (Gallery "drop does nothing"), and the empty
+    // onDrop below was a silent no-op.
+    setAcceptDrops(false);
 }
 
 DockOverlay::~DockOverlay() {

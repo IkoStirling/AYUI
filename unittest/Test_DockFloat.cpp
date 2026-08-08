@@ -31,6 +31,7 @@
 #include "AYMockRenderer.h"
 #include "UIKeyCode.h"
 
+#include <cmath>
 #include <memory>
 
 using namespace ayt::ui;
@@ -76,6 +77,13 @@ std::unique_ptr<DockCard> makeFloatCard(const std::string& id,
 bool simulateTitleBarClick(DockCard* card, FVector2 worldPos) {
     UIMouseEvent e(worldPos, 0); // button 0 = LMB
     return card->onMouseButtonDown(e);
+}
+
+// Title-bar point in world space after performLayout. (0,0)/(2,2) is
+// often Top-slot chrome once empty slots keep their configured weight.
+FVector2 titleBarPoint(DockCard* card) {
+    const FRectangle b = card->getWorldBounds();
+    return FVector2((b.minX + b.maxX) * 0.5f, b.minY + 4.0f);
 }
 
 } // namespace
@@ -181,14 +189,12 @@ TEST_CASE(test_esc_during_drag_cancels) {
     f.ui.getOverlayRoot()->addChildExternal(dock.get());
 
     dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
     DockCard* card = dock->findCard("console");
     CHECK(card != nullptr);
     if (card == nullptr) return;
 
-    // Click on the title bar at the card's top-left corner. DockArea
-    // is at world origin, card is the only child of Left VBox — its
-    // world position is (0, 0) and its title strip spans [0, 22).
-    const bool started = simulateTitleBarClick(card, FVector2(2.0f, 2.0f));
+    const bool started = simulateTitleBarClick(card, titleBarPoint(card));
     CHECK(started);
     CHECK(f.ui.isDragging());
 
@@ -214,11 +220,12 @@ TEST_CASE(test_drag_keeps_docked_copy_visible) {
     f.ui.getOverlayRoot()->addChildExternal(dock.get());
 
     dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
     DockCard* card = dock->findCard("console");
     CHECK(card != nullptr);
     if (card == nullptr) return;
 
-    const bool started = simulateTitleBarClick(card, FVector2(2.0f, 2.0f));
+    const bool started = simulateTitleBarClick(card, titleBarPoint(card));
     CHECK(started);
     CHECK(f.ui.isDragging());
 
@@ -247,12 +254,13 @@ TEST_CASE(test_non_floatable_card_ignores_drag) {
     cardU->setFloatable(false);
     DockCard* card = cardU.get();
     dock->addCard(DockArea::Slot::Left, std::move(cardU));
+    dock->performLayout();
 
     // setFloatable(false) should also clear setDraggable(false) so
     // beginDrag rejects at the source-side gate.
     CHECK_FALSE(card->isDraggable());
 
-    const bool started = simulateTitleBarClick(card, FVector2(2.0f, 2.0f));
+    const bool started = simulateTitleBarClick(card, titleBarPoint(card));
     CHECK_FALSE(started);
     CHECK_FALSE(f.ui.isDragging());
     CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
@@ -316,6 +324,449 @@ TEST_CASE(test_hit_test_slot_covers_all_five_regions) {
     CHECK(dock.hitTestSlot(FVector2(400.0f, 300.0f)) == DockArea::Slot::Center);
     // Middle-row Right (x >= 600).
     CHECK(dock.hitTestSlot(FVector2(700.0f, 300.0f)) == DockArea::Slot::Right);
+}
+
+// -------------------------------------------------------------------------
+// 7b. PR-Dock-SlotHighlight: getSlotRect regions contain exactly the
+//     points hitTestSlot maps to that slot (shared region math).
+// -------------------------------------------------------------------------
+TEST_CASE(test_get_slot_rect_matches_hit_test) {
+    DockArea dock;
+    dock.setSize(FVector2(800.0f, 600.0f));
+
+    struct Probe { FVector2 pos; DockArea::Slot slot; };
+    const Probe probes[] = {
+        { FVector2(400.0f, 30.0f),  DockArea::Slot::Top },
+        { FVector2(400.0f, 550.0f), DockArea::Slot::Bottom },
+        { FVector2(50.0f, 300.0f),  DockArea::Slot::Left },
+        { FVector2(400.0f, 300.0f), DockArea::Slot::Center },
+        { FVector2(700.0f, 300.0f), DockArea::Slot::Right },
+    };
+    for (const Probe& p : probes) {
+        const FRectangle r = dock.getSlotRect(p.slot);
+        CHECK(r.contains(p.pos));
+        CHECK(dock.hitTestSlot(p.pos) == p.slot);
+    }
+    // Invalid slot → empty rect.
+    CHECK(dock.getSlotRect(static_cast<DockArea::Slot>(99)).maxX
+          <= dock.getSlotRect(static_cast<DockArea::Slot>(99)).minX);
+}
+
+// -------------------------------------------------------------------------
+// 7c. PR-Dock-SlotHighlight: dragging a DockCard paints the slot region
+//     under the cursor (translucent fill + border), not just the generic
+//     outline. The fill's bounds must equal getSlotRect(Left) exactly.
+// -------------------------------------------------------------------------
+TEST_CASE(test_dockcard_drag_paints_slot_highlight) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("console");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    const FRectangle b = card->getWorldBounds();
+    const FVector2 titlePt((b.minX + b.maxX) * 0.5f, b.minY + 4.0f);
+    CHECK(simulateTitleBarClick(card, titlePt));
+    CHECK(f.ui.isDragging());
+
+    // Cursor over the LEFT slot region.
+    const FVector2 leftPt(b.minX + 20.0f, (b.minY + b.maxY) * 0.5f);
+    f.ui.onMouseMove(leftPt.x, leftPt.y);
+    CHECK(f.ui.getDragPayload().kind == "DockCard");
+    CHECK(dock->hitTestSlot(leftPt) == DockArea::Slot::Left);
+
+    f.backend.clear();
+    // Highlight paints in render() after children (not onRender).
+    dock->render(f.backend);
+
+    // Only the hovered slot (Left) gets a translucent fill matching
+    // getSlotRect(Left).
+    const FRectangle left = dock->getSlotRect(DockArea::Slot::Left);
+    bool foundHoverFill = false;
+    for (const auto& dc : f.backend.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Rect) {
+            continue;
+        }
+        if (std::fabs(dc.color.w - 0.28f) < 0.001f
+            && std::fabs(dc.bounds.minX - left.minX) < 0.5f
+            && std::fabs(dc.bounds.maxX - left.maxX) < 0.5f
+            && std::fabs(dc.bounds.minY - left.minY) < 0.5f
+            && std::fabs(dc.bounds.maxY - left.maxY) < 0.5f) {
+            foundHoverFill = true;
+            break;
+        }
+    }
+    CHECK(foundHoverFill);
+
+    // Cancel cleanly (Esc) so the session doesn't outlive the fixture;
+    // idle must paint no guide.
+    f.ui.onKeyDown(UIKey_Escape);
+    CHECK_FALSE(f.ui.isDragging());
+    f.backend.clear();
+    dock->paintDropGuide(f.backend);
+    CHECK(f.backend.getDrawCalls().empty());
+}
+
+// -------------------------------------------------------------------------
+// 7d. PR-Dock-SlotHighlight: non-DockCard payloads get no slot highlight
+//     (only the generic drop-target outline).
+// -------------------------------------------------------------------------
+TEST_CASE(test_non_dockcard_drag_gets_no_slot_highlight) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->performLayout();
+
+    // Plain draggable source with a non-DockCard payload.
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(10.0f, 10.0f));
+    DragPayload p;
+    p.kind = "file";
+    source.setDragPayload(p);
+    f.ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK(f.ui.beginDrag(&source));
+    f.ui.updateDrag(50.0f, 300.0f);
+    CHECK(f.ui.isDragging());
+
+    f.backend.clear();
+    dock->render(f.backend);
+
+    // Foreign payload must not paint a translucent slot guide.
+    const FRectangle left = dock->getSlotRect(DockArea::Slot::Left);
+    bool foundGuide = false;
+    for (const auto& dc : f.backend.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Rect) {
+            continue;
+        }
+        if (dc.color.w < 0.5f
+            && std::fabs(dc.bounds.minX - left.minX) < 0.01f
+            && std::fabs(dc.bounds.maxX - left.maxX) < 0.01f) {
+            foundGuide = true;
+            break;
+        }
+    }
+    CHECK_FALSE(foundGuide);
+
+    f.ui.endDrag(true);
+    CHECK_FALSE(f.ui.isDragging());
+}
+
+// -------------------------------------------------------------------------
+// 8. PR-Dock-TearOff: releasing a drag OUTSIDE the DockArea (no accepting
+//    target) promotes the card to a host window — the card is floated to
+//    the release point, then detachToOwnWindow hands it to the host.
+// -------------------------------------------------------------------------
+TEST_CASE(test_drag_outside_dock_promotes_to_host) {
+    DockFixture f;
+
+    // Smaller dock so the test can drag out of its bounds while staying
+    // inside the 800x600 client.
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(600.0f, 400.0f));
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->performLayout();
+
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
+    DockCard* card = dock->findCard("console");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    bool promoted = false;
+    std::string promotedId;
+    card->setPromoteCallback(
+        [&](const std::string& cardId, const std::wstring&,
+            int, int, int, int) -> bool {
+            promoted = true;
+            promotedId = cardId;
+            return true;   // host accepts
+        });
+
+    CHECK(simulateTitleBarClick(card, titleBarPoint(card)));
+    CHECK(f.ui.isDragging());
+
+    // Drag to a point OUTSIDE the DockArea (client is 800x600).
+    f.ui.onMouseMove(750.0f, 500.0f);
+    CHECK_FALSE(dock->isCurrentDropTarget());
+
+    // Release → void drop → promote.
+    f.ui.onMouseButtonUp(750.0f, 500.0f, 0);
+    CHECK_FALSE(f.ui.isDragging());
+    CHECK(promoted);
+    CHECK(promotedId == "console");
+    // Card left the slot (floated + detached to the host window).
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 0);
+    CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
+}
+
+// -------------------------------------------------------------------------
+// 8b. PR-Dock-TearOff: a title-bar CLICK without movement must NOT
+//     promote (movement threshold). The card stays docked.
+// -------------------------------------------------------------------------
+TEST_CASE(test_titlebar_click_without_drag_does_not_promote) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(600.0f, 400.0f));
+    // Match Gallery: disable Top/Bottom so a title click isn't classified
+    // as a Top-slot drop on mouse-up (updateDrag runs before endDrag).
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("console");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    int promoteCount = 0;
+    card->setPromoteCallback(
+        [&](const std::string&, const std::wstring&,
+            int, int, int, int) -> bool {
+            ++promoteCount;
+            return true;
+        });
+
+    const FRectangle b = card->getWorldBounds();
+    const FVector2 titlePt((b.minX + b.maxX) * 0.5f, b.minY + 4.0f);
+    CHECK(simulateTitleBarClick(card, titlePt));
+    CHECK(f.ui.isDragging());
+
+    // Release at the same spot — no travel → no promote.
+    f.ui.onMouseButtonUp(titlePt.x, titlePt.y, 0);
+    CHECK_FALSE(f.ui.isDragging());
+    CHECK(promoteCount == 0);
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
+}
+
+// -------------------------------------------------------------------------
+// 9. PR-Dock-TearOff regression: the G12 payload kind must reach
+//    DockArea::onDrop. beginDrag reads source->getDragPayload() BEFORE
+//    firing _onDragStart, so the card's ctor must pre-stamp
+//    kind="DockCard" — otherwise the kind gate silently rejects every
+//    drop (the "drag does nothing / can't change layout" symptom).
+// -------------------------------------------------------------------------
+TEST_CASE(test_drop_on_slot_moves_card_end_to_end) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("console");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    CHECK(simulateTitleBarClick(card, titleBarPoint(card)));
+    CHECK(f.ui.isDragging());
+
+    // Drag into the CENTER slot region and release.
+    f.ui.onMouseMove(400.0f, 300.0f);
+    f.ui.onMouseButtonUp(400.0f, 300.0f, 0);
+
+    CHECK_FALSE(f.ui.isDragging());
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 0);
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 1);
+    CHECK(dock->findCard("console") != nullptr);
+}
+
+// Same-slot drop must stay docked (K-INV-D3-1). Regression: onDrop used
+// to fall through to floatCard because hitTestOverlay covers the dock.
+TEST_CASE(test_same_slot_drop_keeps_card_docked) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("console");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    int promoteCount = 0;
+    card->setPromoteCallback(
+        [&](const std::string&, const std::wstring&,
+            int, int, int, int) -> bool {
+            ++promoteCount;
+            return true;
+        });
+
+    const FRectangle b = card->getWorldBounds();
+    const FVector2 titlePt((b.minX + b.maxX) * 0.5f, b.minY + 4.0f);
+    CHECK(simulateTitleBarClick(card, titlePt));
+    const FVector2 dropPt(b.minX + 20.0f, (b.minY + b.maxY) * 0.5f);
+    f.ui.onMouseMove(dropPt.x, dropPt.y);
+    CHECK(dock->hitTestSlot(dropPt) == DockArea::Slot::Left);
+    f.ui.onMouseButtonUp(dropPt.x, dropPt.y, 0);
+
+    CHECK_FALSE(f.ui.isDragging());
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
+    CHECK(promoteCount == 0);
+}
+
+// Center is single-occupant: moving Left→Center swaps the prior Center
+// card into Left instead of stacking full-rect siblings.
+TEST_CASE(test_move_into_center_swaps_occupant) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->performLayout();
+
+    dock->addCard(DockArea::Slot::Center, makeFloatCard("viewport", L"Center"));
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    CHECK(dock->moveInSlot("console", DockArea::Slot::Center));
+
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 1);
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock->isCardInSlot(dock->findCard("console"), DockArea::Slot::Center));
+    CHECK(dock->isCardInSlot(dock->findCard("viewport"), DockArea::Slot::Left));
+}
+
+// Opposite side with an occupant must swap, not VBox-stack both on one side.
+TEST_CASE(test_move_into_occupied_side_swaps) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->performLayout();
+
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Right, makeFloatCard("right", L"Right"));
+    CHECK(dock->moveInSlot("right", DockArea::Slot::Left));
+
+    CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock->getCardCount(DockArea::Slot::Right) == 1);
+    CHECK(dock->isCardInSlot(dock->findCard("right"), DockArea::Slot::Left));
+    CHECK(dock->isCardInSlot(dock->findCard("left"), DockArea::Slot::Right));
+}
+
+// After a swap into Center the incoming card must still receive title-bar
+// hits (regression: full-bleed content stole presses → undraggable).
+TEST_CASE(test_center_card_title_bar_hit_after_swap) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Center, makeFloatCard("viewport", L"Center"));
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    CHECK(dock->moveInSlot("console", DockArea::Slot::Center));
+    dock->performLayout();
+
+    DockCard* console = dock->findCard("console");
+    CHECK_NOT_NULL(console);
+    if (console == nullptr) return;
+
+    const FVector2 titlePt = titleBarPoint(console);
+    CHECK(console->hitTest(titlePt) == console);
+    CHECK(simulateTitleBarClick(console, titlePt));
+    CHECK(f.ui.isDragging());
+    f.ui.onKeyDown(UIKey_Escape);
+}
+
+// Gallery path: Center must be reachable through UIManager hit routing.
+// Plain Widget Center containers swallowed hits — direct DockCard::
+// onMouseButtonDown tests stayed green while Gallery stayed undraggable.
+TEST_CASE(test_center_card_drag_via_uimanager_hit) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Center, makeFloatCard("viewport", L"Center"));
+    dock->addCard(DockArea::Slot::Left, makeFloatCard("console", L"Console"));
+    CHECK(dock->moveInSlot("console", DockArea::Slot::Center));
+    dock->performLayout();
+
+    DockCard* console = dock->findCard("console");
+    CHECK_NOT_NULL(console);
+    if (console == nullptr) return;
+
+    const FVector2 titlePt = titleBarPoint(console);
+    CHECK(f.ui.onMouseButtonDown(titlePt.x, titlePt.y, 0));
+    CHECK(f.ui.isDragging());
+    CHECK(f.ui.getDragSource() == console);
+    f.ui.onKeyDown(UIKey_Escape);
+    CHECK_FALSE(f.ui.isDragging());
+}
+
+// Center card must fill the slot (no dead band under the title). VBox
+// Center reflowed the card to content height and left undraggable chrome.
+TEST_CASE(test_center_card_fills_slot_height) {
+    DockFixture f;
+
+    auto dock = std::make_unique<DockArea>();
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->addCard(DockArea::Slot::Center, makeFloatCard("viewport", L"Center"));
+    dock->performLayout();
+    // Second layout mimics UIManager::layout re-entrancy (compoundDescend
+    // then slot split) — VBox Center used to crush the card here.
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("viewport");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    const FRectangle slot = dock->getSlotRect(DockArea::Slot::Center);
+    const FRectangle cb = card->getWorldBounds();
+    CHECK(std::fabs((cb.maxY - cb.minY) - (slot.maxY - slot.minY)) < 1.0f);
+    CHECK(std::fabs(cb.minY - slot.minY) < 1.0f);
+}
+
+// Nested dock (Gallery page padding) — world mouse must map through
+// getWorldPosition(); local-only hit-test pinned every drop under Center.
+TEST_CASE(test_hit_test_slot_uses_world_origin) {
+    DockFixture f;
+    auto dock = std::make_unique<DockArea>();
+    dock->setPosition(FVector2(40.0f, 80.0f));
+    dock->setSize(FVector2(800.0f, 600.0f));
+    dock->setSlotWeight(DockArea::Slot::Top, 1e-6f);
+    dock->setSlotWeight(DockArea::Slot::Bottom, 1e-6f);
+    f.ui.getOverlayRoot()->addChildExternal(dock.get());
+    dock->performLayout();
+
+    // Local (50, 300) Left → world (90, 380). Top/Bottom disabled.
+    CHECK(dock->hitTestSlot(FVector2(90.0f, 380.0f)) == DockArea::Slot::Left);
+    CHECK(dock->hitTestSlot(FVector2(440.0f, 380.0f)) == DockArea::Slot::Center);
+
+    const FRectangle left = dock->getSlotRect(DockArea::Slot::Left);
+    CHECK(std::fabs(left.minX - 40.0f) < 0.01f);
+    CHECK(std::fabs(left.minY - 80.0f) < 0.5f);
+    CHECK(left.contains(FVector2(90.0f, 380.0f)));
 }
 
 TEST_SUITE_END

@@ -71,6 +71,10 @@ public:
 
     void onRender(IRenderBackend& renderer) override;
     void performLayout() override;
+    // Title-bar chrome claims hits before content children. Center-slot
+    // cards (full-bleed Panel content) otherwise lost title presses to a
+    // mis-sized child and became undraggable after a swap into Center.
+    Widget* hitTest(const math::FVector2& worldPos) override;
 
     // D3 — tear-off UX. The card's title bar becomes a drag handle that
     // tears the card off into a floating card. The actual G12 wiring lives
@@ -113,6 +117,12 @@ private:
 
     // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
     bool _titleBarHover = false;
+
+    // PR-Dock-TearOff — press position of the last accepted title-bar
+    // drag. The void-drop promote path (onDragEnd) compares it against
+    // the release position so a click-without-movement never pops a
+    // host window.
+    math::FVector2 _dragStartPos = math::FVector2(0.0f, 0.0f);
 
     // D5.5 — promotion hook. Default empty (detachToOwnWindow no-ops).
     PromoteCallback _promoteCb;

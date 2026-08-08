@@ -5,6 +5,7 @@
 #include "AYDockOverlay.h"
 #include "AYUIManager.h"
 #include "AYDockCard.h"
+#include "AYDockTrace.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -33,100 +34,12 @@ public:
         Count
     };
 
-    DockArea() {
-        // The overlay is always present and a child of DockArea. Build
-        // it first so the rest of the constructor can call into it.
-        _overlay = new DockOverlay();
-        addChild(_overlay);
-
-        // Create one VBox / HBox per slot. Left + Right are vertical
-        // stacks (VBox), Top + Bottom are horizontal strips (HBox),
-        // Center is a plain Widget that hosts a single large child.
-        // The containers are heap-allocated AND attached as children
-        // so destroyWidgetTree(Widget*) tears them down — we never
-        // own them via unique_ptr.
-        _slotContainers[(int)Slot::Left]  = new VBox();
-        _slotContainers[(int)Slot::Right] = new VBox();
-        _slotContainers[(int)Slot::Top]   = new HBox();
-        _slotContainers[(int)Slot::Bottom]= new HBox();
-        _slotContainers[(int)Slot::Center]= new Widget();
-
-        for (int i = 0; i < (int)Slot::Count; ++i) {
-            if (_slotContainers[i]) {
-                addChild(_slotContainers[i]);
-            }
-        }
-
-        // D3 — drop-target wiring. DockArea is the single G12 drop
-        // target for the dock tree; sub-containers (VBox/HBox slot
-        // containers, individual DockCards) stay setAcceptDrops(false)
-        // so UIManager::updateDrag's parent-chain walk finds DockArea
-        // directly.
-        //
-        // Card-id resolution at onDrop time uses
-        // UIManager::tryGet()->getDragSource() — the source pointer
-        // is still alive in _dragSession.source when onDrop fires
-        // (UIManager nulls it AFTER the callback returns;
-        // see AYUIManager.cpp:1282-1293). K-INV-D3-6 landmine
-        // workaround: payload.data / userData weren't expressive
-        // enough for a std::string id without manual lifetime dance,
-        // so we read the source from UIManager instead.
-        //
-        // K-INV-D3-8 highlight limitation: G12 has no onDragOver
-        // callback and UIManager doesn't expose lastMousePos to the
-        // drop target, so per-frame slot/overlay hover tracking is
-        // out of scope for v1.5. The onDrop path uses _hoveredSlot /
-        // _hoveredOverlay (set by leave transitions and the drop's
-        // own hit-test). Visual highlight draws a generic "drop
-        // target active" outline when isCurrentDropTarget() polls
-        // true (see DockArea::onRender).
-        setAcceptDrops(true);
-        setOnDragLeave([this]() {
-            // Clear hover flags on leave. onDragEnter doesn't set
-            // them — we don't know the cursor position here.
-            _hoveredSlot = Slot::Count;
-            _hoveredOverlay = false;
-            markBoundsDirty();
-        });
-        setOnDrop([this](const DragPayload& payload) {
-            if (payload.kind != "DockCard") {
-                return;
-            }
-            UIManager* ui = UIManager::tryGet();
-            if (ui == nullptr) {
-                return;
-            }
-            Widget* src = ui->getDragSource();
-            DockCard* card = dynamic_cast<DockCard*>(src);
-            if (card == nullptr) {
-                return;
-            }
-            const std::string cardId = card->getId();
-            if (cardId.empty()) {
-                return;
-            }
-
-            const math::FVector2 dropPos = ui->getDragLastMousePos();
-            const Slot targetSlot = hitTestSlot(dropPos);
-            const bool isDocked = (_cardIndex.find(cardId) != _cardIndex.end());
-
-            if (isDocked) {
-                if (targetSlot != Slot::Count && !isCardInSlot(card, targetSlot)) {
-                    // Code-review 2026-08-02 #8: same-tree slot→slot
-                    // move, no overlay detour (the detour caused the
-                    // card to flash at dropPos before snapping into
-                    // the target slot). moveInSlot also handles
-                    // K-INV-D3-1 same-slot no-op as a no-op itself.
-                    moveInSlot(cardId, targetSlot);
-                } else if (hitTestOverlay(dropPos)) {
-                    floatCard(cardId, dropPos);
-                }
-            } else if (targetSlot != Slot::Count) {
-                dockCard(cardId, targetSlot);
-            }
-            markBoundsDirty();
-        });
-    }
+    // Ctor lives in AYDockArea.cpp — MUST NOT be inline in this header.
+    // Gallery constructs DockArea via WidgetFactory (AYWidgetFactory.cpp);
+    // an inline ctor meant drop/Center fixes only applied when that TU
+    // was rebuilt, which is why logs still showed centerType=Widget and
+    // same-slot floatCard with no onDrop trace.
+    DockArea();
 
 public:
 
@@ -191,6 +104,13 @@ public:
     DockOverlay* getOverlay() const { return _overlay; }
 
     void onRender(IRenderBackend& renderer) override;
+    // Paint drop highlight AFTER children so opaque DockCards cannot
+    // cover the pre-slot fill (Gallery "preslot matched but blocked").
+    void render(IRenderBackend& renderer) override;
+    // Translucent drop-zone for the slot under the cursor while a
+    // DockCard drag is active (no-op when idle). Hosts may call after
+    // tree render if DockArea::render was skipped by a container path.
+    void paintDropGuide(IRenderBackend& renderer);
     void performLayout() override;
 
     // =================================================================
@@ -221,6 +141,12 @@ public:
     // if none. Mirrors the region math in performLayout() so the
     // drop-zone highlight stays in lockstep with the layout pass.
     Slot hitTestSlot(const math::FVector2& worldPos) const;
+
+    // PR-Dock-SlotHighlight: the world-space rect of a slot's drop
+    // region, using the SAME weights as hitTestSlot (configured
+    // weights, not layout weights) so the pre-slot highlight paints
+    // exactly where a drop would land. Slot::Count → empty rect.
+    math::FRectangle getSlotRect(Slot slot) const;
 
     // True if `worldPos` is inside the overlay's bounds but not on any
     // floating card. K-INV-D3-4 (DockOverlay pass-through) requires

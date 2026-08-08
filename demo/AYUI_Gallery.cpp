@@ -38,6 +38,8 @@
 #include "AYTooltip.h"
 #include "AYWindow.h"
 #include "AYWidget.h"
+#include "AYDockArea.h"
+#include "AYDockTrace.h"
 
 #include "AYUIRenderBackend.h"
 #include "AYRenderer.h"
@@ -197,6 +199,12 @@ void wireGallery(GalleryState& state)
     bindNav("nav_overlay", "page_overlay");
     bindNav("nav_layout", "page_layout");
     bindNav("nav_capabilities", "page_capabilities");
+
+    // In-UI build stamp (OS title / console are easy to miss). If Layout
+    // header doesn't contain this id, the running Gallery is stale.
+    if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(ui.findById("layout_hdr"))) {
+        hdr->setText(L"Layout - mini DockArea [DockArea-20260808c-CtorInCpp]");
+    }
 
     // --- Basics ---
     if (auto* btn = dynamic_cast<ayt::ui::Button*>(ui.findById("btn_disabled"))) {
@@ -783,6 +791,28 @@ bool loadAndWire(GalleryState& state)
     wireCapabilities(state);
     bindReload(state);
     std::fprintf(stderr, "[AYUI_Gallery] loaded %s\n", state.layoutPath.c_str());
+
+    // Unmistakable build fingerprint (console can be missed under WIN32).
+    // Window title + file next to cwd: if you don't see these, wrong exe.
+    constexpr const char* kDockBuildId =
+        "DockArea-20260808c-CtorInCpp";
+    std::fprintf(stderr, "[AYUI_Gallery] BUILD %s\n", kDockBuildId);
+    std::fprintf(stderr, "[AYUI_Gallery] dock trace log: %s\n",
+                 ayt::ui::dockTracePath());
+    ayt::ui::dockTrace("[gallery] ===== session start BUILD %s layout=%s =====\n",
+                       kDockBuildId, state.layoutPath.c_str());
+    if (FILE* stamp = std::fopen("ayui_gallery_build.txt", "w")) {
+        std::fprintf(stamp, "%s\nlayout=%s\ntrace=%s\n", kDockBuildId,
+                     state.layoutPath.c_str(), ayt::ui::dockTracePath());
+        std::fclose(stamp);
+    }
+    if (auto* dock = dynamic_cast<ayt::ui::DockArea*>(
+            state.ui->findById("mini_dock"))) {
+        (void)dock;
+        std::fprintf(stderr, "[AYUI_Gallery] mini_dock OK (%s)\n", kDockBuildId);
+    } else {
+        std::fprintf(stderr, "[AYUI_Gallery] mini_dock MISSING\n");
+    }
     return true;
 }
 
@@ -1140,7 +1170,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
-    cfg.window.title = "AYUI Gallery";
+    // Title carries the build id so a wrong/old exe is obvious without
+    // hunting the AllocConsole window.
+    cfg.window.title = "AYUI Gallery [DockArea-20260808c-CtorInCpp]";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg)) {
@@ -1294,7 +1326,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
                                      static_cast<uint16_t>(state.clientH));
         ui.update(dt); // caret blink, hover revalidate, hot-reload
         ui.layout();
-        ui.render(); // populateFrame + flushFrame (endFrame flushes text)
+        // Split populate/flush so DockArea drop guides paint AFTER the
+        // widget tree. Gallery's ScrollView path can skip the in-widget
+        // guide for mini_dock; host-side paint only while a DockCard drag
+        // is active (paintDropGuide itself also no-ops when idle).
+        ui.populateFrame();
+        if (ui.isDragging() && ui.getDragPayload().kind == "DockCard") {
+            if (auto* page = ui.findById("page_layout")) {
+                if (page->isVisible()) {
+                    if (auto* dock = dynamic_cast<ayt::ui::DockArea*>(
+                            ui.findById("mini_dock"))) {
+                        dock->paintDropGuide(uiBackend);
+                    }
+                }
+            }
+        }
+        ui.flushFrame();
 
         renderer.endFrame();
     }

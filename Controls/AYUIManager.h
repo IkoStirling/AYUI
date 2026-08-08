@@ -395,6 +395,13 @@ public:
     const DragPayload& getDragPayload() const  { return _dragSession.payload; }
     Widget*     getDragSource() const          { return _dragSession.source; }
     Widget*     getCurrentDropTarget() const   { return _dragSession.currentTarget; }
+    // Valid during onDragEnd (and until the next beginDrag): true if the
+    // just-ended drag had an accepting drop target. DockCard uses this so
+    // void-drop promote does not re-float a card that DockArea::onDrop
+    // already handled (including same-slot no-op). Stored out-of-line so
+    // adding the flag does not shift UIManager member layout (stale
+    // Gallery/AYUI mix would AV in registerTooltip's _tooltips).
+    bool        lastDragHadDropTarget() const;
 
     // G12 R3-safe parallel of clearFocus/Capture/HoverNoDispatch. If
     // `candidate` is the drag source or current target, drop the session
