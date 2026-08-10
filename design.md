@@ -813,7 +813,9 @@ Docking is a well-explored pattern. v1.5 borrows the **data shape** from Qt's `*
 
 ### 17.8 After DockArea (pointer)
 
-What to build once the dock tree is usable, and when **not** to start UI animation, are recorded in **[§19](#19-post-dockarea-sequencing--ui-animation-2026-08)**. Do not schedule animation work inside D1–D5 or the Phase-3 tree PRs.
+What to build once the dock tree is usable, and when **not** to start UI animation, are recorded in **[§19](#19-post-dockarea-sequencing--ui-animation-2026-08)**. Do not schedule animation work inside D1–D5 or the Phase-3/4 tree PRs.
+
+**Ship — dock-tree Phase 4 (D4 persistence, 2026-08-10, `c8bbaf9`):** the dock tree serializes/rebuilds itself via `DockArea::serializeDockTree()` / `applyDockTree()`. JSON shape: `{"version":1,"dockTree":{"orientation":"V|H","weights":[slot-size…],"children":[leaf|split…]},"floating":[{"id","x","y","w","h"}]}` — weights are each panel's slot size along the box main axis (0 = fill, splitters implicit between panels); leaves are `{"leaf":id,"tabs":[…],"active":id|null}`. **Card content is NOT serialized** — hosts recreate the cards before `applyDockTree` (Gallery `bindDockPersistence`: Save writes `gallery_dock_tree.json`, Load reads it and re-wires promote callbacks). `applyDockTree` pools every owned card (detach, no delete), destroys the old root, rebuilds per JSON (missing ids skipped; unreferenced cards float back staggered), restores active tabs, prunes empty g_N leaves, relayouts. Landmine fixed by round-trip UT: `serializeNode` must walk **`_slots` order** (stable-sort children by `slotIndexOf`) — `insertWidget` only reorders `_slots` while `addChild` appends the children vector, so `getChildren()` order diverges and weights misalign on apply.
 
 ---
 
@@ -908,8 +910,8 @@ The build config option `AY_ENABLE_ASAN` (root `CMakeLists.txt`, commit `3b912c2
 |------|--------|
 | Refactor R-1..R-10 + new-control C-1..C-12 | **Done** (widgets exist under `Controls/` / `Layout/`; inventory in §15.3 is historical — many "missing" rows are implemented) |
 | Capability depth (popup / keyboard / IME / chrome) | Tracked in `CONTROL_CAPABILITY_PLAN.md`; not a gate for finishing DockArea |
-| Docking §17 D1–D3 + dock-tree Phase 2/3 | **In progress** (pinned leaves, splitters, nested split / join / prune) |
-| Docking D4 / D5 | **Next** after the tree is green in `Test_DockTree` + Gallery |
+| Docking §17 D1–D3 + dock-tree Phase 2/3/4 | **Done** — pinned leaves, VBox/HBox splitters, nested split / join-as-tab / prune, `serializeDockTree`/`applyDockTree` persistence + Gallery Save/Load (`c8bbaf9`, 3493/3493 PASS) |
+| Docking D4 / D5 | **D4 core ships as Phase 4.** D5 (child-window re-dock polish) stays next; Gallery manual regression of the Phase 3/4 UX still pending |
 | UI animation | **Deferred** — see §19.2 |
 
 ### 19.2 When to do UI animation
