@@ -67,13 +67,35 @@ bool dragBelongsToDock(const DockArea& area, UIManager* ui) {
     if (!isDockCardDrag(ui)) {
         return false;
     }
+    auto cardBelongs = [&area](const DockCard* card) -> bool {
+        if (card == nullptr || card->getId().empty()) {
+            return false;
+        }
+        if (area.findCard(card->getId()) != nullptr) {
+            return true;
+        }
+        // Floating cards are erased from _cardIndex (K-INV-D3-7) but
+        // still belong to this dock — they live in its overlay. Without
+        // this check a floating-card redrop would be misclassified as
+        // EXTERNAL and take the legacy adoptCard path instead of the
+        // tree join/split dispatch.
+        const DockOverlay* ov = area.getOverlay();
+        if (ov != nullptr) {
+            for (size_t i = 0; i < ov->getFloatingCardCount(); ++i) {
+                if (ov->getFloatingCard(i) == card) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
     if (DockCard* fromData = static_cast<DockCard*>(ui->getDragPayload().data)) {
-        if (!fromData->getId().empty() && area.findCard(fromData->getId()) != nullptr) {
+        if (cardBelongs(fromData)) {
             return true;
         }
     }
     if (DockCard* fromSrc = dynamic_cast<DockCard*>(ui->getDragSource())) {
-        if (!fromSrc->getId().empty() && area.findCard(fromSrc->getId()) != nullptr) {
+        if (cardBelongs(fromSrc)) {
             return true;
         }
     }
@@ -206,6 +228,181 @@ SplitterHandle* makeTreeSplitter(SplitterHandle::Orientation orientation,
     return handle;
 }
 
+// ---- Phase 3 helpers ------------------------------------------------------
+
+// Recursive card lookup across the whole tree (pinned leaves AND
+// split-created g_N leaves). nullptr = card not in any leaf.
+DockTabGroup* findLeafInNode(Widget* node, DockCard* card) {
+    if (node == nullptr || card == nullptr) {
+        return nullptr;
+    }
+    if (auto* leaf = dynamic_cast<DockTabGroup*>(node)) {
+        return leaf->containsCard(card) ? leaf : nullptr;
+    }
+    if (auto* box = dynamic_cast<BoxBase*>(node)) {
+        for (Widget* c : box->getChildren()) {
+            if (DockTabGroup* f = findLeafInNode(c, card)) {
+                return f;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// Remove `leaf` (a heap object owned by the dock tree) from `box`
+// together with any directly adjacent splitter handles, then free them.
+// removeWidget detaches + rebinds; delete frees the heap node. Only
+// called for EMPTY non-pinned leaves — no cards to leak.
+void removeLeafAndNeighborSplitters(BoxBase* box, Widget* leaf) {
+    std::vector<Widget*> toRemove;
+    const std::vector<Widget*> kids = box->getChildren();
+    int li = -1;
+    for (int i = 0; i < static_cast<int>(kids.size()); ++i) {
+        if (kids[i] == leaf) {
+            li = i;
+            break;
+        }
+    }
+    if (li >= 0) {
+        if (li > 0 && kids[li - 1]->isSplitterHandle()) {
+            toRemove.push_back(kids[li - 1]);
+        }
+        if (li + 1 < static_cast<int>(kids.size())
+            && kids[li + 1]->isSplitterHandle()) {
+            toRemove.push_back(kids[li + 1]);
+        }
+    }
+    toRemove.push_back(leaf);
+    for (Widget* w : toRemove) {
+        box->removeWidget(w);
+        delete w;
+    }
+}
+
+// One bottom-up pass over the tree: drop empty non-pinned leaves (with
+// their adjacent splitters). Recursion order is safe: a child that gets
+// removed is gone from the next snapshot before the parent touches it.
+// Pinned leaves are never removed. Folding single-panel split nodes is
+// intentionally NOT implemented — the current tree shape (root
+// VBox{Top?, mid HBox, Bottom?}) always keeps ≥1 pinned leaf per box, so
+// a single-panel box is unreachable; revisit if Top/Bottom gain
+// pinned-less nesting.
+bool prunePass(Widget* node) {
+    auto* box = dynamic_cast<BoxBase*>(node);
+    if (box == nullptr) {
+        return false;
+    }
+    bool changed = false;
+    for (Widget* c : box->getChildren()) {
+        if (dynamic_cast<BoxBase*>(c) != nullptr) {
+            changed |= prunePass(c);
+        }
+    }
+    for (;;) {
+        Widget* victim = nullptr;
+        for (Widget* c : box->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && !leaf->isPinned()
+                && leaf->getTabCount() == 0) {
+                victim = c;
+                break;
+            }
+        }
+        if (victim == nullptr) {
+            break;
+        }
+        removeLeafAndNeighborSplitters(box, victim);
+        changed = true;
+    }
+    return changed;
+}
+
+// The 25%-edge band of a leaf used by split previews.
+math::FRectangle treeSplitBand(const math::FRectangle& r,
+                               DockArea::TreeDropZone z) {
+    const float w = r.maxX - r.minX;
+    const float h = r.maxY - r.minY;
+    switch (z) {
+        case DockArea::TreeDropZone::West:
+            return math::FRectangle(r.minX, r.minY, r.minX + w * 0.25f, r.maxY);
+        case DockArea::TreeDropZone::East:
+            return math::FRectangle(r.maxX - w * 0.25f, r.minY, r.maxX, r.maxY);
+        case DockArea::TreeDropZone::North:
+            return math::FRectangle(r.minX, r.minY, r.maxX, r.minY + h * 0.25f);
+        case DockArea::TreeDropZone::South:
+            return math::FRectangle(r.minX, r.maxY - h * 0.25f, r.maxX, r.maxY);
+        case DockArea::TreeDropZone::Join:
+        default:
+            return r;
+    }
+}
+
+const wchar_t* treeDropZoneLabel(DockArea::TreeDropZone z) {
+    switch (z) {
+        case DockArea::TreeDropZone::Join:  return L"Join Tabs";
+        case DockArea::TreeDropZone::West:  return L"Split Left";
+        case DockArea::TreeDropZone::East:  return L"Split Right";
+        case DockArea::TreeDropZone::North: return L"Split Above";
+        case DockArea::TreeDropZone::South: return L"Split Below";
+        default:                            return L"?";
+    }
+}
+
+// Phase-3 drop preview: join → translucent leaf fill + border; split →
+// 25% edge band + border + three direction ticks (ImGui style).
+// `zone` is precomputed by the caller (DockArea::resolveTreeDropZone).
+void paintTreeDropZone(IRenderBackend& renderer, const DockTabGroup* leaf,
+                       DockArea::TreeDropZone zone) {
+    const math::FRectangle r = leaf->getWorldBounds();
+    if (r.maxX - r.minX < 2.0f || r.maxY - r.minY < 2.0f) {
+        return;
+    }
+    const math::FVector4 joinFill(0.20f, 0.60f, 0.95f, 0.20f);
+    const math::FVector4 splitFill(0.95f, 0.80f, 0.25f, 0.30f);
+    const math::FVector4 tickColor(1.0f, 1.0f, 1.0f, 0.90f);
+
+    if (zone == DockArea::TreeDropZone::Join) {
+        renderer.drawRect(r, joinFill);
+        renderer.drawBorderRect(r, math::FVector4(0.20f, 0.60f, 0.95f, 0.75f),
+                                2.0f, 0.0f);
+        renderer.drawText(r, L"Join Tabs", 13,
+                          math::FVector4(1.0f, 1.0f, 1.0f, 0.85f));
+        return;
+    }
+
+    const math::FRectangle band = treeSplitBand(r, zone);
+    renderer.drawRect(band, splitFill);
+    renderer.drawBorderRect(
+        band, math::FVector4(0.95f, 0.80f, 0.25f, 0.90f), 2.0f, 0.0f);
+
+    // Three direction ticks along the band's center axis.
+    const float cx = (band.minX + band.maxX) * 0.5f;
+    const float cy = (band.minY + band.maxY) * 0.5f;
+    constexpr float kTickLen = 14.0f;
+    constexpr float kTickTh = 3.0f;
+    constexpr float kTickGap = 9.0f;
+    if (zone == DockArea::TreeDropZone::West
+        || zone == DockArea::TreeDropZone::East) {
+        // Horizontal ticks (split is vertical → ticks run left/right).
+        for (int i = -1; i <= 1; ++i) {
+            const float y = cy + kTickGap * static_cast<float>(i);
+            renderer.drawRect(math::FRectangle(cx - kTickLen * 0.5f, y - kTickTh * 0.5f,
+                                               cx + kTickLen * 0.5f, y + kTickTh * 0.5f),
+                              tickColor);
+        }
+    } else {
+        // Vertical ticks (split is horizontal → ticks run up/down).
+        for (int i = -1; i <= 1; ++i) {
+            const float x = cx + kTickGap * static_cast<float>(i);
+            renderer.drawRect(math::FRectangle(x - kTickTh * 0.5f, cy - kTickLen * 0.5f,
+                                               x + kTickTh * 0.5f, cy + kTickLen * 0.5f),
+                              tickColor);
+        }
+    }
+    renderer.drawText(band, treeDropZoneLabel(zone), 12,
+                      math::FVector4(1.0f, 1.0f, 1.0f, 0.85f));
+}
+
 } // namespace
 
 DockArea::DockArea() {
@@ -253,66 +450,72 @@ DockArea::DockArea() {
         }
 
         const math::FVector2 dropPos = ui->getDragLastMousePos();
-        const Slot targetSlot = hitTestSlot(dropPos);
         const bool isDocked = (_cardIndex.find(cardId) != _cardIndex.end());
-        const bool sameSlot = isDocked && isCardInSlot(card, targetSlot);
+        // dragBelongsToDock needs a live drag session (isDragging), but
+        // by the time this callback runs the session is already tearing
+        // down — classify by ownership instead.
+        const bool isExternal = !isDocked
+            && !dragBelongsToDock(*this, ui)
+            && !cardBelongsToThisDock(cardId);
 
-        const char* fromSlot = "?";
-        for (int i = 0; i < (int)Slot::Count; ++i) {
-            if (isCardInSlot(card, static_cast<Slot>(i))) {
-                fromSlot = dockSlotName(i);
-                break;
+        // External card (promoted child-window redock / foreign source):
+        // legacy hitTestSlot + adoptCard path (tryRedock contract).
+        if (isExternal) {
+            const Slot targetSlot = hitTestSlot(dropPos);
+            dockTrace(
+                "[dock] onDrop EXTERNAL dock=%s card=%s target=%s "
+                "pos=(%.1f,%.1f)\n",
+                getId().c_str(), cardId.c_str(),
+                dockSlotName((int)targetSlot), dropPos.x, dropPos.y);
+            if (targetSlot != Slot::Count) {
+                adoptCard(targetSlot, card);
             }
+            markBoundsDirty();
+            return;
         }
 
-        dockTrace(
-            "[dock] onDrop dock=%s card=%s from=%s target=%s "
-            "pos=(%.1f,%.1f) docked=%d sameSlot=%d floatCount=%zu "
-            "counts L=%zu C=%zu R=%zu\n",
-            getId().c_str(), cardId.c_str(), fromSlot,
-            dockSlotName((int)targetSlot), dropPos.x, dropPos.y,
-            isDocked ? 1 : 0, sameSlot ? 1 : 0,
-            _overlay ? _overlay->getFloatingCardCount() : 0u,
-            getCardCount(Slot::Left), getCardCount(Slot::Center),
-            getCardCount(Slot::Right));
+        // Phase-3 tree dispatch: deepest leaf under the cursor.
+        DockTabGroup* srcLeaf = isDocked ? findLeafOfCard(card) : nullptr;
+        DockTabGroup* dstLeaf = hitTestTree(dropPos);
 
-        if (isDocked) {
-            if (targetSlot != Slot::Count) {
-                // K-INV-D3-1: same-slot → no-op. Never floatCard here.
-                if (!sameSlot) {
-                    const LeafDropZone zone =
-                        resolveLeafDropZone(getSlotRect(targetSlot), dropPos);
-                    if (zone == LeafDropZone::Center
-                        && getCardCount(targetSlot) > 0) {
-                        // Center of an occupied leaf → merge as a tab
-                        // (adaptive in-region placement).
-                        dockTrace("[dock] onDrop -> tabIntoSlot %s -> %s\n",
-                                  fromSlot, dockSlotName((int)targetSlot));
-                        tabIntoSlot(cardId, targetSlot);
-                    } else {
-                        dockTrace("[dock] onDrop -> moveInSlot %s -> %s\n",
-                                  fromSlot, dockSlotName((int)targetSlot));
-                        moveInSlot(cardId, targetSlot);
+        dockTrace(
+            "[dock] onDrop dock=%s card=%s src=%s dst=%s pos=(%.1f,%.1f) "
+            "docked=%d float=%zu\n",
+            getId().c_str(), cardId.c_str(),
+            srcLeaf ? srcLeaf->getLeafId().c_str() : "-",
+            dstLeaf ? dstLeaf->getLeafId().c_str() : "-",
+            dropPos.x, dropPos.y, isDocked ? 1 : 0,
+            _overlay ? _overlay->getFloatingCardCount() : 0u);
+
+        if (dstLeaf != nullptr) {
+            if (srcLeaf == dstLeaf) {
+                // K-INV-D3-1: same leaf → no-op, center AND edge zones
+                // (a 20px release near the edge must stay docked).
+                dockTrace("[dock] onDrop -> same-leaf NO-OP\n");
+            } else {
+                const TreeDropZone zone =
+                    resolveTreeDropZone(dstLeaf, dropPos);
+                if (zone == TreeDropZone::Join) {
+                    // Merge as a tab into the target leaf.
+                    if (srcLeaf != nullptr) {
+                        removeTabFromLeaf(srcLeaf, card);
+                    } else if (_overlay) {
+                        _overlay->removeFloatingCard(card);
                     }
+                    addTabToLeaf(dstLeaf, card);
+                    pruneEmptySplitNodes();
+                    dockTrace("[dock] onDrop -> join %s <- %s tabs=%zu\n",
+                              dstLeaf->getLeafId().c_str(),
+                              srcLeaf ? srcLeaf->getLeafId().c_str() : "float",
+                              dstLeaf->getTabCount());
                 } else {
-                    dockTrace("[dock] onDrop -> same-slot NO-OP\n");
+                    // Edge → nested split (new g_N leaf, 25% share).
+                    dockTrace("[dock] onDrop -> splitLeaf %s\n",
+                              dstLeaf->getLeafId().c_str());
+                    splitLeaf(dstLeaf, zone, card);
                 }
-            } else {
-                dockTrace("[dock] onDrop docked but target=Count (ignored)\n");
             }
-        } else if (targetSlot != Slot::Count) {
-            const LeafDropZone zone =
-                resolveLeafDropZone(getSlotRect(targetSlot), dropPos);
-            if (zone == LeafDropZone::Center) {
-                dockTrace("[dock] onDrop -> dockCardAsTab into %s\n",
-                          dockSlotName((int)targetSlot));
-                dockCardAsTab(cardId, targetSlot);
-            } else {
-                dockTrace("[dock] onDrop -> dockCard into %s\n",
-                          dockSlotName((int)targetSlot));
-                dockCard(cardId, targetSlot);
-            }
-        } else if (hitTestOverlay(dropPos)) {
+        } else if (isDocked && hitTestOverlay(dropPos)) {
             dockTrace("[dock] onDrop -> floatCard (overlay empty)\n");
             floatCard(cardId, dropPos);
         } else {
@@ -354,6 +557,10 @@ DockArea::~DockArea() {
         }
         destroyWidgetTree(child);
     }
+}
+
+Widget* createDockAreaWidget() {
+    return new DockArea();
 }
 
 bool DockArea::parseSlot(const std::string& name, Slot& outSlot) {
@@ -425,6 +632,9 @@ bool DockArea::removeCard(const std::string& cardId) {
     // D1 invariant: removeCard always frees the card. destroyWidgetTree
     // detaches from whatever parent (leaf / DockArea) then deletes.
     destroyWidgetTree(card);
+    // A split-created leaf may now be empty — prune it (pinned leaves
+    // stay forever).
+    pruneEmptySplitNodes();
     return true;
 }
 
@@ -552,6 +762,20 @@ void DockArea::paintDropGuide(IRenderBackend& renderer) {
     } else {
         renderer.drawText(r, slotLabel(hover), 14,
                           math::FVector4(1.0f, 1.0f, 1.0f, 0.75f));
+    }
+
+    // Phase-3 tree layer: precise join/split preview from LIVE leaf
+    // geometry (follows splitter-resized panels). Painted only for a
+    // drag that belongs to this dock — external (child-window) redock
+    // drags keep the legacy slot fill above as their hint.
+    if (_rootNode != nullptr) {
+        UIManager* treeUi = UIManager::tryGet();
+        if (isDockCardDrag(treeUi) && dragBelongsToDock(*this, treeUi)) {
+            if (DockTabGroup* leaf = hitTestTree(cursor)) {
+                paintTreeDropZone(renderer, leaf,
+                                  resolveTreeDropZone(leaf, cursor));
+            }
+        }
     }
 }
 
@@ -699,6 +923,9 @@ bool DockArea::floatCard(const std::string& cardId, const math::FVector2& pos) {
     dockTrace("[dock] floatCard OK card=%s fromLeaf=%s floatCount=%zu\n",
               cardId.c_str(), leaf->getLeafId().c_str(),
               _overlay->getFloatingCardCount());
+    // The vacated leaf may be a split-created g_N — prune it (pinned
+    // leaves stay forever). Runs after the trace: prune frees `leaf`.
+    pruneEmptySplitNodes();
     return true;
 }
 
@@ -843,6 +1070,8 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target) {
         "[dock] moveInSlot DONE counts L=%zu C=%zu R=%zu\n",
         getCardCount(Slot::Left), getCardCount(Slot::Center),
         getCardCount(Slot::Right));
+    // srcLeaf may be a split-created leaf left empty by the swap.
+    pruneEmptySplitNodes();
     return true;
 }
 
@@ -1077,15 +1306,262 @@ DockTabGroup* DockArea::findLeafOfCard(DockCard* card) {
     if (card == nullptr) {
         return nullptr;
     }
-    // Pinned leaves are the whole tree today (split-created leaves
-    // arrive with the Phase-3 tree walk).
-    for (int i = 0; i < (int)Slot::Count; ++i) {
-        DockTabGroup* leaf = _rootLeaves[i];
-        if (leaf != nullptr && leaf->containsCard(card)) {
-            return leaf;
+    return findLeafInNode(_rootNode, card);
+}
+
+bool DockArea::cardBelongsToThisDock(const std::string& cardId) const {
+    if (cardId.empty()) {
+        return false;
+    }
+    if (_cardIndex.find(cardId) != _cardIndex.end()) {
+        return true;
+    }
+    const DockOverlay* ov = _overlay;
+    if (ov != nullptr) {
+        for (size_t i = 0; i < ov->getFloatingCardCount(); ++i) {
+            const DockCard* c = ov->getFloatingCard(i);
+            if (c != nullptr && c->getId() == cardId) {
+                return true;
+            }
         }
     }
-    return nullptr;
+    return false;
+}
+
+// ---- Phase 3: tree drop placement -----------------------------------------
+
+DockTabGroup* DockArea::hitTestTree(const math::FVector2& worldPos) const {
+    if (_rootNode == nullptr) {
+        return nullptr;
+    }
+    return hitTestTreeRec(_rootNode, worldPos);
+}
+
+DockTabGroup* DockArea::hitTestTreeRec(Widget* node,
+                                       const math::FVector2& p) const {
+    if (node == nullptr || !node->isVisible()) {
+        return nullptr;
+    }
+    if (auto* leaf = dynamic_cast<DockTabGroup*>(node)) {
+        return leaf->getWorldBounds().contains(p) ? leaf : nullptr;
+    }
+    auto* box = dynamic_cast<BoxBase*>(node);
+    if (box == nullptr) {
+        return nullptr;
+    }
+    // A point outside the node's own bounds can never resolve into it —
+    // the snap fallback below must not drag a cursor that is outside the
+    // tree onto the nearest leaf.
+    if (!box->getWorldBounds().contains(p)) {
+        return nullptr;
+    }
+    // Containing child wins; otherwise snap to the nearest leaf (splitter
+    // handles are never containers and never targets — a 4px band cannot
+    // swallow a drop).
+    DockTabGroup* nearest = nullptr;
+    float nearestD = std::numeric_limits<float>::max();
+    const std::vector<Widget*>& kids = box->getChildren();
+    for (Widget* c : kids) {
+        if (c == nullptr || !c->isVisible()) {
+            continue;
+        }
+        const math::FRectangle cb = c->getWorldBounds();
+        if (cb.maxX - cb.minX < 2.0f || cb.maxY - cb.minY < 2.0f) {
+            continue;
+        }
+        if (cb.contains(p)) {
+            if (DockTabGroup* f = hitTestTreeRec(c, p)) {
+                return f;
+            }
+            continue;
+        }
+        if (auto* lf = dynamic_cast<DockTabGroup*>(c)) {
+            const math::FVector2 ctr((cb.minX + cb.maxX) * 0.5f,
+                                     (cb.minY + cb.maxY) * 0.5f);
+            const float dx = ctr.x - p.x;
+            const float dy = ctr.y - p.y;
+            const float d = dx * dx + dy * dy;
+            if (d < nearestD) {
+                nearestD = d;
+                nearest = lf;
+            }
+        }
+    }
+    return nearest;
+}
+
+DockArea::TreeDropZone DockArea::resolveTreeDropZone(
+    const DockTabGroup* leaf, const math::FVector2& worldPos) const {
+    if (leaf == nullptr) {
+        return TreeDropZone::Join;
+    }
+    const math::FRectangle r = leaf->getWorldBounds();
+    const float w = r.maxX - r.minX;
+    const float h = r.maxY - r.minY;
+    if (w < 2.0f || h < 2.0f) {
+        return TreeDropZone::Join;
+    }
+    // Empty leaves are a pure join zone — their entire rect merges.
+    if (leaf->getTabCount() == 0) {
+        return TreeDropZone::Join;
+    }
+    // Normalized edge distance, argmin over the four sides with a 25%
+    // threshold. Array order West/East/North/South + strict `<` makes
+    // ties resolve West > East > North > South.
+    const float cand[4][2] = {
+        {(worldPos.x - r.minX) / w, (float)TreeDropZone::West},
+        {(r.maxX - worldPos.x) / w, (float)TreeDropZone::East},
+        {(worldPos.y - r.minY) / h, (float)TreeDropZone::North},
+        {(r.maxY - worldPos.y) / h, (float)TreeDropZone::South},
+    };
+    int best = 0;
+    for (int i = 1; i < 4; ++i) {
+        if (cand[i][0] < cand[best][0]) {
+            best = i;
+        }
+    }
+    if (cand[best][0] < 0.25f) {
+        return static_cast<TreeDropZone>(static_cast<int>(cand[best][1]));
+    }
+    return TreeDropZone::Join;
+}
+
+void DockArea::splitLeaf(DockTabGroup* leaf, TreeDropZone zone,
+                         DockCard* card) {
+    if (leaf == nullptr || card == nullptr) {
+        return;
+    }
+    auto* box = dynamic_cast<BoxBase*>(leaf->getParent());
+    if (box == nullptr) {
+        return;   // leaf not inside a split node
+    }
+    const bool vertical = (zone == TreeDropZone::North
+                           || zone == TreeDropZone::South);
+    const bool before = (zone == TreeDropZone::North
+                         || zone == TreeDropZone::West);
+
+    // IMPORTANT: slot index space = BoxBase::_slots order, NOT
+    // getChildren() order. addChild appends to the children vector while
+    // insertWidget inserts into _slots, so the two orders diverge after
+    // the first insert — deriving leafSlot from children and passing it
+    // to slotSize/setSlotSize/insertWidget would resize the wrong panel
+    // (observed: second split shrank Right instead of the g_0 target).
+    const int leafSlot = box->slotIndexOf(leaf);
+    if (leafSlot < 0) {
+        return;
+    }
+
+    // New leaf takes 25% of the target leaf's main-axis extent. If the
+    // target leaf has a fixed size, shrink it; if it is fill (size 0)
+    // it stays fill and absorbs the remainder at the next layout.
+    const float leafExtent = vertical ? leaf->getSize().y : leaf->getSize().x;
+    const float newSize = std::max(0.0f, leafExtent * 0.25f);
+    if (box->slotSize(leafSlot) > 0.0f) {
+        box->setSlotSize(leafSlot, std::max(
+            0.0f, box->slotSize(leafSlot) - newSize
+                  - SplitterHandle::kDefaultWidth));
+    }
+
+    auto* newLeaf = new DockTabGroup();
+    const int n = _splitLeafCounter++;
+    newLeaf->setLeafId("g_" + std::to_string(n));
+    newLeaf->setPinned(false);
+    newLeaf->setOnCloseTab([this](DockCard* c) {
+        if (c != nullptr) {
+            closeCard(c->getId());
+        }
+    });
+
+    // Reuse an adjacent splitter when one already borders the leaf —
+    // otherwise two handles would stack into a fat dead band.
+    const bool hasSplitterBefore = leafSlot > 0
+        && box->isSplitterSlot(leafSlot - 1);
+    // isSplitterSlot bounds-checks itself (out-of-range → false).
+    const bool hasSplitterAfter = box->isSplitterSlot(leafSlot + 1);
+
+    if (before) {
+        if (hasSplitterBefore) {
+            // [.., splitL, leaf] → [.., g_N, splitL, leaf]: the
+            // existing splitter moves between g_N and leaf.
+            box->insertWidget(leafSlot - 1, newLeaf, newSize);
+        } else {
+            const SplitterHandle::Orientation orient = vertical
+                ? SplitterHandle::Orientation::Vertical
+                : SplitterHandle::Orientation::Horizontal;
+            SplitterHandle* splitter = makeTreeSplitter(
+                orient, getId() + "::split_g" + std::to_string(n));
+            box->insertWidget(leafSlot, splitter,
+                              SplitterHandle::kDefaultWidth);
+            box->insertWidget(leafSlot, newLeaf, newSize);
+        }
+    } else {
+        if (hasSplitterAfter) {
+            // [leaf, splitR, ..] → [leaf, splitR, g_N, ..]: the
+            // existing splitter stays between leaf and g_N.
+            box->insertWidget(leafSlot + 2, newLeaf, newSize);
+        } else {
+            const SplitterHandle::Orientation orient = vertical
+                ? SplitterHandle::Orientation::Vertical
+                : SplitterHandle::Orientation::Horizontal;
+            SplitterHandle* splitter = makeTreeSplitter(
+                orient, getId() + "::split_g" + std::to_string(n));
+            box->insertWidget(leafSlot + 1, splitter,
+                              SplitterHandle::kDefaultWidth);
+            box->insertWidget(leafSlot + 2, newLeaf, newSize);
+        }
+    }
+    box->rebindSplitters();
+
+    // Move the card into the new leaf (detach from its current leaf or
+    // the overlay; never free it — UI-OWN-1).
+    if (DockTabGroup* src = findLeafOfCard(card)) {
+        removeTabFromLeaf(src, card);
+    } else if (_overlay) {
+        _overlay->removeFloatingCard(card);
+    }
+    addTabToLeaf(newLeaf, card);
+
+    // Structure changed — the weight-derived template geometry turns
+    // sticky (fill slots absorb; splitter drags survive relayouts).
+    _structureEpoch++;
+    _hoveredSlot = Slot::Count;
+    _hoveredOverlay = false;
+    markBoundsDirty();
+    requestRelayout();
+    dockTrace("[dock] splitLeaf target=%s zone=%s new=%s card=%s "
+              "extent=%.0f newSize=%.0f\n",
+              leaf->getLeafId().c_str(),
+              zone == TreeDropZone::West ? "West" :
+              zone == TreeDropZone::East ? "East" :
+              zone == TreeDropZone::North ? "North" : "South",
+              newLeaf->getLeafId().c_str(), card->getId().c_str(),
+              static_cast<double>(leafExtent),
+              static_cast<double>(newSize));
+    {
+        const std::vector<Widget*>& ck = box->getChildren();
+        for (Widget* c : ck) {
+            const math::FRectangle wb = c->getWorldBounds();
+            dockTrace("    [child] %s %.0f..%.0f x %.0f..%.0f\n",
+                      c->getId().c_str(), wb.minX, wb.maxX, wb.minY, wb.maxY);
+        }
+    }
+}
+
+void DockArea::pruneEmptySplitNodes() {
+    if (_rootNode == nullptr) {
+        return;
+    }
+    _structureEpoch++;
+    bool any = false;
+    bool changed = true;
+    while (changed) {
+        changed = prunePass(_rootNode);
+        any |= changed;
+    }
+    if (any) {
+        markBoundsDirty();
+        requestRelayout();
+    }
 }
 
 void DockArea::addTabToLeaf(DockTabGroup* leaf, DockCard* card) {
@@ -1112,10 +1588,14 @@ void DockArea::syncTemplateIfPristine(const math::FVector2& size) {
     if (!_templateBuilt) {
         return;
     }
-    if (_templateSynced && !templateSizesMatchDerived(size)) {
+    if (_templateSynced
+        && (_structureEpoch > 0 || !templateSizesMatchDerived(size))) {
         // A splitter drag (or any manual sizing) made the slot sizes
         // sticky — never clobber them. The fill slot absorbs any
-        // resize (VS Code behaviour). See templateSizesMatchDerived.
+        // resize (VS Code behaviour). Phase-3 structure edits
+        // (splitLeaf / prune) bump _structureEpoch, which also turns
+        // the template sticky: inserted g_N leaves would otherwise
+        // shift the fixed-slot index mapping in applyTemplateGeometry.
         return;
     }
     applyTemplateGeometry(size);
@@ -1277,6 +1757,8 @@ bool DockArea::tabIntoSlot(const std::string& cardId, Slot target) {
     dockTrace("[dock] tabIntoSlot OK card=%s -> %s tabs=%zu\n",
               cardId.c_str(), dockSlotName((int)target),
               dstLeaf->getTabCount());
+    // srcLeaf may be a split-created leaf left empty by the move.
+    pruneEmptySplitNodes();
     return true;
 }
 

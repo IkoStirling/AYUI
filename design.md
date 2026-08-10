@@ -1,8 +1,8 @@
 # AYUI Design
 
 **Version:** v1.5  
-**Date:** 2026-07-26  
-**Status:** Core library + refactor lane (R-1..R-10) + new-control lane (C-1..C-12) implemented. Loader parity patch (L1..L4) in flight. v1.5 adds **[§17 Docking & Sub-Window](#17-docking--sub-window-v15-roadmap)** to support the editor goal of stop-dockable panels + child windows.
+**Date:** 2026-08-10  
+**Status:** Core library + refactor lane (R-1..R-10) + new-control lane (C-1..C-12) implemented. Docking D1–D3 + dock-tree (Phase 2/3) in progress under **[§17](#17-docking--sub-window-v15-roadmap)**. Post-dock sequencing and UI-animation timing are locked in **[§19](#19-post-dockarea-sequencing--ui-animation-2026-08)**.
 
 > Historical note: [`AYUI-v1-Design.md`](AYUI-v1-Design.md) (v1.2) remains as reference.  
 > **This file is authoritative** for architecture, phases, and data-driven contracts.
@@ -811,6 +811,10 @@ D1..D5 are **implementation-ready** but each requires its own plan + commit slic
 
 Docking is a well-explored pattern. v1.5 borrows the **data shape** from Qt's `*.ui` save format (slots + cards + floating) and the **drag UX** from Unity's editor layout / ImGui's `DockBuilder` (single tree + named nodes). Avoids re-inventing the persistence format.
 
+### 17.8 After DockArea (pointer)
+
+What to build once the dock tree is usable, and when **not** to start UI animation, are recorded in **[§19](#19-post-dockarea-sequencing--ui-animation-2026-08)**. Do not schedule animation work inside D1–D5 or the Phase-3 tree PRs.
+
 ---
 
 ## 18. API additions from 2026-08-02 code review
@@ -891,3 +895,65 @@ Documented limitations from the Sweep #3 fixes:
 `unittest/Test_Leak.cpp` (added in commit `28f3099`) exercises the leak paths fixed in commit `7502ca7`. These tests have no `CHECK_*` assertions — the assertion happens at process exit via LeakSanitizer. Without `-DAY_ENABLE_ASAN=ON` the tests just exercise the destroy paths (redundant with the regular suite); with ASAN they catch any regression to the `addChildExternal` / `addChild` distinction the original leaks abused.
 
 The build config option `AY_ENABLE_ASAN` (root `CMakeLists.txt`, commit `3b912c2`) enables `/fsanitize=address` on MSVC. CI / pre-release should run with it on; everyday edit-build loop stays default (ASAN is ~2-3x slower and ~3x larger).
+
+---
+
+## 19. Post-DockArea sequencing & UI animation (2026-08)
+
+> **Purpose:** freeze the order of work after the docking track so animation and "one more control" do not interrupt editor-shell delivery. Complements [`CONTROL_CAPABILITY_PLAN.md`](CONTROL_CAPABILITY_PLAN.md) (existing-control depth) and §3.3 (U\* engine lane).
+
+### 19.1 Current posture (as of 2026-08-10)
+
+| Lane | State |
+|------|--------|
+| Refactor R-1..R-10 + new-control C-1..C-12 | **Done** (widgets exist under `Controls/` / `Layout/`; inventory in §15.3 is historical — many "missing" rows are implemented) |
+| Capability depth (popup / keyboard / IME / chrome) | Tracked in `CONTROL_CAPABILITY_PLAN.md`; not a gate for finishing DockArea |
+| Docking §17 D1–D3 + dock-tree Phase 2/3 | **In progress** (pinned leaves, splitters, nested split / join / prune) |
+| Docking D4 / D5 | **Next** after the tree is green in `Test_DockTree` + Gallery |
+| UI animation | **Deferred** — see §19.2 |
+
+### 19.2 When to do UI animation
+
+**Do not implement UI animation during DockArea Phase 3 or D4/D5.**
+
+| Fact | Detail |
+|------|--------|
+| Surface today | `IRenderBackend::createAnimation*` / `updateAnimation` / `getAnimationValue*` exist; defaults are **no-ops**. `MockRenderer` implements them for unit tests only. |
+| Role | Optional **polish**, not an editor-MVP blocker. Peers advanced effects deferred under §1.2 / U5+ (blur, particles, RT). |
+| `UIManager::update(dt)` | Reserved for optional animation ticks; hosts may call it with a no-op backend indefinitely. |
+
+**Open the animation lane only when both hold:**
+
+1. Dock tree + D4 (layout persistence) are stable enough that panel geometry / ownership is not still churning.
+2. Preferably **U2** (`AYUIRenderBackend` + UI overlay in the real frame) has landed — otherwise transitions only exercise the mock path and will be reworked against the real backend.
+
+Until then: keep the no-op API; do not add widget-side tween helpers, style transitions, or drawer animations that depend on dock geometry.
+
+### 19.3 Remaining work after DockArea completes
+
+Basic form / chrome controls from C-1..C-12 (including `TreeView`, `RichText`, `ModalDialog`, menus, toolbars) are already in-tree. Post-dock work is **finish the shell**, then **gaps**, not another full control lane.
+
+| Priority | Item | Notes |
+|----------|------|--------|
+| **High** | **D4** layout persistence | `saveLayout` / `loadLayout` + Editor `~/.ay/editor_layout.json` (or equivalent); same DockArea content across launches |
+| **High** | **D5** ChildWindow productization | Gallery `GalleryChildWindows` is a demo host; Editor needs a durable `ChildWindow` API. Cross-window card drag stays **v1.6** unless D5 forces it (§17.6) |
+| **Medium** | Layouts: `RelativeLayout`, `StackPanel`, `WrapPanel` | §15.4 — anchor resize-safe UI, overlay stacking, toolbar wrap |
+| **Medium** | `ContextMenu` | Explicit gap in `CONTROL_CAPABILITY_PLAN.md` §5; needs PopupLayer ownership model |
+| **Low** | `ColorPicker`, `Accordion` (CollapsiblePanel), `Pagination`, `Canvas` | Post-editor-MVP (§15.3 P2 / capability plan §5) |
+| **Parallel** | Engine **U2** / **U3** | Real render backend + EventBridge / input — independent of control checklist |
+| **v1.6** | Auto-hide drawers; cross-window drag | Locked deferrals in §17.6 |
+
+Capability polish (IME depth, list virtualization, ToolBar overflow, etc.) continues under `CONTROL_CAPABILITY_PLAN.md` and may overlap D4/D5 when it does not touch dock ownership.
+
+### 19.4 Suggested order
+
+```
+Dock Phase-3 tree (split / join / prune) green
+    → D4 layout persistence
+    → D5 ChildWindow productization (as needed for Editor)
+    → RelativeLayout / StackPanel / WrapPanel and/or ContextMenu (as Editor demand)
+    → UI animation (after structure stable; prefer after U2)
+U2 / U3 may run in parallel with the second half of this list.
+```
+
+**Hard rule:** no UI-animation PRs while dock tree structure or card ownership APIs are still changing.

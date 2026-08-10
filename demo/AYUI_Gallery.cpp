@@ -212,7 +212,7 @@ void wireGallery(GalleryState& state)
     // In-UI build stamp (OS title / console are easy to miss). If Layout
     // header doesn't contain this id, the running Gallery is stale.
     if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(ui.findById("layout_hdr"))) {
-        hdr->setText(L"Layout - mini DockArea [DockArea-20260810a-DockTree]");
+        hdr->setText(L"Layout - mini DockArea [DockArea-20260810b-Bugfix]");
     }
 
     // --- Basics ---
@@ -879,7 +879,7 @@ bool loadAndWire(GalleryState& state)
     // Unmistakable build fingerprint (console can be missed under WIN32).
     // Window title + file next to cwd: if you don't see these, wrong exe.
     constexpr const char* kDockBuildId =
-        "DockArea-20260810a-DockTree";
+        "DockArea-20260810b-Bugfix";
     std::fprintf(stderr, "[AYUI_Gallery] BUILD %s\n", kDockBuildId);
     std::fprintf(stderr, "[AYUI_Gallery] dock trace log: %s\n",
                  ayt::ui::dockTracePath());
@@ -1279,7 +1279,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
     // hunting the AllocConsole window.
-    cfg.window.title = "AYUI Gallery [DockArea-20260810a-DockTree]";
+    cfg.window.title = "AYUI Gallery [DockArea-20260810b-Bugfix]";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg)) {

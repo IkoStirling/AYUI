@@ -135,6 +135,18 @@ bool BoxBase::isSplitterSlot(int slotIndex) const {
     return _slots[static_cast<size_t>(slotIndex)].isSplitter;
 }
 
+int BoxBase::slotIndexOf(Widget* widget) const {
+    if (widget == nullptr) {
+        return -1;
+    }
+    for (int i = 0; i < static_cast<int>(_slots.size()); ++i) {
+        if (_slots[static_cast<size_t>(i)].widget == widget) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int BoxBase::panelSlotBefore(int slotIndex) const {
     for (int i = slotIndex - 1; i >= 0; --i) {
         if (!isSplitterSlot(i)) {
@@ -185,13 +197,28 @@ void BoxBase::render(IRenderBackend& renderer) {
         return;
     }
 
-    // Single-pass insertion-order render. Previously this looped twice with
-    // per-slot dynamic_cast<SplitterHandle*>; splitters are cached on the
-    // Slot at insertion time. Splitters sit between panels (no z-order
-    // conflict, non-overlapping bounds) so the visual result is identical.
+    // Slots first (insertion order — splitters sit between panels).
+    // Then any child that was attached via addChild without addWidget:
+    // hitTest already walks _children, so paint must stay symmetric or
+    // those nodes are clickable but invisible.
     for (const Slot& slot : _slots) {
         if (slot.widget != nullptr) {
             slot.widget->render(renderer);
+        }
+    }
+    for (Widget* child : _children) {
+        if (child == nullptr) {
+            continue;
+        }
+        bool inSlot = false;
+        for (const Slot& slot : _slots) {
+            if (slot.widget == child) {
+                inSlot = true;
+                break;
+            }
+        }
+        if (!inSlot) {
+            child->render(renderer);
         }
     }
 }

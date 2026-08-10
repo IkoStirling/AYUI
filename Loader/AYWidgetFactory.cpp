@@ -95,7 +95,7 @@ struct DefaultWidgetRegistrar {
         REGISTER_WIDGET("HBox", HBox);
         REGISTER_WIDGET("SplitterHandle", SplitterHandle);
         REGISTER_WIDGET("GridPanel", GridPanel);
-        REGISTER_WIDGET("DockArea", DockArea);
+        WidgetFactory::get().registerCreator("DockArea", createDockAreaWidget);
         REGISTER_WIDGET("DockCard", DockCard);
         REGISTER_WIDGET("DockOverlay", DockOverlay);
     }

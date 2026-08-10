@@ -40,6 +40,16 @@ public:
         Count
     };
 
+    // Phase-3 drop placement within a tree leaf: Join = merge as a tab;
+    // the four edge zones create a nested split at that side.
+    enum class TreeDropZone {
+        Join,
+        West,
+        East,
+        North,
+        South,
+    };
+
     // Ctor lives in AYDockArea.cpp — MUST NOT be inline in this header.
     // Gallery constructs DockArea via WidgetFactory (AYWidgetFactory.cpp);
     // an inline ctor meant drop/Center fixes only applied when that TU
@@ -188,6 +198,21 @@ public:
     // on a floating card = no-op (handled by DockOverlay::onDrop).
     bool hitTestOverlay(const math::FVector2& worldPos) const;
 
+    // ---- Phase 3: dock-tree drop placement ----
+
+    // Deepest leaf under `worldPos` (recursive tree walk). Splitter
+    // handles are skipped; when the cursor sits inside a split node
+    // but over no child, snaps to the nearest leaf. Returns nullptr
+    // when outside the tree (or the tree is not built yet).
+    DockTabGroup* hitTestTree(const math::FVector2& worldPos) const;
+
+    // Edge-vs-join classification for a leaf: normalized edge-distance
+    // argmin over the four sides with a 25% threshold; ties resolve
+    // West > East > North > South (argmin keeps the first winner).
+    // Empty leaves are always Join (their whole rect is a join zone).
+    TreeDropZone resolveTreeDropZone(const DockTabGroup* leaf,
+                                     const math::FVector2& worldPos) const;
+
 protected:
     // Mirrors CompoundFocusableWidget hooks. Default empty.
     void onChildAdded(Widget* child);
@@ -252,6 +277,29 @@ private:
     void addTabToLeaf(DockTabGroup* leaf, DockCard* card);
     void removeTabFromLeaf(DockTabGroup* leaf, DockCard* card);
 
+    // ---- Phase 3: split / prune ----
+    // Edge drop: insert a new g_N leaf beside `leaf` (25% of the
+    // leaf's main-axis extent) and move `card` into it. Reuses an
+    // existing adjacent splitter when one is already there. Bumps
+    // _structureEpoch so the template geometry turns sticky.
+    void splitLeaf(DockTabGroup* leaf, TreeDropZone zone, DockCard* card);
+    // Remove empty non-pinned leaves (and their adjacent splitters)
+    // until the tree is stable. Pinned leaves are never touched.
+    void pruneEmptySplitNodes();
+    DockTabGroup* hitTestTreeRec(Widget* node, const math::FVector2& p) const;
+
+    // True when `cardId` belongs to this dock: in a slot leaf (via
+    // _cardIndex) or floating in the overlay. Used by the onDrop
+    // dispatch to separate tree-owned drops from EXTERNAL ones. Unlike
+    // dragBelongsToDock this does NOT consult the UIManager drag state —
+    // by the time onDrop fires the drag session is already tearing down,
+    // so isDragging() is unreliable there.
+    bool cardBelongsToThisDock(const std::string& cardId) const;
+
+    int _splitLeafCounter = 0;   // g_N leaf-id naming
+    int _structureEpoch = 0;     // >0 once any split/prune changed the
+                                 // tree — template geometry turns sticky
+
     // Push weight-derived slot sizes into the root template, but only
     // while the template is still "pristine": structure untouched AND
     // every panel slot size still equals the weight-derived value.
@@ -267,5 +315,11 @@ private:
     bool tabIntoSlot(const std::string& cardId, Slot target);
     bool dockCardAsTab(const std::string& cardId, Slot target);
 };
+
+// Factory entry point — lives in AYDockArea.cpp so `new DockArea()` uses
+// that TU's sizeof(DockArea). REGISTER_WIDGET in AYWidgetFactory.cpp would
+// bake sizeof from whatever header revision that TU last saw; a stale
+// .obj after DockArea grows members silently heap-corrupts on create.
+Widget* createDockAreaWidget();
 
 } // namespace ayt::ui

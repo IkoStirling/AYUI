@@ -41,9 +41,11 @@ public:
     ~ScrollView() override;
 
     // Content widget — ScrollView becomes its layout owner. Content
-    // position is reset on content-size change; content's own bounds
-    // are not modified by ScrollView's performLayout (it just decides
-    // where the content gets drawn).
+    // position tracks -scrollOffset. For vertical-scroll hosts (hbar
+    // disabled) with layout-size-managed content, performLayout also
+    // sizes content to the client width and at least the preferred
+    // height so hit-testing / fill layout match the clip. Horizontal
+    // overflow hosts size their strip themselves.
     void setContent(Widget* content);
     Widget* getContent() const { return _content; }
 

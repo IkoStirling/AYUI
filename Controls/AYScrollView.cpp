@@ -187,25 +187,81 @@ void ScrollView::performLayout() {
             getWidth() - (_vbar ? barW : 0.0f), barW));
     }
 
-    // Refresh content size AFTER children layout so page switches
-    // (e.g. short Basics → tall Capabilities) update maxScrollOffset /
-    // vbar. Sampling only when content size was still (0,0) froze the
-    // first page's height and left later pages without a scrollbar.
+    auto clientSize = [this]() -> math::FVector2 {
+        const math::FRectangle c = getClientRect();
+        return math::FVector2(
+            std::max(0.0f, c.maxX - c.minX),
+            std::max(0.0f, c.maxY - c.minY));
+    };
+
+    // Vertical-scroll hosts (Gallery content_scroll: hbar off) size the
+    // content widget to the client width / preferred height so hit-test
+    // bounds match paint. Horizontal overflow hosts (ToolBar) size their
+    // content strip themselves — forcing viewport size first would squash
+    // natural width and hide the hbar.
+    const bool sizeContentToClient = (_content != nullptr)
+        && _content->isLayoutSizeManaged()
+        && !_hbarEnabled;
+
+    if (sizeContentToClient) {
+        const math::FVector2 cs = clientSize();
+        const math::FVector2 probe(
+            cs.x > 0.0f ? cs.x : std::max(getWidth(), 1.0f),
+            cs.y > 0.0f ? cs.y : std::max(getHeight(), 1.0f));
+        if (std::fabs(_content->getSize().x - probe.x) > 0.5f
+            || std::fabs(_content->getSize().y - probe.y) > 0.5f) {
+            _content->setSize(probe);
+        }
+    }
+
     CompoundWidget::performLayout();
 
     if (_content != nullptr) {
-        const math::FVector2 pref = _content->getPreferredContentSize();
-        const math::FVector2 sz = _content->getSize();
-        const math::FVector2 next(
-            std::max(pref.x, sz.x),
-            std::max(pref.y, sz.y));
-        const math::FVector2 known = _scrollState.getContentSize();
-        if (std::fabs(next.x - known.x) > 0.5f
-            || std::fabs(next.y - known.y) > 0.5f) {
-            _scrollState.setContentSize(next);
+        if (sizeContentToClient) {
+            auto fitContent = [&]() {
+                const math::FVector2 cs = clientSize();
+                const math::FVector2 pref = _content->getPreferredContentSize();
+                math::FVector2 next(cs.x > 0.0f ? cs.x : pref.x,
+                                    std::max(cs.y, pref.y));
+                if (std::fabs(_content->getSize().x - next.x) > 0.5f
+                    || std::fabs(_content->getSize().y - next.y) > 0.5f) {
+                    _content->setSize(next);
+                    if (!_content->getChildren().empty()) {
+                        _content->performLayout();
+                    }
+                }
+                const math::FVector2 known = _scrollState.getContentSize();
+                const math::FVector2 contentSz = _content->getSize();
+                if (std::fabs(contentSz.x - known.x) > 0.5f
+                    || std::fabs(contentSz.y - known.y) > 0.5f) {
+                    _scrollState.setContentSize(contentSz);
+                }
+                syncContentPosition();
+                syncBarsToOffset();
+            };
+            fitContent();
+            // VBar may have just appeared and inset the client — refit.
+            const float w1 = _content->getSize().x;
+            const float w2 = clientSize().x;
+            if (w2 > 0.0f && std::fabs(w1 - w2) > 0.5f) {
+                fitContent();
+            }
+        } else {
+            // Legacy / horizontal-overflow path: sample preferred without
+            // rewriting the content widget's size.
+            const math::FVector2 pref = _content->getPreferredContentSize();
+            const math::FVector2 sz = _content->getSize();
+            const math::FVector2 next(
+                std::max(pref.x, sz.x),
+                std::max(pref.y, sz.y));
+            const math::FVector2 known = _scrollState.getContentSize();
+            if (std::fabs(next.x - known.x) > 0.5f
+                || std::fabs(next.y - known.y) > 0.5f) {
+                _scrollState.setContentSize(next);
+            }
+            syncContentPosition();
+            syncBarsToOffset();
         }
-        syncContentPosition();
-        syncBarsToOffset();
     }
 }
 

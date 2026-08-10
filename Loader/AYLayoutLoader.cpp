@@ -41,8 +41,8 @@ namespace {
 void loaderHeapCheck(const char* label)
 {
     if (!_CrtCheckMemory()) {
+        // Headless UnitTests hang on _CrtDbgBreak's dialog — log only.
         std::fprintf(stderr, "[LoaderHeapCheck] FAIL at %s\n", label);
-        _CrtDbgBreak();
     }
 }
 
@@ -773,13 +773,24 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             for (const auto& childJson : j["children"]) {
                 Widget* child = buildWidgetTree(childJson);
                 if (!child) continue;
-                float slotHeight = 0.0f;
-                if (childJson.contains("size") && childJson["size"].is_object()) {
-                    slotHeight = childJson["size"].value("h", 0.0f);
+                if (child->isSplitterHandle()) {
+                    // Mirror HBox: pin thin-axis size so a missed
+                    // size.h=0 cannot stretch the hover band. Vertical
+                    // drag axis matches VBox stacking.
+                    if (SplitterHandle* sh = dynamic_cast<SplitterHandle*>(child)) {
+                        sh->setOrientation(SplitterHandle::Orientation::Vertical);
+                    }
+                    vbox->addWidget(child, SplitterHandle::kDefaultWidth);
+                } else {
+                    float slotHeight = 0.0f;
+                    if (childJson.contains("size") && childJson["size"].is_object()) {
+                        slotHeight = childJson["size"].value("h", 0.0f);
+                    }
+                    vbox->addWidget(child, slotHeight);
                 }
-                vbox->addWidget(child, slotHeight);
                 LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
             }
+            vbox->rebindSplitters();
         } else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
             for (const auto& childJson : j["children"]) {
                 Widget* child = buildWidgetTree(childJson);

@@ -51,6 +51,15 @@ public:
     float slotSize(int slotIndex) const;
     void setSlotSize(int slotIndex, float size);
 
+    // Index of `widget` in the layout slot array (_slots order = layout
+    // order). getChildren() is NOT a valid index space for slot
+    // arithmetic: addChild appends to the children vector while
+    // insertWidget inserts into _slots, so the two orders diverge after
+    // the first insert. Callers that mix slotSize/setSlotSize/
+    // insertWidget with a children-derived index corrupt the wrong
+    // slot. Returns -1 when the widget is not in this box.
+    int slotIndexOf(Widget* widget) const;
+
     // Exposed for tests / debugging so callers can verify the cached
     // splitter flag without paying a dynamic_cast. Hot paths use the
     // cached flag directly via Slot::isSplitter.
