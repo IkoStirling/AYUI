@@ -249,6 +249,28 @@ DockTabGroup* findLeafInNode(Widget* node, DockCard* card) {
     return nullptr;
 }
 
+// Collect every card across all leaves (pinned + g_N) — used by
+// poolAllCards for applyDockTree's detach-all pass.
+void collectLeafCards(Widget* node, std::vector<DockCard*>& out) {
+    if (node == nullptr) {
+        return;
+    }
+    if (auto* leaf = dynamic_cast<DockTabGroup*>(node)) {
+        const size_t n = leaf->getTabCount();
+        for (size_t i = 0; i < n; ++i) {
+            if (DockCard* c = leaf->getTab(i)) {
+                out.push_back(c);
+            }
+        }
+        return;
+    }
+    if (auto* box = dynamic_cast<BoxBase*>(node)) {
+        for (Widget* c : box->getChildren()) {
+            collectLeafCards(c, out);
+        }
+    }
+}
+
 // Remove `leaf` (a heap object owned by the dock tree) from `box`
 // together with any directly adjacent splitter handles, then free them.
 // removeWidget detaches + rebinds; delete frees the heap node. Only
@@ -1796,6 +1818,287 @@ bool DockArea::dockCardAsTab(const std::string& cardId, Slot target) {
               cardId.c_str(), dockSlotName((int)target),
               leaf->getTabCount());
     return true;
+}
+
+// ---- Phase 4: dock-tree persistence ----------------------------------------
+
+std::string DockArea::serializeDockTree() const {
+    ayt::ui::json root;
+    root["version"] = 1;
+    if (_rootNode != nullptr) {
+        ayt::ui::json tree;
+        serializeNode(_rootNode, tree);
+        root["dockTree"] = tree;
+    }
+    ayt::ui::json floating = ayt::ui::json::array();
+    if (_overlay != nullptr) {
+        const size_t n = _overlay->getFloatingCardCount();
+        for (size_t i = 0; i < n; ++i) {
+            const DockCard* c = _overlay->getFloatingCard(i);
+            if (c == nullptr) {
+                continue;
+            }
+            const math::FVector2 pos = c->getPosition();
+            const math::FVector2 sz = c->getSize();
+            floating.push_back({
+                {"id", c->getId()}, {"x", pos.x}, {"y", pos.y},
+                {"w", sz.x}, {"h", sz.y}});
+        }
+    }
+    root["floating"] = floating;
+    return root.dump();
+}
+
+void DockArea::serializeNode(const Widget* node, ayt::ui::json& out) const {
+    if (node == nullptr) {
+        return;
+    }
+    if (const auto* leaf = dynamic_cast<const DockTabGroup*>(node)) {
+        out["leaf"] = leaf->getLeafId();
+        ayt::ui::json tabs = ayt::ui::json::array();
+        const size_t n = leaf->getTabCount();
+        for (size_t i = 0; i < n; ++i) {
+            const DockCard* c = leaf->getTab(i);
+            if (c != nullptr && !c->getId().empty()) {
+                tabs.push_back(c->getId());
+            }
+        }
+        out["tabs"] = tabs;
+        const std::string act = leaf->getActiveTabId();
+        out["active"] = act.empty() ? ayt::ui::json(nullptr) : ayt::ui::json(act);
+        return;
+    }
+    if (const auto* box = dynamic_cast<const BoxBase*>(node)) {
+        out["orientation"] =
+            (dynamic_cast<const VBox*>(box) != nullptr) ? "V" : "H";
+        ayt::ui::json children = ayt::ui::json::array();
+        ayt::ui::json weights = ayt::ui::json::array();
+        // children order diverges from _slots order after insertWidget
+        // (insertWidget inserts into _slots while addChild appends to
+        // the children vector — see BoxBase::slotIndexOf). Layout walks
+        // _slots, so the JSON must too; otherwise the weights array
+        // misaligns on apply and panels land in the wrong order.
+        std::vector<Widget*> ordered;
+        for (Widget* c : box->getChildren()) {
+            if (c != nullptr && !c->isSplitterHandle()) {
+                ordered.push_back(c);
+            }
+        }
+        std::stable_sort(ordered.begin(), ordered.end(),
+            [box](Widget* a, Widget* b) {
+                return box->slotIndexOf(a) < box->slotIndexOf(b);
+            });
+        for (Widget* c : ordered) {
+            // slotIndexOf gives the _slots order; slotSize must read
+            // that index.
+            const int si = box->slotIndexOf(c);
+            ayt::ui::json childJson;
+            serializeNode(c, childJson);
+            children.push_back(childJson);
+            weights.push_back(si >= 0 ? box->slotSize(si) : 0.0f);
+        }
+        out["children"] = children;
+        out["weights"] = weights;
+    }
+}
+
+bool DockArea::applyDockTree(const std::string& jsonStr) {
+    ayt::ui::json j;
+    try {
+        j = ayt::ui::json::parse(jsonStr);
+    } catch (...) {
+        return false;
+    }
+
+    // Pool every card this dock owns (docked tabs + floating), detaching
+    // each WITHOUT deleting (UI-OWN-1 — the widgets stay alive and are
+    // re-attached below or floated back).
+    std::unordered_map<std::string, DockCard*> pool;
+    poolAllCards(pool);
+
+    // Destroy the old root subtree (leaves + splitters). All cards were
+    // detached above, so nothing alive is lost.
+    if (_rootNode != nullptr) {
+        destroyWidgetTree(_rootNode);
+        _rootNode = nullptr;
+        for (int i = 0; i < (int)Slot::Count; ++i) {
+            _rootLeaves[i] = nullptr;
+        }
+        _templateBuilt = false;
+        _templateSynced = false;
+    }
+
+    if (j.contains("dockTree") && j["dockTree"].is_object()) {
+        _rootNode = buildNodeFromJson(j["dockTree"], pool);
+        if (_rootNode != nullptr) {
+            addChild(_rootNode);
+            // Overlay must stay the topmost child (K-INV-D3-4).
+            if (_overlay != nullptr) {
+                _overlay->bringToFront();
+            }
+            _templateBuilt = true;
+            _templateSynced = false;
+        }
+    }
+
+    // Restore floating cards from JSON rects; unreferenced pool
+    // leftovers (cards the JSON never mentions) float back at
+    // staggered offsets so they never stack exactly.
+    if (_overlay != nullptr) {
+        if (j.contains("floating") && j["floating"].is_array()) {
+            for (const auto& fj : j["floating"]) {
+                const std::string fid = fj.value("id", "");
+                if (fid.empty()) {
+                    continue;
+                }
+                auto it = pool.find(fid);
+                if (it == pool.end()) {
+                    continue;
+                }
+                DockCard* c = it->second;
+                pool.erase(it);
+                c->setPosition(math::FVector2(
+                    fj.value("x", 0.0f), fj.value("y", 0.0f)));
+                c->setSize(math::FVector2(
+                    fj.value("w", 320.0f), fj.value("h", 220.0f)));
+                _overlay->addFloatingCard(c);
+            }
+        }
+        int k = 0;
+        for (auto& kv : pool) {
+            DockCard* c = kv.second;
+            if (c == nullptr) {
+                continue;
+            }
+            const float off = 24.0f + 16.0f * static_cast<float>(k % 8);
+            c->setPosition(math::FVector2(off, off));
+            _overlay->addFloatingCard(c);
+            ++k;
+        }
+    }
+
+    if (_rootNode != nullptr) {
+        pruneEmptySplitNodes();
+    }
+    // An applied layout is user structure — the weight-derived template
+    // turns sticky and never clobbers it.
+    _structureEpoch++;
+    _hoveredSlot = Slot::Count;
+    _hoveredOverlay = false;
+    markBoundsDirty();
+    requestRelayout();
+    dockTrace("[dock] applyDockTree OK cards=%zu float=%zu\n",
+              pool.size(), _overlay ? _overlay->getFloatingCardCount() : 0u);
+    return true;
+}
+
+void DockArea::poolAllCards(
+    std::unordered_map<std::string, DockCard*>& pool) {
+    std::vector<DockCard*> cards;
+    collectLeafCards(_rootNode, cards);
+    for (DockCard* c : cards) {
+        if (c == nullptr) {
+            continue;
+        }
+        if (DockTabGroup* leaf = findLeafOfCard(c)) {
+            removeTabFromLeaf(leaf, c);
+        }
+        if (!c->getId().empty()) {
+            pool[c->getId()] = c;
+        }
+    }
+    if (_overlay != nullptr) {
+        while (_overlay->getFloatingCardCount() > 0) {
+            DockCard* c = _overlay->getFloatingCard(0);
+            if (c == nullptr) {
+                break;
+            }
+            _overlay->removeFloatingCard(c);
+            if (!c->getId().empty()) {
+                pool[c->getId()] = c;
+            }
+        }
+    }
+    _cardIndex.clear();
+}
+
+Widget* DockArea::buildNodeFromJson(
+    const ayt::ui::json& j,
+    std::unordered_map<std::string, DockCard*>& pool) {
+    if (j.contains("leaf")) {
+        const std::string id = j.value("leaf", "");
+        DockTabGroup* leaf = nullptr;
+        Slot slot;
+        if (parseSlot(id, slot)) {
+            leaf = makePinnedLeaf(slot);
+        } else {
+            leaf = new DockTabGroup();
+            leaf->setLeafId(id.empty()
+                ? "g_" + std::to_string(_splitLeafCounter++)
+                : id);
+            leaf->setPinned(false);
+            leaf->setOnCloseTab([this](DockCard* c) {
+                if (c != nullptr) {
+                    closeCard(c->getId());
+                }
+            });
+        }
+        if (j.contains("tabs") && j["tabs"].is_array()) {
+            for (const auto& t : j["tabs"]) {
+                const std::string tid = t.get<std::string>();
+                auto it = pool.find(tid);
+                if (it != pool.end()) {
+                    addTabToLeaf(leaf, it->second);
+                    pool.erase(it);
+                }
+            }
+        }
+        if (j.contains("active") && j["active"].is_string()) {
+            const std::string act = j.value("active", "");
+            if (!act.empty()) {
+                leaf->activateTabById(act);
+            }
+        }
+        return leaf;
+    }
+
+    // Split node.
+    const std::string orient = j.value("orientation", "H");
+    BoxBase* box = (orient == "V")
+        ? static_cast<BoxBase*>(new VBox())
+        : static_cast<BoxBase*>(new HBox());
+    box->setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+    box->setSpacing(0.0f);
+    const SplitterHandle::Orientation so = (orient == "V")
+        ? SplitterHandle::Orientation::Vertical
+        : SplitterHandle::Orientation::Horizontal;
+    const ayt::ui::json kids =
+        j.contains("children") && j["children"].is_array()
+            ? j["children"] : ayt::ui::json::array();
+    const ayt::ui::json wts =
+        j.contains("weights") && j["weights"].is_array()
+            ? j["weights"] : ayt::ui::json::array();
+    bool first = true;
+    int wi = 0;
+    for (const auto& kj : kids) {
+        if (!first) {
+            box->addWidget(makeTreeSplitter(
+                so, getId() + "::s" + std::to_string(++_splitLeafCounter)),
+                SplitterHandle::kDefaultWidth);
+        }
+        first = false;
+        float w = 0.0f;
+        if (wi < static_cast<int>(wts.size()) && wts[wi].is_number()) {
+            w = wts[wi].get<float>();
+        }
+        ++wi;
+        Widget* child = buildNodeFromJson(kj, pool);
+        if (child != nullptr) {
+            box->addWidget(child, w);
+        }
+    }
+    box->rebindSplitters();
+    return box;
 }
 
 } // namespace ayt::ui

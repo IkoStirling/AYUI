@@ -7,6 +7,9 @@
 #include "AYDockCard.h"
 #include "AYDockTrace.h"
 #include "AYDockTabGroup.h"
+// Provides the `ayt::ui::json` alias used by the Phase-4 persistence
+// helpers (serializeNode / buildNodeFromJson signatures).
+#include "AYWidgetSerializer.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -213,6 +216,28 @@ public:
     TreeDropZone resolveTreeDropZone(const DockTabGroup* leaf,
                                      const math::FVector2& worldPos) const;
 
+    // ---- Phase 4: dock-tree persistence ----
+    //
+    // Serialize the whole dock tree (structure + per-leaf tab ids +
+    // active tab + floating cards with rects) to JSON:
+    //   {"version":1,"dockTree":{"orientation":"V","weights":[...],
+    //    "children":[leaf|split...]},"floating":[{"id":..,"x":..,
+    //    "y":..,"w":..,"h":..}]}
+    // Weights are each panel's slot size along the box main axis
+    // (0 = fill); splitters are implicit between adjacent panels.
+    // Card CONTENT is not serialized — the caller must recreate the
+    // cards (e.g. Gallery loadAndWire) before applyDockTree.
+    std::string serializeDockTree() const;
+
+    // Rebuild the tree from a serializeDockTree() string. Pools every
+    // existing card (docked + floating), detaches without deleting
+    // (UI-OWN-1), destroys the old root subtree, rebuilds per JSON
+    // (missing ids are skipped; unreferenced cards float back to the
+    // overlay), restores active tabs, prunes empty split leaves, then
+    // relayouts. Returns false on malformed JSON. Safe on an empty
+    // DockArea (builds nothing when "dockTree" is absent).
+    bool applyDockTree(const std::string& jsonStr);
+
 protected:
     // Mirrors CompoundFocusableWidget hooks. Default empty.
     void onChildAdded(Widget* child);
@@ -287,6 +312,17 @@ private:
     // until the tree is stable. Pinned leaves are never touched.
     void pruneEmptySplitNodes();
     DockTabGroup* hitTestTreeRec(Widget* node, const math::FVector2& p) const;
+
+    // ---- Phase 4: tree (de)serialization helpers ----
+    // Recursive writers/readers; shared builder for pinned-vs-g_N
+    // leaves so applyDockTree and ensureRootTree stay in lockstep.
+    void serializeNode(const Widget* node, ayt::ui::json& out) const;
+    Widget* buildNodeFromJson(const ayt::ui::json& j,
+                              std::unordered_map<std::string, DockCard*>& pool);
+    // Pool every card the dock owns (docked tabs + floating) into
+    // `pool` (id → card), detaching each WITHOUT deleting (UI-OWN-1).
+    // Floating cards keep their rect; callers re-apply it on redock.
+    void poolAllCards(std::unordered_map<std::string, DockCard*>& pool);
 
     // True when `cardId` belongs to this dock: in a slot leaf (via
     // _cardIndex) or floating in the overlay. Used by the onDrop

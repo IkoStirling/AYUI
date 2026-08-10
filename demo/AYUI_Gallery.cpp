@@ -804,6 +804,7 @@ void wireCapabilities(GalleryState& state)
 }
 
 void bindReload(GalleryState& state);
+void bindDockPersistence(GalleryState& state);
 
 // PR-B2 �?flip dark <-> light via F5. Uses ThemeManager::setActiveTheme
 // so the composer's composed sheet is swapped into the global
@@ -874,6 +875,9 @@ bool loadAndWire(GalleryState& state)
     // PR-Dock-TearOff: reload rebuilt the dock tree with fresh cards �?
     // re-inject the promote callback every load (hot reload included).
     wireDockPromotion(state);
+    // PR-DockTree-Phase4: save/load buttons die with the reloaded tree —
+    // rebind them on every load too.
+    bindDockPersistence(state);
     std::fprintf(stderr, "[AYUI_Gallery] loaded %s\n", state.layoutPath.c_str());
 
     // Unmistakable build fingerprint (console can be missed under WIN32).
@@ -916,6 +920,63 @@ void bindReload(GalleryState& state)
             // captured inside this lambda �?loadLayout destroys this
             // Button / std::function before ifstream::open returns.
             (void)loadAndWire(state);
+        });
+    }
+}
+
+// PR-DockTree-Phase4: Save/Load the dock tree (structure + tab ids +
+// active + floating rects) to gallery_dock_tree.json next to cwd —
+// same cwd-relative file pattern as the build stamp above.
+void bindDockPersistence(GalleryState& state)
+{
+    if (auto* btn = dynamic_cast<ayt::ui::Button*>(state.ui->findById("btn_save_dock"))) {
+        btn->setOnClicked([&state]() {
+            auto* dock = dynamic_cast<ayt::ui::DockArea*>(
+                state.ui->findById("mini_dock"));
+            if (dock == nullptr) {
+                return;
+            }
+            const std::string s = dock->serializeDockTree();
+            if (FILE* f = std::fopen("gallery_dock_tree.json", "w")) {
+                std::fputs(s.c_str(), f);
+                std::fclose(f);
+                std::fprintf(stderr,
+                             "[AYUI_Gallery] dock tree saved (%zu bytes)\n",
+                             s.size());
+            } else {
+                std::fprintf(stderr,
+                             "[AYUI_Gallery] FAILED to write gallery_dock_tree.json\n");
+            }
+        });
+    }
+    if (auto* btn = dynamic_cast<ayt::ui::Button*>(state.ui->findById("btn_load_dock"))) {
+        btn->setOnClicked([&state]() {
+            auto* dock = dynamic_cast<ayt::ui::DockArea*>(
+                state.ui->findById("mini_dock"));
+            if (dock == nullptr) {
+                return;
+            }
+            std::string s;
+            if (FILE* f = std::fopen("gallery_dock_tree.json", "rb")) {
+                char buf[4096];
+                size_t n;
+                while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
+                    s.append(buf, n);
+                }
+                std::fclose(f);
+            } else {
+                std::fprintf(stderr,
+                             "[AYUI_Gallery] FAILED to read gallery_dock_tree.json\n");
+                return;
+            }
+            if (!dock->applyDockTree(s)) {
+                std::fprintf(stderr,
+                             "[AYUI_Gallery] FAILED to apply dock tree\n");
+                return;
+            }
+            // applyDockTree moves live card objects — re-inject the
+            // promote callback so torn-off child windows keep working.
+            wireDockPromotion(state);
         });
     }
 }

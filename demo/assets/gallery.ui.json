@@ -30,6 +30,20 @@
           "text": "Reload JSON",
           "size": { "w": 110, "h": 26 },
           "slot": { "width": 110 }
+        },
+        {
+          "type": "Button",
+          "id": "btn_save_dock",
+          "text": "Save Dock",
+          "size": { "w": 90, "h": 26 },
+          "slot": { "width": 90 }
+        },
+        {
+          "type": "Button",
+          "id": "btn_load_dock",
+          "text": "Load Dock",
+          "size": { "w": 90, "h": 26 },
+          "slot": { "width": 90 }
         }
       ]
     },

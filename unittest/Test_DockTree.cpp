@@ -623,4 +623,232 @@ TEST_CASE(test_drag_paints_tree_previews) {
     CHECK_FALSE(f.ui.isDragging());
 }
 
+// -------------------------------------------------------------------------
+// 12. serialize → rebuild cards → apply round-trips the tree structure,
+//     tab order, and active tab (Gallery Save → Reload JSON → Load flow).
+// -------------------------------------------------------------------------
+TEST_CASE(test_serialize_apply_round_trip) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left_card", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("console", L"Console"));
+    dock->performLayout();
+
+    const std::string s = dock->serializeDockTree();
+    CHECK(s.find("\"leaf\":\"Center\"") != std::string::npos);
+    CHECK(s.find("\"leaf\":\"Left\"") != std::string::npos);
+
+    // Simulate the Gallery loadAndWire flow: a fresh dock + recreated
+    // cards (content comes from the JSON layout, not the dock tree).
+    auto dock2 = makeDock(f);
+    dock2->addCard(DockArea::Slot::Left, treeMakeCard("left_card", L"Left"));
+    dock2->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock2->addCard(DockArea::Slot::Center, treeMakeCard("console", L"Console"));
+    dock2->performLayout();
+
+    CHECK(dock2->applyDockTree(s));
+    dock2->performLayout();
+
+    DockTabGroup* center = leafAt(dock2.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(center->getLeafId() == "Center");
+    CHECK(center->getTabCount() == 2);
+    CHECK(center->getTab(0)->getId() == "viewport");
+    CHECK(center->getTab(1)->getId() == "console");
+    CHECK(center->getActiveTabId() == "console");
+
+    DockTabGroup* left = leafAt(dock2.get(), FVector2(80.0f, 300.0f));
+    CHECK_NOT_NULL(left);
+    if (left == nullptr) return;
+    CHECK(left->getLeafId() == "Left");
+    CHECK(left->getTabCount() == 1);
+    CHECK(left->getTab(0)->getId() == "left_card");
+}
+
+// -------------------------------------------------------------------------
+// 13. A card the JSON references but the host never recreated is
+//     skipped without error; the rest of the tree still applies.
+// -------------------------------------------------------------------------
+TEST_CASE(test_apply_missing_card_ids_skipped) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left_card", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("console", L"Console"));
+    dock->performLayout();
+
+    const std::string s = dock->serializeDockTree();
+
+    // Host only recreates viewport + left_card (console is gone).
+    auto dock2 = makeDock(f);
+    dock2->addCard(DockArea::Slot::Left, treeMakeCard("left_card", L"Left"));
+    dock2->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock2->performLayout();
+
+    CHECK(dock2->applyDockTree(s));
+    dock2->performLayout();
+
+    DockTabGroup* center = leafAt(dock2.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(center->getTabCount() == 1);
+    CHECK(center->getTab(0)->getId() == "viewport");
+    // Active "console" no longer exists — falls back to the first tab.
+    CHECK(center->getActiveTabId() == "viewport");
+}
+
+// -------------------------------------------------------------------------
+// 14. Floating cards round-trip with their rects.
+// -------------------------------------------------------------------------
+TEST_CASE(test_floating_round_trip) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->performLayout();
+    CHECK(dock->floatCard("viewport", FVector2(340.0f, 120.0f)));
+    DockCard* floating = dock->getOverlay()->getFloatingCard(0);
+    CHECK_NOT_NULL(floating);
+    if (floating == nullptr) return;
+    floating->setSize(FVector2(300.0f, 180.0f));
+
+    const std::string s = dock->serializeDockTree();
+    CHECK(s.find("\"floating\"") != std::string::npos);
+
+    auto dock2 = makeDock(f);
+    dock2->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock2->performLayout();
+    CHECK(dock2->applyDockTree(s));
+    dock2->performLayout();
+
+    CHECK(dock2->getOverlay()->getFloatingCardCount() == 1);
+    DockCard* restored = dock2->getOverlay()->getFloatingCard(0);
+    CHECK_NOT_NULL(restored);
+    if (restored == nullptr) return;
+    CHECK(restored->getId() == "viewport");
+    CHECK(std::fabs(restored->getPosition().x - 340.0f) < 0.5f);
+    CHECK(std::fabs(restored->getPosition().y - 120.0f) < 0.5f);
+    CHECK(std::fabs(restored->getSize().x - 300.0f) < 0.5f);
+    CHECK(std::fabs(restored->getSize().y - 180.0f) < 0.5f);
+}
+
+// -------------------------------------------------------------------------
+// 15. Cards the JSON never references float back to the overlay instead
+//     of being dropped.
+// -------------------------------------------------------------------------
+TEST_CASE(test_apply_orphan_cards_float_back) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left_card", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->performLayout();
+
+    // Serialize a tree that only knows about viewport (left_card is
+    // orphaned by hand-editing the JSON away).
+    const std::string s = dock->serializeDockTree();
+    const std::string orphan =
+        "{\"version\":1,\"dockTree\":{\"orientation\":\"H\",\"weights\":"
+        "[0.0],\"children\":[{\"leaf\":\"Center\",\"tabs\":[\"viewport\"],"
+        "\"active\":\"viewport\"}]},\"floating\":[]}";
+
+    CHECK(dock->applyDockTree(orphan));
+    dock->performLayout();
+
+    CHECK(dock->getOverlay()->getFloatingCardCount() == 1);
+    DockCard* orphaned = dock->getOverlay()->getFloatingCard(0);
+    CHECK_NOT_NULL(orphaned);
+    if (orphaned == nullptr) return;
+    CHECK(orphaned->getId() == "left_card");
+    // viewport stayed docked.
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(center->getLeafId() == "Center");
+    CHECK(center->getTabCount() == 1);
+    CHECK(center->getTab(0)->getId() == "viewport");
+    (void)s;
+}
+
+// -------------------------------------------------------------------------
+// 16. Malformed JSON returns false and leaves the tree untouched.
+// -------------------------------------------------------------------------
+TEST_CASE(test_apply_malformed_json_false) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->performLayout();
+    const size_t before = dock->getCardCount(DockArea::Slot::Center);
+
+    CHECK_FALSE(dock->applyDockTree("{ not json"));
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == before);
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(center->getLeafId() == "Center");
+    CHECK(center->containsCard(dock->findCard("viewport")));
+}
+
+// -------------------------------------------------------------------------
+// 17. Split-created g_N leaves survive the round-trip (nested structure
+//     with splitters), then prune normally when emptied.
+// -------------------------------------------------------------------------
+TEST_CASE(test_serialize_split_leaf_round_trip) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->performLayout();
+
+    DockCard* console = dock->findCard("console");
+    CHECK_NOT_NULL(console);
+    if (console == nullptr) return;
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    CHECK(dragCardTo(f, console, FVector2(cb.maxX - 5.0f,
+                                         (cb.minY + cb.maxY) * 0.5f)));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(),
+        FVector2(cb.maxX - 5.0f, (cb.minY + cb.maxY) * 0.5f));
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+
+    const std::string s = dock->serializeDockTree();
+    CHECK(s.find("\"leaf\":\"g_0\"") != std::string::npos);
+
+    auto dock2 = makeDock(f);
+    dock2->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock2->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock2->performLayout();
+    CHECK(dock2->applyDockTree(s));
+    dock2->performLayout();
+
+    // g_0 survived as a non-pinned leaf holding console.
+    const FVector2 g0Pt(cb.maxX - 5.0f, (cb.minY + cb.maxY) * 0.5f);
+    DockTabGroup* g0b = leafAt(dock2.get(), g0Pt);
+    CHECK_NOT_NULL(g0b);
+    if (g0b == nullptr) return;
+    CHECK(g0b->getLeafId() == "g_0");
+    CHECK(g0b->containsCard(dock2->findCard("console")));
+    CHECK_FALSE(g0b->isPinned());
+
+    // And it prunes when emptied, like a split leaf born at runtime.
+    CHECK(dock2->closeCard("console"));
+    dock2->performLayout();
+    DockTabGroup* after = leafAt(dock2.get(), g0Pt);
+    CHECK_NOT_NULL(after);
+    if (after == nullptr) return;
+    CHECK(after->getLeafId() == "Center");
+}
+
 TEST_SUITE_END
