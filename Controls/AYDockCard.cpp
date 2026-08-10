@@ -19,8 +19,22 @@ namespace {
 // before a void-drop promotes the card to a host window. Guards against
 // accidental single clicks on the title bar popping a window.
 constexpr float kPromoteDragThreshold = 8.0f;
+constexpr float kCloseButtonWidth = 22.0f;
 
 } // namespace
+
+math::FRectangle DockCard::closeButtonRect() const {
+    if (!_closable || _headerHeight <= 0.0f) {
+        return math::FRectangle();
+    }
+    const math::FRectangle bounds = getWorldBounds();
+    const float w = std::min(kCloseButtonWidth, std::max(0.0f, bounds.maxX - bounds.minX));
+    return math::FRectangle(
+        bounds.maxX - w,
+        bounds.minY,
+        bounds.maxX,
+        bounds.minY + _headerHeight);
+}
 
 DockCard::DockCard() {
     // Default size matches a typical inspector / hierarchy panel.
@@ -234,6 +248,8 @@ Widget* DockCard::hitTest(const math::FVector2& worldPos) {
             bounds.minX, bounds.minY,
             bounds.maxX, bounds.minY + _headerHeight);
         if (titleBar.contains(worldPos)) {
+            // Close button and title chrome both resolve to this card;
+            // onMouseButtonDown distinguishes the close hit.
             return this;
         }
     }
@@ -273,15 +289,27 @@ void DockCard::onRender(IRenderBackend& renderer) {
     renderer.drawRect(header, math::FVector4(0.16f, 0.16f, 0.18f, 1.0f));
     renderer.drawBorderRect(header, math::FVector4(0.10f, 0.10f, 0.10f, 1.0f), 1.0f, 0.0f);
 
+    const math::FRectangle closeRect = closeButtonRect();
+    const float titleRight = (_closable && closeRect.maxX > closeRect.minX)
+        ? closeRect.minX - 2.0f
+        : header.maxX - 6.0f;
+
     if (!_title.empty()) {
-        // Title sits inside the header with a small left padding.
         const math::FRectangle textBounds(
             header.minX + 6.0f,
             header.minY,
-            header.maxX - 6.0f,
+            titleRight,
             header.maxY
         );
         renderer.drawText(textBounds, _title, 12, math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
+    }
+
+    if (_closable && closeRect.maxX > closeRect.minX) {
+        if (_closeHover) {
+            renderer.drawRect(closeRect, math::FVector4(0.55f, 0.18f, 0.18f, 1.0f));
+        }
+        renderer.drawText(closeRect, L"x", 12,
+                          math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
     }
 }
 
@@ -303,17 +331,9 @@ void DockCard::onRender(IRenderBackend& renderer) {
 // =============================================================================
 
 bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
-    // Only LMB starts a tear-off drag. Other buttons keep Panel's
+    // Only LMB starts a tear-off drag / close. Other buttons keep Panel's
     // default behaviour.
     if (e.mouseButton != 0) {
-        return false;
-    }
-
-    // K-INV-D3-2 — non-floatable cards short-circuit even before the
-    // hit-test. setDraggable(false) already gates beginDrag, but the
-    // explicit check here avoids the titleBar hit-test work and makes
-    // the intent clear to future readers.
-    if (!_floatable) {
         return false;
     }
 
@@ -332,6 +352,20 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
             getId().c_str(), e.mousePos.x, e.mousePos.y,
             titleBar.minX, titleBar.minY, titleBar.maxX, titleBar.maxY,
             bounds.minX, bounds.minY, bounds.maxX, bounds.maxY);
+        return false;
+    }
+
+    // Close hits BEFORE drag — clicking X must not begin a tear-off.
+    if (_closable && closeButtonRect().contains(e.mousePos)) {
+        dockTrace("[dock] closeClick card=%s\n", getId().c_str());
+        if (_onCloseRequested) {
+            _onCloseRequested(this);
+        }
+        return true;
+    }
+
+    // K-INV-D3-2 — non-floatable cards short-circuit drag.
+    if (!_floatable) {
         return false;
     }
 
@@ -373,7 +407,8 @@ bool DockCard::onMouseMove(const UIMouseEvent& e) {
         bounds.maxX,
         bounds.minY + _headerHeight
     );
-    _titleBarHover = _floatable && titleBar.contains(e.mousePos);
+    _closeHover = _closable && closeButtonRect().contains(e.mousePos);
+    _titleBarHover = titleBar.contains(e.mousePos) && !_closeHover;
     // No-op behaviour; return false so UIManager keeps tracking hover
     // propagation (mirrors the Widget::onMouseMove default).
     return false;
@@ -381,6 +416,7 @@ bool DockCard::onMouseMove(const UIMouseEvent& e) {
 
 void DockCard::onMouseLeave() {
     _titleBarHover = false;
+    _closeHover = false;
     // Inherited leave propagation walks children — same pattern as
     // Window::onMouseLeave (AYWindow.cpp). Widget base handles the
     // call to compoundDescendLeave when applicable.
@@ -388,6 +424,9 @@ void DockCard::onMouseLeave() {
 }
 
 UiCursorHint DockCard::getCursorHint() const {
+    if (_closeHover && _closable) {
+        return UiCursorHint::Hand;
+    }
     // Mirror Window::getCursorHint: when hovering the drag handle, the
     // cursor should signal "this can be moved" rather than the default
     // arrow. Move hint is the closest UiCursorHint enum value to the

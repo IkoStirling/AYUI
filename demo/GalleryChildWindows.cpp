@@ -1,6 +1,8 @@
 #include "GalleryChildWindows.h"
 
+#include "AYDockArea.h"
 #include "AYDockCard.h"
+#include "AYDockTrace.h"
 
 #if defined(_WIN32)
 #  include "GalleryChildBackend.h"
@@ -13,17 +15,14 @@
 #  include <Windows.h>
 #endif
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace ayt::gallery {
 
 namespace {
 
-// PR-Dock-TearOff: convert a promote frame from primary-window CLIENT
-// coordinates to SCREEN coordinates (the card's world position lives in
-// primary-client space; createTopLevelWindow positions in OS screen
-// space). Win32: ClientToScreen against the primary HWND. Non-Win32:
-// identity pass-through (createTopLevelWindow is a stub there anyway).
 void clientToScreenCoords(ayt::device::WindowManager& wm, int& x, int& y) {
 #if defined(_WIN32)
     if (HWND primaryHwnd = static_cast<HWND>(wm.getWindowHandle())) {
@@ -48,11 +47,6 @@ GalleryChildWindows::GalleryChildWindows(ayt::device::WindowManager& wm,
 }
 
 GalleryChildWindows::~GalleryChildWindows() {
-    // K-INV-D5-6: tear down child windows BEFORE the primary UI.
-    // ~UIManager calls shutdown() which can poke g_activeUIManager
-    // (only if it was active); the primary's active flag wins over
-    // a potentially-null child, so destroying the manager here
-    // (with primary still alive) avoids an UAF cleanup race.
     for (auto& e : _entries) {
         if (e.handle != nullptr) {
             _wm.destroyTopLevelWindow(e.handle);
@@ -62,15 +56,182 @@ GalleryChildWindows::~GalleryChildWindows() {
     _entries.clear();
 }
 
+GalleryChildWindows::Entry* GalleryChildWindows::findEntryByHandle(void* handle) {
+    for (auto& e : _entries) {
+        if (e.handle == handle) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+GalleryChildWindows::Entry* GalleryChildWindows::findEntryByUi(
+    const ayt::ui::UIManager* ui) {
+    for (auto& e : _entries) {
+        if (e.ui.get() == ui) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+GalleryChildWindows::Entry* GalleryChildWindows::findEntryByCard(
+    const ayt::ui::DockCard* card) {
+    for (auto& e : _entries) {
+        if (e.card == card) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+bool GalleryChildWindows::hasActiveDrag() const {
+    for (const auto& e : _entries) {
+        if (e.ui && e.ui->isDragging()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool GalleryChildWindows::closeCardHost(ayt::ui::DockCard* card) {
+    Entry* e = findEntryByCard(card);
+    if (e == nullptr || e->handle == nullptr) {
+        return false;
+    }
+    ayt::ui::dockTrace("[child] closeCardHost card=%s\n",
+                       card ? card->getId().c_str() : "?");
+    closeChildWindow(e->handle);
+    return true;
+}
+
+bool GalleryChildWindows::cursorToPrimaryWorld(ayt::math::FVector2& out) const {
+#if defined(_WIN32)
+    HWND primaryHwnd = static_cast<HWND>(_wm.getWindowHandle());
+    if (primaryHwnd == nullptr) {
+        return false;
+    }
+    POINT pt{};
+    if (!::GetCursorPos(&pt)) {
+        return false;
+    }
+    if (!::ScreenToClient(primaryHwnd, &pt)) {
+        return false;
+    }
+    out = ayt::math::FVector2(static_cast<float>(pt.x),
+                              static_cast<float>(pt.y));
+    return true;
+#else
+    (void)out;
+    return false;
+#endif
+}
+
+bool GalleryChildWindows::cursorOverPrimaryWindow() const {
+#if defined(_WIN32)
+    HWND primaryHwnd = static_cast<HWND>(_wm.getWindowHandle());
+    if (primaryHwnd == nullptr) {
+        return false;
+    }
+    POINT pt{};
+    if (!::GetCursorPos(&pt)) {
+        return false;
+    }
+    // Geometry gate: cursor must lie in the primary client rect. This is
+    // independent of which HWND is topmost — the tear-off follows the
+    // cursor with SetWindowPos, so WindowFromPoint alone always sees the
+    // child and would permanently block redock + drop guides.
+    POINT clientPt = pt;
+    if (!::ScreenToClient(primaryHwnd, &clientPt)) {
+        return false;
+    }
+    RECT clientRect{};
+    if (!::GetClientRect(primaryHwnd, &clientRect)
+        || !::PtInRect(&clientRect, clientPt)) {
+        return false;
+    }
+
+    HWND under = ::WindowFromPoint(pt);
+    if (under == nullptr) {
+        return false;
+    }
+    if (under == primaryHwnd || ::IsChild(primaryHwnd, under)) {
+        return true;
+    }
+    // Allow the child that is actively G12-dragging (covers the dock
+    // while following the cursor). Reject other promoted floaters so a
+    // parked window sitting over the dock cannot steal the drop.
+    for (const auto& e : _entries) {
+        if (e.handle == nullptr) {
+            continue;
+        }
+        HWND child = static_cast<HWND>(e.handle);
+        if (under == child || ::IsChild(child, under)) {
+            return e.ui != nullptr && e.ui->isDragging();
+        }
+    }
+    return false;
+#else
+    return false;
+#endif
+}
+
+void GalleryChildWindows::beginDragMove(void* handle) {
+#if defined(_WIN32)
+    Entry* e = findEntryByHandle(handle);
+    if (e == nullptr || e->handle == nullptr) {
+        return;
+    }
+    HWND hwnd = static_cast<HWND>(e->handle);
+    POINT pt{};
+    RECT wr{};
+    if (!::GetCursorPos(&pt) || !::GetWindowRect(hwnd, &wr)) {
+        return;
+    }
+    e->dragGrabX = static_cast<int>(pt.x - wr.left);
+    e->dragGrabY = static_cast<int>(pt.y - wr.top);
+    e->dragStartScreenX = static_cast<int>(pt.x);
+    e->dragStartScreenY = static_cast<int>(pt.y);
+    e->dragMoveActive = true;
+#else
+    (void)handle;
+#endif
+}
+
+void GalleryChildWindows::updateDragMove(void* handle) {
+#if defined(_WIN32)
+    Entry* e = findEntryByHandle(handle);
+    if (e == nullptr || !e->dragMoveActive || e->handle == nullptr) {
+        return;
+    }
+    if (!e->ui || !e->ui->isDragging()) {
+        e->dragMoveActive = false;
+        return;
+    }
+    POINT pt{};
+    if (!::GetCursorPos(&pt)) {
+        return;
+    }
+    ::SetWindowPos(static_cast<HWND>(e->handle), nullptr,
+                   pt.x - e->dragGrabX, pt.y - e->dragGrabY,
+                   0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+#else
+    (void)handle;
+#endif
+}
+
+void GalleryChildWindows::endDragMove(void* handle) {
+    if (Entry* e = findEntryByHandle(handle)) {
+        e->dragMoveActive = false;
+    }
+}
+
 bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
                                       const std::wstring& title,
                                       int x, int y, int w, int h) {
     if (card == nullptr) {
         return false;
     }
-    // The promote frame is the card's WORLD position = primary client
-    // coords. Convert to screen coords before handing to
-    // createTopLevelWindow (which positions in OS screen space).
     clientToScreenCoords(_wm, x, y);
 
     ayt::device::TopLevelWindowDesc d;
@@ -79,6 +240,9 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     d.y      = y;
     d.width  = w;
     d.height = h;
+    // No OS caption/menu �?DockCard title bar is the only chrome
+    // (drag + future close). Avoids double title bars on tear-off.
+    d.borderless = true;
 
     void* handle = nullptr;
     if (!_wm.createTopLevelWindow(d, handle)) {
@@ -88,35 +252,23 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
         return false;
     }
 
-    // Build the entry first so the callbacks can capture a stable
-    // shared_ptr (the vector may reallocate on push_back; std::shared_ptr
-    // keeps the UIManager alive across the lifetime of the callback
-    // even if closeChildWindow removes the entry under it).
     Entry e;
     e.handle = handle;
     e.ui     = std::make_shared<ayt::ui::UIManager>();
     e.card   = card;
 #if defined(_WIN32)
-    // Per-HWND GDI backend — the promoted card renders into THIS
-    // window's DC (bgfx is process-singleton-bound to the primary
-    // window and cannot switch HWNDs per frame).
     e.backend = std::make_unique<GalleryChildBackend>(static_cast<HWND>(handle));
     e.ui->initialize(e.backend.get());
 #else
-    e.ui->initialize(nullptr);  // K-INV-D5-4 null backend = no render
+    e.ui->initialize(nullptr);
 #endif
-    // initialize() claims g_activeUIManager for the child; put the
-    // Gallery primary back so tryGet() between frames stays correct.
-    // Child input/tick still use ActiveScope around each dispatch.
     ayt::ui::UIManager::makeActive(&_primary);
 
     e.ui->setClientSize(static_cast<float>(w), static_cast<float>(h));
 
-    // PR-Dock-TearOff live-card migration: reparent the LIVE card into
-    // the child root. addChild auto-detaches from the old parent (the
-    // source DockOverlay); the card keeps its whole widget subtree and
-    // callback state (K-INV-D5.5-2 — detachToOwnWindow already snapped
-    // the overlay bookkeeping BEFORE our callback ran).
+    ayt::ui::dockTrace("[child] promoteCard OK card=%s screen=(%d,%d) %dx%d\n",
+                       card->getId().c_str(), x, y, w, h);
+
     card->setPosition(ayt::math::FVector2(0.0f, 0.0f));
     card->setSize(ayt::math::FVector2(static_cast<float>(w),
                                       static_cast<float>(h)));
@@ -124,21 +276,10 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     e.ui->layout();
 
     ayt::device::TopLevelWindowCallbacks cbs;
-    // Capture by value. The UIManager lives in `_entries` by
-    // shared_ptr; the lambdas run on the Win32 message thread, NOT
-    // concurrent with our tick (single-threaded Gallery v1).
     cbs.onCloseRequested = [this, handle]() {
         this->closeChildWindow(handle);
     };
 
-    // Input forwarding. Every callback grabs its own ActiveScope —
-    // these fire during the Win32 message pump (pollEvents), NOT inside
-    // tickAll, so each must push/pop the active UIManager independently
-    // without polluting the primary's slot. Coordinates arrive
-    // client-relative (AYDevice translated them); buttons map down/up
-    // to the UIManager pair (bool return = request capture). Capture
-    // the shared_ptr + card (NOT the Entry — it holds a non-copyable
-    // unique_ptr backend).
     const std::shared_ptr<ayt::ui::UIManager> ui = e.ui;
     ayt::ui::DockCard* promotedCard = e.card;
     cbs.onResize = [ui, promotedCard](int width, int height) {
@@ -149,20 +290,56 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
             promotedCard->setSize(ayt::math::FVector2(
                 static_cast<float>(width), static_cast<float>(height)));
         }
-        ui->root()->performLayout();
+        ui->layout();
     };
-    cbs.onMouseMove = [ui](float x, float y) {
+    cbs.onMouseMove = [this, ui, handle](float x, float y) {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
         ui->onMouseMove(x, y);
+        // G12 title-drag moves the OS window with the cursor so the
+        // user can park it back over the primary DockArea.
+        this->updateDragMove(handle);
     };
     cbs.onMouseLeave = [ui]() {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
         ui->onMouseLeave();
     };
-    cbs.onMouseButton = [ui](float x, float y, int button, bool pressed) {
+#if defined(_WIN32)
+    cbs.onSetCursor = [ui]() -> bool {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
-        return pressed ? ui->onMouseButtonDown(x, y, button)
-                       : ui->onMouseButtonUp(x, y, button);
+        // Mirror Gallery primary WM_SETCURSOR �?DockCard Move/Hand hints.
+        static const HCURSOR arrow = ::LoadCursor(nullptr, IDC_ARROW);
+        static const HCURSOR hand  = ::LoadCursor(nullptr, IDC_HAND);
+        static const HCURSOR move  = ::LoadCursor(nullptr, IDC_SIZEALL);
+        static const HCURSOR beam  = ::LoadCursor(nullptr, IDC_IBEAM);
+        HCURSOR c = arrow;
+        switch (ui->getCursorHint()) {
+        case ayt::ui::UiCursorHint::Hand: c = hand; break;
+        case ayt::ui::UiCursorHint::Move: c = move; break;
+        case ayt::ui::UiCursorHint::Beam: c = beam; break;
+        default: break;
+        }
+        ::SetCursor(c);
+        return true;
+    };
+#endif
+    cbs.onMouseButton = [this, ui, handle](float x, float y, int button,
+                                           bool pressed) {
+        ayt::ui::UIManager::ActiveScope guard(ui.get());
+        if (pressed) {
+            const bool handled = ui->onMouseButtonDown(x, y, button);
+            if (button == 0 && ui->isDragging()) {
+                this->beginDragMove(handle);
+            }
+            return handled;
+        }
+        // Redock BEFORE endDrag �?uses OS cursor �?primary dock hit-test.
+        if (button == 0 && this->tryRedock(ui)) {
+            this->endDragMove(handle);
+            return true;
+        }
+        const bool handled = ui->onMouseButtonUp(x, y, button);
+        this->endDragMove(handle);
+        return handled;
     };
     cbs.onMouseWheel = [ui](float x, float y, float deltaY) {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
@@ -192,9 +369,6 @@ void GalleryChildWindows::closeChildWindow(void* handle) {
             if (it->handle != nullptr) {
                 _wm.destroyTopLevelWindow(it->handle);
             }
-            // shared_ptr<UIManager> drops here — ~UIManager::shutdown
-            // clears g_active if the child held it. Always re-claim the
-            // Gallery primary so the next tryGet() is not nullptr.
             _entries.erase(it);
             ayt::ui::UIManager::makeActive(&_primary);
             return;
@@ -202,19 +376,112 @@ void GalleryChildWindows::closeChildWindow(void* handle) {
     }
 }
 
+void GalleryChildWindows::updateRedockHover() {
+    if (_dock == nullptr) {
+        return;
+    }
+    for (const auto& e : _entries) {
+        if (e.ui && e.ui->isDragging()) {
+            ayt::math::FVector2 world;
+            if (cursorOverPrimaryWindow() && cursorToPrimaryWorld(world)) {
+                _dock->setExternalDropPos(world);
+            } else {
+                _dock->clearExternalDropPos();
+            }
+            return;
+        }
+    }
+    _dock->clearExternalDropPos();
+}
+
+bool GalleryChildWindows::tryRedock(
+    const std::shared_ptr<ayt::ui::UIManager>& ui) {
+    if (_dock == nullptr || ui == nullptr || !ui->isDragging()) {
+        return false;
+    }
+
+    Entry* entry = findEntryByUi(ui.get());
+    if (entry == nullptr || entry->card == nullptr) {
+        return false;
+    }
+
+#if defined(_WIN32)
+    // Title-click / tiny nudge must not redock.
+    POINT pt{};
+    if (::GetCursorPos(&pt)) {
+        const int moved = std::abs(pt.x - entry->dragStartScreenX)
+                        + std::abs(pt.y - entry->dragStartScreenY);
+        if (moved < 12) {
+            ayt::ui::dockTrace("[child] tryRedock skip moved=%d\n", moved);
+            return false;
+        }
+    }
+#endif
+
+    // Cursor must be over the primary client. The dragging child HWND
+    // is allowed to sit on top (follow-cursor); hit-testing uses the
+    // cursor's primary-client coordinates, not WindowFromPoint ownership.
+    if (!cursorOverPrimaryWindow()) {
+        ayt::ui::dockTrace("[child] tryRedock skip (cursor outside primary client)\n");
+        return false;
+    }
+
+    ayt::math::FVector2 world;
+    if (!cursorToPrimaryWorld(world)) {
+        return false;
+    }
+
+    const ayt::ui::DockArea::Slot slot = _dock->hitTestSlot(world);
+    ayt::ui::dockTrace("[child] tryRedock cursor primary=(%.1f,%.1f) slot=%d\n",
+                       world.x, world.y, static_cast<int>(slot));
+    if (slot == ayt::ui::DockArea::Slot::Count) {
+        return false;
+    }
+
+    // Reject disabled / near-zero bands (Gallery Top/Bottom at 1e-6).
+    const ayt::math::FRectangle sr = _dock->getSlotRect(slot);
+    if ((sr.maxX - sr.minX) < 8.0f || (sr.maxY - sr.minY) < 8.0f) {
+        ayt::ui::dockTrace("[child] tryRedock skip tiny slot=%d\n",
+                           static_cast<int>(slot));
+        return false;
+    }
+
+    ayt::ui::DockCard* card = entry->card;
+    const std::string cardId = card->getId();
+    void* handle = entry->handle;
+
+    ui->cancelDrag();
+
+    ui->root()->removeChild(card);
+    // adoptCard / displace floatCard / requestRelayout must see the
+    // primary UIManager via tryGet() — not the child that still owns
+    // ActiveScope from the mouse-up handler.
+    {
+        ayt::ui::UIManager::ActiveScope primaryGuard(&_primary);
+        if (!_dock->adoptCard(slot, card)) {
+            ayt::ui::dockTrace("[child] tryRedock adoptCard FAILED card=%s\n",
+                               cardId.c_str());
+            ui->root()->addChild(card);
+            return false;
+        }
+        _dock->clearExternalDropPos();
+        _primary.layout();
+    }
+
+    ayt::ui::dockTrace("[child] tryRedock OK card=%s -> slot=%d\n",
+                       cardId.c_str(), static_cast<int>(slot));
+
+    this->closeChildWindow(handle);
+    return true;
+}
+
 void GalleryChildWindows::tickAll(float dt) {
+    updateRedockHover();
     for (auto& e : _entries) {
         if (!e.ui) continue;
-        // pushActive swaps the active UIManager for the duration of
-        // this iteration; on scope exit the previous active (typically
-        // the Gallery's primary) is restored.
         ayt::ui::UIManager::ActiveScope guard(e.ui.get());
         e.ui->update(dt);
 #if defined(_WIN32)
-        // Per-window GDI draw. Grab the window DC for this frame, point
-        // the backend at it, render. GetDC/ReleaseDC round-trip per
-        // frame keeps the DC lifetime tight (no stale handle across
-        // resize/destroy).
         if (e.backend && e.handle != nullptr) {
             if (HWND childHwnd = static_cast<HWND>(e.handle)) {
                 if (HDC hdc = ::GetDC(childHwnd)) {
@@ -228,7 +495,7 @@ void GalleryChildWindows::tickAll(float dt) {
             }
         }
 #else
-        e.ui->render();  // nullptr backend → populateFrame/flushFrame guard
+        e.ui->render();
 #endif
     }
 }

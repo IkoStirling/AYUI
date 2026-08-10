@@ -43,19 +43,27 @@ SplitterHandle::SplitterHandle() {
     setSize(math::FVector2(kDefaultWidth, 100.0f));
 }
 
-void SplitterHandle::bindPanels(HBox* owner, int leftPanelSlot, int rightPanelSlot) {
+void SplitterHandle::bindPanels(BoxBase* owner, int beforePanelSlot, int afterPanelSlot) {
     _owner = owner;
-    _leftPanelSlot = leftPanelSlot;
-    _rightPanelSlot = rightPanelSlot;
+    _beforePanelSlot = beforePanelSlot;
+    _afterPanelSlot = afterPanelSlot;
 }
 
 math::FRectangle SplitterHandle::interactionBand() const {
     math::FRectangle band = getWorldBounds();
     // If layout accidentally stretched us to a fill slot, only the leading
     // kDefaultWidth strip is the real handle — otherwise "move away" still
-    // lands inside the fat band and leave never fires.
-    if (band.maxX - band.minX > kDefaultWidth + 0.5f) {
-        band.maxX = band.minX + kDefaultWidth;
+    // lands inside the fat band and leave never fires. The thin axis is x
+    // for Horizontal (HBox, vertical strip) and y for Vertical (VBox,
+    // horizontal strip).
+    if (_orientation == Orientation::Horizontal) {
+        if (band.maxX - band.minX > kDefaultWidth + 0.5f) {
+            band.maxX = band.minX + kDefaultWidth;
+        }
+    } else {
+        if (band.maxY - band.minY > kDefaultWidth + 0.5f) {
+            band.maxY = band.minY + kDefaultWidth;
+        }
     }
     return band;
 }
@@ -100,7 +108,7 @@ bool SplitterHandle::onMouseMove(const UIMouseEvent& e) {
                 (world.maxX - world.minX > kDefaultWidth + 0.5f) ? 1 : 0);
         }
         if (_dragging) {
-            applyDrag(e.mousePos.x);
+            applyDrag(cursorAxisPos(e.mousePos));
             return true;
         }
         return false;
@@ -119,7 +127,7 @@ bool SplitterHandle::onMouseMove(const UIMouseEvent& e) {
     }
     _hover = true;
     if (_dragging) {
-        applyDrag(e.mousePos.x);
+        applyDrag(cursorAxisPos(e.mousePos));
     }
     return true;
 }
@@ -129,22 +137,22 @@ bool SplitterHandle::onMouseButtonDown(const UIMouseEvent& e) {
         return false;
     }
 
-    if (_owner == nullptr || _leftPanelSlot < 0 || _rightPanelSlot < 0) {
-        if (HBox* box = dynamic_cast<HBox*>(getParent())) {
+    if (_owner == nullptr || _beforePanelSlot < 0 || _afterPanelSlot < 0) {
+        if (BoxBase* box = dynamic_cast<BoxBase*>(getParent())) {
             box->rebindSplitters();
         }
     }
 
-    if (_owner == nullptr || _leftPanelSlot < 0 || _rightPanelSlot < 0) {
+    if (_owner == nullptr || _beforePanelSlot < 0 || _afterPanelSlot < 0) {
         return false;
     }
 
     _dragging = true;
     _hover = true;
-    _dragStartMouseX = e.mousePos.x;
-    _adjustLeft = _owner->slotWidth(_leftPanelSlot) > 0.0f;
-    const int targetSlot = _adjustLeft ? _leftPanelSlot : _rightPanelSlot;
-    _dragStartPrimaryWidth = _owner->slotWidth(targetSlot);
+    _dragStartMouseAxisPos = cursorAxisPos(e.mousePos);
+    _adjustBefore = _owner->slotSize(_beforePanelSlot) > 0.0f;
+    const int targetSlot = _adjustBefore ? _beforePanelSlot : _afterPanelSlot;
+    _dragStartPrimarySize = _owner->slotSize(targetSlot);
     if (splitterDebugEnabled()) {
         std::fprintf(stderr,
             "[SplitterDebug] %s BUTTON DOWN -> dragging=1 mouse=(%.1f,%.1f)\n",
@@ -211,18 +219,20 @@ void SplitterHandle::onMouseLeave() {
 
 UiCursorHint SplitterHandle::getCursorHint() const {
     if (_dragging || _hover) {
-        return UiCursorHint::SizeHorizontal;
+        return (_orientation == Orientation::Horizontal)
+            ? UiCursorHint::SizeHorizontal
+            : UiCursorHint::SizeVertical;
     }
     return UiCursorHint::Default;
 }
 
-void SplitterHandle::applyDrag(float mouseWorldX) {
+void SplitterHandle::applyDrag(float mouseAxisPos) {
     if (_owner == nullptr) {
         return;
     }
 
-    _owner->applySplitterDrag(_leftPanelSlot, _rightPanelSlot, mouseWorldX,
-                              _dragStartMouseX, _dragStartPrimaryWidth, _adjustLeft);
+    _owner->applySplitterDrag(_beforePanelSlot, _afterPanelSlot, mouseAxisPos,
+                              _dragStartMouseAxisPos, _dragStartPrimarySize, _adjustBefore);
 }
 
 void SplitterHandle::tick(float dt) {
@@ -255,17 +265,30 @@ void SplitterHandle::onRender(IRenderBackend& renderer) {
 
     renderer.drawRect(bounds, math::FVector4(0.40f, 0.48f, 0.62f, 1.0f));
 
-    const float cx = (bounds.minX + bounds.maxX) * 0.5f;
-    const float grabHalfWidth = 1.0f;
-    const float grabInsetTop = 4.0f;
-    const float grabInsetBottom = 4.0f;
-    if (bounds.maxY - bounds.minY > grabInsetTop + grabInsetBottom) {
-        renderer.drawRect(
-            math::FRectangle(cx - grabHalfWidth,
-                             bounds.minY + grabInsetTop,
-                             cx + grabHalfWidth,
-                             bounds.maxY - grabInsetBottom),
-            math::FVector4(0.85f, 0.88f, 0.92f, 0.9f));
+    constexpr float kGrabHalfSize = 1.0f;
+    constexpr float kGrabInset = 4.0f;
+    if (_orientation == Orientation::Horizontal) {
+        // Vertical strip: grab bar runs down the middle, inset top/bottom.
+        const float cx = (bounds.minX + bounds.maxX) * 0.5f;
+        if (bounds.maxY - bounds.minY > kGrabInset + kGrabInset) {
+            renderer.drawRect(
+                math::FRectangle(cx - kGrabHalfSize,
+                                 bounds.minY + kGrabInset,
+                                 cx + kGrabHalfSize,
+                                 bounds.maxY - kGrabInset),
+                math::FVector4(0.85f, 0.88f, 0.92f, 0.9f));
+        }
+    } else {
+        // Horizontal strip: grab bar runs across the middle, inset left/right.
+        const float cy = (bounds.minY + bounds.maxY) * 0.5f;
+        if (bounds.maxX - bounds.minX > kGrabInset + kGrabInset) {
+            renderer.drawRect(
+                math::FRectangle(bounds.minX + kGrabInset,
+                                 cy - kGrabHalfSize,
+                                 bounds.maxX - kGrabInset,
+                                 cy + kGrabHalfSize),
+                math::FVector4(0.85f, 0.88f, 0.92f, 0.9f));
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 #include "AYUIManager.h"
 #include "AYDockCard.h"
 #include "AYDockTrace.h"
+#include "AYDockTabGroup.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -13,16 +14,21 @@
 
 namespace ayt::ui {
 
-// D1: DockArea - the editor-shell root that hosts named slots
-// (Left/Right/Top/Bottom/Center) plus a DockOverlay for floating cards.
+// DockArea - the editor-shell root that hosts the dock tree plus a
+// DockOverlay for floating cards.
 //
-// Each slot owns a VBox (Left/Right stack vertically; Top/Bottom stack
-// horizontally; Center holds the main view). Cards added to a slot are
-// pushed into that slot's VBox in insertion order; the existing layout
-// engine then sizes them with fill-style stretching.
+// The dock tree IS the AYUI widget tree: children are
+// [root split node, DockOverlay]. The root is a VBox{HBox} split node
+// with SplitterHandles between panels; panels are DockTabGroup leaves
+// (the 5 legacy slots are pinned leaves whose leafId = slot name and
+// which are never pruned). Nested splits created by edge drops are
+// future phases. Drop hit-testing / guides follow live leaf geometry
+// after the template is laid out so splitter-resized panels stay
+// adaptive placement targets.
 //
-// D1 ships the slot tree, addCard / removeCard / findCard, and overlay
-// ownership. Tear-off UX is D3; persistence is D4.
+// The 5-slot legacy API (addCard(Slot)/getCardCount(Slot)/adoptCard/
+// moveInSlot/...) is preserved verbatim and maps onto the pinned
+// leaves, so hosts and tests keep working unchanged.
 class DockArea : public CompoundFocusableWidget {
 public:
     enum class Slot {
@@ -50,15 +56,13 @@ public:
 
     // D3 internal — used by the ctor's onDrop lambda to enforce
     // K-INV-D3-1 (same-slot no-op). Returns true if `card` lives in
-    // `slot`. Inline because the lambda body needs it.
+    // `slot`'s pinned leaf. Inline because the lambda body needs it.
     bool isCardInSlot(const DockCard* card, Slot slot) const {
         if (card == nullptr) return false;
         const int s = (int)slot;
         if (s < 0 || s >= (int)Slot::Count) return false;
-        for (DockCard* c : _slotCards[s]) {
-            if (c == card) return true;
-        }
-        return false;
+        const DockTabGroup* leaf = _rootLeaves[s];
+        return leaf != nullptr && leaf->containsCard(card);
     }
 
     // Slot weight (0..1) used by the layout pass for relative sizing.
@@ -83,17 +87,34 @@ public:
     // Add a card to a named slot. DockArea takes ownership of `card`.
     // Adding a card with the same id as an existing card replaces the old
     // card (mirroring the Loader's "last write wins" rule).
+    // NOTE: does NOT displace prior occupants — callers that need
+    // single-occupant bands (redock / dockCard) must use adoptCard.
     void addCard(Slot slot, std::unique_ptr<DockCard> card);
+
+    // Insert an external / floating card into `slot`, taking ownership.
+    // If the slot is already occupied, prior cards are floated onto the
+    // overlay (same policy as dockCard) so VBox does not stack them and
+    // cover the band. Used by Gallery/Editor child-window redock.
+    bool adoptCard(Slot slot, DockCard* card);
 
     // Remove a card by id. Returns true if a card was removed.
     bool removeCard(const std::string& cardId);
+
+    // Close a card whether docked or floating on the overlay (destroys
+    // the widget tree). Used by DockCard's header close affordance.
+    bool closeCard(const std::string& cardId);
 
     // Find a card anywhere (slots or floating overlay) by id. Returns
     // nullptr if not found.
     DockCard* findCard(const std::string& cardId) const;
 
-    // Cards currently docked in a slot, in insertion order.
-    size_t getCardCount(Slot slot) const { return _slotCards[(int)slot].size(); }
+    // Cards currently docked in a slot = tabs of that slot's pinned
+    // leaf, in insertion order. 0 until the tree exists.
+    size_t getCardCount(Slot slot) const {
+        if ((int)slot < 0 || (int)slot >= (int)Slot::Count) return 0;
+        const DockTabGroup* leaf = _rootLeaves[(int)slot];
+        return leaf != nullptr ? leaf->getTabCount() : 0;
+    }
     DockCard* getCard(Slot slot, size_t index) const;
 
     // Convenience: turn a string id into a Slot enum. Returns false if
@@ -111,6 +132,19 @@ public:
     // DockCard drag is active (no-op when idle). Hosts may call after
     // tree render if DockArea::render was skipped by a container path.
     void paintDropGuide(IRenderBackend& renderer);
+
+    // D5-redock: host-side bridge for a drag originating in a promoted
+    // child window. The child's G12 drag session lives in the child
+    // UIManager (never touches this tree), so isDockCardDrag(primary)
+    // is false and the slot highlight must come from the host feeding
+    // the cursor position (primary-client / world space) here every
+    // frame. paintDropGuide then paints the slot under it. Clear with
+    // clearExternalDropPos() when the drag leaves (or the child dies).
+    void setExternalDropPos(const math::FVector2& pos) {
+        _externalDropActive = true;
+        _externalDropPos = pos;
+    }
+    void clearExternalDropPos() { _externalDropActive = false; }
     void performLayout() override;
 
     // =================================================================
@@ -160,21 +194,29 @@ protected:
     void onChildRemoved(Widget* child);
 
 private:
-    // The VBox / HBox for each slot. Center is a child Widget (no VBox
-    // wrapper) because Center typically hosts a single large panel
-    // (viewport) rather than a stack.
+    // ---- dock tree ----
+    // children = [rootNode, overlay]. The root node is a VBox/HBox
+    // split tree; leaves are DockTabGroups. Pinned leaves hold the 5
+    // legacy slots (leafId = slot name, never pruned); split-created
+    // leaves use g_N ids and prune when empty (future phases).
     //
-    // Raw pointers (not unique_ptr) on purpose: every entry is also
+    // Raw pointers (not unique_ptr) on purpose: every node is also
     // attached as a child of DockArea via addChild, so destroyWidgetTree
     // frees them when DockArea dies. Holding them via unique_ptr would
     // double-delete (once by destroyWidgetTree, once by ~unique_ptr).
-    Widget* _slotContainers[(int)Slot::Count] = {};   // {} zero-initialises the whole array (NOT just [0])
+    Widget* _rootNode = nullptr;
+    DockTabGroup* _rootLeaves[(int)Slot::Count] = {};
+    bool _templateBuilt = false;
+    // First sync skips the pristine check (the tree may have been
+    // built at size 0 — the first real-size performLayout must always
+    // push the weight-derived geometry).
+    bool _templateSynced = false;
+
     float _slotWeight[(int)Slot::Count] = {0.20f, 0.25f, 0.15f, 0.20f, 0.55f};
     float _slotMinSize[(int)Slot::Count] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    std::vector<DockCard*> _slotCards[(int)Slot::Count] = {};  // {} forces element-wise default-ctor
 
-    // id -> card (across all slots + overlay). Ownership stays in
-    // _slotCards / overlay.
+    // id -> card (across all slots + overlay). Ownership stays in the
+    // dock tree / overlay.
     std::unordered_map<std::string, DockCard*> _cardIndex;
 
     // Floating overlay (always present, child of DockArea). Raw pointer
@@ -189,17 +231,41 @@ private:
     Slot _hoveredSlot = Slot::Count;   // Slot::Count sentinel = no hover
     bool _hoveredOverlay = false;
 
+    // D5-redock — external (child-window) drag bridge state, see
+    // setExternalDropPos / clearExternalDropPos above.
+    bool                 _externalDropActive = false;
+    math::FVector2       _externalDropPos = math::FVector2(0.0f, 0.0f);
+
     // D3 — last-known cursor world position from the drag session.
     // UIManager doesn't expose lastMousePos publicly; we cache it in
     // onDragEnter for use by onDrop (overlay drop uses this position).
     math::FVector2 _dragEnterPos = math::FVector2(-1.0f, -1.0f);
 
-    // Code-review 2026-08-02 #20: tearDownSlots() was dead (never
-    // called) AND inconsistent (didn't clear _cardIndex, leaving stale
-    // pointers that would UAF via removeCard on the next rebuild).
-    // Removed body + declaration; if a future "rebuild slots" path
-    // needs it, write a new function with full bookkeeping (cards +
-    // containers + _cardIndex + correct ownership semantics).
+    // ---- tree structure ops ----
+    // Lazily build the template tree (root VBox{HBox} + pinned leaves
+    // per enabled slot). Never runs twice; slot sizes start at 0 (fill)
+    // and are pushed by the first syncTemplateIfPristine pass.
+    void ensureRootTree();
+    DockTabGroup* makePinnedLeaf(Slot slot);
+    DockTabGroup* leafForSlot(Slot slot);
+    DockTabGroup* findLeafOfCard(DockCard* card);
+    void addTabToLeaf(DockTabGroup* leaf, DockCard* card);
+    void removeTabFromLeaf(DockTabGroup* leaf, DockCard* card);
+
+    // Push weight-derived slot sizes into the root template, but only
+    // while the template is still "pristine": structure untouched AND
+    // every panel slot size still equals the weight-derived value.
+    // Splitter drags flip that and pixels become sticky — the fill
+    // slot (mid / Center) absorbs any resize.
+    void syncTemplateIfPristine(const math::FVector2& size);
+    void applyTemplateGeometry(const math::FVector2& size);
+    bool templateSizesMatchDerived(const math::FVector2& size) const;
+
+    // Adaptive in-region drop: merge as a tab into the target leaf
+    // without swapping / floating the prior occupant. Used when the
+    // cursor is in the leaf's center zone.
+    bool tabIntoSlot(const std::string& cardId, Slot target);
+    bool dockCardAsTab(const std::string& cardId, Slot target);
 };
 
 } // namespace ayt::ui

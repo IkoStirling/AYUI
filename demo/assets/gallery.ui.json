@@ -172,7 +172,7 @@
               "spacing": 8,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
-                { "type": "TextLabel", "id": "layout_hdr", "text": "Layout - mini DockArea (drag card headers to retarget)", "size": { "w": 640, "h": 24 } },
+                { "type": "TextLabel", "id": "layout_hdr", "text": "Layout - mini DockArea dock-tree (splitters + drop zones; drag headers)", "size": { "w": 720, "h": 24 } },
                 {
                   "type": "DockArea",
                   "id": "mini_dock",

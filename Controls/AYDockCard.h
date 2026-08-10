@@ -48,10 +48,13 @@ public:
     Widget* getContent() const { return _content; }
 
     // Whether the card shows a close ("x") affordance in its header.
-    // D1 only stores the flag; the click handler that fires onCloseRequested
-    // lands in D3 alongside tear-off UX.
+    // When true, the header paints an X; a press fires onCloseRequested
+    // (host removes the card / closes the promoted child window).
     void setClosable(bool c) { _closable = c; }
     bool isClosable() const { return _closable; }
+
+    using CloseCallback = std::function<void(DockCard* card)>;
+    void setOnCloseRequested(CloseCallback cb) { _onCloseRequested = std::move(cb); }
 
     // Whether the card can be torn off into a floating card. D1 stores
     // the flag; D3 wires the actual drag path. setFloatable(false) also
@@ -131,6 +134,9 @@ private:
 
     // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
     bool _titleBarHover = false;
+    bool _closeHover = false;
+
+    math::FRectangle closeButtonRect() const;
 
     // PR-Dock-TearOff — press position of the last accepted title-bar
     // drag. The void-drop promote path (onDragEnd) compares it against
@@ -140,6 +146,7 @@ private:
 
     // D5.5 — promotion hook. Default empty (detachToOwnWindow no-ops).
     PromoteCallback _promoteCb;
+    CloseCallback   _onCloseRequested;
 };
 
 } // namespace ayt::ui

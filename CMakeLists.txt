@@ -54,6 +54,7 @@ set(SRC_FILES
     Controls/AYDockArea.cpp
     Controls/AYDockCard.cpp
     Controls/AYDockOverlay.cpp
+    Controls/AYDockTabGroup.cpp
     Controls/AYUIManager.cpp
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
@@ -121,6 +122,7 @@ set(HEAD_FILES
     Controls/AYDockArea.h
     Controls/AYDockCard.h
     Controls/AYDockOverlay.h
+    Controls/AYDockTabGroup.h
     Layout/AYBox.h
     Layout/AYSplitterHandle.h
     Layout/AYGridPanel.h

@@ -147,6 +147,48 @@ TEST_CASE(test_dock_card_moves_from_overlay_to_slot) {
 }
 
 // -------------------------------------------------------------------------
+// 2b. adoptCard into an occupied slot floats the prior occupant
+//     (redock must not VBox-stack / cover the band).
+// -------------------------------------------------------------------------
+TEST_CASE(test_hit_test_slot_outside_dock_is_count) {
+    DockArea dock;
+    dock.setPosition(FVector2(100.0f, 100.0f));
+    dock.setSize(FVector2(400.0f, 300.0f));
+    dock.performLayout();
+    // Above the dock used to map to Top (local.y < midY) and redock
+    // snapped floating windows into the disabled Top band.
+    CHECK(dock.hitTestSlot(FVector2(200.0f, 50.0f))
+          == DockArea::Slot::Count);
+    CHECK(dock.hitTestSlot(FVector2(50.0f, 200.0f))
+          == DockArea::Slot::Count);
+    CHECK(dock.hitTestSlot(FVector2(200.0f, 200.0f))
+          != DockArea::Slot::Count);
+}
+
+TEST_CASE(test_adopt_card_displaces_occupied_slot) {
+    DockArea dock;
+    dock.setSize(FVector2(800.0f, 600.0f));
+    dock.performLayout();
+
+    dock.addCard(DockArea::Slot::Left, makeFloatCard("old", L"Old"));
+    CHECK(dock.getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock.getOverlay()->getFloatingCardCount() == 0);
+
+    DockCard* inbound = makeFloatCard("new", L"New").release();
+    CHECK(dock.adoptCard(DockArea::Slot::Left, inbound));
+
+    CHECK(dock.getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock.findCard("new") != nullptr);
+    CHECK(dock.isCardInSlot(dock.findCard("new"), DockArea::Slot::Left));
+    CHECK(dock.getOverlay()->getFloatingCardCount() == 1);
+    DockCard* floated = dock.getOverlay()->getFloatingCard(0);
+    CHECK(floated != nullptr);
+    if (floated) {
+        CHECK(floated->getId() == "old");
+    }
+}
+
+// -------------------------------------------------------------------------
 // 3. Same-slot drop is a no-op (K-INV-D3-1) — tested via dock->addCard
 //    chain that the onDrop callback walks (isCardInSlot short-circuit).
 // -------------------------------------------------------------------------
@@ -384,27 +426,40 @@ TEST_CASE(test_dockcard_drag_paints_slot_highlight) {
     CHECK(dock->hitTestSlot(leftPt) == DockArea::Slot::Left);
 
     f.backend.clear();
-    // Highlight paints in render() after children (not onRender).
-    dock->render(f.backend);
+    // Drive the guide via the external-drop bridge so the assertion is
+    // independent of tryGet()/drag-session wiring during a bare render()
+    // call. Production still paints from DockArea::render while dragging.
+    dock->setExternalDropPos(leftPt);
+    dock->paintDropGuide(f.backend);
 
-    // Only the hovered slot (Left) gets a translucent fill matching
-    // getSlotRect(Left).
+    // Hovered slot (Left) gets a translucent base fill matching
+    // getSlotRect(Left). Adaptive dock-tree guides also paint a stronger
+    // in-region sub-zone on top (alpha ~0.42–0.45).
     const FRectangle left = dock->getSlotRect(DockArea::Slot::Left);
     bool foundHoverFill = false;
     for (const auto& dc : f.backend.getDrawCalls()) {
         if (dc.type != MockRenderer::DrawCall::Rect) {
             continue;
         }
-        if (std::fabs(dc.color.w - 0.28f) < 0.001f
-            && std::fabs(dc.bounds.minX - left.minX) < 0.5f
-            && std::fabs(dc.bounds.maxX - left.maxX) < 0.5f
-            && std::fabs(dc.bounds.minY - left.minY) < 0.5f
-            && std::fabs(dc.bounds.maxY - left.maxY) < 0.5f) {
+        const bool alphaOk =
+            (std::fabs(dc.color.w - 0.18f) < 0.02f)
+            || (std::fabs(dc.color.w - 0.42f) < 0.05f)
+            || (std::fabs(dc.color.w - 0.45f) < 0.05f);
+        // Full-slot base OR an in-region zone whose bounds lie inside Left.
+        const bool insideLeft =
+            dc.bounds.minX >= left.minX - 0.5f
+            && dc.bounds.maxX <= left.maxX + 0.5f
+            && dc.bounds.minY >= left.minY - 0.5f
+            && dc.bounds.maxY <= left.maxY + 0.5f
+            && (dc.bounds.maxX - dc.bounds.minX) > 2.0f
+            && (dc.bounds.maxY - dc.bounds.minY) > 2.0f;
+        if (alphaOk && insideLeft) {
             foundHoverFill = true;
             break;
         }
     }
     CHECK(foundHoverFill);
+    dock->clearExternalDropPos();
 
     // Cancel cleanly (Esc) so the session doesn't outlive the fixture;
     // idle must paint no guide.

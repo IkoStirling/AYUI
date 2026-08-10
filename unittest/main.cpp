@@ -76,6 +76,7 @@
 #include "Test_SyncVerticalBar.cpp"     // PR-SyncVerticalBar (header-only helper + 4 owner migration)
 #include "Test_ContainerContract_Cut2.cpp" // PR-Container-Contract-Cut2 (helper + 4 container migration + MockRenderer clip)
 #include "Test_Scene_Suite_G.cpp"          // Gallery-regression layer (3 scenario-level UTs for UT blind spots)
+#include "Test_DockTabGroup.cpp"           // dock-tree Phase 2 (leaf widget)
 
 void runTest()
 {

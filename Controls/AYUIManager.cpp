@@ -208,7 +208,7 @@ void dumpSplitterLayoutOnce(Widget* root)
                     "isSplitterHandle=%d slotWidth=%.1f isSplitterSlot=%d\n",
                     widgetLabel(box), i, widgetLabel(kids[i]),
                     kids[i]->isSplitterHandle() ? 1 : 0,
-                    box->slotWidth(static_cast<int>(i)),
+                    box->slotSize(static_cast<int>(i)),
                     box->isSplitterSlot(static_cast<int>(i)) ? 1 : 0);
             }
         }
@@ -1327,6 +1327,17 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
 
     math::FVector2 pos(x, y);
     Widget* hit = pickTopmostWidget(pos);
+    if (ayuiTraceInputEnabled()) {
+        // dockTrace (file-backed) instead of fprintf(stderr): GUI apps
+        // launched from Git Bash don't inherit stderr into redirected
+        // files, so stderr-only traces silently vanish.
+        dockTrace("[InputTrace] onMouseButtonDown pos=(%.1f,%.1f) hit=%s type=%s parent=%s\n",
+                  static_cast<double>(x), static_cast<double>(y),
+                  widgetLabel(hit),
+                  hit ? typeid(*hit).name() : "-",
+                  (hit != nullptr && hit->getParent() != nullptr)
+                      ? widgetLabel(hit->getParent()) : "-");
+    }
     updateHoverWidget(_hoverWidget, hit);
 
     // Phase D (D2) — Modal input block. When a modal is active, the only

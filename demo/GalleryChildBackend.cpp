@@ -169,9 +169,12 @@ void GalleryChildBackend::drawText(const math::FRectangle& bounds, const std::ws
     HFONT font = fontForSize(fontSize);
     HGDIOBJ oldFont = font ? SelectObject(_hdc, font) : nullptr;
     RECT rect = toRect(bounds);
+    // Single-glyph chrome ("x" close) centers better in its hit rect.
+    const UINT align = (text.size() == 1)
+        ? DT_CENTER
+        : horizontalAlign(ayt::ui::IRenderBackend::TextStyle::Align::Left);
     DrawTextW(_hdc, text.c_str(), static_cast<int>(text.size()), &rect,
-              DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | horizontalAlign(
-                  ayt::ui::IRenderBackend::TextStyle::Align::Left));
+              DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | align);
     if (oldFont != nullptr) {
         SelectObject(_hdc, oldFont);
     }
