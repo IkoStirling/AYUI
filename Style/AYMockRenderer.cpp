@@ -47,12 +47,19 @@ void MockRenderer::popClip() {
     }
 }
 
+void MockRenderer::setBlendMode(BlendMode mode) {
+    // Stamped onto every DrawCall recorded while active; beginFrame reset
+    // is a UIManager-level concern (the mock has no frame concept).
+    _currentBlend = mode;
+}
+
 void MockRenderer::drawRect(const math::FRectangle& bounds, const math::FVector4& color) {
     DrawCall dc;
     dc.type = DrawCall::Rect;
     dc.bounds = bounds;
     dc.color = color;
     dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
     _triangleCount += 2;  // 2 triangles per rect
     _vertexCount += 6;
@@ -65,6 +72,7 @@ void MockRenderer::drawRect(const math::FRectangle& bounds, void* textureHandle,
     dc.bounds = bounds;
     dc.color = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
     dc.texture = textureHandle;
+    dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
     _triangleCount += 2;
     _vertexCount += 6;
@@ -78,6 +86,7 @@ void MockRenderer::drawText(const math::FRectangle& bounds, const std::wstring& 
     dc.color = color;
     dc.text = text;
     dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
 }
 
@@ -88,6 +97,7 @@ void MockRenderer::drawWithAlpha(const math::FRectangle& bounds, void* textureHa
     dc.bounds = bounds;
     dc.color = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
     dc.texture = textureHandle;
+    dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
     _triangleCount += 2;
     _vertexCount += 6;
@@ -110,6 +120,12 @@ void MockRenderer::drawGradientRect(const math::FRectangle& bounds,
         (topLeft.w + topRight.w + bottomLeft.w + bottomRight.w) * 0.25f
     );
     dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
+    // P1: per-corner colors in param order TL TR BL BR.
+    dc.cornerColors[0] = topLeft;
+    dc.cornerColors[1] = topRight;
+    dc.cornerColors[2] = bottomLeft;
+    dc.cornerColors[3] = bottomRight;
     _drawCalls.push_back(dc);
     _triangleCount += 2;
     _vertexCount += 6;

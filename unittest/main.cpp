@@ -14,6 +14,7 @@
 #include "Test_ScrollBar.cpp"
 #include "Test_InteractiveWidget.cpp"
 #include "Test_RenderBackend.cpp"
+#include "Test_MockBlendGradient.cpp"
 #include "Test_TextLabel.cpp"
 #include "Test_Thickness.cpp"
 #include "Test_Image.cpp"

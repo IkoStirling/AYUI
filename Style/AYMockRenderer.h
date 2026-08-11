@@ -25,6 +25,11 @@ public:
         PathHandle pathHandle;
         ParticleHandle particleHandle;
         BlurType blurType;
+        // P1 additions (appended so existing aggregate-free initializers
+        // keep compiling): blend mode active when the call was recorded,
+        // and per-corner gradient colors in param order TL TR BL BR.
+        BlendMode blendMode = BlendMode::Normal;
+        math::FVector4 cornerColors[4];
     };
 
     MockRenderer();
@@ -41,6 +46,7 @@ public:
     void drawWithAlpha(const math::FRectangle& bounds, void* textureHandle, float alpha) override;
 
     // IRenderBackend implementations - virtual with default impl / 虚函数实现
+    void setBlendMode(BlendMode mode) override;
     void drawText(const math::FRectangle& bounds, const std::wstring& text, int fontSize, const TextStyle& style) override;
     void drawGradientRect(const math::FRectangle& bounds,
                          const math::FVector4& topLeft, const math::FVector4& topRight,
@@ -137,6 +143,7 @@ public:
 
 private:
     std::vector<DrawCall> _drawCalls;
+    BlendMode _currentBlend = BlendMode::Normal;
     int _triangleCount = 0;
     int _vertexCount = 0;
     int _nextPathId = 1;
