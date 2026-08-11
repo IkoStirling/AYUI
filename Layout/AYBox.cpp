@@ -135,6 +135,13 @@ bool BoxBase::isSplitterSlot(int slotIndex) const {
     return _slots[static_cast<size_t>(slotIndex)].isSplitter;
 }
 
+Widget* BoxBase::slotAt(int slotIndex) const {
+    if (slotIndex < 0 || slotIndex >= static_cast<int>(_slots.size())) {
+        return nullptr;
+    }
+    return _slots[static_cast<size_t>(slotIndex)].widget;
+}
+
 int BoxBase::slotIndexOf(Widget* widget) const {
     if (widget == nullptr) {
         return -1;
@@ -307,7 +314,11 @@ float BoxBase::resolveMinSlotSize(const Slot& slot) const {
     float minS = kMinPanelSize;
 
     if (const Window* window = dynamic_cast<const Window*>(slot.widget)) {
-        minS = std::max(minS, window->getMinSize().x);
+        // Main-axis min: width for HBox, height for VBox.
+        const bool vertical = dynamic_cast<const VBox*>(this) != nullptr;
+        const float winMin = vertical ? window->getMinSize().y
+                                      : window->getMinSize().x;
+        minS = std::max(minS, winMin);
     }
     if (slot.limits.minWidth > 0.0f) {
         minS = std::max(minS, slot.limits.minWidth);
@@ -317,6 +328,11 @@ float BoxBase::resolveMinSlotSize(const Slot& slot) const {
     }
 
     return minS;
+}
+
+bool BoxBase::slotOccupiesSpace(const Slot& slot) const {
+    return slot.widget != nullptr && slot.widget->isVisible()
+        && slot.widget->getParent() == this;
 }
 
 float BoxBase::resolveMaxSlotSize(const Slot& slot) const {
@@ -352,20 +368,31 @@ float BoxBase::maxSlotSize(int slotIndex) const {
     }
 
     const float total = axisContentLength();
-    const float spacingTotal = _spacing * static_cast<float>(_slots.size() - 1);
-    float reserved = spacingTotal;
+    float reserved = 0.0f;
+    int occupying = 0;
 
     for (int i = 0; i < static_cast<int>(_slots.size()); ++i) {
+        const Slot& slot = _slots[static_cast<size_t>(i)];
+        if (!slotOccupiesSpace(slot)) {
+            continue;
+        }
+        ++occupying;
         if (i == slotIndex) {
             continue;
         }
         if (isSplitterSlot(i)) {
             reserved += SplitterHandle::kDefaultWidth;
-        } else if (_slots[static_cast<size_t>(i)].size > 0.0f) {
-            reserved += _slots[static_cast<size_t>(i)].size;
+        } else if (slot.size > 0.0f) {
+            // Never reserve less than the neighbor's own floor — otherwise
+            // a panel already below min (splitLeaf / template) lets the
+            // drag crush a fill sibling further.
+            reserved += std::max(slot.size, minSlotSize(i));
         } else {
             reserved += minSlotSize(i);
         }
+    }
+    if (occupying > 1) {
+        reserved += _spacing * static_cast<float>(occupying - 1);
     }
 
     const float neighborLimitedMax = std::max(minSlotSize(slotIndex), total - reserved);
@@ -375,6 +402,69 @@ float BoxBase::maxSlotSize(int slotIndex) const {
 
 float BoxBase::clampSlotSize(int slotIndex, float size) const {
     return std::clamp(size, minSlotSize(slotIndex), maxSlotSize(slotIndex));
+}
+
+void BoxBase::stealFromFixedToSatisfyFillMins(float availableMain) {
+    // Match HBox/VBox spacing accounting: spacing between every occupying
+    // slot, then treat fill panels as sharing the leftover equally.
+    float totalFixed = 0.0f;
+    int fillCount = 0;
+    int occupying = 0;
+    float minFillEach = 0.0f;
+
+    for (int i = 0; i < static_cast<int>(_slots.size()); ++i) {
+        const Slot& slot = _slots[static_cast<size_t>(i)];
+        if (!slotOccupiesSpace(slot)) {
+            continue;
+        }
+        ++occupying;
+        if (slot.isSplitter) {
+            totalFixed += SplitterHandle::kDefaultWidth;
+        } else if (slot.size > 0.0f) {
+            totalFixed += slot.size;
+        } else {
+            ++fillCount;
+            minFillEach = std::max(minFillEach, minSlotSize(i));
+        }
+    }
+    if (fillCount == 0 || occupying == 0) {
+        return;
+    }
+
+    const float spacingTotal =
+        _spacing * static_cast<float>(std::max(0, occupying - 1));
+    float leftover = availableMain - totalFixed - spacingTotal;
+    float fillEach = leftover / static_cast<float>(fillCount);
+    if (fillEach + 0.5f >= minFillEach) {
+        return;
+    }
+
+    float deficit =
+        (minFillEach - std::max(0.0f, fillEach)) * static_cast<float>(fillCount);
+    for (int pass = 0; pass < 8 && deficit > 0.5f; ++pass) {
+        bool progress = false;
+        for (int i = 0; i < static_cast<int>(_slots.size()); ++i) {
+            Slot& slot = _slots[static_cast<size_t>(i)];
+            if (!slotOccupiesSpace(slot) || slot.isSplitter || slot.size <= 0.0f) {
+                continue;
+            }
+            const float floor = minSlotSize(i);
+            const float room = slot.size - floor;
+            if (room <= 0.5f) {
+                continue;
+            }
+            const float take = std::min(room, deficit);
+            slot.size -= take;
+            deficit -= take;
+            progress = true;
+            if (deficit <= 0.5f) {
+                break;
+            }
+        }
+        if (!progress) {
+            break;
+        }
+    }
 }
 
 VBox::VBox() {
@@ -479,16 +569,19 @@ math::FVector2 VBox::getPreferredContentSize() const {
 void VBox::layoutChildren() {
     math::FVector2 size = getSize();
     float availableWidth = std::max(0.0f, size.x - _padding.x - _padding.z);
+    float availableHeight = std::max(0.0f, size.y - _padding.y - _padding.w);
 
     size_t childCount = _slots.size();
     if (childCount == 0) { _naturalHeight = 0.0f; return; }
+
+    // Keep fill panels at their floor when fixed siblings would crush them.
+    stealFromFixedToSatisfyFillMins(availableHeight);
 
     float totalFixedHeight = 0.0f;
     size_t fillCount = 0;
     size_t visibleSlotCount = 0;
     for (const auto& slot : _slots) {
-        if (slot.widget == nullptr || !slot.widget->isVisible()
-            || slot.widget->getParent() != this) {
+        if (!slotOccupiesSpace(slot)) {
             continue;
         }
         ++visibleSlotCount;
@@ -505,7 +598,6 @@ void VBox::layoutChildren() {
         totalFixedHeight -= _spacing;
     }
 
-    float availableHeight = std::max(0.0f, size.y - _padding.y - _padding.w);
     float fillHeight = (fillCount > 0) ? (availableHeight - totalFixedHeight) / fillCount : 0.0f;
     fillHeight = std::max(0.0f, fillHeight);
 
@@ -599,10 +691,10 @@ void HBox::layoutChildren() {
         }
     }
 
-    auto slotOccupiesSpace = [this](const Slot& slot) -> bool {
-        return slot.widget != nullptr && slot.widget->isVisible()
-            && slot.widget->getParent() == this;
-    };
+    const float availableWidth = size.x - _padding.x - _padding.z;
+    // Keep fill panels at their floor when fixed siblings would crush them
+    // (e.g. dragging the right splitter leftward until Center → 0).
+    stealFromFixedToSatisfyFillMins(availableWidth);
 
     float totalFixedWidth = 0.0f;
     size_t fillCount = 0;
@@ -625,7 +717,6 @@ void HBox::layoutChildren() {
         totalFixedWidth -= _spacing;
     }
 
-    const float availableWidth = size.x - _padding.x - _padding.z;
     const float fillWidth =
         (fillCount > 0) ? std::max(0.0f, (availableWidth - totalFixedWidth) / fillCount) : 0.0f;
 

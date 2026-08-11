@@ -97,6 +97,11 @@ void DockTabGroup::activateTab(size_t index) {
     if (_tabs[_activeIndex] != nullptr) {
         _tabs[_activeIndex]->setVisible(true);
     }
+    // Visibility-only was not enough: inactive cards kept stale sizes from
+    // before a join/split, so switching tabs showed a "hole" until the next
+    // parent layout pass. Size the newly shown card immediately.
+    markBoundsDirty();
+    performLayout();
 }
 
 void DockTabGroup::activateTabById(const std::string& id) {
@@ -129,13 +134,9 @@ void DockTabGroup::performLayout() {
     if (active == nullptr) {
         return;
     }
-    if (_tabs.size() == 1) {
-        // Single card: full-bleed — its own title bar is the only
-        // chrome (legacy 5-slot geometry; test_center_card_fills_
-        // slot_height pins the exact world bounds).
-        active->setPosition(math::FVector2(0.0f, 0.0f));
-        active->setSize(sz);
-    } else {
+    math::FVector2 cardPos(0.0f, 0.0f);
+    math::FVector2 cardSz = sz;
+    if (_tabs.size() >= 2) {
         // Tab strip covers the active card's own title bar: slide the
         // card up by (stripH - cardHeaderHeight) so the strip region
         // (0..stripH) exactly overlays the title bar and the card body
@@ -143,8 +144,17 @@ void DockTabGroup::performLayout() {
         // hitTest (strip claims hits) keep the overlap invisible.
         const float headerH = std::max(0.0f, active->getHeaderHeight());
         const float offsetY = kTabStripHeight - headerH;
-        active->setPosition(math::FVector2(0.0f, offsetY));
-        active->setSize(math::FVector2(sz.x, std::max(0.0f, sz.y - offsetY)));
+        cardPos = math::FVector2(0.0f, offsetY);
+        cardSz = math::FVector2(sz.x, std::max(0.0f, sz.y - offsetY));
+    }
+    // Size every tab (including hidden ones) so a later activateTab does
+    // not reveal a card still holding pre-join geometry.
+    for (DockCard* card : _tabs) {
+        if (card == nullptr) {
+            continue;
+        }
+        card->setPosition(cardPos);
+        card->setSize(cardSz);
     }
     compoundDescendLayout(this);
 }
@@ -196,7 +206,9 @@ Widget* DockTabGroup::hitTest(const math::FVector2& worldPos) {
         // (which the strip covers visually and interactively).
         return this;
     }
-    return compoundDescendHitTest(this, worldPos);
+    // Gate card descent by leaf bounds (default getClientRect) so a
+    // card's overflowing grandchildren cannot steal hits outside the leaf.
+    return compoundDescendHitTestClipped(this, worldPos);
 }
 
 bool DockTabGroup::onMouseButtonDown(const UIMouseEvent& e) {
@@ -282,9 +294,22 @@ void DockTabGroup::render(IRenderBackend& renderer) {
     if (!isVisible()) {
         return;
     }
-    // Cards first; the strip paints AFTER so it covers the active
-    // card's own title bar (slid up beneath it).
-    renderChildren(renderer);
+    // Empty leaf should be pruned/hidden by DockArea; if one still
+    // reaches paint, draw opaque chrome so it can never read as a
+    // black "hole" against the dock background.
+    if (_tabs.empty()) {
+        const math::FRectangle b = getWorldBounds();
+        if (b.maxX > b.minX && b.maxY > b.minY) {
+            renderer.drawRect(b, math::FVector4(0.16f, 0.16f, 0.18f, 1.0f));
+            renderer.drawBorderRect(
+                b, math::FVector4(0.08f, 0.08f, 0.10f, 1.0f), 1.0f, 0.0f);
+        }
+        return;
+    }
+    // Cards first (clipped to the leaf so card-body overflow cannot
+    // paint into a neighboring panel). The strip paints AFTER popClip
+    // so it still covers the active card's own title bar.
+    compoundDescendClippedRender(this, renderer);
     if (_tabs.size() >= 2) {
         paintStrip(renderer);
     }

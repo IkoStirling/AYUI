@@ -60,6 +60,18 @@ TEST_SUITE(AYUI_DockTabGroup)
 // Leaf widget basics
 // -------------------------------------------------------------------------
 
+TEST_CASE(test_tab_group_render_clips_cards) {
+    MockRenderer r;
+    DockTabGroup leaf;
+    leaf.setSize(FVector2(100.0f, 160.0f));
+    auto card = makeCard("c");
+    leaf.addTab(card.release());
+    leaf.performLayout();
+    leaf.render(r);
+    CHECK(r.isClipStackBalanced());
+    CHECK(r.getClipDepth() == 0);
+}
+
 TEST_CASE(test_tab_group_single_card_full_bleed) {
     DockTabGroup group;
     group.setSize(FVector2(400.0f, 300.0f));
@@ -115,6 +127,28 @@ TEST_CASE(test_tab_group_activate_switches_visibility) {
     CHECK(group.getActiveTabId() == "b");
     CHECK_FALSE(a->isVisible());
     CHECK(b->isVisible());
+}
+
+TEST_CASE(test_tab_group_activate_resizes_newly_shown_card) {
+    DockTabGroup group;
+    group.setSize(FVector2(400.0f, 300.0f));
+    group.addTab(makeCard("a").release());
+    group.addTab(makeCard("b").release());
+    group.performLayout();
+
+    DockCard* a = group.getTab(0);
+    DockCard* b = group.getTab(1);
+    CHECK_NOT_NULL(a);
+    CHECK_NOT_NULL(b);
+    if (a == nullptr || b == nullptr) return;
+
+    // Simulate a stale inactive card (pre-join geometry).
+    a->setSize(FVector2(80.0f, 40.0f));
+    group.activateTab(0);
+    CHECK(a->isVisible());
+    // activateTab must restretch the card to the leaf, not leave the hole.
+    CHECK(a->getSize().x >= 390.0f);
+    CHECK(a->getSize().y >= 250.0f);
 }
 
 TEST_CASE(test_tab_group_multi_card_layout_slides_card_under_strip) {

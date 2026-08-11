@@ -198,6 +198,11 @@
                     "Top": 1e-6,
                     "Bottom": 1e-6
                   },
+                  "slotMinSizes": {
+                    "Left": 120,
+                    "Right": 120,
+                    "Center": 120
+                  },
                   "cards": [
                     {
                       "slot": "Left",

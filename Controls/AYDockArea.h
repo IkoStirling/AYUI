@@ -90,12 +90,19 @@ public:
         return _slotWeight[(int)slot];
     }
 
-    // Slot min size (logical pixels). Default 0 for all.
+    // Slot min size along the template main axis (logical px).
+    // 0 = use BoxBase::kMinPanelSize when limits are applied to the tree.
     void setSlotMinSize(Slot slot, float minSize) {
         if ((int)slot < 0 || (int)slot >= (int)Slot::Count) return;
         _slotMinSize[(int)slot] = minSize;
+        applyPinnedSlotMinLimits();
     }
-    float getSlotMinSize(Slot slot) const { return _slotMinSize[(int)slot]; }
+    float getSlotMinSize(Slot slot) const {
+        if ((int)slot < 0 || (int)slot >= (int)Slot::Count) return 0.0f;
+        return _slotMinSize[(int)slot];
+    }
+    // Resolved floor used by template geometry + Box slot limits.
+    float effectiveSlotMinSize(Slot slot) const;
 
     // Add a card to a named slot. DockArea takes ownership of `card`.
     // Adding a card with the same id as an existing card replaces the old
@@ -105,10 +112,16 @@ public:
     void addCard(Slot slot, std::unique_ptr<DockCard> card);
 
     // Insert an external / floating card into `slot`, taking ownership.
-    // If the slot is already occupied, prior cards are floated onto the
-    // overlay (same policy as dockCard) so VBox does not stack them and
-    // cover the band. Used by Gallery/Editor child-window redock.
+    // Joins as a new tab when the leaf already has cards (Phase-3
+    // DockTabGroup). Used by Gallery/Editor child-window redock and
+    // dockCard. Prefer `redockAt` when a world position is known so the
+    // drop can target split leaves / edge zones.
     bool adoptCard(Slot slot, DockCard* card);
+
+    // Child-window / external redock at a world point. Prefers Phase-3
+    // tree join/split under the cursor; falls back to pinned-slot
+    // adoptCard so collapsed side bands can still revive.
+    bool redockAt(DockCard* card, const math::FVector2& worldPos);
 
     // Remove a card by id. Returns true if a card was removed.
     bool removeCard(const std::string& cardId);
@@ -141,9 +154,11 @@ public:
     // Paint drop highlight AFTER children so opaque DockCards cannot
     // cover the pre-slot fill (Gallery "preslot matched but blocked").
     void render(IRenderBackend& renderer) override;
-    // Translucent drop-zone for the slot under the cursor while a
-    // DockCard drag is active (no-op when idle). Hosts may call after
-    // tree render if DockArea::render was skipped by a container path.
+    // Translucent drop-zone while a DockCard drag is active (no-op when
+    // idle). Painted from DockArea::render AFTER children — do not also
+    // call from the host frame loop (double-paints the Phase-3 preview).
+    // External child-window redock uses setExternalDropPos + legacy slot
+    // tint; dock-owned drags with a live tree paint join/split only.
     void paintDropGuide(IRenderBackend& renderer);
 
     // D5-redock: host-side bridge for a drag originating in a promoted
@@ -215,6 +230,18 @@ public:
     // Empty leaves are always Join (their whole rect is a join zone).
     TreeDropZone resolveTreeDropZone(const DockTabGroup* leaf,
                                      const math::FVector2& worldPos) const;
+
+    // Unified drop resolver used by paintDropGuide (preview) and
+    // redockAt / onDrop helpers (commit): collapsed-side revive via
+    // hitTestSlot first, else tree leaf+zone, else pinned slot.
+    enum class DropKind { None, Tree, Slot };
+    struct DropTarget {
+        DropKind       kind = DropKind::None;
+        DockTabGroup*  leaf = nullptr;
+        TreeDropZone   zone = TreeDropZone::Join;
+        Slot           slot = Slot::Count;
+    };
+    DropTarget resolveDropTarget(const math::FVector2& worldPos) const;
 
     // ---- Phase 4: dock-tree persistence ----
     //
@@ -301,6 +328,10 @@ private:
     DockTabGroup* findLeafOfCard(DockCard* card);
     void addTabToLeaf(DockTabGroup* leaf, DockCard* card);
     void removeTabFromLeaf(DockTabGroup* leaf, DockCard* card);
+    // Side pinned leaves (Left/Right/Top/Bottom) collapse when empty so
+    // the fill column expands. Center is never collapsed.
+    void setSidePinnedCollapsed(DockTabGroup* leaf, bool collapsed);
+    void collapseEmptySidePinnedLeaves();
 
     // ---- Phase 3: split / prune ----
     // Edge drop: insert a new g_N leaf beside `leaf` (25% of the
@@ -309,7 +340,9 @@ private:
     // _structureEpoch so the template geometry turns sticky.
     void splitLeaf(DockTabGroup* leaf, TreeDropZone zone, DockCard* card);
     // Remove empty non-pinned leaves (and their adjacent splitters)
-    // until the tree is stable. Pinned leaves are never touched.
+    // until the tree is stable, unwrap single-panel nests, ensure every
+    // box has a visible fill panel, and hide an empty Center. This is
+    // the hole-eradication choke point after structure edits.
     void pruneEmptySplitNodes();
     DockTabGroup* hitTestTreeRec(Widget* node, const math::FVector2& p) const;
 
@@ -335,6 +368,7 @@ private:
     int _splitLeafCounter = 0;   // g_N leaf-id naming
     int _structureEpoch = 0;     // >0 once any split/prune changed the
                                  // tree — template geometry turns sticky
+    bool _pruning = false;       // re-entrancy guard for pruneEmptySplitNodes
 
     // Push weight-derived slot sizes into the root template, but only
     // while the template is still "pristine": structure untouched AND
@@ -344,6 +378,10 @@ private:
     void syncTemplateIfPristine(const math::FVector2& size);
     void applyTemplateGeometry(const math::FVector2& size);
     bool templateSizesMatchDerived(const math::FVector2& size) const;
+    // Push effectiveSlotMinSize into BoxSlotLimits on each pinned leaf
+    // so SplitterHandle drags honor DockArea mins (not only the global
+    // BoxBase::kMinPanelSize default).
+    void applyPinnedSlotMinLimits();
 
     // Adaptive in-region drop: merge as a tab into the target leaf
     // without swapping / floating the prior occupant. Used when the

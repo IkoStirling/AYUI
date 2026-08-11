@@ -240,9 +240,10 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     d.y      = y;
     d.width  = w;
     d.height = h;
-    // No OS caption/menu �?DockCard title bar is the only chrome
-    // (drag + future close). Avoids double title bars on tear-off.
+    // No OS caption — DockCard title is the chrome. Thick-frame still
+    // enables edge/corner resize (口 grip painted on the card).
     d.borderless = true;
+    d.resizable  = true;
 
     void* handle = nullptr;
     if (!_wm.createTopLevelWindow(d, handle)) {
@@ -272,6 +273,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     card->setPosition(ayt::math::FVector2(0.0f, 0.0f));
     card->setSize(ayt::math::FVector2(static_cast<float>(w),
                                       static_cast<float>(h)));
+    card->setShowResizeGrip(true);
     e.ui->root()->addChild(card);
     e.ui->layout();
 
@@ -431,19 +433,28 @@ bool GalleryChildWindows::tryRedock(
         return false;
     }
 
+    // Prefer live tree leaf under the cursor; fall back to legacy slot
+    // bands so collapsed sides can still revive.
     const ayt::ui::DockArea::Slot slot = _dock->hitTestSlot(world);
-    ayt::ui::dockTrace("[child] tryRedock cursor primary=(%.1f,%.1f) slot=%d\n",
-                       world.x, world.y, static_cast<int>(slot));
-    if (slot == ayt::ui::DockArea::Slot::Count) {
+    const ayt::ui::DockTabGroup* treeLeaf = _dock->hitTestTree(world);
+    ayt::ui::dockTrace("[child] tryRedock cursor primary=(%.1f,%.1f) slot=%d "
+                       "tree=%s\n",
+                       world.x, world.y, static_cast<int>(slot),
+                       treeLeaf != nullptr ? treeLeaf->getLeafId().c_str()
+                                           : "-");
+    if (treeLeaf == nullptr && slot == ayt::ui::DockArea::Slot::Count) {
         return false;
     }
 
-    // Reject disabled / near-zero bands (Gallery Top/Bottom at 1e-6).
-    const ayt::math::FRectangle sr = _dock->getSlotRect(slot);
-    if ((sr.maxX - sr.minX) < 8.0f || (sr.maxY - sr.minY) < 8.0f) {
-        ayt::ui::dockTrace("[child] tryRedock skip tiny slot=%d\n",
-                           static_cast<int>(slot));
-        return false;
+    // Reject disabled / near-zero bands when only the slot path applies
+    // (Gallery Top/Bottom at 1e-6).
+    if (treeLeaf == nullptr) {
+        const ayt::math::FRectangle sr = _dock->getSlotRect(slot);
+        if ((sr.maxX - sr.minX) < 8.0f || (sr.maxY - sr.minY) < 8.0f) {
+            ayt::ui::dockTrace("[child] tryRedock skip tiny slot=%d\n",
+                               static_cast<int>(slot));
+            return false;
+        }
     }
 
     ayt::ui::DockCard* card = entry->card;
@@ -453,13 +464,13 @@ bool GalleryChildWindows::tryRedock(
     ui->cancelDrag();
 
     ui->root()->removeChild(card);
-    // adoptCard / displace floatCard / requestRelayout must see the
-    // primary UIManager via tryGet() — not the child that still owns
+    // redockAt / adoptCard / requestRelayout must see the primary
+    // UIManager via tryGet() — not the child that still owns
     // ActiveScope from the mouse-up handler.
     {
         ayt::ui::UIManager::ActiveScope primaryGuard(&_primary);
-        if (!_dock->adoptCard(slot, card)) {
-            ayt::ui::dockTrace("[child] tryRedock adoptCard FAILED card=%s\n",
+        if (!_dock->redockAt(card, world)) {
+            ayt::ui::dockTrace("[child] tryRedock redockAt FAILED card=%s\n",
                                cardId.c_str());
             ui->root()->addChild(card);
             return false;
@@ -468,8 +479,8 @@ bool GalleryChildWindows::tryRedock(
         _primary.layout();
     }
 
-    ayt::ui::dockTrace("[child] tryRedock OK card=%s -> slot=%d\n",
-                       cardId.c_str(), static_cast<int>(slot));
+    ayt::ui::dockTrace("[child] tryRedock OK card=%s pos=(%.1f,%.1f)\n",
+                       cardId.c_str(), world.x, world.y);
 
     this->closeChildWindow(handle);
     return true;

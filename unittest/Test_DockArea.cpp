@@ -6,9 +6,11 @@
 #include "AYWidget.h"
 #include "AYTextLabel.h"
 #include "AYButton.h"
+#include "AYMockRenderer.h"
 #include <memory>
 
 using namespace ayt::ui;
+using namespace ayt::math;
 namespace um = ayt::math;
 
 namespace {
@@ -172,6 +174,34 @@ TEST_CASE(test_dock_card_basic) {
     CHECK_FLOAT_EQ(card->getHeaderHeight(), 24.0f, 1e-5f);
     // No content yet.
     CHECK(card->getContent() == nullptr);
+}
+
+TEST_CASE(test_dock_card_clips_content_to_body) {
+    MockRenderer r;
+    auto card = std::make_unique<DockCard>();
+    card->setSize(FVector2(80.0f, 120.0f));
+    card->setHeaderHeight(22.0f);
+    card->setPosition(FVector2(0.0f, 0.0f));
+
+    auto* fat = new Widget();
+    fat->setSize(FVector2(200.0f, 40.0f));   // wider than the card body
+    card->setContent(fat);
+    card->performLayout();
+
+    // Body client rect excludes the header strip.
+    const FRectangle cr = card->getClientRect();
+    CHECK_FLOAT_EQ(cr.minY, 22.0f, 1e-5f);
+    CHECK_FLOAT_EQ(cr.maxX - cr.minX, 80.0f, 1e-5f);
+
+    card->render(r);
+    CHECK(r.isClipStackBalanced());
+    CHECK(r.getClipDepth() == 0);
+
+    // Overflow past the card's right edge must not hit the fat child —
+    // the card's world-bounds gate rejects first; a point inside the
+    // card but outside getClientRect (header) resolves to the card.
+    CHECK(card->hitTest(FVector2(90.0f, 50.0f)) == nullptr);
+    CHECK(card->hitTest(FVector2(40.0f, 10.0f)) == card.get());
 }
 
 TEST_CASE(test_dock_card_set_content_owns_widget) {

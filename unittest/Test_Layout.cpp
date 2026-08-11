@@ -258,6 +258,46 @@ TEST_CASE(test_splitter_handle_requires_both_panels_bound) {
     CHECK(split.onMouseButtonUp(UIMouseEvent(FVector2(splitX + 40.0f, 200.0f), 0)));
 }
 
+TEST_CASE(test_hbox_splitter_drag_respects_min_panel_size) {
+    HBox hbox;
+    hbox.setSize(FVector2(800.0f, 400.0f));
+    hbox.setSpacing(0.0f);
+    hbox.setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+
+    Window left;
+    Window center;
+    Window right;
+    SplitterHandle splitLeft;
+    SplitterHandle splitRight;
+    hbox.addWidget(&left, 220.0f);
+    hbox.addWidget(&splitLeft, SplitterHandle::kDefaultWidth);
+    hbox.addWidget(&center, 0.0f);   // fill
+    hbox.addWidget(&splitRight, SplitterHandle::kDefaultWidth);
+    hbox.addWidget(&right, 200.0f);
+    hbox.rebindSplitters();
+    hbox.performLayout();
+
+    // Crush Left toward zero via its right-hand splitter.
+    const float splitLX =
+        (splitLeft.getWorldBounds().minX + splitLeft.getWorldBounds().maxX) * 0.5f;
+    CHECK(splitLeft.onMouseButtonDown(UIMouseEvent(FVector2(splitLX, 200.0f), 0)));
+    CHECK(splitLeft.onMouseMove(UIMouseEvent(FVector2(splitLX - 500.0f, 200.0f), 0)));
+    CHECK(splitLeft.onMouseButtonUp(UIMouseEvent(FVector2(splitLX - 500.0f, 200.0f), 0)));
+    CHECK(left.getWidth() >= BoxBase::kMinPanelSize - 0.5f);
+
+    // Grow Right until Center (fill) would collapse — Center must keep min.
+    hbox.setSlotSize(0, 220.0f);
+    hbox.setSlotSize(4, 200.0f);
+    hbox.performLayout();
+    const float splitRX =
+        (splitRight.getWorldBounds().minX + splitRight.getWorldBounds().maxX) * 0.5f;
+    CHECK(splitRight.onMouseButtonDown(UIMouseEvent(FVector2(splitRX, 200.0f), 0)));
+    CHECK(splitRight.onMouseMove(UIMouseEvent(FVector2(splitRX - 700.0f, 200.0f), 0)));
+    CHECK(splitRight.onMouseButtonUp(UIMouseEvent(FVector2(splitRX - 700.0f, 200.0f), 0)));
+    CHECK(center.getWidth() >= BoxBase::kMinPanelSize - 0.5f);
+    CHECK(left.getWidth() >= BoxBase::kMinPanelSize - 0.5f);
+}
+
 TEST_CASE(test_hbox_toolbar_has_no_splits_by_default) {
     HBox toolbar;
     toolbar.setSize(FVector2(640.0f, 44.0f));

@@ -64,6 +64,8 @@ public:
     // splitter flag without paying a dynamic_cast. Hot paths use the
     // cached flag directly via Slot::isSplitter.
     bool isSplitterSlot(int slotIndex) const;
+    // Widget at `_slots[index]`, or nullptr if out of range.
+    Widget* slotAt(int slotIndex) const;
 
     // ---- splitter machinery (axis-neutral) ----
     // `mouseAxisPos` is the cursor coordinate along this box's main
@@ -104,6 +106,16 @@ protected:
     float minSlotSize(int slotIndex) const;
     float maxSlotSize(int slotIndex) const;
     float clampSlotSize(int slotIndex, float size) const;
+
+    // True when the slot participates in main-axis layout (visible child
+    // still parented to this box). Shared by layoutChildren and the
+    // splitter max-size reserve so drag clamps match painted widths.
+    bool slotOccupiesSpace(const Slot& slot) const;
+
+    // If equal-share fill panels would land below their mins, shrink
+    // fixed panels that are still above min until fills fit (or every
+    // fixed panel is already at its floor).
+    void stealFromFixedToSatisfyFillMins(float availableMain);
 
     std::vector<Slot> _slots;
 

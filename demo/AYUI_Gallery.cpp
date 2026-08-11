@@ -1,4 +1,4 @@
-// AYUI_Gallery.cpp ï¿½?standalone AYUI visual check (no 3D / no Editor shell).
+// AYUI_Gallery.cpp ï¿?standalone AYUI visual check (no 3D / no Editor shell).
 //
 // Host loop (path A):
 //   DeviceManager window + input
@@ -94,7 +94,7 @@ struct GalleryState {
     int clientW = kWidth;
     int clientH = kHeight;
     bool running = true;
-    // Durable path for Reload JSON ï¿½?must NOT live only inside the
+    // Durable path for Reload JSON ï¿?must NOT live only inside the
     // button's onClicked lambda: loadLayout destroys that button (and
     // the lambda) mid-callback, leaving a dangling std::string& for
     // ifstream::open.
@@ -104,10 +104,10 @@ struct GalleryState {
     std::unique_ptr<ayt::ui::ModalDialog> modal;
     std::unique_ptr<ayt::ui::TextLabel> modalBody;
 
-    // Capabilities page ï¿½?long-lived overlay widgets. Tooltip is attached
+    // Capabilities page ï¿?long-lived overlay widgets. Tooltip is attached
     // to a target via attachTo() (lives on overlay); Window is mounted on
     // the overlay directly. They live on the overlay AND in raw pointers
-    // here ï¿½?the overlay owns lifetime EXCLUSIVELY. We never wrap these
+    // here ï¿?the overlay owns lifetime EXCLUSIVELY. We never wrap these
     // in unique_ptr / shared_ptr because the overlay's destroyWidgetTree
     // would otherwise double-free alongside our own destructor.
     //
@@ -116,17 +116,17 @@ struct GalleryState {
     // tree behind the overlay). It removes the widget from the overlay
     // via detachForHostDestruction() (Tooltip's analog: detach()) so
     // the overlay has no live reference, THEN deletes the raw pointer
-    // ourselves. After teardown, the raw pointer is dangling ï¿½?caller
+    // ourselves. After teardown, the raw pointer is dangling ï¿?caller
     // must null it out.
     ayt::ui::Tooltip* tooltip = nullptr;
     ayt::ui::Window*   window  = nullptr;
-    // Window's body TextLabel ï¿½?kept separately so teardown can free
+    // Window's body TextLabel ï¿?kept separately so teardown can free
     // it explicitly. The body was added via window->addChildExternal,
     // which means destroyWidgetTree on the Window would detach but not
     // delete it (UI-OWN-2 invariant for external children).
     ayt::ui::TextLabel* windowBody = nullptr;
 
-    // PR-B2 ï¿½?Theme toggle state. F5 swaps dark <-> light via
+    // PR-B2 ï¿?Theme toggle state. F5 swaps dark <-> light via
     // ThemeManager::setActiveTheme(). The composer's composed sheet is
     // re-applied automatically, and onThemeChanged listeners (if any)
     // get notified. We track the active name on the host so the next
@@ -157,7 +157,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
             w->setVisible(std::strcmp(id, pageId) == 0);
         }
     }
-    // Page height changes on switch ï¿½?reset scroll so a tall page's
+    // Page height changes on switch ï¿?reset scroll so a tall page's
     // scrollbar/start offset aren't left over from a short page (or vice
     // versa). Content size is refreshed in ScrollView::performLayout.
     if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
@@ -165,7 +165,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
         scroll->setContentSize(ayt::math::FVector2(0.0f, 0.0f));
         scroll->setScrollOffset(ayt::math::FVector2(0.0f, 0.0f));
     }
-    // Visibility changes which VBox fill slot owns content_host ï¿½?force a
+    // Visibility changes which VBox fill slot owns content_host ï¿?force a
     // layout pass so the newly shown page gets real width/height.
     ui.clearDragStateNoDispatch(nullptr);
     ui.invalidateLayout();
@@ -212,7 +212,7 @@ void wireGallery(GalleryState& state)
     // In-UI build stamp (OS title / console are easy to miss). If Layout
     // header doesn't contain this id, the running Gallery is stale.
     if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(ui.findById("layout_hdr"))) {
-        hdr->setText(L"Layout - mini DockArea [DockArea-20260810b-Bugfix]");
+        hdr->setText(L"Layout - mini DockArea [DockArea-20260811b-FillResize]");
     }
 
     // --- Basics ---
@@ -338,7 +338,7 @@ void wireGallery(GalleryState& state)
                     if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                             state.ui->findById("lbl_modal"))) {
                         // OK already wrote via setOnResult; Cancel/Esc leave
-                        // "modal: open" ï¿½?report Cancel for button dismiss.
+                        // "modal: open" ï¿?report Cancel for button dismiss.
                         if (lbl->getText() == L"modal: open") {
                             lbl->setText(L"modal: Cancel");
                         } else if (lbl->getText().find(L"idle") != std::wstring::npos) {
@@ -348,7 +348,7 @@ void wireGallery(GalleryState& state)
                 });
             }
             // Modal::openModal (not UIManager::openModal alone) mounts the
-            // dimmer, sets focus, and runs layout ï¿½?required for OK/Cancel.
+            // dimmer, sets focus, and runs layout ï¿?required for OK/Cancel.
             state.modal->openModal();
             const ayt::math::FVector2 vp = state.ui->getClientSize();
             const ayt::math::FVector2 sz = state.modal->getSize();
@@ -387,7 +387,7 @@ void wireGallery(GalleryState& state)
     // Wrap content_host inside ScrollView so all 6 pages are reachable
     // when the window is smaller than the page stack's natural height.
     // The JSON puts content_host as a child of content_scroll via
-    // addChild ï¿½?ScrollView expects setContent, not addChild, so we
+    // addChild ï¿?ScrollView expects setContent, not addChild, so we
     // re-bind explicitly here. removeChild + addChild keeps the widget
     // tree intact (content_host still owns the 5 page VBoxes).
     if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
@@ -404,7 +404,7 @@ void wireGallery(GalleryState& state)
 // title bar OUTSIDE the dock now detaches it into a real top-level OS
 // window (live-card migration, no JSON rebuild).
 //
-// MUST run after every loadAndWire (including btn_reload hot reload) ï¿½?
+// MUST run after every loadAndWire (including btn_reload hot reload) ï¿?
 // loadLayout rebuilds the dock tree with fresh DockCards that have no
 // callback. The promote callback is a member of each DockCard, so wiring
 // once per card lifetime is enough (float/dock moves don't reset it).
@@ -464,7 +464,7 @@ void wireDockPromotion(GalleryState& state)
         }
     }
     // D5-redock: promoted cards return to THIS dock. Re-bound on every
-    // tree rebuild (btn_reload) ï¿½?the old raw pointer dies with the tree.
+    // tree rebuild (btn_reload) ï¿?the old raw pointer dies with the tree.
     if (state.childWindows != nullptr) {
         state.childWindows->setRedockTarget(dock);
     }
@@ -472,7 +472,7 @@ void wireDockPromotion(GalleryState& state)
 }
 
 // =============================================================================
-// Capabilities page ï¿½?single-page demo of every shipped PR not yet visible
+// Capabilities page ï¿?single-page demo of every shipped PR not yet visible
 // in any of the 5 baseline pages. Each block is intentionally small (one or
 // two widgets + a status label) so the failure mode is obvious if a PR
 // regresses. Order matches the JSON: A3 / C1 / C2 / C3 / B3 / B1 (B1 last
@@ -482,13 +482,13 @@ void wireDockPromotion(GalleryState& state)
 // Pull the long-lived overlay widgets (Tooltip + Window) OFF the overlay
 // and free them. Must run BEFORE ui.shutdown() AND BEFORE loadLayout (which
 // would otherwise leave the overlay holding a stale pointer to a soon-
-// deleted target button ï¿½?read-after-free on the next tick()).
+// deleted target button ï¿?read-after-free on the next tick()).
 //
 // Why a separate helper instead of relying on ~GalleryState: the overlay
 // outlives GalleryState (it lives inside the UIManager). Without explicit
 // detach + delete here, ~GalleryState would free the Widget while the
 // overlay's _children still references it; the next update() / render()
-// would deref freed memory. Window has the same hazard ï¿½?its overlay
+// would deref freed memory. Window has the same hazard ï¿?its overlay
 // parent would otherwise double-free when the overlay tears down.
 //
 // Order matters: detach BEFORE delete. Tooltip::detach() pulls itself off
@@ -497,17 +497,17 @@ void wireDockPromotion(GalleryState& state)
 // overlay's child list doesn't see a dangling pointer. The Window has no
 // dedicated "detachForHostDestruction" analog, but the same trick
 // Menu::detachForHostDestruction() uses (break parent back-pointer +
-// removeChild) is fine here ï¿½?Window's overlay isn't its owner, just a
+// removeChild) is fine here ï¿?Window's overlay isn't its owner, just a
 // mount site.
 //
-// Idempotent: calling twice is safe ï¿½?the second call sees tooltip/window
+// Idempotent: calling twice is safe ï¿?the second call sees tooltip/window
 // already null and short-circuits.
 void teardownCapabilitiesOverlay(GalleryState& state) {
     if (state.tooltip != nullptr) {
         // Tooltip::detach() pulls itself off the overlay + unregisters
         // from the hover-timer driver. After detach the tooltip is no
         // longer reachable from any UI tree, so destroyWidgetTree (NOT
-        // `delete` ï¿½?Tooltip owns its TextLabel child via addChild, and
+        // `delete` ï¿?Tooltip owns its TextLabel child via addChild, and
         // UI-OWN-1 says ~Widget does not free children; destroyWidgetTree
         // walks the tree and frees every reachable widget recursively).
         state.tooltip->detach();
@@ -516,7 +516,7 @@ void teardownCapabilitiesOverlay(GalleryState& state) {
     }
     if (state.window != nullptr) {
         // Pull off the overlay (no equivalent to Menu::detachForHost
-        // Destruction for Window ï¿½?but removeChild on the overlay works
+        // Destruction for Window ï¿?but removeChild on the overlay works
         // because we mounted via addChildExternal which kept ownership
         // with us).
         if (state.window->getParent() != nullptr) {
@@ -546,7 +546,7 @@ void wireCapabilities(GalleryState& state)
     // --- A3 TextInput: shift+arrows, double-click word, Ctrl+Z/Y ---
     // Note: TextInput exposes setOnTextChanged + setOnSubmit but no
     // selection-changed callback (v1 surface). The status label here
-    // mirrors the text-changed callback ï¿½?typing / undo / redo all
+    // mirrors the text-changed callback ï¿?typing / undo / redo all
     // reach it. Shift+arrow selection extension and double-click word
     // selection are silent (no callback) but the user can verify them
     // visually by the highlight + selection in the widget.
@@ -571,7 +571,7 @@ void wireCapabilities(GalleryState& state)
             tip->setText(L"PR-C1 passive tooltip\nUIManager drives tick\nhover 0.5s to appear");
             tip->setHoverDelay(0.5f);
             // The tip lives on the overlay. GalleryState holds a raw
-            // pointer (NOT unique_ptr ï¿½?the overlay owns the lifetime;
+            // pointer (NOT unique_ptr ï¿?the overlay owns the lifetime;
             // teardownCapabilitiesOverlay() pulls it off the overlay
             // before freeing it here).
             state.tooltip = tip;
@@ -592,7 +592,7 @@ void wireCapabilities(GalleryState& state)
                 std::wstring msg = L"typeahead: combo[";
                 msg += std::to_wstring(idx);
                 msg += L"] = ";
-                // Look up the item name via the same ComboBox ï¿½?we keep
+                // Look up the item name via the same ComboBox ï¿?we keep
                 // cmb alive in the lambda capture, not in state, because
                 // Reload JSON destroys + recreates the widget.
                 if (auto* cmb2 = dynamic_cast<ayt::ui::ComboBox*>(
@@ -617,15 +617,15 @@ void wireCapabilities(GalleryState& state)
             fruits->addItem(L"Banana");
             fruits->addItem(L"Blueberry");
             fruits->addItem(L"Cherry");
-            // PR-C3 hotfix ï¿½?capture `fruits` (not just `&ui`) so the
+            // PR-C3 hotfix ï¿?capture `fruits` (not just `&ui`) so the
             // hover/activate callbacks can dereference it. Previous build
             // silently fell back to the stale exe (lambda capture was a
             // compile error that ships never caught because the Gallery
             // wasn't rebuilt after the PR-C3 wire-up).
             fruits->setOnHoverChanged([&ui, fruits](int idx) {
-                // PR-C3 feedback ï¿½?typeahead jumps the highlight via
+                // PR-C3 feedback ï¿?typeahead jumps the highlight via
                 // setHoveredIndex; the state label mirrors it so the
-                // user sees 'A' ï¿½?Apple, 'B' ï¿½?Banana, etc. without
+                // user sees 'A' ï¿?Apple, 'B' ï¿?Banana, etc. without
                 // needing to look at the menu bar's highlight color.
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
@@ -652,7 +652,7 @@ void wireCapabilities(GalleryState& state)
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
                         ui.findById("cap_c3_state"))) {
                     // Don't clobber a "Fruits -> Cherry activated"
-                    // message with a plain close ï¿½?only annotate when
+                    // message with a plain close ï¿?only annotate when
                     // the state still says the menu is open.
                     const std::wstring& cur = lbl->getText();
                     if (cur == L"menu: (idle)" ||
@@ -667,7 +667,7 @@ void wireCapabilities(GalleryState& state)
             colors->addItem(L"Red");
             colors->addItem(L"Green");
             colors->addItem(L"Blue");
-            // PR-C3 hotfix ï¿½?see Fruits above; same lambda-capture fix needed
+            // PR-C3 hotfix ï¿?see Fruits above; same lambda-capture fix needed
             // for Colors to avoid referencing a non-captured local.
             colors->setOnHoverChanged([&ui, colors](int idx) {
                 if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
@@ -694,7 +694,7 @@ void wireCapabilities(GalleryState& state)
         }
         // Update the status label when an anchor button is clicked so
         // the user knows the menu is now open and typeahead is live.
-        // MenuBar exposes its anchors via _menus (private) ï¿½?but the
+        // MenuBar exposes its anchors via _menus (private) ï¿?but the
         // public API has getMenuCount() / getMenu(); we instead hook
         // the rendered anchor buttons through the overlay's hit list.
         // Since MenuBar's anchor buttons are children of the bar, the
@@ -715,7 +715,7 @@ void wireCapabilities(GalleryState& state)
     // synthetic wheel event through UIManager to verify routing. Since
     // real wheel events come from the SDL2 device layer (PR-B3 hook is
     // UIManager::onDeviceWheel), we wire the status label to mirror the
-    // selection-changed callback ï¿½?selecting an item proves wheel scrolled
+    // selection-changed callback ï¿?selecting an item proves wheel scrolled
     // the list and the click resolved correctly.
     if (auto* list = dynamic_cast<ayt::ui::ListView*>(ui.findById("cap_b3_list"))) {
         for (int i = 0; i < 30; ++i) {
@@ -723,13 +723,13 @@ void wireCapabilities(GalleryState& state)
             std::swprintf(buf, 32, L"row-%02d", i);
             list->addItem(buf);
         }
-        // B3 hotfix ï¿½?fire on BOTH selection AND scroll so the user sees
+        // B3 hotfix ï¿?fire on BOTH selection AND scroll so the user sees
         // feedback whether they clicked a row or just wheel-scrolled.
         // Previously setOnSelectionChanged only fired on click, so a
         // pure wheel-scroll left the label stuck at "(idle)" and the
         // user thought the wheel wasn't routing. The scrollbar callback
-        // fires for both wheel (which routes through onMouseWheel ï¿½?
-        // scrollBy ï¿½?setScrollOffset ï¿½?syncBarToOffset which mutates the
+        // fires for both wheel (which routes through onMouseWheel ï¿?
+        // scrollBy ï¿?setScrollOffset ï¿?syncBarToOffset which mutates the
         // bar's value) and direct vbar drag.
         list->setOnSelectionChanged([&ui](int idx) {
             if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
@@ -740,7 +740,7 @@ void wireCapabilities(GalleryState& state)
                 lbl->setText(msg);
             }
         });
-        // Do NOT replace vbar->setOnValueChanged ï¿½?that wipes ListView's
+        // Do NOT replace vbar->setOnValueChanged ï¿?that wipes ListView's
         // scroll/rebind mapping. Use setOnScroll for status feedback.
         list->setOnScroll([&ui](const ayt::math::FVector2& off) {
             if (auto* lbl = dynamic_cast<ayt::ui::TextLabel*>(
@@ -779,9 +779,9 @@ void wireCapabilities(GalleryState& state)
     // the pointer in state.windowBody so teardown can free it explicitly
     // (addChildExternal makes destroyWidgetTree skip it).
     //
-    // PR-B1 hotfix ï¿½?offset below the title bar (28px) with a small
+    // PR-B1 hotfix ï¿?offset below the title bar (28px) with a small
     // breathing margin. Previous wire-up placed the body at local
-    // (0,0), which lives under the title bar's gray strip ï¿½?the text
+    // (0,0), which lives under the title bar's gray strip ï¿?the text
     // was technically following the window's drag/resize (Widget's
     // worldPosition chains via _parent), but visually it overlapped
     // the chrome and looked "stuck" to the user. The Window class
@@ -806,10 +806,10 @@ void wireCapabilities(GalleryState& state)
 void bindReload(GalleryState& state);
 void bindDockPersistence(GalleryState& state);
 
-// PR-B2 ï¿½?flip dark <-> light via F5. Uses ThemeManager::setActiveTheme
+// PR-B2 ï¿?flip dark <-> light via F5. Uses ThemeManager::setActiveTheme
 // so the composer's composed sheet is swapped into the global
 // StyleManager and any onThemeChanged listeners get notified. We do NOT
-// touch individual widget style ids ï¿½?resolveStyle() reads the active
+// touch individual widget style ids ï¿?resolveStyle() reads the active
 // theme's tokens at draw time, so the next render() pass picks up the
 // new colors without a reload.
 //
@@ -872,10 +872,10 @@ bool loadAndWire(GalleryState& state)
     wireGallery(state);
     wireCapabilities(state);
     bindReload(state);
-    // PR-Dock-TearOff: reload rebuilt the dock tree with fresh cards ï¿½?
+    // PR-Dock-TearOff: reload rebuilt the dock tree with fresh cards ï¿?
     // re-inject the promote callback every load (hot reload included).
     wireDockPromotion(state);
-    // PR-DockTree-Phase4: save/load buttons die with the reloaded tree â€”
+    // PR-DockTree-Phase4: save/load buttons die with the reloaded tree â€?
     // rebind them on every load too.
     bindDockPersistence(state);
     std::fprintf(stderr, "[AYUI_Gallery] loaded %s\n", state.layoutPath.c_str());
@@ -883,7 +883,7 @@ bool loadAndWire(GalleryState& state)
     // Unmistakable build fingerprint (console can be missed under WIN32).
     // Window title + file next to cwd: if you don't see these, wrong exe.
     constexpr const char* kDockBuildId =
-        "DockArea-20260810b-Bugfix";
+        "DockArea-20260811b-FillResize";
     std::fprintf(stderr, "[AYUI_Gallery] BUILD %s\n", kDockBuildId);
     std::fprintf(stderr, "[AYUI_Gallery] dock trace log: %s\n",
                  ayt::ui::dockTracePath());
@@ -917,7 +917,7 @@ void bindReload(GalleryState& state)
             teardownCapabilitiesOverlay(state);
             state.clickCount = 0;
             // Use state.layoutPath (lives in GalleryState), not a path
-            // captured inside this lambda ï¿½?loadLayout destroys this
+            // captured inside this lambda ï¿?loadLayout destroys this
             // Button / std::function before ifstream::open returns.
             (void)loadAndWire(state);
         });
@@ -925,7 +925,7 @@ void bindReload(GalleryState& state)
 }
 
 // PR-DockTree-Phase4: Save/Load the dock tree (structure + tab ids +
-// active + floating rects) to gallery_dock_tree.json next to cwd â€”
+// active + floating rects) to gallery_dock_tree.json next to cwd â€?
 // same cwd-relative file pattern as the build stamp above.
 void bindDockPersistence(GalleryState& state)
 {
@@ -974,16 +974,16 @@ void bindDockPersistence(GalleryState& state)
                              "[AYUI_Gallery] FAILED to apply dock tree\n");
                 return;
             }
-            // applyDockTree moves live card objects â€” re-inject the
+            // applyDockTree moves live card objects â€?re-inject the
             // promote callback so torn-off child windows keep working.
             wireDockPromotion(state);
         });
     }
 }
 
-// PR-S5: UiCursorHint ï¿½?Win32 cursor. The UI layer computes hints
+// PR-S5: UiCursorHint ï¿?Win32 cursor. The UI layer computes hints
 // (Window resize edges / title-bar Move, ScrollBar SizeNs, Hand, Beam)
-// but Gallery never applied them ï¿½?resize/drag felt "functional but the
+// but Gallery never applied them ï¿?resize/drag felt "functional but the
 // cursor never changed". LoadCursor lazily caches the system cursors.
 static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint)
 {
@@ -1024,10 +1024,10 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     // / onMouseButtonUp so the entire UI tree (hover tooltips, button
     // click, focus) works on a finger tap. Vertical pan delta is fed
     // into onMouseWheel so ScrollView / ListView scroll when the user
-    // drags a finger ï¿½?same code path as a real wheel on a desktop.
+    // drags a finger ï¿?same code path as a real wheel on a desktop.
     struct TouchState {
         bool    active       = false;
-        // PR-B5 ï¿½?dragStarted flips true once the finger crosses the
+        // PR-B5 ï¿?dragStarted flips true once the finger crosses the
         // drag threshold. While false, the gesture is a "tentative tap"
         // and we suppress the synthesized mouse-down so a ListView
         // row click doesn't fire before the user has shown they want
@@ -1043,7 +1043,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         DWORD   pointerId    = 0;
     };
     static thread_local TouchState gTouch;
-    // Wheel scale: a 100-px finger drag ï¿½?1 notch of mouse wheel delta
+    // Wheel scale: a 100-px finger drag ï¿?1 notch of mouse wheel delta
     // (typical deltaY = 120). Flip sign so dragging finger UP scrolls
     // content DOWN (matches native scrolling convention).
     constexpr float kTouchWheelScale = 1.2f;
@@ -1078,14 +1078,14 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         state->ui->onMouseMove(x, y);
         // Keep handled=false so Device also updates MouseDevice position.
         // Returning handled=true previously starved getWheelDelta bridging
-        // of a valid cursor (Device pos stayed at 0,0 ï¿½?pickTopmost miss).
+        // of a valid cursor (Device pos stayed at 0,0 ï¿?pickTopmost miss).
         return 0;
     }
     case WM_SETCURSOR: {
         // PR-S5: apply the UI layer's cursor hint (resize edges,
         // title-bar Move, Beam, Hand). SetCursor here
         // and skip DefWindowProc so the OS doesn't snap back to arrow.
-        // _hoverWidget/_capturedWidget are already fresh ï¿½?WM_SETCURSOR
+        // _hoverWidget/_capturedWidget are already fresh ï¿?WM_SETCURSOR
         // follows the WM_MOUSEMOVE that updated them.
         ::SetCursor(cursorForHint(state->ui->getCursorHint()));
         handled = true;
@@ -1094,12 +1094,12 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     case WM_MOUSEWHEEL: {
         // Primary wheel path: client coords from the message (not Device
         // mouse pos). Gallery swallows move for UI but must own wheel too
-        // ï¿½?otherwise only the post-poll Device bridge runs, often at a
+        // ï¿?otherwise only the post-poll Device bridge runs, often at a
         // stale (0,0) pick point.
         //
         // Sign: Win32 positive = wheel away / natural trackpad "swipe up"
         // often arrives as negative. UI scrollOffset increases to reveal
-        // lower content (browser-like: finger up ï¿½?content up). Negate
+        // lower content (browser-like: finger up ï¿?content up). Negate
         // Win32 notches so swipe/wheel matches browser natural scrolling.
         constexpr float kPixelsPerNotch = 40.0f;
         const short raw = static_cast<short>(HIWORD(wParam));
@@ -1177,7 +1177,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         return 0;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        // PR-B2 ï¿½?F5 toggles dark <-> light. Intercept BEFORE the UI key
+        // PR-B2 ï¿?F5 toggles dark <-> light. Intercept BEFORE the UI key
         // tree so the keystroke never reaches the focused widget (a
         // future TextInput with setShortcut("F5") would otherwise eat
         // it). VK_F5 = 0x74.
@@ -1198,7 +1198,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     }
     case WM_TOUCH: {
         // Decode TOUCHINPUT array (count in LOWORD(wParam)). We only
-        // track the FIRST active touch ï¿½?the Gallery is single-finger
+        // track the FIRST active touch ï¿?the Gallery is single-finger
         // interaction. Multi-touch gestures (pinch-zoom etc.) are out
         // of scope.
         const int count = LOWORD(wParam);
@@ -1239,7 +1239,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         }
 
         if (sawDown) {
-            // First contact ï¿½?record the tentative tap. We DO NOT
+            // First contact ï¿?record the tentative tap. We DO NOT
             // synthesize mouse-down yet; the previously-shipped code
             // fired onMouseButtonDown immediately, which on a ListView
             // selected a row before the user had a chance to scroll.
@@ -1273,7 +1273,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
             gTouch.lastY = gTouch.y;
             state->ui->onMouseMove(gTouch.x, gTouch.y);
 
-            // PR-B5 ï¿½?once the finger crosses the drag threshold,
+            // PR-B5 ï¿?once the finger crosses the drag threshold,
             // commit the gesture as a scroll. We DON'T synthesize a
             // mouse-down (which would have selected a row); the
             // accumulated dy is fed straight into onMouseWheel.
@@ -1286,7 +1286,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
                 }
             }
             if (gTouch.dragStarted) {
-                // Threshold = 8 px (one wheel notch ï¿½?6-8 px on most
+                // Threshold = 8 px (one wheel notch ï¿?6-8 px on most
                 // precision touchpads).
                 constexpr float kTouchWheelThresholdPx = 8.0f;
                 if (std::fabs(gTouch.accumulatedDy) >= kTouchWheelThresholdPx) {
@@ -1294,7 +1294,7 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
                     // "content to move by -deltaY in y" (scroll wheel up
                     // has positive deltaY per Win32 convention). Our
                     // accumulatedDy is "finger moved down" which feels
-                    // like "scroll content up" ï¿½?so we negate.
+                    // like "scroll content up" ï¿?so we negate.
                     const float wheelDelta =
                         -gTouch.accumulatedDy * kTouchWheelScale;
                     state->ui->onMouseWheel(gTouch.x, gTouch.y, wheelDelta);
@@ -1340,7 +1340,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
     // hunting the AllocConsole window.
-    cfg.window.title = "AYUI Gallery [DockArea-20260810b-Bugfix]";
+    cfg.window.title = "AYUI Gallery [DockArea-20260811b-FillResize]";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg)) {
@@ -1390,7 +1390,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
 
-    // PR-B2 ï¿½?install built-in dark theme. ensureDefaultThemes is
+    // PR-B2 ï¿?install built-in dark theme. ensureDefaultThemes is
     // idempotent (no-op if a host registered a theme already) and
     // setActiveTheme pushes the composed sheet into the StyleManager
     // so resolveStyle() returns token-driven colors from this point on.
@@ -1424,7 +1424,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
             ui.onDeviceCompositionUpdate(text, caret);
         };
 
-    // PR-Dock-TearOff: child-window host ï¿½?must exist BEFORE the first
+    // PR-Dock-TearOff: child-window host ï¿?must exist BEFORE the first
     // loadAndWire because wireDockPromotion's lambdas close over
     // state.childWindows.
     state.childWindows =
@@ -1447,7 +1447,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         });
 
     std::fprintf(stderr,
-                 "[AYUI_Gallery] ready ï¿½?UI-only composite (no RenderScene)\n"
+                 "[AYUI_Gallery] ready ï¿?UI-only composite (no RenderScene)\n"
                  "[AYUI_Gallery] sections: Basics / Input / Collections / Overlay / Layout\n");
 
     LARGE_INTEGER qpcFreq{};
@@ -1460,8 +1460,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.pollEvents();
 
         // Fallback bridge: precision trackpads may deliver wheel only via
-        // WM_INPUT ï¿½?MouseDevice (no WM_MOUSEWHEEL). Use UIManager's last
-        // mouse (updated by WM_MOUSEMOVE), never Device pos alone ï¿½?move
+        // WM_INPUT ï¿?MouseDevice (no WM_MOUSEWHEEL). Use UIManager's last
+        // mouse (updated by WM_MOUSEMOVE), never Device pos alone ï¿?move
         // used to be handled=true and starved Device coordinates.
         if (!state.wheelHandledThisFrame) {
             if (ayt::device::MouseDevice* mouse = devices.mouse()) {
@@ -1504,30 +1504,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         state.childWindows->tickAll(dt);
         ui.update(dt); // caret blink, hover revalidate, hot-reload
         ui.layout();
-        // Split populate/flush so DockArea drop guides paint AFTER the
-        // widget tree. Gallery's ScrollView path can skip the in-widget
-        // guide for mini_dock; host-side paint only while a DockCard drag
-        // is active (paintDropGuide itself also no-ops when idle).
+        // Drop guides paint inside DockArea::render (after its children).
+        // Do NOT call paintDropGuide again here â€?that stacked a second
+        // copy of the Phase-3 join/split preview on top of the first.
+        // Child-window redock still works: tickAll â†?updateRedockHover
+        // sets setExternalDropPos before populateFrame.
         ui.populateFrame();
-        // Primary DockCard drag OR promoted-child redock drag (external
-        // drop pos fed by GalleryChildWindows::updateRedockHover).
-        // paintDropGuide no-ops when neither path is active.
-        {
-            const bool primaryDockDrag =
-                ui.isDragging() && ui.getDragPayload().kind == "DockCard";
-            const bool childDockDrag =
-                state.childWindows && state.childWindows->hasActiveDrag();
-            if (primaryDockDrag || childDockDrag) {
-                if (auto* page = ui.findById("page_layout")) {
-                    if (page->isVisible()) {
-                        if (auto* dock = dynamic_cast<ayt::ui::DockArea*>(
-                                ui.findById("mini_dock"))) {
-                            dock->paintDropGuide(uiBackend);
-                        }
-                    }
-                }
-            }
-        }
         ui.flushFrame();
 
         renderer.endFrame();
@@ -1538,13 +1520,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     // CRITICAL: tear down Capabilities overlay widgets BEFORE ui.shutdown.
     // Otherwise ~UIManager tears down the overlay (deleting Tooltip /
     // Window), and the dangling raw pointers in state.tooltip / state.window
-    // survive ï¿½?the SECOND free would happen in ~GalleryState (after this
+    // survive ï¿?the SECOND free would happen in ~GalleryState (after this
     // function returns) and SEGV. teardownCapabilitiesOverlay pulls the
     // widgets off the overlay AND deletes them here so the overlay's
     // subsequent shutdown sees no children to free.
     teardownCapabilitiesOverlay(state);
     // PR-Dock-TearOff: destroy child windows BEFORE the primary UI
-    // (K-INV-D5-6) ï¿½?the child UIManagers (and the promoted cards living
+    // (K-INV-D5-6) ï¿?the child UIManagers (and the promoted cards living
     // in their roots) free here; the primary's shutdown then finds a
     // clean tree.
     state.childWindows.reset();

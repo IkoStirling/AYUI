@@ -158,17 +158,15 @@ DockCard::DockCard() {
 }
 
 DockCard::~DockCard() {
-    // R3-safe parallel of ~TextInput / ~TextArea::TextDocument: drop the
-    // UIManager's transient drag pointers BEFORE the vtable dispatch
-    // chain unwinds. Without this, a tear-off drag in progress when the
-    // editor closes its DockArea (or destroys the card mid-drag) would
-    // leave _dragSession.source / _dragSession.currentTarget pointing at
-    // freed memory; the next endDrag() would call _onDragEnd on the
-    // freed source widget → UB. clearDragStateNoDispatch is the no-virtual
-    // variant (commit 3844a95), mirroring clearFocusNoDispatch /
-    // clearCaptureNoDispatch.
+    // R3-safe: drop UIManager transient pointers BEFORE the vtable
+    // unwinds. Drag was already covered; capture/hover must clear too —
+    // any sync destroy path that races input would otherwise UAF on the
+    // next mouse-up/move (title-bar X used to destroy on button-down).
     if (UIManager* ui = UIManager::tryGet()) {
         ui->clearDragStateNoDispatch(this);
+        ui->clearCaptureNoDispatch(this);
+        ui->clearHoverNoDispatch(this);
+        ui->clearFocusNoDispatch(this);
     }
 
     // Content is owned via destroyWidgetTree to keep the existing
@@ -235,6 +233,19 @@ void DockCard::performLayout() {
     compoundDescendLayout(this);
 }
 
+math::FRectangle DockCard::getClientRect() const {
+    // Mirror Window: chrome (header) is outside the clip/hit body so
+    // overflowing content cannot steal title-bar hits or paint over it.
+    const math::FRectangle bounds = getWorldBounds();
+    const float h = std::max(0.0f, _headerHeight);
+    return math::FRectangle(bounds.minX, bounds.minY + h,
+                            bounds.maxX, bounds.maxY);
+}
+
+void DockCard::renderChildren(IRenderBackend& renderer) {
+    compoundDescendClippedRender(this, renderer);
+}
+
 Widget* DockCard::hitTest(const math::FVector2& worldPos) {
     if (!isVisible()) {
         return nullptr;
@@ -253,8 +264,9 @@ Widget* DockCard::hitTest(const math::FVector2& worldPos) {
             return this;
         }
     }
-    // Body / content — reverse-order children, then self.
-    return compoundDescendHitTest(this, worldPos);
+    // Body / content — clipped to getClientRect so grandchildren that
+    // keep a fixed size wider than the card cannot claim neighbor hits.
+    return compoundDescendHitTestClipped(this, worldPos);
 }
 
 void DockCard::onRender(IRenderBackend& renderer) {
@@ -311,6 +323,23 @@ void DockCard::onRender(IRenderBackend& renderer) {
         renderer.drawText(closeRect, L"x", 12,
                           math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
     }
+
+    // SE grip — visual affordance for OS thick-frame resize on promoted
+    // child windows (mirrors Window::renderResizeGrip).
+    if (_showResizeGrip) {
+        const math::FVector4 gripColor(0.5f, 0.5f, 0.55f, 0.8f);
+        constexpr float kDot = 2.0f;
+        constexpr float margin = 6.0f;
+        constexpr float spacing = 3.0f;
+        for (int i = 0; i < 3; ++i) {
+            const float cx = bounds.maxX - margin
+                - static_cast<float>(i) * spacing - kDot;
+            const float cy = bounds.maxY - margin
+                - static_cast<float>(i) * spacing - kDot;
+            renderer.drawRect(
+                math::FRectangle(cx, cy, cx + kDot, cy + kDot), gripColor);
+        }
+    }
 }
 
 // =============================================================================
@@ -355,14 +384,14 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
         return false;
     }
 
-    // Close hits BEFORE drag — clicking X must not begin a tear-off.
+    // Close hits BEFORE drag — arm on down, fire on up (see onMouseButtonUp).
+    // Destroying in button-down let UIManager capture a freed `this`.
     if (_closable && closeButtonRect().contains(e.mousePos)) {
-        dockTrace("[dock] closeClick card=%s\n", getId().c_str());
-        if (_onCloseRequested) {
-            _onCloseRequested(this);
-        }
+        dockTrace("[dock] closeArm card=%s\n", getId().c_str());
+        _closeArmed = true;
         return true;
     }
+    _closeArmed = false;
 
     // K-INV-D3-2 — non-floatable cards short-circuit drag.
     if (!_floatable) {
@@ -399,6 +428,25 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
     return false;
 }
 
+bool DockCard::onMouseButtonUp(const UIMouseEvent& e) {
+    if (e.mouseButton != 0 || !_closeArmed) {
+        _closeArmed = false;
+        return false;
+    }
+    _closeArmed = false;
+    // Only commit if release is still over the X (cancel if dragged off).
+    if (!_closable || !closeButtonRect().contains(e.mousePos)) {
+        return true;
+    }
+    dockTrace("[dock] closeClick card=%s\n", getId().c_str());
+    // UIManager has already cleared _capturedWidget before dispatching
+    // up — safe to destroy from the close callback.
+    if (_onCloseRequested) {
+        _onCloseRequested(this);
+    }
+    return true;
+}
+
 bool DockCard::onMouseMove(const UIMouseEvent& e) {
     const math::FRectangle bounds = getWorldBounds();
     const math::FRectangle titleBar(
@@ -417,6 +465,7 @@ bool DockCard::onMouseMove(const UIMouseEvent& e) {
 void DockCard::onMouseLeave() {
     _titleBarHover = false;
     _closeHover = false;
+    _closeArmed = false;
     // Inherited leave propagation walks children — same pattern as
     // Window::onMouseLeave (AYWindow.cpp). Widget base handles the
     // call to compoundDescendLeave when applicable.

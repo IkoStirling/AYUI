@@ -147,8 +147,9 @@ TEST_CASE(test_dock_card_moves_from_overlay_to_slot) {
 }
 
 // -------------------------------------------------------------------------
-// 2b. adoptCard into an occupied slot floats the prior occupant
-//     (redock must not VBox-stack / cover the band).
+// 2b. adoptCard into an occupied slot joins as a tab (Phase-3
+//     DockTabGroup). Displace-to-float was the pre-tab policy and kicked
+//     Center content out on Gallery child-window redock.
 // -------------------------------------------------------------------------
 TEST_CASE(test_hit_test_slot_outside_dock_is_count) {
     DockArea dock;
@@ -165,7 +166,7 @@ TEST_CASE(test_hit_test_slot_outside_dock_is_count) {
           != DockArea::Slot::Count);
 }
 
-TEST_CASE(test_adopt_card_displaces_occupied_slot) {
+TEST_CASE(test_adopt_card_joins_occupied_slot) {
     DockArea dock;
     dock.setSize(FVector2(800.0f, 600.0f));
     dock.performLayout();
@@ -177,15 +178,12 @@ TEST_CASE(test_adopt_card_displaces_occupied_slot) {
     DockCard* inbound = makeFloatCard("new", L"New").release();
     CHECK(dock.adoptCard(DockArea::Slot::Left, inbound));
 
-    CHECK(dock.getCardCount(DockArea::Slot::Left) == 1);
+    CHECK(dock.getCardCount(DockArea::Slot::Left) == 2);
     CHECK(dock.findCard("new") != nullptr);
+    CHECK(dock.findCard("old") != nullptr);
     CHECK(dock.isCardInSlot(dock.findCard("new"), DockArea::Slot::Left));
-    CHECK(dock.getOverlay()->getFloatingCardCount() == 1);
-    DockCard* floated = dock.getOverlay()->getFloatingCard(0);
-    CHECK(floated != nullptr);
-    if (floated) {
-        CHECK(floated->getId() == "old");
-    }
+    CHECK(dock.isCardInSlot(dock.findCard("old"), DockArea::Slot::Left));
+    CHECK(dock.getOverlay()->getFloatingCardCount() == 0);
 }
 
 // -------------------------------------------------------------------------
@@ -419,41 +417,41 @@ TEST_CASE(test_dockcard_drag_paints_slot_highlight) {
     CHECK(simulateTitleBarClick(card, titlePt));
     CHECK(f.ui.isDragging());
 
-    // Cursor over the LEFT slot region.
-    const FVector2 leftPt(b.minX + 20.0f, (b.minY + b.maxY) * 0.5f);
+    // Cursor over the LEFT leaf join zone (avoid the 25% west edge).
+    DockTabGroup* leftLeaf0 = dock->hitTestTree(
+        FVector2(b.minX + 20.0f, (b.minY + b.maxY) * 0.5f));
+    CHECK_NOT_NULL(leftLeaf0);
+    if (leftLeaf0 == nullptr) return;
+    const FRectangle lb0 = leftLeaf0->getWorldBounds();
+    const FVector2 leftPt((lb0.minX + lb0.maxX) * 0.5f,
+                          (lb0.minY + lb0.maxY) * 0.5f);
     f.ui.onMouseMove(leftPt.x, leftPt.y);
     CHECK(f.ui.getDragPayload().kind == "DockCard");
     CHECK(dock->hitTestSlot(leftPt) == DockArea::Slot::Left);
 
     f.backend.clear();
-    // Drive the guide via the external-drop bridge so the assertion is
-    // independent of tryGet()/drag-session wiring during a bare render()
-    // call. Production still paints from DockArea::render while dragging.
+    // External-drop bridge: preview uses the same resolveDropTarget as
+    // redockAt. Over a visible Left leaf that is Join → tree join paint.
     dock->setExternalDropPos(leftPt);
     dock->paintDropGuide(f.backend);
 
-    // Hovered slot (Left) gets a translucent base fill matching
-    // getSlotRect(Left). Adaptive dock-tree guides also paint a stronger
-    // in-region sub-zone on top (alpha ~0.42–0.45).
-    const FRectangle left = dock->getSlotRect(DockArea::Slot::Left);
+    DockTabGroup* leftLeaf = dock->hitTestTree(leftPt);
+    CHECK_NOT_NULL(leftLeaf);
+    if (leftLeaf == nullptr) return;
+    const FRectangle leftBounds = leftLeaf->getWorldBounds();
     bool foundHoverFill = false;
     for (const auto& dc : f.backend.getDrawCalls()) {
         if (dc.type != MockRenderer::DrawCall::Rect) {
             continue;
         }
-        const bool alphaOk =
-            (std::fabs(dc.color.w - 0.18f) < 0.02f)
-            || (std::fabs(dc.color.w - 0.42f) < 0.05f)
-            || (std::fabs(dc.color.w - 0.45f) < 0.05f);
-        // Full-slot base OR an in-region zone whose bounds lie inside Left.
-        const bool insideLeft =
-            dc.bounds.minX >= left.minX - 0.5f
-            && dc.bounds.maxX <= left.maxX + 0.5f
-            && dc.bounds.minY >= left.minY - 0.5f
-            && dc.bounds.maxY <= left.maxY + 0.5f
-            && (dc.bounds.maxX - dc.bounds.minX) > 2.0f
-            && (dc.bounds.maxY - dc.bounds.minY) > 2.0f;
-        if (alphaOk && insideLeft) {
+        // Join preview alpha is 0.20 (paintTreeDropZone).
+        const bool alphaOk = (std::fabs(dc.color.w - 0.20f) < 0.02f);
+        const bool matchesLeft =
+            std::fabs(dc.bounds.minX - leftBounds.minX) < 0.5f
+            && std::fabs(dc.bounds.maxX - leftBounds.maxX) < 0.5f
+            && std::fabs(dc.bounds.minY - leftBounds.minY) < 0.5f
+            && std::fabs(dc.bounds.maxY - leftBounds.maxY) < 0.5f;
+        if (alphaOk && matchesLeft) {
             foundHoverFill = true;
             break;
         }

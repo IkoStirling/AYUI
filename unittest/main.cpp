@@ -64,8 +64,8 @@
 #include "Test_LayoutPersistence.cpp"  // D4 (2026-07-26)
 #include "Test_CardPromotion.cpp"      // D5.5 (2026-07-26)
 #include "Test_Leak.cpp"               // code-review 2026-08-02 leak-detection regression
-#include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText 贯通
-#include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接口
+#include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText 贯�?
+#include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接�?
 #include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
 #include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
 #include "Test_Theme_Gallery.cpp"       // PR-B2 measurePrefixWidth + Theme swap

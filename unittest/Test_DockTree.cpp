@@ -10,7 +10,7 @@
 //   * center drop → join as a tab (VS Code style)
 //   * edge drop → nested split (new g_N leaf, 25% share, splitter
 //     reuse / creation)
-//   * same-leaf drop → no-op (center AND edge — K-INV-D3-1)
+//   * same-leaf Join → no-op; solo edge → no-op; multi-tab edge → split
 //   * close/float emptying a g_N leaf → prune (with adjacent
 //     splitter), pinned leaves never pruned
 //   * structure edits flip the pristine guard — the weight template
@@ -256,6 +256,177 @@ TEST_CASE(test_drop_edge_splits_leaf) {
 }
 
 // -------------------------------------------------------------------------
+// 3b. South-edge drop on Center (orthogonal to the mid HBox) wraps Center
+//     in a nested VBox: Center fills the remainder, g_0 takes ~25% height
+//     below. Without the wrap, 25% of height was mis-applied as an HBox
+//     width and Center looked "short".
+// -------------------------------------------------------------------------
+TEST_CASE(test_drop_south_wraps_orthogonal_nest) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("inspector", L"Inspector"));
+    dock->performLayout();
+
+    DockCard* inspector = dock->findCard("inspector");
+    CHECK_NOT_NULL(inspector);
+    if (inspector == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 southPt((cb.minX + cb.maxX) * 0.5f, cb.maxY - 5.0f);
+    CHECK(dock->resolveTreeDropZone(center, southPt) ==
+          DockArea::TreeDropZone::South);
+
+    CHECK(dragCardTo(f, inspector, southPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), southPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+    CHECK(g0->containsCard(inspector));
+
+    DockTabGroup* centerAfter = leafAt(dock.get(),
+        FVector2((cb.minX + cb.maxX) * 0.5f, cb.minY + 20.0f));
+    CHECK_NOT_NULL(centerAfter);
+    if (centerAfter == nullptr) return;
+    CHECK(centerAfter->getLeafId() == "Center");
+
+    const FRectangle gb = g0->getWorldBounds();
+    const FRectangle cab = centerAfter->getWorldBounds();
+    // Nested below: g_0 sits under Center, shares the same column x-range,
+    // and Center still fills most of the column height (not a hairline).
+    CHECK(gb.minY >= cab.maxY - 2.0f);
+    CHECK(std::fabs((gb.minX + gb.maxX) * 0.5f
+                    - (cab.minX + cab.maxX) * 0.5f) < 40.0f);
+    CHECK(cab.maxY - cab.minY >= (cb.maxY - cb.minY) * 0.50f);
+    CHECK(gb.maxY - gb.minY >= 40.0f);
+    // Nest parent is a VBox under the mid HBox.
+    CHECK(dynamic_cast<VBox*>(centerAfter->getParent()) != nullptr);
+}
+
+// -------------------------------------------------------------------------
+// 3c. Join after orthogonal split must not UAF: Left → Center-South →
+//     drag that card onto Center's Join zone. prune deletes g_0; tracing
+//     srcLeaf after prune used to crash. Nest unwrap restores Center as
+//     a direct mid-HBox child.
+// -------------------------------------------------------------------------
+TEST_CASE(test_join_after_south_split_no_crash) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->performLayout();
+
+    DockCard* console = dock->findCard("console");
+    CHECK_NOT_NULL(console);
+    if (console == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 southPt((cb.minX + cb.maxX) * 0.5f, cb.maxY - 5.0f);
+    CHECK(dragCardTo(f, console, southPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), southPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+
+    // Join back onto Center (center of Center's remaining band).
+    DockTabGroup* centerBand = leafAt(dock.get(),
+        FVector2((cb.minX + cb.maxX) * 0.5f, cb.minY + 20.0f));
+    CHECK_NOT_NULL(centerBand);
+    if (centerBand == nullptr) return;
+    const FVector2 joinPt = centerOf(centerBand);
+    CHECK(dock->resolveTreeDropZone(centerBand, joinPt) ==
+          DockArea::TreeDropZone::Join);
+    CHECK(dragCardTo(f, console, joinPt));
+    dock->performLayout();
+
+    // Console is a Center tab; g_0 is gone; Center is no longer nested.
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 2);
+    CHECK(dock->findCard("console") != nullptr);
+    DockTabGroup* after = leafAt(dock.get(), joinPt);
+    CHECK_NOT_NULL(after);
+    if (after == nullptr) return;
+    CHECK(after->getLeafId() == "Center");
+    CHECK(after->containsCard(console));
+    CHECK(dynamic_cast<HBox*>(after->getParent()) != nullptr);
+}
+
+// -------------------------------------------------------------------------
+// 3d. Empty side pinned leaves collapse (hidden + bordering splitters)
+//     so the fill column expands. Re-docking into that slot expands them.
+// -------------------------------------------------------------------------
+TEST_CASE(test_empty_side_pinned_collapses_and_expands) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("inspector", L"Inspector"));
+    dock->performLayout();
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const float centerW0 = center->getWorldBounds().maxX
+                         - center->getWorldBounds().minX;
+
+    DockCard* inspector = dock->findCard("inspector");
+    CHECK_NOT_NULL(inspector);
+    if (inspector == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 southPt((cb.minX + cb.maxX) * 0.5f, cb.maxY - 5.0f);
+    CHECK(dragCardTo(f, inspector, southPt));
+    dock->performLayout();
+
+    // Right pinned leaf collapsed; Center column grew.
+    DockTabGroup* right = nullptr;
+    if (HBox* mid = midBox(dock.get())) {
+        for (Widget* c : mid->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && leaf->getLeafId() == "Right") {
+                right = leaf;
+                break;
+            }
+        }
+    }
+    CHECK_NOT_NULL(right);
+    if (right == nullptr) return;
+    CHECK_FALSE(right->isVisible());
+
+    DockTabGroup* centerAfter = leafAt(dock.get(),
+        FVector2((cb.minX + cb.maxX) * 0.5f, cb.minY + 20.0f));
+    CHECK_NOT_NULL(centerAfter);
+    if (centerAfter == nullptr) return;
+    // Center may now be inside a nest VBox — measure the nest's width
+    // (parent) or the leaf itself if still direct.
+    Widget* col = centerAfter->getParent();
+    if (dynamic_cast<VBox*>(col) == nullptr) {
+        col = centerAfter;
+    }
+    const float centerW1 = col->getWorldBounds().maxX
+                         - col->getWorldBounds().minX;
+    CHECK(centerW1 > centerW0 + 20.0f);
+
+    // moveInSlot back into Right expands the side slot.
+    CHECK(dock->moveInSlot("inspector", DockArea::Slot::Right));
+    dock->performLayout();
+    CHECK(right->isVisible());
+    CHECK(dock->getCardCount(DockArea::Slot::Right) == 1);
+}
+
+// -------------------------------------------------------------------------
 // 4. Splitting the new g_0 leaf again yields g_1 — arbitrary nesting
 //    depth along the same split axis.
 // -------------------------------------------------------------------------
@@ -347,8 +518,8 @@ TEST_CASE(test_resolve_tree_drop_zone_corners) {
 }
 
 // -------------------------------------------------------------------------
-// 6. Same-leaf drop is a no-op in BOTH the center and edge zones
-//    (K-INV-D3-1, incl. a 20px release near the edge).
+// 6. Same-leaf Join is a no-op; same-leaf Edge with a solo card is also
+//    a no-op. Multi-tab edge tear-off is covered separately.
 // -------------------------------------------------------------------------
 TEST_CASE(test_same_leaf_drop_noop_edge_and_center) {
     TreeFixture f;
@@ -368,7 +539,7 @@ TEST_CASE(test_same_leaf_drop_noop_edge_and_center) {
     CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
     CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
 
-    // Edge-zone release (west band, ~1% from the left edge).
+    // Solo-card edge-zone release stays NO-OP (cannot split yourself).
     const FRectangle b = console->getWorldBounds();
     const FVector2 westPt(b.minX + 2.0f, (b.minY + b.maxY) * 0.5f);
     CHECK(dock->resolveTreeDropZone(
@@ -377,6 +548,117 @@ TEST_CASE(test_same_leaf_drop_noop_edge_and_center) {
     CHECK(dragCardTo(f, console, westPt));
     CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
     CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
+}
+
+// -------------------------------------------------------------------------
+// 6b. Multi-tab same-leaf edge drop tears the card into a new split
+//     (Gallery: drag one Center tab to the leaf edge → separate).
+// -------------------------------------------------------------------------
+TEST_CASE(test_same_leaf_edge_splits_when_multi_tab) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("a", L"A"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("b", L"B"));
+    dock->performLayout();
+
+    DockCard* b = dock->findCard("b");
+    CHECK_NOT_NULL(b);
+    if (b == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(center->getTabCount() == 2);
+
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 eastPt(cb.maxX - 5.0f, (cb.minY + cb.maxY) * 0.5f);
+    CHECK(dock->resolveTreeDropZone(center, eastPt) ==
+          DockArea::TreeDropZone::East);
+    CHECK(dragCardTo(f, b, eastPt));
+    dock->performLayout();
+
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 1);
+    DockTabGroup* g0 = leafAt(dock.get(), eastPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() != "Center");
+    CHECK(g0->containsCard(b));
+}
+
+// -------------------------------------------------------------------------
+// 6c. East-split after Right collapsed must revive the reused Center|Right
+//     splitter (was hidden with the empty Right). Gallery D1: boundary
+//     between Center and the new east leaf must stay draggable.
+// -------------------------------------------------------------------------
+TEST_CASE(test_east_split_revives_hidden_right_splitter) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("console", L"Console"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("inspector", L"Inspector"));
+    dock->performLayout();
+
+    DockCard* inspector = dock->findCard("inspector");
+    DockCard* console = dock->findCard("console");
+    CHECK_NOT_NULL(inspector);
+    CHECK_NOT_NULL(console);
+    if (inspector == nullptr || console == nullptr) return;
+
+    // Collapse Right first so its adjacent splitter is hidden (the bug setup).
+    CHECK(dock->floatCard("inspector", FVector2(50.0f, 50.0f)));
+    dock->performLayout();
+
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+    SplitterHandle* hiddenSplit = nullptr;
+    for (int i = 0; ; ++i) {
+        Widget* w = mid->slotAt(i);
+        if (w == nullptr) {
+            break;
+        }
+        if (mid->isSplitterSlot(i) && !w->isVisible()) {
+            hiddenSplit = dynamic_cast<SplitterHandle*>(w);
+        }
+    }
+    CHECK_NOT_NULL(hiddenSplit);
+    if (hiddenSplit == nullptr) return;
+    CHECK_FALSE(hiddenSplit->isVisible());
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 eastPt(cb.maxX - 5.0f, (cb.minY + cb.maxY) * 0.5f);
+    CHECK(dragCardTo(f, console, eastPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), eastPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->containsCard(console));
+    CHECK(g0->getLeafId() != "Center");
+
+    // The previously-hidden Center|Right handle is now Center|g_N and must
+    // be visible + draggable again.
+    CHECK(hiddenSplit->isVisible());
+    const int gi = mid->slotIndexOf(g0);
+    CHECK(gi > 0);
+    CHECK(mid->slotAt(gi - 1) == hiddenSplit);
+
+    const FRectangle sb = hiddenSplit->getWorldBounds();
+    const float splitX = (sb.minX + sb.maxX) * 0.5f;
+    const float splitY = (sb.minY + sb.maxY) * 0.5f;
+    CHECK(dock->hitTest(FVector2(splitX, splitY)) == hiddenSplit);
+
+    const float w0 = center->getWidth();
+    CHECK(hiddenSplit->onMouseButtonDown(UIMouseEvent(FVector2(splitX, splitY), 0)));
+    CHECK(hiddenSplit->onMouseMove(UIMouseEvent(FVector2(splitX - 40.0f, splitY), 0)));
+    CHECK(hiddenSplit->onMouseButtonUp(UIMouseEvent(FVector2(splitX - 40.0f, splitY), 0)));
+    dock->performLayout();
+    CHECK(std::fabs(center->getWidth() - w0) > 1.0f);
 }
 
 // -------------------------------------------------------------------------
@@ -419,13 +701,23 @@ TEST_CASE(test_close_split_leaf_prunes) {
     CHECK(after->getLeafId() != "g_0");
     CHECK(after->getLeafId() == "Center");
 
-    // Pinned leaves survive being emptied (no prune of Left).
+    // Pinned side leaves collapse when emptied (no prune — they stay in
+    // the tree but hidden so fill expands). Empty Center also hides.
     CHECK(dock->getCardCount(DockArea::Slot::Left) == 0);
     CHECK(dock->getCardCount(DockArea::Slot::Center) == 1);
-    DockTabGroup* left = leafAt(dock.get(), FVector2(80.0f, 300.0f));
+    DockTabGroup* left = nullptr;
+    if (HBox* mid = midBox(dock.get())) {
+        for (Widget* c : mid->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && leaf->getLeafId() == "Left") {
+                left = leaf;
+                break;
+            }
+        }
+    }
     CHECK_NOT_NULL(left);
     if (left == nullptr) return;
-    CHECK(left->getLeafId() == "Left");
+    CHECK_FALSE(left->isVisible());
 }
 
 // -------------------------------------------------------------------------
@@ -452,23 +744,24 @@ TEST_CASE(test_splitter_sizing_survives_relayout_after_split) {
     CHECK(dragCardTo(f, console, FVector2(cb.maxX - 5.0f,
                                          (cb.minY + cb.maxY) * 0.5f)));
 
-    // Find the Left leaf's slot index in the mid HBox.
+    // Find the Left leaf's slot index in the mid HBox (may be collapsed
+    // after console moved away — still present, just hidden).
     HBox* mid = midBox(dock.get());
     CHECK_NOT_NULL(mid);
     if (mid == nullptr) return;
     int leftSlot = -1;
-    {
-        const std::vector<Widget*>& kids = mid->getChildren();
-        for (int i = 0; i < static_cast<int>(kids.size()); ++i) {
-            auto* leaf = dynamic_cast<DockTabGroup*>(kids[i]);
-            if (leaf != nullptr && leaf->getLeafId() == "Left") {
-                leftSlot = i;
-                break;
-            }
+    DockTabGroup* leftLeaf = nullptr;
+    for (Widget* c : mid->getChildren()) {
+        auto* leaf = dynamic_cast<DockTabGroup*>(c);
+        if (leaf != nullptr && leaf->getLeafId() == "Left") {
+            leftLeaf = leaf;
+            leftSlot = mid->slotIndexOf(leaf);
+            break;
         }
     }
+    CHECK_NOT_NULL(leftLeaf);
     CHECK(leftSlot >= 0);
-    if (leftSlot < 0) return;
+    if (leftLeaf == nullptr || leftSlot < 0) return;
 
     // Simulate a splitter drag by resizing the slot; the split already
     // bumped the epoch, so performLayout must keep this size.
@@ -498,6 +791,9 @@ TEST_CASE(test_external_card_drop_uses_legacy_adopt) {
     CHECK(dragCardTo(f, external.get(), FVector2(80.0f, 300.0f)));
 
     // adoptCard took ownership; the card now lives in the Left leaf.
+    // Layout must run so the revived Left leaf gets real bounds before
+    // hit-testing (collapsed sides start at size 0 until performLayout).
+    dock->performLayout();
     CHECK(dock->getCardCount(DockArea::Slot::Left) == 1);
     DockTabGroup* left = leafAt(dock.get(), FVector2(80.0f, 300.0f));
     CHECK_NOT_NULL(left);
@@ -600,8 +896,10 @@ TEST_CASE(test_drag_paints_tree_previews) {
     }
     CHECK(foundJoin);
 
-    // Split preview: 25% edge band at Center's east side.
-    const FVector2 eastPt(cb.maxX - 5.0f, (cb.minY + cb.maxY) * 0.5f);
+    // Split preview: 25% edge band at Center's east side (keep ≥10px
+    // from the dock outer edge so a collapsed Right revive strip does
+    // not steal the drop).
+    const FVector2 eastPt(cb.maxX - 15.0f, (cb.minY + cb.maxY) * 0.5f);
     f.ui.onMouseMove(eastPt.x, eastPt.y);
     f.backend.clear();
     dock->paintDropGuide(f.backend);
@@ -849,6 +1147,616 @@ TEST_CASE(test_serialize_split_leaf_round_trip) {
     CHECK_NOT_NULL(after);
     if (after == nullptr) return;
     CHECK(after->getLeafId() == "Center");
+}
+
+// -------------------------------------------------------------------------
+// 18. Emptying a side pinned leaf that sits inside an orthogonal wrap
+//     nest must NOT leave a fill hole (Gallery: Right-North → join away
+//     → dead band under g_N). The pinned leaf is re-homed to mid and
+//     the nest unwraps / last panel fills.
+// -------------------------------------------------------------------------
+TEST_CASE(test_side_north_wrap_then_join_away_no_hole) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("right", L"Right"));
+    dock->performLayout();
+
+    DockCard* left = dock->findCard("left");
+    DockCard* right = dock->findCard("right");
+    CHECK_NOT_NULL(left);
+    CHECK_NOT_NULL(right);
+    if (left == nullptr || right == nullptr) return;
+
+    DockTabGroup* rightLeaf = leafAt(dock.get(), FVector2(700.0f, 300.0f));
+    CHECK_NOT_NULL(rightLeaf);
+    if (rightLeaf == nullptr) return;
+    CHECK(rightLeaf->getLeafId() == "Right");
+    const FRectangle rb = rightLeaf->getWorldBounds();
+    const FVector2 northPt((rb.minX + rb.maxX) * 0.5f, rb.minY + 5.0f);
+    CHECK(dock->resolveTreeDropZone(rightLeaf, northPt) ==
+          DockArea::TreeDropZone::North);
+
+    // Left → Right-North: wraps Right into a VBox nest [g_0, Right].
+    CHECK(dragCardTo(f, left, northPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), northPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+    CHECK(g0->containsCard(left));
+    CHECK(dynamic_cast<VBox*>(g0->getParent()) != nullptr);
+
+    // Join Right's remaining card into Center — empties Right inside nest.
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    CHECK(dragCardTo(f, right, centerOf(center)));
+    dock->performLayout();
+
+    CHECK(dock->getCardCount(DockArea::Slot::Center) >= 1);
+    CHECK(dock->getCardCount(DockArea::Slot::Right) == 0);
+
+    // g_0 must fill the former Right column — no dead band under it.
+    DockTabGroup* g0After = nullptr;
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+    for (Widget* c : mid->getChildren()) {
+        auto* leaf = dynamic_cast<DockTabGroup*>(c);
+        if (leaf != nullptr && leaf->getLeafId() == "g_0") {
+            g0After = leaf;
+            break;
+        }
+        // Still nested? measure the nest VBox instead.
+        if (auto* nest = dynamic_cast<VBox*>(c)) {
+            for (Widget* nc : nest->getChildren()) {
+                auto* nl = dynamic_cast<DockTabGroup*>(nc);
+                if (nl != nullptr && nl->getLeafId() == "g_0") {
+                    g0After = nl;
+                    break;
+                }
+            }
+        }
+    }
+    CHECK_NOT_NULL(g0After);
+    if (g0After == nullptr) return;
+
+    const FRectangle gb = g0After->getWorldBounds();
+    const float midH = mid->getWorldBounds().maxY - mid->getWorldBounds().minY;
+    // Visible panel must consume most of the mid row height (not ~25%).
+    CHECK(gb.maxY - gb.minY >= midH * 0.70f);
+
+    // Right pinned leaf is collapsed in the template mid, not hidden
+    // inside a nest.
+    DockTabGroup* rightAfter = nullptr;
+    for (Widget* c : mid->getChildren()) {
+        auto* leaf = dynamic_cast<DockTabGroup*>(c);
+        if (leaf != nullptr && leaf->getLeafId() == "Right") {
+            rightAfter = leaf;
+            break;
+        }
+    }
+    CHECK_NOT_NULL(rightAfter);
+    if (rightAfter == nullptr) return;
+    CHECK_FALSE(rightAfter->isVisible());
+    CHECK(dynamic_cast<HBox*>(rightAfter->getParent()) != nullptr);
+}
+
+// -------------------------------------------------------------------------
+// 19. Dragging the last Center card into a nest sibling must nest-hide
+//     empty Center (no dead fill band). Redocking into Center joins as
+//     a tab without displacing the prior occupant.
+// -------------------------------------------------------------------------
+TEST_CASE(test_empty_center_in_nest_hides_and_adopt_joins) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->performLayout();
+
+    DockCard* left = dock->findCard("left");
+    DockCard* centerCard = dock->findCard("center");
+    CHECK_NOT_NULL(left);
+    CHECK_NOT_NULL(centerCard);
+    if (left == nullptr || centerCard == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 northPt((cb.minX + cb.maxX) * 0.5f, cb.minY + 5.0f);
+
+    // Left → Center-North: nest [g_0, Center].
+    CHECK(dragCardTo(f, left, northPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), northPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+
+    // Join Center's last card into g_0 → Center empties inside nest.
+    CHECK(dragCardTo(f, centerCard, centerOf(g0)));
+    dock->performLayout();
+
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 0);
+    CHECK(g0->getTabCount() == 2);
+
+    // Walk mid for the Center leaf (may be nest-hidden).
+    DockTabGroup* centerLeaf = nullptr;
+    if (HBox* mid = midBox(dock.get())) {
+        std::vector<Widget*> stack;
+        stack.push_back(mid);
+        while (!stack.empty() && centerLeaf == nullptr) {
+            Widget* n = stack.back();
+            stack.pop_back();
+            if (auto* leaf = dynamic_cast<DockTabGroup*>(n)) {
+                if (leaf->getLeafId() == "Center") {
+                    centerLeaf = leaf;
+                    break;
+                }
+            }
+            if (auto* box = dynamic_cast<BoxBase*>(n)) {
+                for (Widget* c : box->getChildren()) {
+                    stack.push_back(c);
+                }
+            }
+        }
+    }
+    CHECK_NOT_NULL(centerLeaf);
+    if (centerLeaf == nullptr) return;
+    CHECK_FALSE(centerLeaf->isVisible());
+
+    // g_0 (or its unwrapped self) must fill most of the mid height.
+    DockTabGroup* filled = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(filled);
+    if (filled == nullptr) return;
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+    const float midH = mid->getWorldBounds().maxY - mid->getWorldBounds().minY;
+    const FRectangle fb = filled->getWorldBounds();
+    CHECK(fb.maxY - fb.minY >= midH * 0.70f);
+
+    // adoptCard into Center joins — does not float existing tabs.
+    DockCard* inbound = treeMakeCard("inbound", L"Inbound").release();
+    CHECK(dock->adoptCard(DockArea::Slot::Center, inbound));
+    CHECK(dock->getCardCount(DockArea::Slot::Center) >= 1);
+    CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
+    CHECK(centerLeaf->isVisible());
+}
+
+// -------------------------------------------------------------------------
+// 20. Floating the last Center card hides empty Center so a populated
+//     side expands into the middle (Gallery promote left a dead band).
+// -------------------------------------------------------------------------
+TEST_CASE(test_float_last_center_hides_and_side_expands) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->performLayout();
+
+    DockTabGroup* left0 = leafAt(dock.get(), FVector2(80.0f, 300.0f));
+    CHECK_NOT_NULL(left0);
+    if (left0 == nullptr) return;
+    const float leftW0 = left0->getWorldBounds().maxX
+                       - left0->getWorldBounds().minX;
+
+    CHECK(dock->floatCard("center", FVector2(500.0f, 100.0f)));
+    dock->performLayout();
+
+    CHECK(dock->getCardCount(DockArea::Slot::Center) == 0);
+    DockTabGroup* centerLeaf = nullptr;
+    if (HBox* mid = midBox(dock.get())) {
+        for (Widget* c : mid->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && leaf->getLeafId() == "Center") {
+                centerLeaf = leaf;
+                break;
+            }
+        }
+    }
+    CHECK_NOT_NULL(centerLeaf);
+    if (centerLeaf == nullptr) return;
+    CHECK_FALSE(centerLeaf->isVisible());
+
+    DockTabGroup* left1 = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(left1);
+    if (left1 == nullptr) return;
+    CHECK(left1->getLeafId() == "Left");
+    const float leftW1 = left1->getWorldBounds().maxX
+                       - left1->getWorldBounds().minX;
+    CHECK(leftW1 > leftW0 + 40.0f);
+}
+
+// -------------------------------------------------------------------------
+// 21. resolveDropTarget: collapsed side wins over tree Center (preview
+//     ≡ commit for Gallery redock revive).
+// -------------------------------------------------------------------------
+TEST_CASE(test_resolve_drop_prefers_collapsed_side) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->performLayout();
+
+    CHECK(dock->floatCard("left", FVector2(50.0f, 50.0f)));
+    dock->performLayout();
+
+    // Left collapsed; cursor in the outer revive strip (not deep into
+    // the expanded Center west edge-split zone).
+    const DockArea::DropTarget t =
+        dock->resolveDropTarget(FVector2(5.0f, 300.0f));
+    CHECK(t.kind == DockArea::DropKind::Slot);
+    CHECK(t.slot == DockArea::Slot::Left);
+
+    // East of Center but outside the 10px Right revive strip → Edge split.
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 eastPt(cb.maxX - 15.0f, (cb.minY + cb.maxY) * 0.5f);
+    const DockArea::DropTarget te = dock->resolveDropTarget(eastPt);
+    CHECK(te.kind == DockArea::DropKind::Tree);
+    CHECK(te.zone == DockArea::TreeDropZone::East);
+}
+
+// -------------------------------------------------------------------------
+// 22. Moving a card out of g_N via a later splitLeaf must prune the
+//     emptied leaf — otherwise it remains a transparent fixed-width
+//     band (Gallery: black gap between Center and Right).
+// -------------------------------------------------------------------------
+TEST_CASE(test_split_away_from_g_n_prunes_empty_source) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->performLayout();
+
+    DockCard* left = dock->findCard("left");
+    CHECK_NOT_NULL(left);
+    if (left == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    // Left → Center east → g_0 (Right stays collapsed / out of the way).
+    const FVector2 eastPt(cb.maxX - 15.0f, (cb.minY + cb.maxY) * 0.5f);
+    CHECK(dock->resolveTreeDropZone(center, eastPt) ==
+          DockArea::TreeDropZone::East);
+    CHECK(dragCardTo(f, left, eastPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), eastPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+    CHECK(g0->containsCard(left));
+    const FVector2 g0Pt = centerOf(g0);
+
+    // Tear left from g_0 onto Center west → new g_1; emptied g_0 must prune.
+    DockTabGroup* center2 = leafAt(dock.get(), FVector2(300.0f, 300.0f));
+    CHECK_NOT_NULL(center2);
+    if (center2 == nullptr) return;
+    CHECK(center2->getLeafId() == "Center");
+    const FRectangle cb2 = center2->getWorldBounds();
+    const FVector2 westPt(cb2.minX + 15.0f, (cb2.minY + cb2.maxY) * 0.5f);
+    CHECK(dock->resolveTreeDropZone(center2, westPt) ==
+          DockArea::TreeDropZone::West);
+    CHECK(dragCardTo(f, left, westPt));
+    dock->performLayout();
+
+    // Former g_0 location must not be an empty leaf band.
+    DockTabGroup* atOldG0 = leafAt(dock.get(), g0Pt);
+    CHECK_NOT_NULL(atOldG0);
+    if (atOldG0 == nullptr) return;
+    CHECK(atOldG0->getTabCount() >= 1);
+
+    if (HBox* mid = midBox(dock.get())) {
+        for (Widget* c : mid->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && !leaf->isPinned()) {
+                CHECK(leaf->getTabCount() > 0);
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// 23. Hole eradication: a mid HBox of only fixed-size visible panels
+//     must be healed on performLayout so leftover cannot remain a gap.
+// -------------------------------------------------------------------------
+TEST_CASE(test_perform_layout_heals_fixed_only_mid_hole) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("right", L"Right"));
+    dock->performLayout();
+
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+
+    // Force every visible panel to a fixed size (no fill) — the
+    // pre-heal condition that painted a black band in Gallery.
+    for (int i = 0; ; ++i) {
+        Widget* w = mid->slotAt(i);
+        if (w == nullptr) {
+            break;
+        }
+        if (w->isSplitterHandle() || !w->isVisible()) {
+            continue;
+        }
+        mid->setSlotSize(i, 120.0f);
+    }
+    dock->performLayout();
+
+    // After heal, visible panel widths must cover the mid (no leftover
+    // gap larger than splitter/spacing slack).
+    const FRectangle mb = mid->getWorldBounds();
+    float covered = 0.0f;
+    int visiblePanels = 0;
+    for (Widget* c : mid->getChildren()) {
+        if (c == nullptr || !c->isVisible()) {
+            continue;
+        }
+        const FRectangle cb = c->getWorldBounds();
+        covered += (cb.maxX - cb.minX);
+        if (!c->isSplitterHandle()) {
+            ++visiblePanels;
+        }
+    }
+    CHECK(visiblePanels >= 2);
+    const float midW = mb.maxX - mb.minX;
+    CHECK(covered >= midW - 8.0f);
+}
+
+// -------------------------------------------------------------------------
+// 23. Multi-step nest that leaves only a hidden Center must dissolve —
+//     otherwise mid keeps a vacant box and paints a gap between Left and
+//     the remaining panel group (Gallery D8).
+// -------------------------------------------------------------------------
+TEST_CASE(test_vacant_nest_with_hidden_center_dissolves) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("right", L"Right"));
+    dock->performLayout();
+
+    DockCard* left = dock->findCard("left");
+    DockCard* centerCard = dock->findCard("center");
+    DockCard* right = dock->findCard("right");
+    CHECK_NOT_NULL(left);
+    CHECK_NOT_NULL(centerCard);
+    CHECK_NOT_NULL(right);
+    if (left == nullptr || centerCard == nullptr || right == nullptr) return;
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 northPt((cb.minX + cb.maxX) * 0.5f, cb.minY + 5.0f);
+
+    // Left → Center-North: nest [g_0, Center]; Left collapses.
+    CHECK(dragCardTo(f, left, northPt));
+    dock->performLayout();
+
+    DockTabGroup* g0 = leafAt(dock.get(), northPt);
+    CHECK_NOT_NULL(g0);
+    if (g0 == nullptr) return;
+    CHECK(g0->getLeafId() == "g_0");
+
+    // Join Center into g_0 → Center hidden inside nest (blocks unwrap).
+    CHECK(dragCardTo(f, centerCard, centerOf(g0)));
+    dock->performLayout();
+    CHECK(g0->getTabCount() == 2);
+
+    // Move both cards into Right — g_0 prunes; nest would be vacant.
+    CHECK(dragCardTo(f, left, centerOf(leafAt(dock.get(), FVector2(700.0f, 300.0f)))));
+    dock->performLayout();
+    DockTabGroup* rightLeaf = leafAt(dock.get(), FVector2(700.0f, 300.0f));
+    CHECK_NOT_NULL(rightLeaf);
+    if (rightLeaf == nullptr) return;
+    CHECK(dragCardTo(f, centerCard, centerOf(rightLeaf)));
+    dock->performLayout();
+
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+
+    // No mid child box may be vacant (0 visible non-splitter panels).
+    for (Widget* c : mid->getChildren()) {
+        auto* nest = dynamic_cast<BoxBase*>(c);
+        if (nest == nullptr) {
+            continue;
+        }
+        int visible = 0;
+        for (int i = 0; ; ++i) {
+            Widget* w = nest->slotAt(i);
+            if (w == nullptr) {
+                break;
+            }
+            if (!w->isSplitterHandle() && w->isVisible()) {
+                ++visible;
+            }
+        }
+        CHECK(visible > 0);
+    }
+
+    // Visible panels + splitters must cover the mid (no black gap band).
+    const FRectangle mb = mid->getWorldBounds();
+    float covered = 0.0f;
+    for (Widget* c : mid->getChildren()) {
+        if (c == nullptr || !c->isVisible()) {
+            continue;
+        }
+        const FRectangle wb = c->getWorldBounds();
+        covered += (wb.maxX - wb.minX);
+    }
+    CHECK(covered >= (mb.maxX - mb.minX) - 8.0f);
+
+    // Hidden Center must live in the template mid, not a dissolved nest.
+    DockTabGroup* centerLeaf = nullptr;
+    for (Widget* c : mid->getChildren()) {
+        auto* leaf = dynamic_cast<DockTabGroup*>(c);
+        if (leaf != nullptr && leaf->getLeafId() == "Center") {
+            centerLeaf = leaf;
+            break;
+        }
+    }
+    CHECK_NOT_NULL(centerLeaf);
+    if (centerLeaf == nullptr) return;
+    CHECK_FALSE(centerLeaf->isVisible());
+}
+
+// -------------------------------------------------------------------------
+// 24. Title-bar close-X destroys on mouse-up (not down) so UIManager never
+//     captures a freed DockCard — Gallery crash after close Left.
+// -------------------------------------------------------------------------
+TEST_CASE(test_dock_card_close_x_via_uimanager_defers_destroy) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    auto leftOwned = treeMakeCard("left", L"Left");
+    leftOwned->setClosable(true);
+    leftOwned->setFloatable(true);
+    leftOwned->setOnCloseRequested([dock = dock.get()](DockCard* c) {
+        if (c != nullptr) {
+            dock->closeCard(c->getId());
+        }
+    });
+    dock->addCard(DockArea::Slot::Left, std::move(leftOwned));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("right", L"Right"));
+    dock->performLayout();
+
+    DockCard* card = dock->findCard("left");
+    CHECK_NOT_NULL(card);
+    if (card == nullptr) return;
+
+    const FRectangle b = card->getWorldBounds();
+    // Close button is the rightmost ~22px of the title strip.
+    const float closeX = b.maxX - 8.0f;
+    const float closeY = b.minY + 8.0f;
+
+    CHECK(f.ui.onMouseButtonDown(closeX, closeY, 0));
+    // Must still be alive after down — destroy waits for up.
+    CHECK(dock->findCard("left") != nullptr);
+
+    CHECK(f.ui.onMouseButtonUp(closeX, closeY, 0));
+    CHECK(dock->findCard("left") == nullptr);
+
+    // Capture must be clear (no dangling pointer after destroy).
+    CHECK_FALSE(f.ui.onMouseButtonUp(closeX, closeY, 0));
+
+    dock->performLayout();
+    HBox* mid = midBox(dock.get());
+    CHECK_NOT_NULL(mid);
+    if (mid == nullptr) return;
+    const FRectangle mb = mid->getWorldBounds();
+    float covered = 0.0f;
+    for (Widget* c : mid->getChildren()) {
+        if (c == nullptr || !c->isVisible()) {
+            continue;
+        }
+        const FRectangle wb = c->getWorldBounds();
+        covered += (wb.maxX - wb.minX);
+    }
+    CHECK(covered >= (mb.maxX - mb.minX) - 8.0f);
+}
+
+// -------------------------------------------------------------------------
+// 25. Gallery recipe: N/W/S/E wrap → join → same-leaf West → close Left
+//     must not leave a mid gap / hole (20260811 GapClose follow-up).
+// -------------------------------------------------------------------------
+TEST_CASE(test_gallery_nwes_join_west_close_left_no_hole) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left, treeMakeCard("left", L"Left"));
+    dock->addCard(DockArea::Slot::Center, treeMakeCard("center", L"Center"));
+    dock->addCard(DockArea::Slot::Right, treeMakeCard("right", L"Right"));
+    dock->performLayout();
+
+    DockCard* right = dock->findCard("right");
+    DockCard* left = dock->findCard("left");
+    CHECK_NOT_NULL(right);
+    CHECK_NOT_NULL(left);
+    if (right == nullptr || left == nullptr) return;
+
+    auto centerPt = [](DockArea* d) {
+        DockTabGroup* c = leafAt(d, FVector2(400.0f, 300.0f));
+        return c != nullptr ? centerOf(c) : FVector2(400.0f, 300.0f);
+    };
+    auto edgePt = [](DockArea* d, DockArea::TreeDropZone z) {
+        DockTabGroup* c = leafAt(d, FVector2(400.0f, 300.0f));
+        if (c == nullptr) {
+            return FVector2(400.0f, 300.0f);
+        }
+        const FRectangle b = c->getWorldBounds();
+        switch (z) {
+        case DockArea::TreeDropZone::North:
+            return FVector2((b.minX + b.maxX) * 0.5f, b.minY + 5.0f);
+        case DockArea::TreeDropZone::West:
+            return FVector2(b.minX + 5.0f, (b.minY + b.maxY) * 0.5f);
+        case DockArea::TreeDropZone::South:
+            return FVector2((b.minX + b.maxX) * 0.5f, b.maxY - 5.0f);
+        case DockArea::TreeDropZone::East:
+            return FVector2(b.maxX - 5.0f, (b.minY + b.maxY) * 0.5f);
+        default:
+            return centerOf(c);
+        }
+    };
+
+    CHECK(dragCardTo(f, right, edgePt(dock.get(), DockArea::TreeDropZone::North)));
+    dock->performLayout();
+    CHECK(dragCardTo(f, right, edgePt(dock.get(), DockArea::TreeDropZone::West)));
+    dock->performLayout();
+    CHECK(dragCardTo(f, right, edgePt(dock.get(), DockArea::TreeDropZone::South)));
+    dock->performLayout();
+    CHECK(dragCardTo(f, right, edgePt(dock.get(), DockArea::TreeDropZone::East)));
+    dock->performLayout();
+    CHECK(dragCardTo(f, right, centerPt(dock.get())));
+    dock->performLayout();
+    CHECK(dragCardTo(f, right, edgePt(dock.get(), DockArea::TreeDropZone::West)));
+    dock->performLayout();
+
+    auto midCovered = [&]() -> bool {
+        HBox* mid = midBox(dock.get());
+        if (mid == nullptr) {
+            return false;
+        }
+        const FRectangle mb = mid->getWorldBounds();
+        float covered = 0.0f;
+        for (Widget* c : mid->getChildren()) {
+            if (c == nullptr || !c->isVisible()) {
+                continue;
+            }
+            const FRectangle wb = c->getWorldBounds();
+            covered += (wb.maxX - wb.minX);
+        }
+        return covered >= (mb.maxX - mb.minX) - 8.0f;
+    };
+    CHECK(midCovered());
+
+    CHECK(dock->closeCard("left"));
+    dock->performLayout();
+    CHECK(dock->findCard("left") == nullptr);
+    CHECK(midCovered());
 }
 
 TEST_SUITE_END

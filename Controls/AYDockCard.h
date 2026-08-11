@@ -74,6 +74,12 @@ public:
 
     void onRender(IRenderBackend& renderer) override;
     void performLayout() override;
+    // Body rect below the header — shared by renderChildren clip and
+    // hitTest descent (same contract as Window::getClientRect).
+    math::FRectangle getClientRect() const override;
+    // Clip content to the body so fixed-size grandchildren (Gallery
+    // Ping button, labels) cannot paint into neighboring dock panels.
+    void renderChildren(IRenderBackend& renderer) override;
     // Title-bar chrome claims hits before content children. Center-slot
     // cards (full-bleed Panel content) otherwise lost title presses to a
     // mis-sized child and became undraggable after a swap into Center.
@@ -88,6 +94,9 @@ public:
     // Return type mirrors Widget::onMouseButtonDown (bool) — overriding
     // with a different return type triggers C2555.
     bool onMouseButtonDown(const UIMouseEvent& e) override;
+    // Close-X commits on mouse-up so UIManager can clear capture before
+    // destroyWidgetTree runs (down-path destroy left a dangling capture → AE).
+    bool onMouseButtonUp(const UIMouseEvent& e) override;
     bool onMouseMove(const UIMouseEvent& e) override;
     void onMouseLeave() override;
     UiCursorHint getCursorHint() const override;
@@ -122,6 +131,11 @@ public:
     void setPromoteCallback(PromoteCallback cb) { _promoteCb = std::move(cb); }
     bool detachToOwnWindow();
 
+    // When true, paints a SE "口" resize grip (OS thick-frame does the
+    // actual resize on promoted child HWNDs — this is the visual cue).
+    void setShowResizeGrip(bool show) { _showResizeGrip = show; }
+    bool showResizeGrip() const { return _showResizeGrip; }
+
 private:
     std::string _id;
     std::wstring _title;
@@ -135,6 +149,9 @@ private:
     // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
     bool _titleBarHover = false;
     bool _closeHover = false;
+    // Close affordance: armed on LMB-down over X, fired on LMB-up.
+    bool _closeArmed = false;
+    bool _showResizeGrip = false;
 
     math::FRectangle closeButtonRect() const;
 
