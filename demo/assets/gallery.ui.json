@@ -68,6 +68,7 @@
             { "type": "Button", "id": "nav_overlay", "text": "4. Overlay", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_layout", "text": "5. Layout", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_capabilities", "text": "6. Capabilities", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_backend", "text": "7. Backend", "size": { "w": 160, "h": 28 } },
             { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
             { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
           ]
@@ -296,6 +297,16 @@
                   "size": { "w": 320, "h": 110 }
                 },
                 { "type": "TextLabel", "id": "cap_b3_state", "text": "wheel: (idle)", "size": { "w": 500, "h": 20 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_backend",
+              "spacing": 10,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "backend_hdr", "text": "Backend - UIRenderBackend: gradient / blend modes / SDF border + shadow / texture + 9-patch", "size": { "w": 920, "h": 24 } },
+                { "type": "TextLabel", "id": "backend_hint", "text": "The canvas below is host-drawn every frame (BackendDemoWidget::onRender) straight through the render backend.", "size": { "w": 900, "h": 20 } }
               ]
             }
               ]
