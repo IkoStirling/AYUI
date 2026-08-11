@@ -307,7 +307,31 @@ TEST_CASE(test_drop_south_wraps_orthogonal_nest) {
     CHECK(cab.maxY - cab.minY >= (cb.maxY - cb.minY) * 0.50f);
     CHECK(gb.maxY - gb.minY >= 40.0f);
     // Nest parent is a VBox under the mid HBox.
-    CHECK(dynamic_cast<VBox*>(centerAfter->getParent()) != nullptr);
+    auto* nest = dynamic_cast<VBox*>(centerAfter->getParent());
+    CHECK_NOT_NULL(nest);
+    if (nest == nullptr) return;
+
+    // Nest must be flush with mid (no default BoxBase 4px padding) so the
+    // Left column and Center|g_0 stack share the same top/bottom and the
+    // only horizontal gap is the splitter.
+    DockTabGroup* leftLeaf = nullptr;
+    if (HBox* mid = midBox(dock.get())) {
+        for (Widget* c : mid->getChildren()) {
+            auto* leaf = dynamic_cast<DockTabGroup*>(c);
+            if (leaf != nullptr && leaf->getLeafId() == "Left") {
+                leftLeaf = leaf;
+                break;
+            }
+        }
+    }
+    CHECK_NOT_NULL(leftLeaf);
+    if (leftLeaf == nullptr) return;
+    const FRectangle lb = leftLeaf->getWorldBounds();
+    const FRectangle nb = nest->getWorldBounds();
+    CHECK(std::fabs(nb.minY - lb.minY) < 1.0f);
+    CHECK(std::fabs(nb.maxY - lb.maxY) < 1.0f);
+    CHECK(nb.minX >= lb.maxX - 1.0f);
+    CHECK(nb.minX <= lb.maxX + SplitterHandle::kDefaultWidth + 2.0f);
 }
 
 // -------------------------------------------------------------------------

@@ -2137,6 +2137,9 @@ void DockArea::splitLeaf(DockTabGroup* leaf, TreeDropZone zone,
             ? static_cast<BoxBase*>(new VBox())
             : static_cast<BoxBase*>(new HBox());
         nest->setId(getId() + "::nest_g" + std::to_string(n));
+        // Match template mid/root: default BoxBase padding (4) would inset
+        // the whole column vs Left and shrink Center|g_N below mid height.
+        nest->setPadding(0.0f, 0.0f, 0.0f, 0.0f);
         nest->setSpacing(0.0f);
 
         if (before) {
