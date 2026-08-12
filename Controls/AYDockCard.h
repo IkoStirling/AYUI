@@ -131,10 +131,28 @@ public:
     void setPromoteCallback(PromoteCallback cb) { _promoteCb = std::move(cb); }
     bool detachToOwnWindow();
 
-    // When true, paints a SE "口" resize grip (OS thick-frame does the
-    // actual resize on promoted child HWNDs — this is the visual cue).
+    // Host-window chrome (promoted OS HWND only). Overlay floating
+    // DockCards must leave these false — no maximize 口, no SE grip.
     void setShowResizeGrip(bool show) { _showResizeGrip = show; }
     bool showResizeGrip() const { return _showResizeGrip; }
+    void setShowMaximizeButton(bool show) { _showMaximizeButton = show; }
+    bool showMaximizeButton() const { return _showMaximizeButton; }
+    // Visual only — host keeps this in sync with OS IsZoomed.
+    void setMaximizedVisual(bool maximized) { _maximizedVisual = maximized; }
+    bool maximizedVisual() const { return _maximizedVisual; }
+
+    // Raw handler (not std::function): promote runs mid-drag while the
+    // card still holds a CloseCallback; assigning another std::function
+    // of the same signature corrupted tidy and AVed in Gallery promote.
+    using MaximizeHandler = void (*)(void* user, DockCard* card);
+    void setMaximizeHandler(MaximizeHandler fn, void* user) {
+        _maximizeFn = fn;
+        _maximizeUser = user;
+    }
+    void clearMaximizeHandler() {
+        _maximizeFn = nullptr;
+        _maximizeUser = nullptr;
+    }
 
 private:
     std::string _id;
@@ -149,11 +167,18 @@ private:
     // D3 — title-bar hover tracking (drives cursor hint + onMouseLeave).
     bool _titleBarHover = false;
     bool _closeHover = false;
+    bool _maximizeHover = false;
     // Close affordance: armed on LMB-down over X, fired on LMB-up.
     bool _closeArmed = false;
+    bool _maximizeArmed = false;
     bool _showResizeGrip = false;
+    bool _showMaximizeButton = false;
+    bool _maximizedVisual = false;
+    MaximizeHandler _maximizeFn = nullptr;
+    void* _maximizeUser = nullptr;
 
     math::FRectangle closeButtonRect() const;
+    math::FRectangle maximizeButtonRect() const;
 
     // PR-Dock-TearOff — press position of the last accepted title-bar
     // drag. The void-drop promote path (onDragEnd) compares it against

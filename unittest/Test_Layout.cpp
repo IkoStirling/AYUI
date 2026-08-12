@@ -703,5 +703,31 @@ TEST_CASE(vbox_preferred_content_size_walks_into_nested_vbox_using_natural) {
     delete inner;
 }
 
+// Gallery Backend first-entry: wireBackendPage addWidget(demo, 900) on a
+// hidden page after it was already laid out. Stale _naturalHeight made
+// ScrollView think there was no overflow until a later relayout.
+TEST_CASE(vbox_add_widget_invalidates_natural_cache) {
+    VBox page;
+    page.setPadding(0, 0, 0, 0);
+    page.setSpacing(0);
+    page.setSize(FVector2(200.0f, 80.0f));
+
+    auto* hdr = new ayt::ui::Widget();
+    hdr->setSize(FVector2(200.0f, 24.0f));
+    page.addWidget(hdr, 24.0f);
+    page.performLayout();
+    CHECK_FLOAT_EQ(page.getCachedNaturalHeight(), 24.0f, 1e-3f);
+
+    auto* demo = new ayt::ui::Widget();
+    demo->setSize(FVector2(200.0f, 900.0f));
+    page.addWidget(demo, 900.0f);
+
+    CHECK(page.getCachedNaturalHeight() < 0.0f);
+    CHECK_FLOAT_EQ(page.getPreferredContentSize().y, 924.0f, 1e-3f);
+
+    delete hdr;
+    delete demo;
+}
+
 TEST_SUITE_END
 

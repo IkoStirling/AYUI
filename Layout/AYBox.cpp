@@ -55,6 +55,7 @@ void BoxBase::addWidget(Widget* widget, float size, const BoxSlotLimits& limits)
     if (slot.isSplitter) {
         rebindSplitters();
     }
+    invalidateNaturalSizeCache();
 }
 
 void BoxBase::insertWidget(int index, Widget* widget, float size, const BoxSlotLimits& limits) {
@@ -86,6 +87,7 @@ void BoxBase::insertWidget(int index, Widget* widget, float size, const BoxSlotL
     if (slot.isSplitter) {
         rebindSplitters();
     }
+    invalidateNaturalSizeCache();
 }
 
 void BoxBase::removeWidget(Widget* widget) {
@@ -105,6 +107,7 @@ void BoxBase::removeWidget(Widget* widget) {
     // drag-end re-resolves them safely. Mirrors what addWidget /
     // insertWidget already do (rebindSplitters()).
     rebindSplitters();
+    invalidateNaturalSizeCache();
 }
 
 void BoxBase::setSlotLimits(int slotIndex, const BoxSlotLimits& limits) {
@@ -126,6 +129,7 @@ void BoxBase::setSlotSize(int slotIndex, float size) {
         return;
     }
     _slots[static_cast<size_t>(slotIndex)].size = size;
+    invalidateNaturalSizeCache();
 }
 
 bool BoxBase::isSplitterSlot(int slotIndex) const {
@@ -491,16 +495,12 @@ namespace {
 float walkNaturalHeight(const Widget* w) {
     if (w == nullptr) return 0.0f;
     if (!w->isVisible()) return 0.0f;
-    // PR-B3 follow-up: if this widget is itself a VBox, prefer its
-    // cached natural height (sum of children's natural heights
-    // before fill stretch). The walker otherwise sums the stretched
-    // heights of every descendant and reports a content extent
-    // equal to the viewport — which makes ScrollView conclude "no
-    // overflow" and disable the scrollbar even when pages actually
-    // overflow.
+    // Prefer VBox preferred size (uses slot.size + cached natural height).
+    // Walking getChildren()/getSize() misses fixed slots added after the
+    // last layout of a hidden page (Gallery Backend first entry: demo
+    // 900px slot, stale cache → ScrollView thinks no overflow).
     if (const auto* vb = dynamic_cast<const VBox*>(w)) {
-        const float cached = vb->getCachedNaturalHeight();
-        if (cached >= 0.0f) return cached;
+        return vb->getPreferredContentSize().y;
     }
     if (w->getChildren().empty()) return w->getSize().y;
     float total = 0.0f;

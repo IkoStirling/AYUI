@@ -176,6 +176,38 @@ TEST_CASE(test_dock_card_basic) {
     CHECK(card->getContent() == nullptr);
 }
 
+TEST_CASE(test_dock_card_maximize_only_when_host_chrome) {
+    auto card = std::make_unique<DockCard>();
+    card->setSize(FVector2(240.0f, 200.0f));
+    card->setPosition(FVector2(0.0f, 0.0f));
+    card->setHeaderHeight(22.0f);
+    card->setClosable(true);
+    card->setFloatable(false);   // avoid beginDrag on title presses
+    card->performLayout();
+
+    int maxClicks = 0;
+    card->setMaximizeHandler(
+        [](void* user, DockCard*) {
+            *static_cast<int*>(user) += 1;
+        },
+        &maxClicks);
+
+    // Maximize sits immediately left of the close X (~22px).
+    const FRectangle b = card->getWorldBounds();
+    const FVector2 maxPt(b.maxX - 33.0f, b.minY + 8.0f);
+
+    CHECK_FALSE(card->showMaximizeButton());
+    card->onMouseButtonDown(UIMouseEvent(maxPt, 0));
+    card->onMouseButtonUp(UIMouseEvent(maxPt, 0));
+    CHECK(maxClicks == 0);
+
+    card->setShowMaximizeButton(true);
+    CHECK(card->showMaximizeButton());
+    card->onMouseButtonDown(UIMouseEvent(maxPt, 0));
+    card->onMouseButtonUp(UIMouseEvent(maxPt, 0));
+    CHECK(maxClicks == 1);
+}
+
 TEST_CASE(test_dock_card_clips_content_to_body) {
     MockRenderer r;
     auto card = std::make_unique<DockCard>();

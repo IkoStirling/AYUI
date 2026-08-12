@@ -24,6 +24,7 @@
 #include "AYButton.h"
 #include "AYCheckBox.h"
 #include "AYSlider.h"
+#include "AYBox.h"
 #include "AYProgressBar.h"
 #include "AYTextLabel.h"
 #include "AYTextInput.h"
@@ -135,7 +136,25 @@ struct GalleryState {
     // and before uiBackend.shutdown(), otherwise the GPU textures leak.
     ayt::ui::Widget* backendDemo = nullptr;
     void* backendTexGradient = nullptr;  // 64x64 smooth stretch demo
-    void* backendTexNine     = nullptr;  // 16x16 rounded 9-patch demo
+    void* backendTexNine     = nullptr;  // clean 32x32 rounded 9-patch (BK7)
+    void* backendTexNineStyle = nullptr; // stylized 16x16 tan+ring (optional)
+
+    // Live knobs for BackendDemoWidget (survive reload; sliders rebind).
+    struct BackendDemoParams {
+        float borderWidth   = 3.0f;
+        float borderR0      = 2.0f;
+        float borderR1      = 8.0f;
+        float borderR2      = 20.0f;
+        float shadowBlurA   = 4.0f;
+        float shadowBlurB   = 12.0f;
+        float shadowOffset  = 4.0f;
+        float shadowCorner  = 10.0f;
+        float comboRadius   = 12.0f;
+        float comboStroke   = 2.0f;
+        float comboBlur     = 6.0f;
+        float ninePad       = 8.0f;
+        float blendAlpha    = 0.60f;
+    } backendParams;
 
     // PR-B2 ??Theme toggle state. F5 swaps dark <-> light via
     // ThemeManager::setActiveTheme(). The composer's composed sheet is
@@ -210,11 +229,13 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
 // opaque handles).
 class BackendDemoWidget : public ayt::ui::Widget {
 public:
-    void setTextures(void* gradientTex, void* nineTex)
+    void setTextures(void* gradientTex, void* nineTex, void* nineStyleTex = nullptr)
     {
-        _gradientTex = gradientTex;
-        _nineTex     = nineTex;
+        _gradientTex  = gradientTex;
+        _nineTex      = nineTex;
+        _nineStyleTex = nineStyleTex;
     }
+    void setParams(GalleryState::BackendDemoParams* params) { _params = params; }
 
 protected:
     void onRender(ayt::ui::IRenderBackend& r) override
@@ -222,6 +243,9 @@ protected:
         using ayt::math::FRectangle;
         using ayt::math::FVector2;
         using ayt::math::FVector4;
+
+        const GalleryState::BackendDemoParams p =
+            (_params != nullptr) ? *_params : GalleryState::BackendDemoParams{};
 
         const FRectangle b = getWorldBounds();
         if (b.maxX <= b.minX || b.maxY <= b.minY) {
@@ -231,8 +255,6 @@ protected:
         float y = b.minY + 8.0f;
         const FVector4 labelColor(0.85f, 0.85f, 0.92f, 1.0f);
 
-        // Local helpers: section header + row cursor; `rect` reserves a
-        // w x h box on the current row, `endRow` drops to the next line.
         auto section = [&](const wchar_t* title) {
             r.drawText(FRectangle(x, y, x + 700.0f, y + 20.0f), title, 13, labelColor);
             y += 24.0f;
@@ -265,53 +287,65 @@ protected:
         // ---- P1: blend modes ----------------------------------------------
         section(L"P1 - Blend modes over a gray base: Additive / Multiply / Screen");
         {
-            r.drawRect(rect(210.0f, 64.0f), FVector4(0.45f, 0.45f, 0.48f, 1.0f));
+            const FRectangle base = rect(280.0f, 64.0f);
+            r.drawRect(base, FVector4(0.45f, 0.45f, 0.48f, 1.0f));
+
+            const float pad = 8.0f;
+            const float sw  = 78.0f;
+            const float gap = 10.0f;
+            const float a   = p.blendAlpha;
+            auto slice = [&](int i) {
+                const float sx = base.minX + pad + static_cast<float>(i) * (sw + gap);
+                return FRectangle(sx, base.minY + pad, sx + sw, base.maxY - pad);
+            };
             r.setBlendMode(ayt::ui::BlendMode::Additive);
-            r.drawRect(rect(70.0f, 64.0f), FVector4(1.0f, 0.40f, 0.10f, 0.60f));
+            r.drawRect(slice(0), FVector4(1.0f, 0.40f, 0.10f, a));
             r.setBlendMode(ayt::ui::BlendMode::Multiply);
-            r.drawRect(rect(70.0f, 64.0f), FVector4(0.20f, 0.80f, 0.60f, 1.0f));
+            r.drawRect(slice(1), FVector4(0.20f, 0.80f, 0.60f, 1.0f));
             r.setBlendMode(ayt::ui::BlendMode::Screen);
-            r.drawRect(rect(70.0f, 64.0f), FVector4(0.80f, 0.25f, 0.25f, 0.75f));
+            r.drawRect(slice(2), FVector4(0.80f, 0.25f, 0.25f, a));
             r.setBlendMode(ayt::ui::BlendMode::Normal);
-            // Additive glow over a translucent panel (orange over blue).
-            r.drawRect(rect(110.0f, 64.0f), FVector4(0.20f, 0.45f, 0.85f, 0.55f));
+
+            const FRectangle panel = rect(140.0f, 64.0f);
+            r.drawRect(panel, FVector4(0.20f, 0.45f, 0.85f, 0.55f));
             r.setBlendMode(ayt::ui::BlendMode::Additive);
-            r.drawRect(rect(110.0f, 64.0f), FVector4(1.0f, 0.55f, 0.15f, 0.50f));
+            r.drawRect(panel, FVector4(1.0f, 0.55f, 0.15f, a));
             r.setBlendMode(ayt::ui::BlendMode::Normal);
         }
         endRow(64.0f);
 
         // ---- P2: SDF borders ----------------------------------------------
-        section(L"P2 - SDF borders: corner radius 2 / 8 / 20, 3px stroke (no 8-rect squares)");
-        for (float radius : {2.0f, 8.0f, 20.0f}) {
+        section(L"P2 - SDF borders: live corner radius / stroke (panel below)");
+        for (float radius : {p.borderR0, p.borderR1, p.borderR2}) {
             r.drawBorderRect(rect(96.0f, 96.0f),
-                             FVector4(0.35f, 0.75f, 1.0f, 1.0f), 3.0f, radius);
+                             FVector4(0.35f, 0.75f, 1.0f, 1.0f), p.borderWidth, radius);
         }
         endRow(96.0f);
 
         // ---- P2: SDF shadows ----------------------------------------------
-        section(L"P2 - SDF shadows: blur 4 vs 12; combo card = fill + border + shadow");
-        for (float blur : {4.0f, 12.0f}) {
+        section(L"P2 - SDF shadows + combo card (rounded fill, not square drawRect)");
+        for (float blur : {p.shadowBlurA, p.shadowBlurB}) {
             ayt::ui::IRenderBackend::ShadowStyle shadow;
             shadow.color        = FVector4(0.0f, 0.0f, 0.0f, 0.55f);
-            shadow.offset       = FVector2(4.0f, 4.0f);
+            shadow.offset       = FVector2(p.shadowOffset, p.shadowOffset);
             shadow.blurRadius   = blur;
-            shadow.cornerRadius = 10.0f;
+            shadow.cornerRadius = p.shadowCorner;
             r.drawRectShadow(rect(120.0f, 96.0f), shadow);
-            // Un-shadowed neighbor for contrast.
             r.drawBorderRect(rect(60.0f, 96.0f),
-                             FVector4(0.55f, 0.60f, 0.70f, 1.0f), 1.0f, 10.0f);
+                             FVector4(0.55f, 0.60f, 0.70f, 1.0f), 1.0f, p.shadowCorner);
         }
         {
             const FRectangle card = rect(150.0f, 96.0f);
             ayt::ui::IRenderBackend::ShadowStyle shadow;
             shadow.color        = FVector4(0.0f, 0.0f, 0.0f, 0.50f);
             shadow.offset       = FVector2(3.0f, 3.0f);
-            shadow.blurRadius   = 6.0f;
-            shadow.cornerRadius = 12.0f;
+            shadow.blurRadius   = p.comboBlur;
+            shadow.cornerRadius = p.comboRadius;
             r.drawRectShadow(card, shadow);
-            r.drawRect(card, FVector4(0.16f, 0.30f, 0.44f, 1.0f));
-            r.drawBorderRect(card, FVector4(0.92f, 0.92f, 0.96f, 1.0f), 2.0f, 12.0f);
+            // Rounded fill — square drawRect used to poke corners past the stroke.
+            r.drawRoundedRect(card, FVector4(0.16f, 0.30f, 0.44f, 1.0f), p.comboRadius);
+            r.drawBorderRect(card, FVector4(0.92f, 0.92f, 0.96f, 1.0f),
+                             p.comboStroke, p.comboRadius);
         }
         endRow(96.0f);
 
@@ -320,7 +354,6 @@ protected:
             section(L"P3 - 64x64 gradient texture, LINEAR stretch (no mip blockiness)");
             r.drawRect(rect(240.0f, 96.0f), _gradientTex,
                        FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
-            // Same texture, wider (horizontal squash).
             r.drawRect(rect(180.0f, 96.0f), _gradientTex,
                        FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
             endRow(96.0f);
@@ -328,8 +361,8 @@ protected:
 
         // ---- P3: 9-patch --------------------------------------------------
         if (_nineTex != nullptr) {
-            section(L"P3 - 16x16 rounded 9-patch at 48 / 96 / 192 px wide (corners stay sharp)");
-            const FVector4 padding(4.0f, 4.0f, 4.0f, 4.0f);  // texture pixels
+            section(L"P3 - 32x32 clean 9-patch (padding from panel)");
+            const FVector4 padding(p.ninePad, p.ninePad, p.ninePad, p.ninePad);
             r.drawNinePatch(rect(48.0f, 40.0f), _nineTex,
                             FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padding);
             r.drawNinePatch(rect(96.0f, 48.0f), _nineTex,
@@ -338,11 +371,24 @@ protected:
                             FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padding);
             endRow(60.0f);
         }
+        if (_nineStyleTex != nullptr) {
+            section(L"P3 - stylized 16x16 9-patch (tan fill + sketched ring; style sample)");
+            const FVector4 padStyle(4.0f, 4.0f, 4.0f, 4.0f);
+            r.drawNinePatch(rect(48.0f, 40.0f), _nineStyleTex,
+                            FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padStyle);
+            r.drawNinePatch(rect(96.0f, 48.0f), _nineStyleTex,
+                            FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padStyle);
+            r.drawNinePatch(rect(192.0f, 60.0f), _nineStyleTex,
+                            FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padStyle);
+            endRow(60.0f);
+        }
     }
 
 private:
-    void* _gradientTex = nullptr;
-    void* _nineTex     = nullptr;
+    void* _gradientTex  = nullptr;
+    void* _nineTex      = nullptr;
+    void* _nineStyleTex = nullptr;
+    GalleryState::BackendDemoParams* _params = nullptr;
 };
 
 void wireGallery(GalleryState& state)
@@ -997,7 +1043,7 @@ void toggleTheme(GalleryState& state) {
 
 // Backend page -- creates the two UI textures (64x64 smooth gradient +
 // 16x16 rounded button) and mounts the host-drawn demo widget into
-// page_backend's VBox (fixed 820px slot). Textures are registered with
+// page_backend's VBox (fixed-height slot). Textures are registered with
 // UIRenderBackend (backend-specific API -- AYUI's IRenderBackend only
 // passes opaque handles). Textures are created once; the widget is
 // re-created on every reload (loadLayout built a fresh page_backend).
@@ -1030,9 +1076,42 @@ void wireBackendPage(GalleryState& state)
         state.backendTexGradient = state.uiBackend->createUiTexture(64, 64, px.data());
     }
     if (state.backendTexNine == nullptr) {
-        // 16x16 rounded-rect button (radius 4, 2px light ring, blue body),
-        // transparent outside the shape -- the 9-patch corners must stay
-        // sharp/translucent where the ring curves, or bleeding shows.
+        // Clean 32x32 rounded button (radius 8, ~2.5px bright ring, blue
+        // body). Larger source keeps corner arcs sharp under LINEAR 9-slice
+        // at 48/96/192 — the old 16x16 looked sketched/wobbly (kept below
+        // as an explicit style sample).
+        constexpr int N = 32;
+        std::vector<uint8_t> px(static_cast<size_t>(N * N * 4), 0u);
+        const float hx = (N - 1) * 0.5f;
+        const float hy = (N - 1) * 0.5f;
+        const float rad = 8.0f;
+        for (int y = 0; y < N; ++y) {
+            for (int x = 0; x < N; ++x) {
+                const float qx = std::fabs(static_cast<float>(x) - hx) - (hx - rad);
+                const float qy = std::fabs(static_cast<float>(y) - hy) - (hy - rad);
+                const float d =
+                    std::sqrt(std::max(qx, 0.0f) * std::max(qx, 0.0f) +
+                              std::max(qy, 0.0f) * std::max(qy, 0.0f)) +
+                    std::min(std::max(qx, qy), 0.0f) - rad;
+                const float cover = std::clamp(0.5f - d, 0.0f, 1.0f);
+                if (cover <= 0.0f) {
+                    continue;
+                }
+                uint8_t* p = &px[static_cast<size_t>((y * N + x) * 4)];
+                const bool ring = d > -2.5f;
+                // BGRA upload path (createUiTexture swizzles to RGBA).
+                p[0] = ring ? 252u : 217u;  // B
+                p[1] = ring ? 248u : 122u;  // G
+                p[2] = ring ? 245u : 55u;   // R
+                p[3] = static_cast<uint8_t>(cover * 255.0f + 0.5f);
+            }
+        }
+        state.backendTexNine = state.uiBackend->createUiTexture(
+            static_cast<uint16_t>(N), static_cast<uint16_t>(N), px.data());
+    }
+    if (state.backendTexNineStyle == nullptr) {
+        // Stylized 16x16 tan + sketched bright ring — intentional look,
+        // not the BK7 baseline.
         std::vector<uint8_t> px(16u * 16u * 4u, 0u);
         const float hx = 7.5f, hy = 7.5f, r = 4.0f;
         for (int y = 0; y < 16; ++y) {
@@ -1053,13 +1132,81 @@ void wireBackendPage(GalleryState& state)
                 }
             }
         }
-        state.backendTexNine = state.uiBackend->createUiTexture(16, 16, px.data());
+        state.backendTexNineStyle =
+            state.uiBackend->createUiTexture(16, 16, px.data());
     }
 
     auto* demo = new BackendDemoWidget();
-    demo->setTextures(state.backendTexGradient, state.backendTexNine);
-    page->addWidget(demo, 820.0f);
+    demo->setTextures(state.backendTexGradient, state.backendTexNine,
+                      state.backendTexNineStyle);
+    demo->setParams(&state.backendParams);
+
+    // Live parameter panel — each slider writes into backendParams;
+    // BackendDemoWidget reads them every frame.
+    auto* panel = new ayt::ui::VBox();
+    panel->setSpacing(4.0f);
+    panel->setPadding(0.0f, 4.0f, 0.0f, 4.0f);
+
+    auto addSliderRow = [&](const wchar_t* label, float* target,
+                            float minV, float maxV, float rowH = 26.0f) {
+        auto* row = new ayt::ui::HBox();
+        row->setSpacing(8.0f);
+        row->setPadding(0, 0, 0, 0);
+        auto* lbl = new ayt::ui::TextLabel();
+        lbl->setText(label);
+        lbl->setSize(ayt::math::FVector2(150.0f, rowH));
+        auto* val = new ayt::ui::TextLabel();
+        {
+            wchar_t buf[32];
+            std::swprintf(buf, 32, L"%.1f", *target);
+            val->setText(buf);
+        }
+        val->setSize(ayt::math::FVector2(48.0f, rowH));
+        auto* sld = new ayt::ui::Slider();
+        sld->setSize(ayt::math::FVector2(280.0f, rowH));
+        sld->setValueRange(minV, maxV);
+        sld->setValue(*target);
+        sld->setOnValueChanged([target, val](float v) {
+            *target = v;
+            wchar_t buf[32];
+            std::swprintf(buf, 32, L"%.1f", v);
+            val->setText(buf);
+        });
+        row->addWidget(lbl, 150.0f);
+        row->addWidget(sld, 0.0f);   // fill
+        row->addWidget(val, 48.0f);
+        panel->addWidget(row, rowH);
+    };
+
+    auto* panelHdr = new ayt::ui::TextLabel();
+    panelHdr->setText(L"Live params (drag — canvas updates every frame)");
+    panelHdr->setSize(ayt::math::FVector2(640.0f, 20.0f));
+    panel->addWidget(panelHdr, 20.0f);
+
+    addSliderRow(L"P1 blend alpha", &state.backendParams.blendAlpha, 0.1f, 1.0f);
+    addSliderRow(L"P2 border width", &state.backendParams.borderWidth, 1.0f, 12.0f);
+    addSliderRow(L"P2 border R0", &state.backendParams.borderR0, 0.0f, 40.0f);
+    addSliderRow(L"P2 border R1", &state.backendParams.borderR1, 0.0f, 40.0f);
+    addSliderRow(L"P2 border R2", &state.backendParams.borderR2, 0.0f, 48.0f);
+    addSliderRow(L"P2 shadow blurA", &state.backendParams.shadowBlurA, 0.0f, 32.0f);
+    addSliderRow(L"P2 shadow blurB", &state.backendParams.shadowBlurB, 0.0f, 32.0f);
+    addSliderRow(L"P2 shadow offset", &state.backendParams.shadowOffset, 0.0f, 16.0f);
+    addSliderRow(L"P2 shadow corner", &state.backendParams.shadowCorner, 0.0f, 40.0f);
+    addSliderRow(L"P2 combo radius", &state.backendParams.comboRadius, 0.0f, 40.0f);
+    addSliderRow(L"P2 combo stroke", &state.backendParams.comboStroke, 0.0f, 12.0f);
+    addSliderRow(L"P2 combo blur", &state.backendParams.comboBlur, 0.0f, 32.0f);
+    addSliderRow(L"P3 nine padding", &state.backendParams.ninePad, 1.0f, 14.0f);
+
+    // 20 header + 13*26 + spacing/padding ≈ 380
+    page->addWidget(panel, 380.0f);
+    page->addWidget(demo, 900.0f);
     state.backendDemo = demo;
+
+    if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(
+            state.ui->findById("backend_hdr"))) {
+        hdr->setText(
+            L"Backend - UIRenderBackend [SdfClipShape-20260812k]");
+    }
 }
 
 // Releases the backend textures and drops the demo pointer. The widget is
@@ -1076,6 +1223,10 @@ void teardownBackendPage(GalleryState& state)
     if (state.backendTexNine != nullptr) {
         state.uiBackend->releaseUiTexture(state.backendTexNine);
         state.backendTexNine = nullptr;
+    }
+    if (state.backendTexNineStyle != nullptr) {
+        state.uiBackend->releaseUiTexture(state.backendTexNineStyle);
+        state.backendTexNineStyle = nullptr;
     }
 }
 

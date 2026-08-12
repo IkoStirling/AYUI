@@ -244,6 +244,8 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     // enables edge/corner resize (口 grip painted on the card).
     d.borderless = true;
     d.resizable  = true;
+    // Create hidden; paint first GDI frame; then show (no white flash).
+    d.visible = false;
 
     void* handle = nullptr;
     if (!_wm.createTopLevelWindow(d, handle)) {
@@ -274,6 +276,24 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     card->setSize(ayt::math::FVector2(static_cast<float>(w),
                                       static_cast<float>(h)));
     card->setShowResizeGrip(true);
+    card->setShowMaximizeButton(true);
+    card->setMaximizeHandler(
+        [](void* user, ayt::ui::DockCard* c) {
+            auto* self = static_cast<GalleryChildWindows*>(user);
+            if (self == nullptr || c == nullptr) {
+                return;
+            }
+            for (const auto& ent : self->entries()) {
+                if (ent.card != c || ent.handle == nullptr) {
+                    continue;
+                }
+                self->_wm.toggleTopLevelMaximized(ent.handle);
+                c->setMaximizedVisual(
+                    self->_wm.isTopLevelMaximized(ent.handle));
+                break;
+            }
+        },
+        this);
     e.ui->root()->addChild(card);
     e.ui->layout();
 
@@ -360,6 +380,20 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
         ui->onDeviceChar(utf8, byteCount);
     };
     _wm.setTopLevelCallbacks(handle, cbs);
+
+#if defined(_WIN32)
+    // First present while HWND is still hidden, then reveal.
+    if (e.backend && e.handle != nullptr) {
+        if (HDC hdc = ::GetDC(static_cast<HWND>(e.handle))) {
+            ayt::ui::UIManager::ActiveScope guard(e.ui.get());
+            auto* gdi = static_cast<GalleryChildBackend*>(e.backend.get());
+            gdi->setDrawTarget(hdc, w, h);
+            e.ui->render();
+            ::ReleaseDC(static_cast<HWND>(e.handle), hdc);
+        }
+    }
+#endif
+    _wm.setTopLevelVisible(handle, true);
 
     _entries.push_back(std::move(e));
     return true;

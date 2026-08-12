@@ -117,9 +117,12 @@ protected:
     // fixed panel is already at its floor).
     void stealFromFixedToSatisfyFillMins(float availableMain);
 
-    std::vector<Slot> _slots;
+    // VBox caches pre-stretch natural height for ScrollView. Slot edits
+    // (add/remove/resize) must drop that cache or a later page switch
+    // walks a stale height and the scrollbar stays disabled.
+    virtual void invalidateNaturalSizeCache() {}
 
-protected:
+    std::vector<Slot> _slots;
     float _spacing;
     math::FVector4 _padding;
     Gravity _gravity = Gravity::TopLeft;
@@ -146,6 +149,7 @@ public:
 
 protected:
     float axisContentLength() const override;
+    void invalidateNaturalSizeCache() override { _naturalHeight = -1.0f; }
 
 private:
     // PR-B3 hotfix (Bug #4 follow-up) — natural height = sum of

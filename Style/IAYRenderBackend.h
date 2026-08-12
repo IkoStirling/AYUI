@@ -315,6 +315,16 @@ public:
     */
     virtual void drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius = 0);
 
+    /*
+       @name: drawRoundedRect
+       @func: 绘制圆角实心矩形（SDF 填充；cornerRadius=0 时退化为 drawRect）
+       @param bounds: 矩形边界
+       @param color: 填充颜色
+       @param cornerRadius: 圆角半径（像素）
+    */
+    virtual void drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color,
+                                 float cornerRadius = 0);
+
     // =============================================================================
     // Category 8: Shadow Rendering / 阴影渲染
     // =============================================================================
@@ -1053,6 +1063,13 @@ inline void IRenderBackend::drawBorderRect(const math::FRectangle& bounds, const
         drawRect(math::FRectangle(minX, maxY - r, minX + r, maxY), color);
         drawRect(math::FRectangle(maxX - r, maxY - r, maxX, maxY), color);
     }
+}
+
+inline void IRenderBackend::drawRoundedRect(const math::FRectangle& bounds,
+                                            const math::FVector4& color,
+                                            float cornerRadius) {
+    (void)cornerRadius;
+    drawRect(bounds, color);
 }
 
 inline void IRenderBackend::drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) {
