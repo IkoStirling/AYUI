@@ -55,6 +55,7 @@ public:
                          const math::FVector4& topColor, const math::FVector4& bottomColor) override;
     void drawRect(const math::FRectangle& bounds, const BorderStyle& border) override;
     void drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius) override;
+    void drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color, float cornerRadius) override;
     void drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) override;
 
     // Path methods / 路径方法

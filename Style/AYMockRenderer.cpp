@@ -144,6 +144,23 @@ void MockRenderer::drawBorderRect(const math::FRectangle& bounds, const math::FV
     IRenderBackend::drawBorderRect(bounds, color, borderWidth, cornerRadius);
 }
 
+void MockRenderer::drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color, float cornerRadius) {
+    // Recorded as type=Rect on purpose: hundreds of tests count
+    // DrawCall::Rect occurrences and must not see a new enum value.
+    // The radius rides in floatParam1 so rounded-fill assertions can
+    // read it back. Production UIRenderBackend draws one SDF item.
+    DrawCall dc;
+    dc.type = DrawCall::Rect;
+    dc.bounds = bounds;
+    dc.color = color;
+    dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
+    dc.floatParam1 = cornerRadius;
+    _drawCalls.push_back(dc);
+    _triangleCount += 2;
+    _vertexCount += 6;
+}
+
 void MockRenderer::drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) {
     math::FRectangle shadowBounds(
         bounds.minX + shadow.offset.x,

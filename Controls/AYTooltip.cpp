@@ -257,26 +257,19 @@ void Tooltip::performLayout() {
 void Tooltip::onRender(IRenderBackend& renderer) {
     const math::FRectangle b = getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
+    // B1: rounded plate + one drawBorderRect replaces the old 4-strip
+    // border (4 draw calls → 1 SDF item). Radius 3px matches the Menu
+    // dialog look; the plate must be rounded too, or background corners
+    // poke out beyond the border ring.
+    constexpr float kRadius = 3.0f;
     // Background plate with slight alpha — matches Menu palette so the
     // tooltip reads as a dialog-style frame, not a bare TextLabel slab.
-    renderer.drawRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f));
+    renderer.drawRoundedRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f), kRadius);
     // 4-sided border, 1px wide, matches Menu::onRender for visual parity
     // with the dropdown popups. Previous code only drew top+bottom strips,
     // which left the tooltip looking like a horizontal band instead of a
     // wrapped dialog box.
-    constexpr float bw = 1.0f;
-    renderer.drawRect(
-        math::FRectangle(b.minX, b.minY, b.maxX, b.minY + bw),
-        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
-    renderer.drawRect(
-        math::FRectangle(b.minX, b.maxY - bw, b.maxX, b.maxY),
-        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
-    renderer.drawRect(
-        math::FRectangle(b.minX, b.minY, b.minX + bw, b.maxY),
-        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
-    renderer.drawRect(
-        math::FRectangle(b.maxX - bw, b.minY, b.maxX, b.maxY),
-        math::FVector4(0.45f, 0.45f, 0.50f, 1.0f));
+    renderer.drawBorderRect(b, math::FVector4(0.45f, 0.45f, 0.50f, 1.0f), 1.0f, kRadius);
 }
 
 Widget* createTooltipWidget() { return new Tooltip(); }

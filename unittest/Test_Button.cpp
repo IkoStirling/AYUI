@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYButton.h"
+#include "AYStyle.h"
 #include "AYMockRenderer.h"
 #include <iostream>
 
@@ -118,6 +119,36 @@ TEST_CASE(button_render_preserves_hover_fill) {
     CHECK(fill.color.x == 0.36f);
     CHECK(fill.color.y == 0.38f);
     CHECK(fill.color.z == 0.42f);
+    // B1: fallback fill is a 2px rounded rect (matches the 2px rounded
+    // border); MockRenderer rides the radius in floatParam1.
+    CHECK_FLOAT_EQ(fill.floatParam1, 2.0f, 1e-5f);
+}
+
+// B1: with a wired StyleSheet the rounded fill must follow the style's
+// corner radius (not the fallback 2px), so fill and border stay aligned.
+TEST_CASE(button_style_rounded_fill_follows_corner_radius) {
+    StyleManager::get().setStyleSheet(nullptr);
+
+    StyleSheet sheet;
+    WidgetStyle st = StyleBuilder::makeButton();
+    st.border.cornerRadius = 6.0f;
+    sheet.setStyle("test_btn_rounded", st);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    Button button;
+    button.setSize(FVector2(100.0f, 32.0f));
+    button.setText(L"OK");
+    button.setStyleId("test_btn_rounded");
+
+    MockRenderer renderer;
+    button.render(renderer);
+
+    CHECK(renderer.getDrawCalls().size() >= 2u);
+    const auto& fill = renderer.getDrawCalls()[0];
+    CHECK(fill.type == MockRenderer::DrawCall::Rect);  // rounded → Rect (compat)
+    CHECK_FLOAT_EQ(fill.floatParam1, 6.0f, 1e-5f);     // style radius rode through
+
+    StyleManager::get().setStyleSheet(nullptr);
 }
 
 TEST_SUITE_END

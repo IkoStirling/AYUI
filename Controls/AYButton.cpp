@@ -55,7 +55,9 @@ void Button::onRender(IRenderBackend& renderer) {
     const ResolvedStyle style = resolveStyle(getStyleId());
 
     if (style.hasStyle) {
-        renderer.drawRect(bounds, style.backgroundColor);
+        // B1: rounded fill matches the rounded border — a plain drawRect
+        // left background-colored corners poking out inside the SDF ring.
+        renderer.drawRoundedRect(bounds, style.backgroundColor, style.cornerRadius);
         renderer.drawBorderRect(bounds,
                                 math::FVector4(0.12f, 0.12f, 0.12f, 1.0f),
                                 style.borderWidth, style.cornerRadius);
@@ -75,7 +77,8 @@ void Button::onRender(IRenderBackend& renderer) {
         default:
             break;
         }
-        renderer.drawRect(bounds, bg);
+        // B1: 2px rounded fill under the 2px rounded border (fallback).
+        renderer.drawRoundedRect(bounds, bg, 2.0f);
         renderer.drawBorderRect(bounds, math::FVector4(0.12f, 0.12f, 0.12f, 1.0f), 1.0f, 2.0f);
     }
 
