@@ -1520,8 +1520,8 @@ void UIManager::paintGhost(IRenderBackend& renderer) {
     if (!_dragGhost->isVisible()) return;
     const math::FRectangle b = _dragGhost->getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
-    // Dark semi-transparent plate.
-    renderer.drawRect(b, math::FVector4(0.15f, 0.16f, 0.20f, 0.85f));
+    // Dark semi-transparent plate — B3: rounded to match the 2px border.
+    renderer.drawRoundedRect(b, math::FVector4(0.15f, 0.16f, 0.20f, 0.85f), 2.0f);
     // 1px accent border (matches the drop-target highlight palette).
     renderer.drawBorderRect(b,
         math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 1.0f, 2.0f);

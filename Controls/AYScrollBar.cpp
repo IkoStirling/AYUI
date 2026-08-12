@@ -179,10 +179,11 @@ bool ScrollBar::onMouseButtonUp(const UIMouseEvent& e) {
 void ScrollBar::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
-    // Track background
-    renderer.drawRect(bounds,
+    // Track background — B3: rounded fill matches the 2px rounded outline.
+    renderer.drawRoundedRect(bounds,
         isEnabled() ? math::FVector4(0.10f, 0.10f, 0.12f, 1.0f)
-                    : math::FVector4(0.07f, 0.07f, 0.08f, 1.0f));
+                    : math::FVector4(0.07f, 0.07f, 0.08f, 1.0f),
+        2.0f);
 
     if (_max <= _min || _viewportSize >= (_max - _min)) {
         // No need for thumb; render just the track + outline.
@@ -202,7 +203,8 @@ void ScrollBar::onRender(IRenderBackend& renderer) {
     } else if (isMouseOver()) {
         thumbColor = math::FVector4(0.58f, 0.58f, 0.62f, 1.0f);
     }
-    renderer.drawRect(thumb, thumbColor);
+    // B3: rounded thumb fill matches the 2px rounded thumb border.
+    renderer.drawRoundedRect(thumb, thumbColor, 2.0f);
     renderer.drawBorderRect(thumb, thumbBorder, 1.0f, 2.0f);
 }
 

@@ -94,7 +94,8 @@ void CheckBox::onRender(IRenderBackend& renderer) {
         boxBorderColor = math::FVector4(0.5f, 0.5f, 0.55f, 1.0f);
         boxBorderWidth = 1.0f;
     }
-    renderer.drawRect(box, boxBg);
+    // B3: rounded fill matches the 2px rounded border.
+    renderer.drawRoundedRect(box, boxBg, 2.0f);
     renderer.drawBorderRect(box, boxBorderColor, boxBorderWidth, 2.0f);
 
     // Checkmark accent fill (inset 3px on each side). When a style

@@ -110,7 +110,9 @@ void RadioButton::onRender(IRenderBackend& renderer) {
     // half width) using drawBorderRect. The MockRenderer fans this out
     // into N rect fills; for visual purposes the round-enough shape is
     // what the user sees. Tests pin the draw-call count and accent color.
-    renderer.drawRect(circle, outerBg);
+    // B3: the fill must be rounded to the same radius, or its square
+    // corners poke out beyond the circle ring.
+    renderer.drawRoundedRect(circle, outerBg, kCircleSize * 0.5f);
     renderer.drawBorderRect(circle, outerBorderColor, outerBorderWidth,
                             kCircleSize * 0.5f);
 

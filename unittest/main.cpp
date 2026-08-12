@@ -5,6 +5,7 @@
 
 #include "Test_Widget.cpp"
 #include "Test_Button.cpp"
+#include "Test_B3RoundedFill.cpp"
 #include "Test_CheckBox.cpp"
 #include "Test_RadioButton.cpp"
 #include "Test_RadioGroup.cpp"

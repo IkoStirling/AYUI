@@ -99,14 +99,15 @@ void ProgressBar::onRender(IRenderBackend& renderer) {
         unfilledBorderWidth = style.borderWidth;
     }
 
-    // Unfilled base.
-    renderer.drawRect(bar, unfilledBg);
+    // B3: rounded fills match the 2px rounded border (bar keeps its
+    // rounded cap at the fill edge, which reads as a progress bar).
+    renderer.drawRoundedRect(bar, unfilledBg, 2.0f);
 
     // Filled portion — clamp to >= 1px width when normalized > 0 so a
     // tiny non-zero value still shows a visible bar.
     if (filled.maxX > filled.minX + 0.5f) {
-        renderer.drawRect(filled,
-            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f));
+        renderer.drawRoundedRect(filled,
+            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f), 2.0f);
     }
     renderer.drawBorderRect(bar, unfilledBorder, unfilledBorderWidth, 2.0f);
 

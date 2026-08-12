@@ -273,7 +273,8 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     const ResolvedStyle style = resolveStyle(getStyleId());
     math::FVector4 bg = math::FVector4(0.12f, 0.12f, 0.13f, 1.0f);
     if (style.hasStyle) bg = style.backgroundColor;
-    renderer.drawRect(bounds, bg);
+    // B3: rounded fill matches the 2px rounded border (drawn last).
+    renderer.drawRoundedRect(bounds, bg, 2.0f);
 
     // Clip + permanently-offset content (see syncContentPosition).
     // getClientRect is inset by the frame border so content cannot cover

@@ -264,7 +264,10 @@ void Slider::onRender(IRenderBackend& renderer) {
     } else if (isMouseOver()) {
         handleColor = math::FVector4(0.95f, 0.96f, 0.98f, 1.0f);
     }
-    renderer.drawRect(handle, handleColor);
+    // B3: rounded handle fill matches the 2px rounded handle border.
+    // (Track halves stay square on purpose — two rounded segments would
+    // leave a notch at the fill seam.)
+    renderer.drawRoundedRect(handle, handleColor, 2.0f);
     renderer.drawBorderRect(handle, handleBorder, 1.0f, 2.0f);
 }
 

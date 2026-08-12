@@ -579,7 +579,8 @@ void ListView::onRender(IRenderBackend& renderer) {
 
     // G4 — background fills the row strip; vbar paints itself when visible.
     const math::FRectangle listBounds = getClientRect();
-    renderer.drawRect(listBounds, bg);
+    // B3: rounded fill matches the 2px rounded border.
+    renderer.drawRoundedRect(listBounds, bg, 2.0f);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
     // Clip rows to the list strip INTERSECTED with the active parent

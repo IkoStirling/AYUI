@@ -527,7 +527,9 @@ void ComboBox::onRender(IRenderBackend& renderer) {
         : math::FVector4(0.45f, 0.45f, 0.5f, 1.0f);
     float bw = style.hasStyle ? style.borderWidth : 1.0f;
 
-    renderer.drawRect(bounds, bg);
+    // B3: rounded fill matches the 2px rounded border (square fill pokes
+    // out of the ring corners otherwise).
+    renderer.drawRoundedRect(bounds, bg, 2.0f);
     renderer.drawBorderRect(bounds, border, bw, 2.0f);
 
     // Arrow chevron — a small downward triangle on the right edge, drawn

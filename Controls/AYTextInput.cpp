@@ -665,7 +665,8 @@ void TextInput::onRender(IRenderBackend& renderer) {
             : math::FVector4(0.4f, 0.4f, 0.45f, 1.0f);
         borderWidth = 1.0f;
     }
-    renderer.drawRect(bounds, bg);
+    // B3: rounded fill matches the 2px rounded border.
+    renderer.drawRoundedRect(bounds, bg, 2.0f);
     renderer.drawBorderRect(bounds, borderColor, borderWidth, 2.0f);
 
     // Display text — password mask replaces each char with '*'.
