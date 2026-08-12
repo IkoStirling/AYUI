@@ -43,6 +43,11 @@ class MenuBar : public CompoundWidget {
 public:
     static constexpr float kDefaultWidth = 600.0f;
     static constexpr float kDefaultHeight = 26.0f;
+    // Default anchor chrome: fixed width (not text-fit) + 1px gap between
+    // items. Text-fit is opt-in via setAnchorAutoWidth(true).
+    static constexpr float kDefaultAnchorWidth = 80.0f;
+    static constexpr float kDefaultAnchorSpacing = 1.0f;
+    static constexpr float kAnchorMinWidth = 40.0f;
 
     MenuBar();
     ~MenuBar() override;
@@ -53,6 +58,19 @@ public:
     size_t getMenuCount() const { return _menus.size(); }
     Menu* getMenu(size_t index) const;
     const std::wstring& getMenuTitle(size_t index) const;
+
+    // Anchor layout knobs (MenuBar lays out its own row — not an HBox).
+    // Mirrors BoxBase::setSpacing for the bar's top-level buttons.
+    void setAnchorSpacing(float spacing);
+    float getAnchorSpacing() const { return _anchorSpacing; }
+
+    void setAnchorWidth(float width);
+    float getAnchorWidth() const { return _anchorWidth; }
+
+    // When true, each anchor width = max(min, getPreferredSize().x).
+    // Default false → fixed getAnchorWidth() for every item.
+    void setAnchorAutoWidth(bool enabled);
+    bool isAnchorAutoWidth() const { return _anchorAutoWidth; }
 
     // Which menu is currently open (-1 = none).
     int getOpenMenuIndex() const { return _openIdx; }
@@ -96,6 +114,10 @@ private:
 
     std::vector<MenuEntry> _menus;
     int _openIdx = -1;
+
+    float _anchorSpacing = kDefaultAnchorSpacing;
+    float _anchorWidth = kDefaultAnchorWidth;
+    bool  _anchorAutoWidth = false;
 
     // Polish (P3): accelerator registry — (mods << 9) | keyCode maps to
     // the MenuItem. 9-bit shift because UIKeyCode values fit in 9 bits

@@ -100,8 +100,11 @@ math::FVector2 ScrollView::getViewportSize() const {
 
 void ScrollView::syncContentPosition() {
     if (_content == nullptr) return;
+    // Pixel-snap: scroll state is already rounded in ScrollableWidget,
+    // but belt-and-suspenders so layout never parks content on a
+    // half-pixel (1px SDF borders shimmer under fractional offsets).
     const math::FVector2 off = _scrollState.getScrollOffset();
-    _content->setPosition(math::FVector2(-off.x, -off.y));
+    _content->setPosition(math::FVector2(-std::round(off.x), -std::round(off.y)));
 }
 
 // PR-Container-Contract-Cut2: getClientRect is the single source of truth

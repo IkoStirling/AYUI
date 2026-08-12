@@ -31,9 +31,11 @@ namespace ayt::ui {
 // Result semantics (Q3):
 //   `Result::Cancel = 0`, `Result::Ok = 1`. `_onResult(cb)` fires on accept
 //   or reject (whichever button the user clicked). `_onClose` (Modal's)
-//   still fires for Esc / dimmer-click / programmatic close — both callbacks
-//   are independent. Esc does NOT set _result; the Result stays at the
+//   still fires for Esc / programmatic close — both callbacks are
+//   independent. Esc does NOT set _result; the Result stays at the
 //   constructor's default (Cancel) for cancel-style closures.
+//   Dimmer click does NOT dismiss by default (forced-confirm); hosts that
+//   want click-outside-to-cancel call setDismissOnDimmerClick(true).
 //
 // Default look (Q4-Q6): button bar is right-aligned along the bottom
 // (Cancel to the left of OK), `Cancel = Reject`. Default text "OK" / "Cancel"
@@ -63,11 +65,12 @@ public:
     static constexpr float kDefaultWidth       = 400.0f;
     static constexpr float kDefaultHeight      = 180.0f;
     static constexpr float kButtonBarHeight    = 40.0f;
-    static constexpr float kButtonSpacing      = 8.0f;
+    static constexpr float kButtonSpacing      = 12.0f;  // Cancel↔OK gap
     static constexpr float kBarRightPadding    = 12.0f;  // gap from right edge
     static constexpr float kBarBottomPadding   = 8.0f;
     static constexpr float kButtonWidth        = 96.0f;
     static constexpr float kButtonHeight       = 24.0f;
+    static constexpr float kBodyPadding        = 16.0f;  // text inset in body panel
 
     ModalDialog();
     ~ModalDialog() override;
@@ -108,6 +111,10 @@ public:
     // Q9 — own layoutChildren. Body panel sized to dialog minus button bar;
     // buttons laid out Cancel-then-OK along the right edge.
     void layoutChildren() override;
+
+    // Plate chrome (shadow + fill + border). Matches Window floating look
+    // so the dialog reads as a layer above the dimmer, not a flat patch.
+    void onRender(IRenderBackend& renderer) override;
 
     // Phase D §5.3 hooks — these are private callbacks wired into the
     // Button click sinks. Public by implementation necessity (Button's

@@ -97,6 +97,12 @@ void Modal::setDimmerOwned(Dimmer* dimmer) {
     }
 }
 
+void Modal::ensureDimmer() {
+    if (_dimmer == nullptr) {
+        setDimmerOwned(new Dimmer());
+    }
+}
+
 void Modal::setContent(Widget* content) {
     if (content == nullptr) {
         // Detach the existing content without destroying it.
@@ -132,6 +138,10 @@ void Modal::openModal() {
     }
     UIManager& ui = *uiPtr;
 
+    // Industrial default: full-viewport scrim when the host forgot one.
+    // Stack/test fixtures that already called setDimmer keep theirs.
+    ensureDimmer();
+
     // Q14 — single-active invariant. If another modal is open, close it
     // first. UIManager::openModal owns this rule.
     ui.openModal(this);
@@ -156,18 +166,26 @@ void Modal::openModal() {
         ui.setFocus(this);
     }
 
-    // Mount the dimmer onto _overlayRoot, sized to viewport. UIManager owns
-    // the lifecycle of overlay children — when the modal closes, the
-    // dimmer must be detached too (UIManager::closeModal handles it).
-    if (_dimmer != nullptr && _dimmer->getParent() == nullptr) {
+    // Mount the dimmer UNDER the modal on _overlayRoot. pickTopmostWidget
+    // reverse-walks overlay children — last child wins. If the dimmer were
+    // added after the modal it would swallow OK/Cancel hits across the
+    // whole viewport. Order: [dimmer, modal].
+    if (_dimmer != nullptr) {
         const math::FVector2 vp = ui.getClientSize();
         _dimmer->setSize(vp);
         _dimmer->setPosition(math::FVector2(0.0f, 0.0f));
-        // Adopting the dimmer as an overlay child. openModal already
-        // attached `this` to the overlay; the dimmer is a SIBLING under
-        // _overlayRoot so its hitTest wins for clicks outside the modal
-        // content rect. We use the public getOverlayRoot() accessor.
-        ui.getOverlayRoot()->addChildExternal(_dimmer);
+        Widget* overlay = ui.getOverlayRoot();
+        if (overlay != nullptr) {
+            if (_dimmer->getParent() != nullptr) {
+                _dimmer->getParent()->removeChild(_dimmer);
+            }
+            // Detach modal briefly so we can stack dimmer then modal.
+            if (getParent() == overlay) {
+                overlay->removeChild(this);
+            }
+            overlay->addChildExternal(_dimmer);
+            overlay->addChildExternal(this);
+        }
     }
 
     _isOpen = true;

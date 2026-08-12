@@ -79,7 +79,7 @@ Menu* MenuBar::addMenu(const std::wstring& title) {
     // Anchor button lives next to the menu (sibling-style).
     class Button* btn = new Button();
     btn->setText(title);
-    btn->setSize(math::FVector2(80.0f, kDefaultHeight));
+    btn->setSize(math::FVector2(_anchorWidth, kDefaultHeight));
     btn->setLayoutPositionManaged(false);
     btn->setLayoutSizeManaged(false);
     addChild(btn);
@@ -195,16 +195,40 @@ void MenuBar::onAnchorClicked(int index) {
     _openIdx = index;
 }
 
+void MenuBar::setAnchorSpacing(float spacing) {
+    _anchorSpacing = std::max(0.0f, spacing);
+    layoutAnchors();
+}
+
+void MenuBar::setAnchorWidth(float width) {
+    _anchorWidth = std::max(kAnchorMinWidth, width);
+    layoutAnchors();
+}
+
+void MenuBar::setAnchorAutoWidth(bool enabled) {
+    _anchorAutoWidth = enabled;
+    layoutAnchors();
+}
+
 void MenuBar::layoutAnchors() {
     float x = 0.0f;
     const float h = kDefaultHeight;
+    bool first = true;
     for (size_t i = 0; i < _menus.size(); ++i) {
         if (_menus[i].anchor == nullptr) continue;
-        _menus[i].anchor->setPosition(math::FVector2(x, 0.0f));
-        const float w = _menus[i].anchor->getSize().x;
+        if (!first) {
+            x += _anchorSpacing;
+        }
+        first = false;
+        Button* btn = _menus[i].anchor;
+        const float w = _anchorAutoWidth
+            ? std::max(kAnchorMinWidth, btn->getPreferredSize().x)
+            : _anchorWidth;
+        btn->setSize(math::FVector2(w, h));
+        btn->setPosition(math::FVector2(x, 0.0f));
         x += w;
     }
-    setSize(math::FVector2(x, h));
+    setSize(math::FVector2(std::max(x, 1.0f), h));
 }
 
 void MenuBar::performLayout() {

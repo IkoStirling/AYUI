@@ -31,8 +31,35 @@ TEST_CASE(modaldialog_initial_state_focused_ok) {
     CHECK(dlg.getAcceptText() == L"OK");
     CHECK(dlg.getRejectText() == L"Cancel");
     CHECK(dlg.getResult() == ModalDialog::Cancel);   // default
+    CHECK_FALSE(dlg.isDismissOnDimmerClick());       // forced-confirm default
     CHECK_FLOAT_EQ(dlg.getWidth(), ModalDialog::kDefaultWidth, 1e-5f);
     CHECK_FLOAT_EQ(dlg.getHeight(), ModalDialog::kDefaultHeight, 1e-5f);
+}
+
+TEST_CASE(modaldialog_dimmer_click_does_not_dismiss) {
+    UIManager um;
+    um.initialize(nullptr);
+    um.setClientSize(640.0f, 480.0f);
+
+    ModalDialog dlg;
+    int closeCount = 0;
+    dlg.setOnClose([&]() { ++closeCount; });
+    um.root()->addChildExternal(&dlg);
+    dlg.openModal();
+    CHECK(dlg.isOpen());
+    Dimmer* dim = dlg.getDimmer();
+    CHECK(dim != nullptr);
+
+    CHECK(dim->onMouseButtonDown(UIMouseEvent(FVector2(10.0f, 10.0f), 0)));
+    CHECK(dlg.isOpen());
+    CHECK(closeCount == 0);
+
+    um.onKeyDown(UIKey_Escape);
+    CHECK_FALSE(dlg.isOpen());
+    CHECK(closeCount == 1);
+
+    um.root()->removeChild(&dlg);
+    um.shutdown();
 }
 
 TEST_CASE(modaldialog_accept_fires_result_and_onclose) {

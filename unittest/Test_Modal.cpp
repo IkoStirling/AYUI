@@ -33,6 +33,33 @@ TEST_CASE(modal_initial_state_focused_off) {
     CHECK(m.getContent() == nullptr);
 }
 
+TEST_CASE(modal_open_auto_attaches_default_dimmer) {
+    UIManager um;
+    um.initialize(nullptr);
+    um.setClientSize(640.0f, 480.0f);
+
+    Modal m;
+    CHECK(m.getDimmer() == nullptr);
+    um.root()->addChildExternal(&m);
+
+    m.openModal();
+    CHECK(m.isOpen());
+    CHECK(m.getDimmer() != nullptr);
+    // Dimmer under modal on the overlay (reverse pick → modal wins on plate).
+    Widget* overlay = um.getOverlayRoot();
+    CHECK(overlay != nullptr);
+    CHECK(m.getDimmer()->getParent() == overlay);
+    CHECK(m.getParent() == overlay);
+    const auto& kids = overlay->getChildren();
+    CHECK(kids.size() >= 2u);
+    CHECK(kids[kids.size() - 2] == m.getDimmer());
+    CHECK(kids[kids.size() - 1] == &m);
+
+    m.closeModal();
+    um.root()->removeChild(&m);
+    um.shutdown();
+}
+
 // Phase D §5.3 follow-up: this test is DISABLED until the stack-dtor
 // R3 landmine in TextInput::~TextInput (Phase C) gets a Phase D-style
 // fix that handles mid-construction virtual dispatch on stack-stored

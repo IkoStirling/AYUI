@@ -1,5 +1,6 @@
 #include "AYModalDialog.h"
 #include "AYUIManager.h"
+#include "IAYRenderBackend.h"
 
 #include <algorithm>
 #include <utility>
@@ -12,6 +13,10 @@ namespace ayt::ui {
 
 ModalDialog::ModalDialog() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
+    // OK/Cancel dialogs are forced-confirm by default: the scrim blocks
+    // input but does NOT dismiss. Esc still cancels via UIManager (Q7).
+    // Hosts that want click-outside-to-cancel call setDismissOnDimmerClick(true).
+    setDismissOnDimmerClick(false);
     // Lazy panel + button construction. We do NOT create them in the
     // ctor body directly because adding Button children during
     // construction of a CompoundFocusableWidget risks double-init via
@@ -137,9 +142,13 @@ void ModalDialog::rejectDialog() {
 // ----------------------------------------------------------------------------
 
 void ModalDialog::ensurePanelsCreated() {
+    // Body panel is a transparent layout host — chrome is painted by
+    // ModalDialog::onRender (shadow + rounded plate). Keep border off so
+    // we don't double-stroke the inset body.
     if (_bodyPanel == nullptr) {
         _bodyPanel = new Panel();
-        _bodyPanel->setBorderEnabled(false);   // body panel has no chrome
+        _bodyPanel->setBorderEnabled(false);
+        _bodyPanel->setBackgroundEnabled(false);
         addChildExternal(_bodyPanel);
     }
     if (_okButton == nullptr) {
@@ -162,13 +171,20 @@ void ModalDialog::layoutChildren() {
     const float h = getHeight();
     const float barTop = std::max(0.0f, h - kButtonBarHeight);
 
-    // Q9 — body panel fills (width, height - button bar) at (0, 0).
-    // No internal padding: the host's body (a VBox / HBox / etc.)
-    // controls its own spacing. This avoids the "double padding" trap
-    // where the dialog adds 8px and the VBox inside adds another 8px.
+    // Body plate fills (width, height - button bar). Host content is
+    // inset by kBodyPadding so labels are not glued to the chrome edge.
     if (_bodyPanel != nullptr) {
         _bodyPanel->setSize(math::FVector2(w, barTop));
         _bodyPanel->setPosition(math::FVector2(0.0f, 0.0f));
+        if (_bodyContent != nullptr) {
+            const float innerW = std::max(0.0f, w - kBodyPadding * 2.0f);
+            const float innerH = std::max(0.0f, barTop - kBodyPadding * 2.0f);
+            _bodyContent->setPosition(math::FVector2(kBodyPadding, kBodyPadding));
+            // Keep host-authored size when larger; otherwise fill the inset.
+            if (_bodyContent->getWidth() < 1.0f || _bodyContent->getHeight() < 1.0f) {
+                _bodyContent->setSize(math::FVector2(innerW, innerH));
+            }
+        }
     }
 
     // Q4 — button bar right-aligned along the bottom. Cancel sits to
@@ -186,6 +202,22 @@ void ModalDialog::layoutChildren() {
         _cancelButton->setSize(math::FVector2(kButtonWidth, kButtonHeight));
         _cancelButton->setPosition(math::FVector2(cancelX, cancelY));
     }
+}
+
+void ModalDialog::onRender(IRenderBackend& renderer) {
+    const math::FRectangle bounds = getWorldBounds();
+    if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
+        return;
+    }
+    // Mirror Window floating chrome so the plate lifts off the dimmer.
+    renderer.drawRectShadow(bounds, IRenderBackend::ShadowStyle{
+        math::FVector4(0.0f, 0.0f, 0.0f, 0.45f),
+        math::FVector2(0.0f, 4.0f),
+        10.0f,
+        4.0f
+    });
+    renderer.drawRoundedRect(bounds, math::FVector4(0.18f, 0.18f, 0.20f, 1.0f), 4.0f);
+    renderer.drawBorderRect(bounds, math::FVector4(0.08f, 0.08f, 0.08f, 1.0f), 1.0f, 4.0f);
 }
 
 Widget* createModalDialogWidget() {

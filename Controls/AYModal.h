@@ -27,9 +27,11 @@ namespace ayt::ui {
 //
 // DECISION (Q5): two widgets (Dimmer + Modal). The dimmer is a separate
 // widget so reuse tests + a future "Modal without dimmer" use case can
-// swap it out independently. Modal does NOT auto-create the dimmer in
-// openModal — host owns the dimmer lifetime — but v1 hosts will get a
-// default dimmer via `Modal::ensureDimmer()` for convenience.
+// swap it out independently. Hosts may call setDimmer / setDimmerOwned;
+// openModal also calls ensureDimmer() so a default owned scrim appears
+// when none was attached (industrial modal blocking without boilerplate).
+// Hosts that truly want no dimmer must setDimmer(nullptr) after open —
+// or we can add a policy flag later.
 //
 // DECISION (Q6): focus-trap start root = `this`. UIManager.onKeyDown's Tab
 // branch reads `_activeModal` and chooses `_activeModal` as the DFS root
@@ -86,6 +88,12 @@ public:
     void setDimmer(Dimmer* dimmer);
     void setDimmerOwned(Dimmer* dimmer);
     Dimmer* getDimmer() const { return _dimmer; }
+
+    // Lazily attach an owned default Dimmer (50% black scrim) when the
+    // host never called setDimmer / setDimmerOwned. openModal invokes
+    // this so Gallery / editor hosts get industrial modal blocking
+    // without boilerplate. No-op when a dimmer is already attached.
+    void ensureDimmer();
 
     // Sets the content widget. Reparents onto `this`. Host owns the content
     // lifetime; Modal does NOT destroy content on close (mirror DECISION 2
