@@ -280,18 +280,20 @@ void Menu::onRender(IRenderBackend& renderer) {
     const math::FVector2 sz = getSize();
     if (sz.x <= 0.0f || sz.y <= 0.0f) return;
     math::FRectangle b(pos.x, pos.y, pos.x + sz.x, pos.y + sz.y);
-    // Background plate.
-    renderer.drawRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f));
-    // Border.
-    const float bw = 1.0f;
-    renderer.drawRect(math::FRectangle(b.minX, b.minY, b.maxX, b.minY + bw),
-                       math::FVector4(0.35f, 0.35f, 0.40f, 1.0f));
-    renderer.drawRect(math::FRectangle(b.minX, b.maxY - bw, b.maxX, b.maxY),
-                       math::FVector4(0.35f, 0.35f, 0.40f, 1.0f));
-    renderer.drawRect(math::FRectangle(b.minX, b.minY, b.minX + bw, b.maxY),
-                       math::FVector4(0.35f, 0.35f, 0.40f, 1.0f));
-    renderer.drawRect(math::FRectangle(b.maxX - bw, b.minY, b.maxX, b.maxY),
-                       math::FVector4(0.35f, 0.35f, 0.40f, 1.0f));
+    // B4: floating-popup drop shadow — first so the plate covers the
+    // blurred edge (matches Window B2, tighter offset/blur for menus).
+    renderer.drawRectShadow(b, IRenderBackend::ShadowStyle{
+        math::FVector4(0.0f, 0.0f, 0.0f, 0.40f),  // color
+        math::FVector2(0.0f, 3.0f),               // offset
+        8.0f,                                     // blur
+        3.0f                                      // cornerRadius
+    });
+    // B4: rounded plate + single border ring — the old 4-strip square
+    // border (4 draw calls) becomes one SDF ring at radius 3, matching
+    // Tooltip's B1 plate (which copied the menu palette).
+    constexpr float kRadius = 3.0f;
+    renderer.drawRoundedRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f), kRadius);
+    renderer.drawBorderRect(b, math::FVector4(0.35f, 0.35f, 0.40f, 1.0f), 1.0f, kRadius);
 }
 
 Widget* createMenuWidget() { return new Menu(); }

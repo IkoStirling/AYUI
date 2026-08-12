@@ -85,6 +85,44 @@ TEST_CASE(menu_factory_registered) {
     destroyWidgetTree(widget);
 }
 
+// B4: an opened menu renders as a floating popup — drop shadow first
+// (offset rect, semi-transparent black), then a 3px-rounded plate with a
+// single border ring. MockRenderer rides the radius in floatParam1.
+TEST_CASE(menu_render_draws_shadow_and_rounded_plate) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget* host = new Widget();
+    host->setSize(FVector2(800.0f, 600.0f));
+
+    Menu* menu = new Menu();
+    menu->addItem(L"Open");
+    menu->addItem(L"Save");
+    menu->open(host, FVector2(100.0f, 80.0f));
+    menu->setSize(FVector2(220.0f, 72.0f));
+
+    MockRenderer renderer;
+    menu->render(renderer);
+
+    CHECK(renderer.getDrawCalls().size() >= 3u);
+    // 1) Drop shadow: first draw call, offset +3y, semi-transparent black.
+    const auto& shadow = renderer.getDrawCalls()[0];
+    CHECK(shadow.type == MockRenderer::DrawCall::Rect);
+    CHECK_FLOAT_EQ(shadow.bounds.minX, 100.0f, 1e-5f);
+    CHECK_FLOAT_EQ(shadow.bounds.minY, 83.0f, 1e-5f);
+    CHECK(shadow.color.w < 1.0f);
+    CHECK(shadow.color.x < 0.05f);
+    // 2) Rounded plate rides radius 3.
+    const auto& plate = renderer.getDrawCalls()[1];
+    CHECK(plate.type == MockRenderer::DrawCall::Rect);
+    CHECK_FLOAT_EQ(plate.floatParam1, 3.0f, 1e-5f);
+
+    menu->close();
+    ui.shutdown();
+    delete host;
+}
+
 // Phase A (A2): when a Menu is opened it lives on UIManager's overlay root,
 // NOT as a child of the host. After open(host, pos), the menu is found in
 // ui.getOverlayRoot()->getChildren() and host->getChildren() is empty.
