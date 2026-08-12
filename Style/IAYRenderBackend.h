@@ -226,6 +226,12 @@ public:
         float shadowBlurRadius = 0;                         // 阴影模糊半径 / Shadow blur radius
         int letterSpacing = 0;                              // 字间距调整 / Letter spacing adjustment
         int lineSpacing = 0;                                // 行间距调整 / Line spacing adjustment
+        // 多行换行 / Multi-line wrapping: when true the styled drawText
+        // wraps text to the bounds width (greedy word wrap, same rules as
+        // measureText) and lays lines out at lineHeight + lineSpacing;
+        // VAlign then positions the whole block. Default false keeps the
+        // legacy single-line behavior (wider text clips at the bounds).
+        bool wrapToBounds = false;
         enum class Align { Left, Center, Right };
         Align align = Align::Left;                          // 文字水平对齐 / Text horizontal alignment
         enum class VAlign { Top, Middle, Bottom };
@@ -320,6 +326,71 @@ public:
     };
 
     /*
+       @name: CornerRadii
+       @func: 四角独立圆角半径结构体
+       @param topLeft/topRight/bottomRight/bottomLeft: 各角半径（像素，0=直角）
+       @note: 顺序 TL TR BR BL，与 shader u_radius 逐位对应；构造时可用
+              CornerRadii(r) 取统一半径。非实现后端退化近似为最大角半径。
+    */
+    struct CornerRadii {
+        float topLeft = 0;
+        float topRight = 0;
+        float bottomRight = 0;
+        float bottomLeft = 0;
+        CornerRadii() = default;
+        CornerRadii(float uniformRadius)
+            : topLeft(uniformRadius)
+            , topRight(uniformRadius)
+            , bottomRight(uniformRadius)
+            , bottomLeft(uniformRadius)
+        {
+        }
+        CornerRadii(float tl, float tr, float br, float bl)
+            : topLeft(tl)
+            , topRight(tr)
+            , bottomRight(br)
+            , bottomLeft(bl)
+        {
+        }
+        bool isUniform() const
+        {
+            return topLeft == topRight && topRight == bottomRight
+                && bottomRight == bottomLeft;
+        }
+        float maxRadius() const
+        {
+            return std::max(std::max(topLeft, topRight),
+                            std::max(bottomRight, bottomLeft));
+        }
+    };
+
+    /*
+       @name: CardStyle
+       @func: 卡片样式 - shadow+fill+stroke 三层一次提交
+       @param fillColor: 填充颜色（a=0 无填充层）
+       @param cornerRadius: 四角圆角半径（四层共享同一轮廓）
+       @param borderColor: 描边颜色（a=0 无描边层）
+       @param borderWidth: 描边宽度（像素，≤0 无描边层）
+       @param borderPosition: 描边位置（Outside=环在矩形边缘外，Center=骑跨，
+                              Inside=向内；默认 Center 与 drawBorderRect 视觉一致）
+       @param shadowColor: 阴影颜色（a=0 无阴影层）
+       @param shadowOffset: 阴影偏移（像素）
+       @param shadowBlurRadius: 阴影模糊半径（像素）
+       @note: 支持该 API 的后端一次 draw call 合成三层（SDF shader 单 pass）；
+              默认实现按 shadow→fill→border 三次调用保持层序正确。
+    */
+    struct CardStyle {
+        math::FVector4 fillColor = math::FVector4(0, 0, 0, 0);
+        CornerRadii   cornerRadius;
+        math::FVector4 borderColor = math::FVector4(0, 0, 0, 0);
+        float          borderWidth = 0;
+        BorderStyle::Position borderPosition = BorderStyle::Position::Center;
+        math::FVector4 shadowColor = math::FVector4(0, 0, 0, 0);
+        math::FVector2 shadowOffset = math::FVector2(0, 0);
+        float          shadowBlurRadius = 0;
+    };
+
+    /*
        @name: drawRect (border)
        @func: 绘制带边框矩形 - 使用边框样式绘制矩形
        @param bounds: 矩形边界
@@ -347,6 +418,32 @@ public:
     */
     virtual void drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color,
                                  float cornerRadius = 0);
+
+    /*
+       @name: drawRoundedRect (per-corner)
+       @func: 四角独立圆角半径的实心矩形（shader 原生四角；四角全 0 退化为 drawRect）
+       @param radii: 各角半径（TL TR BR BL，像素）
+       @note: 非实现后端退化为统一最大角半径
+    */
+    virtual void drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color,
+                                 const CornerRadii& radii);
+
+    /*
+       @name: drawBorderRect (per-corner)
+       @func: 四角独立圆角半径的描边矩形（描边环位于矩形边缘中央，与标量版一致）
+       @param radii: 各角半径（TL TR BR BL，像素）
+    */
+    virtual void drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color,
+                                float borderWidth, const CornerRadii& radii);
+
+    /*
+       @name: drawCard
+       @func: 卡片绘制 - shadow+fill+stroke 三层合并为一次提交
+       @param bounds: 卡片边界
+       @param style: 卡片样式（四角半径、描边位置、阴影模糊全打包）
+       @note: 后端支持时单次 draw call；层序 shadow→fill→stroke 由 shader 合成
+    */
+    virtual void drawCard(const math::FRectangle& bounds, const CardStyle& style);
 
     // =============================================================================
     // Category 8: Shadow Rendering / 阴影渲染
@@ -1043,7 +1140,14 @@ inline void IRenderBackend::drawGradientRect(const math::FRectangle& bounds,
 }
 
 inline void IRenderBackend::drawRect(const math::FRectangle& bounds, const BorderStyle& border) {
-    drawBorderRect(bounds, border.color, border.width, border.cornerRadius);
+    // Route through drawCard so Position reaches backends that support it
+    // (default drawCard preserves the drawBorderRect visual: Center ring).
+    CardStyle card;
+    card.cornerRadius  = CornerRadii(border.cornerRadius);
+    card.borderColor   = border.color;
+    card.borderWidth   = border.width;
+    card.borderPosition = border.position;
+    drawCard(bounds, card);
 }
 
 inline void IRenderBackend::drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius) {
@@ -1093,6 +1197,47 @@ inline void IRenderBackend::drawRoundedRect(const math::FRectangle& bounds,
                                             float cornerRadius) {
     (void)cornerRadius;
     drawRect(bounds, color);
+}
+
+inline void IRenderBackend::drawRoundedRect(const math::FRectangle& bounds,
+                                            const math::FVector4& color,
+                                            const CornerRadii& radii) {
+    if (radii.isUniform()) {
+        drawRoundedRect(bounds, color, radii.topLeft);
+        return;
+    }
+    // Non-implementing backends approximate with the largest corner.
+    drawRoundedRect(bounds, color, radii.maxRadius());
+}
+
+inline void IRenderBackend::drawBorderRect(const math::FRectangle& bounds,
+                                           const math::FVector4& color, float borderWidth,
+                                           const CornerRadii& radii) {
+    if (radii.isUniform()) {
+        drawBorderRect(bounds, color, borderWidth, radii.topLeft);
+        return;
+    }
+    drawBorderRect(bounds, color, borderWidth, radii.maxRadius());
+}
+
+inline void IRenderBackend::drawCard(const math::FRectangle& bounds, const CardStyle& style) {
+    // Layer order shadow → fill → stroke (stroke last so the ring sits on
+    // top of the fill). Per-corner radii degrade to the scalar forms via
+    // the CornerRadii overloads above.
+    if (style.shadowColor.w > 0.0f) {
+        ShadowStyle shadow;
+        shadow.color        = style.shadowColor;
+        shadow.offset       = style.shadowOffset;
+        shadow.blurRadius   = style.shadowBlurRadius;
+        shadow.cornerRadius = style.cornerRadius.topLeft;
+        drawRectShadow(bounds, shadow);
+    }
+    if (style.fillColor.w > 0.0f) {
+        drawRoundedRect(bounds, style.fillColor, style.cornerRadius);
+    }
+    if (style.borderWidth > 0.0f && style.borderColor.w > 0.0f) {
+        drawBorderRect(bounds, style.borderColor, style.borderWidth, style.cornerRadius);
+    }
 }
 
 inline void IRenderBackend::drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) {
