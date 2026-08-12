@@ -213,7 +213,9 @@ public:
        @param shadowBlurRadius: 阴影模糊半径（像素）
        @param letterSpacing: 字间距调整（像素，正值增大间距）
        @param lineSpacing: 行间距调整（像素，正值增大间距）
-       @param align: 文字对齐方式
+       @param align: 文字水平对齐方式
+       @param valign: 文字垂直对齐方式（Top/Middle/Bottom；Middle 与
+                      简单 drawText 的居中行为一致）
     */
     struct TextStyle {
         math::FVector4 color = math::FVector4(1, 1, 1, 1);  // 文字颜色 / Text color
@@ -225,7 +227,9 @@ public:
         int letterSpacing = 0;                              // 字间距调整 / Letter spacing adjustment
         int lineSpacing = 0;                                // 行间距调整 / Line spacing adjustment
         enum class Align { Left, Center, Right };
-        Align align = Align::Left;                          // 文字对齐 / Text alignment
+        Align align = Align::Left;                          // 文字水平对齐 / Text horizontal alignment
+        enum class VAlign { Top, Middle, Bottom };
+        VAlign valign = VAlign::Middle;                     // 文字垂直对齐 / Text vertical alignment
     };
 
     /*
