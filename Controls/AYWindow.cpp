@@ -434,6 +434,15 @@ void Window::onRender(IRenderBackend& renderer) {
     math::FRectangle titleBar(bounds.minX, bounds.minY, bounds.maxX, bounds.minY + _titleBarHeight);
     math::FRectangle body(bounds.minX, bounds.minY + _titleBarHeight, bounds.maxX, bounds.maxY);
 
+    // B2: floating-window drop shadow. Drawn first so the plate covers the
+    // blurred edge — MockRenderer records it as one offset rect, production
+    // UIRenderBackend draws one SDF item (radius-expanded blur approximant).
+    renderer.drawRectShadow(bounds, IRenderBackend::ShadowStyle{
+        math::FVector4(0.0f, 0.0f, 0.0f, 0.45f),  // color
+        math::FVector2(0.0f, 4.0f),               // offset: hangs below
+        10.0f,                                    // blur
+        0.0f                                      // cornerRadius: plate is square
+    });
     renderer.drawRect(bounds, math::FVector4(0.16f, 0.16f, 0.18f, 1.0f));
     renderer.drawRect(titleBar, math::FVector4(0.22f, 0.22f, 0.25f, 1.0f));
     renderer.drawRect(body, math::FVector4(0.12f, 0.12f, 0.14f, 1.0f));

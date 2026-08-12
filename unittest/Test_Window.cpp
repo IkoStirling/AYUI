@@ -276,6 +276,28 @@ TEST_CASE(window_resize_fires_on_resize_callback_on_release_only) {
     CHECK(fireCount == 1);  // unchanged — size didn't move
 }
 
+// B2: floating windows cast a drop shadow as the FIRST draw call, so it
+// layers under the plate. MockRenderer records it as one offset rect with
+// semi-transparent black; offset (0,+4) hangs the shadow below the window.
+TEST_CASE(window_render_draws_drop_shadow_first) {
+    Window window;
+    window.setPosition(FVector2(10.0f, 20.0f));
+    window.setSize(FVector2(200.0f, 100.0f));
+
+    MockRenderer renderer;
+    window.render(renderer);
+
+    CHECK(renderer.getDrawCalls().size() >= 4u);
+    const auto& first = renderer.getDrawCalls()[0];
+    CHECK(first.type == MockRenderer::DrawCall::Rect);
+    CHECK_FLOAT_EQ(first.bounds.minX, 10.0f, 1e-5f);
+    CHECK_FLOAT_EQ(first.bounds.minY, 24.0f, 1e-5f);   // +4 offset
+    CHECK_FLOAT_EQ(first.bounds.maxX, 210.0f, 1e-5f);
+    CHECK_FLOAT_EQ(first.bounds.maxY, 124.0f, 1e-5f);
+    CHECK(first.color.w < 1.0f);                       // semi-transparent
+    CHECK(first.color.x < 0.05f);                      // black shadow
+}
+
 TEST_CASE(window_resize_renders_grip_when_resizable) {
     Window window;
     window.setPosition(FVector2(0.0f, 0.0f));
