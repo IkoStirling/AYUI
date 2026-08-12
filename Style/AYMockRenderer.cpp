@@ -53,11 +53,30 @@ void MockRenderer::setBlendMode(BlendMode mode) {
     _currentBlend = mode;
 }
 
+void MockRenderer::pushOpacity(float alpha) {
+    // Clamp to [0,1]: 1.0 is a no-op, anything outside the range is a
+    // caller bug and would otherwise stack nonsense (alpha > 1 makes
+    // draws opaque-er, alpha < 0 would break the multiply).
+    const float a = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
+    // COMPOUND: the stack stores the CUMULATIVE product, not the raw
+    // frame — parent push(0.5) then child push(0.5) yields stack top
+    // 0.25 (tree opacity multiplies). pop() restores the parent frame.
+    _opacityStack.push_back(_opacityStack.back() * a);
+}
+
+void MockRenderer::popOpacity() {
+    // The stack base (1.0) is never popped — an unbalanced pop on a
+    // bare renderer must not crash or corrupt the frame.
+    if (_opacityStack.size() > 1) {
+        _opacityStack.pop_back();
+    }
+}
+
 void MockRenderer::drawRect(const math::FRectangle& bounds, const math::FVector4& color) {
     DrawCall dc;
     dc.type = DrawCall::Rect;
     dc.bounds = bounds;
-    dc.color = color;
+    dc.color = tintWithOpacity(color);
     dc.texture = nullptr;
     dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
@@ -70,7 +89,7 @@ void MockRenderer::drawRect(const math::FRectangle& bounds, void* textureHandle,
     DrawCall dc;
     dc.type = DrawCall::Image;
     dc.bounds = bounds;
-    dc.color = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+    dc.color = math::FVector4(1.0f, 1.0f, 1.0f, _opacityStack.back());
     dc.texture = textureHandle;
     dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
@@ -83,7 +102,7 @@ void MockRenderer::drawText(const math::FRectangle& bounds, const std::wstring& 
     DrawCall dc;
     dc.type = DrawCall::Text;
     dc.bounds = bounds;
-    dc.color = color;
+    dc.color = tintWithOpacity(color);
     dc.text = text;
     dc.texture = nullptr;
     dc.blendMode = _currentBlend;
@@ -95,7 +114,7 @@ void MockRenderer::drawWithAlpha(const math::FRectangle& bounds, void* textureHa
     DrawCall dc;
     dc.type = DrawCall::Image;
     dc.bounds = bounds;
-    dc.color = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+    dc.color = math::FVector4(1.0f, 1.0f, 1.0f, alpha * _opacityStack.back());
     dc.texture = textureHandle;
     dc.blendMode = _currentBlend;
     _drawCalls.push_back(dc);
@@ -119,13 +138,14 @@ void MockRenderer::drawGradientRect(const math::FRectangle& bounds,
         (topLeft.z + topRight.z + bottomLeft.z + bottomRight.z) * 0.25f,
         (topLeft.w + topRight.w + bottomLeft.w + bottomRight.w) * 0.25f
     );
+    dc.color = tintWithOpacity(dc.color);
     dc.texture = nullptr;
     dc.blendMode = _currentBlend;
     // P1: per-corner colors in param order TL TR BL BR.
-    dc.cornerColors[0] = topLeft;
-    dc.cornerColors[1] = topRight;
-    dc.cornerColors[2] = bottomLeft;
-    dc.cornerColors[3] = bottomRight;
+    dc.cornerColors[0] = tintWithOpacity(topLeft);
+    dc.cornerColors[1] = tintWithOpacity(topRight);
+    dc.cornerColors[2] = tintWithOpacity(bottomLeft);
+    dc.cornerColors[3] = tintWithOpacity(bottomRight);
     _drawCalls.push_back(dc);
     _triangleCount += 2;
     _vertexCount += 6;
@@ -152,7 +172,7 @@ void MockRenderer::drawRoundedRect(const math::FRectangle& bounds, const math::F
     DrawCall dc;
     dc.type = DrawCall::Rect;
     dc.bounds = bounds;
-    dc.color = color;
+    dc.color = tintWithOpacity(color);
     dc.texture = nullptr;
     dc.blendMode = _currentBlend;
     dc.floatParam1 = cornerRadius;

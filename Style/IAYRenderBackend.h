@@ -112,6 +112,25 @@ public:
     */
     virtual void setBlendMode(BlendMode mode) {}
 
+    /*
+       @name: pushOpacity
+       @func: 压入全局不透明度 - 之后所有带颜色的绘制（矩形/文本/渐变/SDF）
+              alpha 通道都乘以栈顶值。树状淡入淡出：父控件 push 0.5 后
+              子控件再 push 0.5，最终 alpha = 原始 alpha × 0.25。
+       @param alpha: 0.0（全透明）~ 1.0（不透明）。0/负值不按透明处理
+                     （clamp 到 [0,1]，1.0 = 无效果 no-op）
+       @note: 栈式（LIFO），与 pushClip 同构；必须与 popOpacity 成对调用
+       @note: 默认栈底为 1.0（无效果），未实现的后端默认 no-op
+    */
+    virtual void pushOpacity(float alpha) {}
+
+    /*
+       @name: popOpacity
+       @func: 弹出全局不透明度 - 恢复之前保存的不透明度状态
+       @note: 必须与 pushOpacity 成对调用
+    */
+    virtual void popOpacity() {}
+
     // =============================================================================
     // Category 2: Transform and Clipping / 变换与裁剪
     // =============================================================================

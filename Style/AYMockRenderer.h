@@ -47,6 +47,8 @@ public:
 
     // IRenderBackend implementations - virtual with default impl / 虚函数实现
     void setBlendMode(BlendMode mode) override;
+    void pushOpacity(float alpha) override;
+    void popOpacity() override;
     void drawText(const math::FRectangle& bounds, const std::wstring& text, int fontSize, const TextStyle& style) override;
     void drawGradientRect(const math::FRectangle& bounds,
                          const math::FVector4& topLeft, const math::FVector4& topRight,
@@ -152,6 +154,18 @@ private:
     int _nextAnimId = 1;
     int _nextFontId = 1;
     int _nextTargetId = 1;
+
+    // PR-anim: stacked opacity (LIFO, same shape as the clip stack).
+    // Every color-emitting draw multiplies its alpha by the top frame;
+    // the stack base is always 1.0 (no-op) so default rendering is
+    // byte-identical to pre-opacity behavior.
+    std::vector<float> _opacityStack = {1.0f};
+
+    // Multiply a color's alpha by the current opacity frame. RGB stays
+    // untouched — opacity fades the whole draw, it does not tint it.
+    math::FVector4 tintWithOpacity(const math::FVector4& color) const {
+        return math::FVector4(color.x, color.y, color.z, color.w * _opacityStack.back());
+    }
 
     struct PathData {
         math::FRectangle bounds;

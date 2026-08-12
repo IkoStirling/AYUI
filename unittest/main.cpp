@@ -80,6 +80,7 @@
 #include "Test_Scene_Suite_G.cpp"          // Gallery-regression layer (3 scenario-level UTs for UT blind spots)
 #include "Test_DockTabGroup.cpp"           // dock-tree Phase 2 (leaf widget)
 #include "Test_DockTree.cpp"               // dock-tree Phase 3 (nested split / join / prune)
+#include "Test_OpacityAnimation.cpp"       // PR-anim (renderer opacity stack + widget fade tweens)
 
 void runTest()
 {

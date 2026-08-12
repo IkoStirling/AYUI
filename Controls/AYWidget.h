@@ -248,10 +248,28 @@ public:
     virtual void performLayout() {}
 
     // Per-frame tick. UIManager::update(dt) drives the root widget which
-    // cascades into CompoundWidget children. Default is a no-op; widgets
-    // with time-based behavior (SplitterHandle's hover reveal delay) override.
-    // Mirrors the performLayout cascade: CompoundWidget::tick walks children.
-    virtual void tick(float dt) { AYUNREFERENCED_PARAM(dt); }
+    // cascades into CompoundWidget children (compoundDescendTick forces
+    // the BASE implementation via self->Widget::tick, so the animation
+    // advance below runs for every tree node even when a subclass
+    // overrides tick without chaining). Widgets with time-based behavior
+    // (SplitterHandle's hover reveal delay) override.
+    virtual void tick(float dt);
+
+    // ---------------------------------------------------------------------
+    // Opacity / fade transitions (PR-anim). Widget::render pushes _opacity
+    // into the renderer's opacity stack, so the whole subtree fades as one
+    // unit (children multiply against the parent's alpha). With no fade
+    // active _opacity stays 1.0 and rendering is byte-identical to the
+    // pre-opacity code path.
+    // ---------------------------------------------------------------------
+    void setOpacity(float opacity);
+    float getOpacity() const { return _opacity; }
+    // Tweens _opacity from its current value to `to` over durationMs,
+    // driven by tick(dt). durationMs <= 0 snaps immediately. Curve table
+    // mirrors MockRenderer's animation handles (same easing).
+    void animateOpacity(float to, float durationMs,
+                        AnimationCurve curve = AnimationCurve::EaseOut);
+    bool isOpacityAnimating() const { return _opacityAnimating; }
 
     // Style
     void setStyleId(const std::string& id) { _styleId = id; }
@@ -357,6 +375,18 @@ protected:
     bool _visible;
     bool _layoutPositionManaged = true;
     bool _layoutSizeManaged = true;
+
+    // PR-anim: tree opacity + fade transition state. _opacity == 1.0 is
+    // the fast path (no pushOpacity, byte-identical rendering); the
+    // animation fields are idle until animateOpacity starts a tween.
+    float _opacity = 1.0f;
+    bool  _opacityAnimating = false;
+    float _opacityAnimFrom = 1.0f;
+    float _opacityAnimTo = 1.0f;
+    float _opacityAnimElapsed = 0.0f;
+    float _opacityAnimDuration = 0.0f;
+    AnimationCurve _opacityAnimCurve = AnimationCurve::EaseOut;
+
     std::string _styleId;
     std::string _id;
     // G11 — per-widget token overrides. Keyed by bare token name (no

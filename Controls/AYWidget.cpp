@@ -2,9 +2,35 @@
 #include "AYCompoundFocusableWidget.h"
 #include "aymath/MathUtils.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ayt::ui {
+
+namespace {
+
+// PR-anim: easing table for widget tweens. Mirrors MockRenderer's
+// AnimationData::update switch so a Widget::animateOpacity tween and a
+// renderer-side animation handle interpolate identically.
+float easeCurve(float t, AnimationCurve curve)
+{
+    switch (curve) {
+    case AnimationCurve::EaseIn:
+        return t * t;
+    case AnimationCurve::EaseOut:
+        return 1.0f - (1.0f - t) * (1.0f - t);
+    case AnimationCurve::EaseInOut:
+        return t < 0.5f ? 2.0f * t * t : 1.0f - 2.0f * (1.0f - t) * (1.0f - t);
+    case AnimationCurve::Spring:
+        // Simplified spring — same formula as MockRenderer.
+        return t + std::sin(t * 6.28f) * 0.1f * (1.0f - t);
+    case AnimationCurve::Linear:
+    default:
+        return t;
+    }
+}
+
+} // namespace
 
 // =============================================================================
 // Phase B (S3): shared compound-descent helpers. Both CompoundWidget and
@@ -403,6 +429,13 @@ void CompoundWidget::onChildRemoved(Widget* child) {
 
 void Widget::render(IRenderBackend& renderer) {
     if (!_visible) return;
+    // PR-anim: push the node opacity so the whole subtree (own paints +
+    // children) fades as one unit. Fast path when fully opaque — the
+    // pre-opacity rendering path is byte-identical.
+    const bool fading = _opacity < (1.0f - 1e-5f);
+    if (fading) {
+        renderer.pushOpacity(_opacity);
+    }
     onRender(renderer);
     renderChildren(renderer);
     // G12 — drop-target highlight. When this widget is the active drop
@@ -416,6 +449,49 @@ void Widget::render(IRenderBackend& renderer) {
         renderer.drawBorderRect(b,
             math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 1.0f, 2.0f);
     }
+    if (fading) {
+        renderer.popOpacity();
+    }
+}
+
+void Widget::tick(float dt) {
+    // PR-anim: advance the opacity tween. compoundDescendTick forces this
+    // base implementation for every tree node, so a fade keeps running
+    // even under subclasses that override tick without chaining.
+    if (!_opacityAnimating) {
+        return;
+    }
+    _opacityAnimElapsed += dt;
+    if (_opacityAnimElapsed >= _opacityAnimDuration) {
+        _opacity = _opacityAnimTo;
+        _opacityAnimating = false;
+        return;
+    }
+    const float t = easeCurve(_opacityAnimElapsed / _opacityAnimDuration,
+                              _opacityAnimCurve);
+    _opacity = _opacityAnimFrom + (_opacityAnimTo - _opacityAnimFrom) * t;
+}
+
+void Widget::setOpacity(float opacity) {
+    _opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
+    // A direct set cancels any in-flight tween — the caller took over.
+    _opacityAnimating = false;
+}
+
+void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
+    const float target = to < 0.0f ? 0.0f : (to > 1.0f ? 1.0f : to);
+    if (durationMs <= 0.0f) {
+        // Instant snap — same semantics as setOpacity.
+        _opacity = target;
+        _opacityAnimating = false;
+        return;
+    }
+    _opacityAnimFrom = _opacity;
+    _opacityAnimTo = target;
+    _opacityAnimDuration = durationMs * 0.001f;  // ms -> s
+    _opacityAnimElapsed = 0.0f;
+    _opacityAnimCurve = curve;
+    _opacityAnimating = true;
 }
 
 void Widget::renderChildren(IRenderBackend& renderer) {

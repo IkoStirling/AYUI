@@ -133,6 +133,14 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     _focusedWidgetBefore = ui.getFocusedWidget();
     ui.setFocus(this);
     performLayout();
+
+    // PR-anim: pop-in fade. The menu tree renders at full alpha a frame
+    // later (Widget::render pushes the tweened opacity), so first paint
+    // is already the start of the fade — no first-frame pop. Fade-out on
+    // close is deliberately NOT animated: close() destroys the tree
+    // synchronously, and a fade-out would need a delayed-destroy dance.
+    setOpacity(0.0f);
+    animateOpacity(1.0f, 140.0f, AnimationCurve::EaseOut);
 }
 
 void Menu::detachForHostDestruction()
@@ -429,6 +437,12 @@ bool Menu::onKeyDown(int keyCode) {
 }
 
 void Menu::tick(float dt) {
+    // PR-anim: chain the base FIRST — opacity tweens live in
+    // Widget::tick. compoundDescendTick forces the base for nodes it
+    // reaches as `self`, but the overlay cascade reaches the Menu as a
+    // CHILD (virtual dispatch → this override), so without the chain
+    // the pop-in fade would never advance.
+    Widget::tick(dt);
     // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
     // Driven by UIManager::update → _root->tick cascade when the Menu
     // is in the _root subtree (the common case after open() reparents

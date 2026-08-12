@@ -769,12 +769,15 @@ void UIManager::update(float dt) {
     // (via openPopup → _overlayRoot->addChild) and need tick(dt) to
     // drive their typeahead timer (Menu::tick accumulates the buffer
     // reset window). Tooltips get an explicit driver loop below; menus
-    // get the cascade here. The overlay root itself is a plain Widget
-    // with no tick override, so calling tick() just returns immediately
-    // and the cascade walks its children (Menu, ComboBox popup, etc.)
-    // through CompoundWidget::tick.
+    // get the cascade here. PR-anim: compoundDescendTick, NOT
+    // _overlayRoot->tick() — the overlay root is a plain Widget whose
+    // default tick returns immediately without walking children, so a
+    // bare tick() never reaches popups: no fade advance for the menu
+    // pop-in animation, no typeahead auto-clear. The compound helper
+    // walks children and forces the BASE Widget::tick on each node
+    // (fade tweens live there).
     if (_overlayRoot != nullptr) {
-        _overlayRoot->tick(dt);
+        compoundDescendTick(_overlayRoot, dt);
     }
 
     // Re-validate hover against the last known pointer. Pure-hover leave
