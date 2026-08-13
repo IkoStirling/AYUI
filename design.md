@@ -959,3 +959,34 @@ U2 / U3 may run in parallel with the second half of this list.
 ```
 
 **Hard rule:** no UI-animation PRs while dock tree structure or card ownership APIs are still changing.
+
+---
+
+## 20. UI Layout Editor
+
+> **Mission:** author and round-trip `*.ui.json` layouts with the same wire format as `UIManager::loadLayout` / `UILayoutLoader::saveLayout` (no parallel schema).
+
+### 20.1 Locked decisions
+
+| Decision | Choice |
+|----------|--------|
+| Format | Existing `*.ui.json` only (`WidgetSerializer` / `UILayoutLoader`) |
+| Architecture | One `UIManager`: chrome JSON + document tree under `canvas_host` |
+| Ship order | Standalone EXE first, then AYEditor `ChildWindow` (shared session core) |
+
+### 20.2 Dual host
+
+| Host | Entry | Role |
+|------|-------|------|
+| **v0** `AYUI_LayoutEditor` | `demo/layout_editor/` (Gallery-style WinMain) | Primary authoring surface |
+| **v0.5** AYEditor | Tools → “UI Layout Editor…” → `EditorChildWindowManager` | Same `LayoutEditorSession` attached after chrome load |
+
+Core: `demo/layout_editor/LayoutEditorSession` — `attach(UIManager&)`, open/save/select/add/delete/property strip. Hit-test accepts only widgets under `canvas_host` (chrome ignored).
+
+### 20.3 Checklist
+
+| Milestone | Scope | Status |
+|-----------|--------|--------|
+| **v0** | Open / Save / Save As; click-select; hierarchy list; id/x/y/w/h/text; Add Button/Label/Panel; Delete | ✅ |
+| **v0.5** | AYEditor ChildWindow + menu entry | ✅ |
+| Later | DockArea authoring, multi-select, full style inspector, hierarchy drag-reorder | — |

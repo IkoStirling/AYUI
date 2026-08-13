@@ -1,0 +1,22 @@
+{
+  "type": "Panel",
+  "id": "document_root",
+  "size": { "w": 640, "h": 480 },
+  "position": { "x": 16, "y": 16 },
+  "children": [
+    {
+      "type": "Button",
+      "id": "btn_hello",
+      "text": "Hello",
+      "size": { "w": 120, "h": 32 },
+      "position": { "x": 24, "y": 24 }
+    },
+    {
+      "type": "TextLabel",
+      "id": "lbl_hello",
+      "text": "Sample document",
+      "size": { "w": 200, "h": 24 },
+      "position": { "x": 24, "y": 72 }
+    }
+  ]
+}

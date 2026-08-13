@@ -72,3 +72,64 @@ add_custom_command(TARGET AYUI_Gallery POST_BUILD
         $<TARGET_FILE_DIR:AYUI_Gallery>/assets
     COMMENT "Copy AYUI Gallery assets next to AYUI_Gallery"
 )
+
+# ---------------------------------------------------------------------------
+# AYUI_LayoutEditor — standalone *.ui.json layout authoring (v0)
+# ---------------------------------------------------------------------------
+add_executable(AYUI_LayoutEditor WIN32
+    layout_editor/AYUI_LayoutEditor.cpp
+    layout_editor/LayoutEditorSession.cpp
+    layout_editor/LayoutEditorSession.h
+)
+
+target_include_directories(AYUI_LayoutEditor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor
+)
+
+target_link_libraries(AYUI_LayoutEditor PRIVATE
+    AYUI
+    AYRenderer
+    AYDevice
+)
+
+if(WIN32)
+    target_link_libraries(AYUI_LayoutEditor PRIVATE user32 gdi32 comdlg32)
+endif()
+
+if(MSVC)
+    target_compile_options(AYUI_LayoutEditor PRIVATE /Zc:__cplusplus /Zc:preprocessor)
+    target_compile_definitions(AYUI_LayoutEditor PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
+target_compile_definitions(AYUI_LayoutEditor PRIVATE
+    AY_SHADER_SHADERC_HINT="${AY_SHADER_SHADERC_PATH}"
+    AY_SHADER_BGFX_COMMON_HINT="${AY_SHADER_BGFX_COMMON_DIR}"
+    AY_SHADER_BGFX_SRC_HINT="${AY_SHADER_BGFX_SRC_DIR}"
+)
+
+add_custom_command(TARGET AYUI_LayoutEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor/assets
+        $<TARGET_FILE_DIR:AYUI_LayoutEditor>/assets
+    COMMENT "Copy Layout Editor assets next to AYUI_LayoutEditor"
+)
+
+# Headless open→mutate→save→reload check (no HWND).
+add_executable(AYUI_LayoutEditor_RoundTrip
+    layout_editor/_roundtrip_check.cpp
+    layout_editor/LayoutEditorSession.cpp
+    layout_editor/LayoutEditorSession.h
+)
+target_include_directories(AYUI_LayoutEditor_RoundTrip PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor
+)
+target_link_libraries(AYUI_LayoutEditor_RoundTrip PRIVATE AYUI)
+if(MSVC)
+    target_compile_options(AYUI_LayoutEditor_RoundTrip PRIVATE /Zc:__cplusplus /Zc:preprocessor)
+    target_compile_definitions(AYUI_LayoutEditor_RoundTrip PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+add_custom_command(TARGET AYUI_LayoutEditor_RoundTrip POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor/assets
+        $<TARGET_FILE_DIR:AYUI_LayoutEditor_RoundTrip>/assets
+)
