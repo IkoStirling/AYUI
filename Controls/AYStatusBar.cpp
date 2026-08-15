@@ -1,7 +1,7 @@
-#include "AYStatusBar.h"
-#include "AYTextLabel.h"
-#include "IAYRenderBackend.h"
-#include "AYTextMeasure.h"
+#include "AYUI/StatusBar.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/TextMeasure.h"
 #include <algorithm>
 
 namespace ayt::ui {

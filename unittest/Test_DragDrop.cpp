@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYUIManager.h"
-#include "AYDragDrop.h"
-#include "AYMockRenderer.h"
-#include "AYInteractiveWidget.h"
-#include "UIKeyCode.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/DragDrop.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/InteractiveWidget.h"
+#include "AYUI/UIKeyCode.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

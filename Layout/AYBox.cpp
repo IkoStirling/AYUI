@@ -1,6 +1,6 @@
-#include "AYBox.h"
-#include "AYSplitterHandle.h"
-#include "AYWindow.h"
+#include "AYUI/Box.h"
+#include "AYUI/SplitterHandle.h"
+#include "AYUI/Window.h"
 
 #include <algorithm>
 #include <cmath>

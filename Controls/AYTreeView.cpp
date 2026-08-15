@@ -1,6 +1,6 @@
-#include "AYTreeView.h"
-#include "IAYRenderBackend.h"
-#include "AYScrollBarSync.h"
+#include "AYUI/TreeView.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/ScrollBarSync.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>

@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYSelectableWidget.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/SelectableWidget.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include "AYMath.h"
 #include <iostream>
 

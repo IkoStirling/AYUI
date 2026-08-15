@@ -16,15 +16,15 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYLayoutLoader.h"
-#include "AYWidgetSerializer.h"
-#include "AYWidgetFactory.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
-#include "AYTextLabel.h"
-#include "AYBox.h"
-#include "AYWidget.h"
+#include "AYUI/LayoutLoader.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/Box.h"
+#include "AYUI/Widget.h"
 #include "AYMath/MathTypes.h"
 #include <cstdio>
 #include <memory>

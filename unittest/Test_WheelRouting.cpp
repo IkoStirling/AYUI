@@ -1,10 +1,10 @@
 #include "AYTest.h"
-#include "AYWidget.h"
-#include "AYUIManager.h"
-#include "AYScrollView.h"
-#include "AYListView.h"
-#include "AYComboBox.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Widget.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/ListView.h"
+#include "AYUI/ComboBox.h"
+#include "AYUI/MockRenderer.h"
 
 #include <string>
 

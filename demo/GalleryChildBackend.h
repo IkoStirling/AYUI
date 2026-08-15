@@ -16,7 +16,7 @@
 
 #include "AYMath/MathDefs.h"
 #include "AYMath/MathTypes.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/IRenderBackend.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN

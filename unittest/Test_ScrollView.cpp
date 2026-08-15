@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYScrollView.h"
-#include "AYScrollableWidget.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYMockRenderer.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/ScrollableWidget.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/MockRenderer.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

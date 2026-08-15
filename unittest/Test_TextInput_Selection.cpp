@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYTextInput.h"
-#include "AYUIManager.h"
-#include "UIKeyCode.h"
+#include "AYUI/TextInput.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/UIKeyCode.h"
 #include <cmath>
 #include <cstdlib>
 #include <string>

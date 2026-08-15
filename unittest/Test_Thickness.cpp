@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYThickness.h"
+#include "AYUI/Thickness.h"
 
 using namespace ayt::ui;
 

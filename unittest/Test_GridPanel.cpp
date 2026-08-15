@@ -1,13 +1,13 @@
 #include "AYTest.h"
-#include "AYGridPanel.h"
-#include "AYPanel.h"
-#include "AYTextLabel.h"
-#include "AYButton.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
+#include "AYUI/GridPanel.h"
+#include "AYUI/Panel.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/Button.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
 #include <iostream>
 
 // =============================================================================

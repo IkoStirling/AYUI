@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYClipboard.h"
-#include "AYTextInput.h"
-#include "AYTextArea.h"
-#include "AYUIManager.h"
-#include "UIKeyCode.h"
+#include "AYUI/Clipboard.h"
+#include "AYUI/TextInput.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/UIKeyCode.h"
 #include <string>
 
 // =============================================================================

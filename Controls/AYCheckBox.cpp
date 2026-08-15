@@ -1,6 +1,6 @@
-#include "AYCheckBox.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
+#include "AYUI/CheckBox.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYMath/MathUtils.h"
 #include <algorithm>
 

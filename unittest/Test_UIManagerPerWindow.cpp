@@ -10,10 +10,10 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYUIManager.h"
-#include "AYWidget.h"
-#include "AYButton.h"
-#include "AYMockRenderer.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/Widget.h"
+#include "AYUI/Button.h"
+#include "AYUI/MockRenderer.h"
 
 using namespace ayt::ui;
 

@@ -21,16 +21,16 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYUIManager.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
-#include "AYDockTabGroup.h"
-#include "AYDragDrop.h"
-#include "AYMockRenderer.h"
-#include "AYBox.h"
-#include "AYSplitterHandle.h"
-#include "UIKeyCode.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/DockTabGroup.h"
+#include "AYUI/DragDrop.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Box.h"
+#include "AYUI/SplitterHandle.h"
+#include "AYUI/UIKeyCode.h"
 
 #include <cmath>
 #include <memory>

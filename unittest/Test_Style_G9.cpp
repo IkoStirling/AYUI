@@ -1,12 +1,12 @@
 #include "AYTest.h"
-#include "AYStyle.h"
-#include "AYSlider.h"
-#include "AYCheckBox.h"
-#include "AYRadioButton.h"
-#include "AYPanel.h"
-#include "AYSeparator.h"
-#include "AYToolBarSeparator.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Style.h"
+#include "AYUI/Slider.h"
+#include "AYUI/CheckBox.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/Panel.h"
+#include "AYUI/Separator.h"
+#include "AYUI/ToolBarSeparator.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;

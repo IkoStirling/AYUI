@@ -1,12 +1,12 @@
 #include "AYTest.h"
-#include "AYTextInput.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/TextInput.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include <cstdio>
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
-#include "UIKeyCode.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
+#include "AYUI/UIKeyCode.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -393,7 +393,7 @@ TEST_CASE(textinput_uikeycode_constants_match_vk) {
 //   - Render draws underline rectangle when composing.
 // =============================================================================
 
-#include "AYImeTypes.h"
+#include "AYUI/ImeTypes.h"
 
 TEST_CASE(textinput_ime_start_inserts_preview) {
     MockRenderer backend;

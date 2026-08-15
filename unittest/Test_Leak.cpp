@@ -21,11 +21,11 @@
 
 #include "AYTest.h"
 #include "AYMath/MathTypes.h"
-#include "AYListView.h"
-#include "AYScrollView.h"
-#include "AYTabStrip.h"
-#include "AYDockCard.h"
-#include "AYMockRenderer.h"
+#include "AYUI/ListView.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/MockRenderer.h"
 
 #include <memory>
 

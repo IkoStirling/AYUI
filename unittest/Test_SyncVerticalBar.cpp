@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYScrollBarSync.h"
-#include "AYScrollBar.h"
+#include "AYUI/ScrollBarSync.h"
+#include "AYUI/ScrollBar.h"
 
 #include <string>
 

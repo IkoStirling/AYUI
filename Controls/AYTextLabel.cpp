@@ -1,5 +1,5 @@
-#include "AYTextLabel.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/IRenderBackend.h"
 
 namespace ayt::ui {
 

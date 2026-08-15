@@ -1,8 +1,8 @@
 #include "AYTest.h"
-#include "AYRadioGroup.h"
-#include "AYRadioButton.h"
-#include "AYWidgetFactory.h"
-#include "AYMockRenderer.h"
+#include "AYUI/RadioGroup.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/MockRenderer.h"
 
 #include <iostream>
 #include <vector>

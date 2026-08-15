@@ -1,4 +1,4 @@
-#include "AYTextureRegistry.h"
+#include "AYUI/TextureRegistry.h"
 
 namespace ayt::ui {
 

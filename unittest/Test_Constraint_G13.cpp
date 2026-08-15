@@ -3,9 +3,9 @@
 // CassowarySolver) and the high-level ConstraintPanel widget.
 
 #include "AYTest.h"
-#include "AYConstraint.h"
-#include "AYWidget.h"
-#include "AYButton.h"
+#include "AYUI/Constraint.h"
+#include "AYUI/Widget.h"
+#include "AYUI/Button.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

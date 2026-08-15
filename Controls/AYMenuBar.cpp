@@ -1,7 +1,7 @@
-#include "AYMenuBar.h"
-#include "AYButton.h"
-#include "AYUIManager.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/MenuBar.h"
+#include "AYUI/Button.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/IRenderBackend.h"
 #include "AYMath/MathUtils.h"
 #include <algorithm>
 

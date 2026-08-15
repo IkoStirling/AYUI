@@ -1,5 +1,5 @@
-#include "AYToolBarSeparator.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/ToolBarSeparator.h"
+#include "AYUI/IRenderBackend.h"
 
 namespace ayt::ui {
 

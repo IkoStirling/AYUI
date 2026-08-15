@@ -1,4 +1,4 @@
-#include "AYGridPanel.h"
+#include "AYUI/GridPanel.h"
 #include <algorithm>
 
 namespace ayt::ui {

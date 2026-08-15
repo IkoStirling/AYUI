@@ -1,7 +1,7 @@
-#include "AYWindow.h"
-#include "AYScrollableWidget.h"
-#include "AYScrollBarSync.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/Window.h"
+#include "AYUI/ScrollableWidget.h"
+#include "AYUI/ScrollBarSync.h"
+#include "AYUI/IRenderBackend.h"
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>

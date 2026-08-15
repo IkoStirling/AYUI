@@ -1,11 +1,11 @@
 #include "AYTest.h"
-#include "AYWidget.h"
-#include "AYScrollView.h"
-#include "AYListView.h"
-#include "AYWindow.h"
-#include "AYTreeView.h"
-#include "AYMockRenderer.h"
-#include "AYUIManager.h"
+#include "AYUI/Widget.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/ListView.h"
+#include "AYUI/Window.h"
+#include "AYUI/TreeView.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIManager.h"
 #include "AYMath/MathTypes.h"
 
 using namespace ayt::ui;

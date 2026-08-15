@@ -1,5 +1,5 @@
-#include "AYWidget.h"
-#include "AYCompoundFocusableWidget.h"
+#include "AYUI/Widget.h"
+#include "AYUI/CompoundFocusableWidget.h"
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>

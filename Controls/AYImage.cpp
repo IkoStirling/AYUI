@@ -1,6 +1,6 @@
-#include "AYImage.h"
-#include "AYTextureRegistry.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/Image.h"
+#include "AYUI/TextureRegistry.h"
+#include "AYUI/IRenderBackend.h"
 
 namespace ayt::ui {
 

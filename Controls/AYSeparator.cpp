@@ -1,6 +1,6 @@
-#include "AYSeparator.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
+#include "AYUI/Separator.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 
 namespace ayt::ui {
 

@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYMockRenderer.h"
+#include "AYUI/MockRenderer.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYTextLabel.h"
+#include "AYUI/TextLabel.h"
 #include <iostream>
 
 using namespace ayt::ui;

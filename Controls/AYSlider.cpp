@@ -1,7 +1,7 @@
-#include "AYSlider.h"
-#include "AYValueWidget.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
+#include "AYUI/Slider.h"
+#include "AYUI/ValueWidget.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {

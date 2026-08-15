@@ -1,5 +1,5 @@
-#include "AYFocusableWidget.h"
-#include "AYUIManager.h"
+#include "AYUI/FocusableWidget.h"
+#include "AYUI/UIManager.h"
 
 namespace ayt::ui {
 

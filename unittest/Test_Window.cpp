@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYWindow.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Window.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;

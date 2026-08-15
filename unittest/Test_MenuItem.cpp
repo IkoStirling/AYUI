@@ -1,8 +1,8 @@
 #include "AYTest.h"
-#include "AYMenuItem.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/MenuItem.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include <iostream>
 
 using namespace ayt::ui;

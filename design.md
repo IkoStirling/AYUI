@@ -61,7 +61,7 @@ References: [AYRenderer/design.md](../AYRenderer/design.md) §10.4, [AYEntity/de
 | Hot-reload (`isReloadNeeded`) | ❌ | — | B10: stub returns false; R-4 unblocks |
 | New abstractions (InteractiveWidget, TextContent, Thickness) | ❌ | — | R-1..R-3 |
 
-Namespace: **`ayt::ui`** everywhere. Deprecate `Events/AYEvent.h` (`ayui::events` stub).
+Namespace: **`ayt::ui`** everywhere. Deprecate `include/AYUI/Event.h` (`ayui::events` stub).
 
 Control inventory + known issues: see [§15](#15-control-inventory-2026-07-audit).  
 Refactor plan + new control schedule: see [§16](#16-abstraction-refactor-plan).
@@ -211,7 +211,7 @@ The `WidgetSerializer` (used by Editor / tests / round-trip) has been **consiste
 
 **Out of scope here** (explicitly deferred to a later patch):
 
-- `closable` on `Window` (DECISION 4 in `AYWindow.h` — clamp GDI; deferred to v1.5 §17 docking cards).
+- `closable` on `Window` (DECISION 4 in `AYUI/Window.h` — clamp GDI; deferred to v1.5 §17 docking cards).
 - Every serializer field that the loader does not need at runtime (e.g. `selectionMode` round-trip on `ListView` is valuable for tests but the editor inspector does not need it — serializer already covers it).
 
 **INV-L** invariants (must hold before/after):
@@ -291,13 +291,13 @@ Keep both; optionally share a private `WidgetJsonIO` helper in U1 to avoid field
 
 ### 5.2 Internal (implemented)
 
-Use **`UIEvent` / `UIEventType`** in `Controls/AYWidget.h` only:
+Use **`UIEvent` / `UIEventType`** in `include/AYUI/Widget.h` only:
 
 - Bubble: `Widget::bubbleEvent`
 - Handlers: `addEventHandler(UIEventType, ...)`
 - Controls implement mouse/keyboard → internal events
 
-Remove or repurpose `Events/AYEvent.h` (wrong namespace, unused).
+Remove or repurpose `include/AYUI/Event.h` (wrong namespace, unused).
 
 ### 5.3 External (U3)
 
@@ -320,7 +320,7 @@ EventBridge **does not** duplicate `UIEvent` types. It maps platform events to e
 
 ### 6.1 `IRenderBackend`
 
-Interface: `Style/IAYRenderBackend.h`. v1 **MVP subset**:
+Interface: `interface/AYUI/IRenderBackend.h`. v1 **MVP subset**:
 
 | Required for U2 | Defer (default no-op) |
 |-----------------|------------------------|
@@ -432,14 +432,14 @@ AYUI/
 ├── Style/
 ├── Loader/
 ├── i18n/
-├── Events/                   ← AYEvent.h stub; replace with EventBridge in U3
+├── Events/                   ← AYUI/Event.h stub; replace with EventBridge in U3
 └── unittest/
 ```
 
 **Planned additions:**
 
 ```
-Controls/   → (optional) AYUIManager.h/cpp in U1
+Controls/   → (optional) AYUI/UIManager.h/cpp in U1
 Events/     → AYEventBridge.h/cpp in U3
 AYRenderer/src/detail/AYUIRenderBackend.* in U2
 ```
@@ -463,7 +463,7 @@ AYRenderer/src/detail/AYUIRenderBackend.* in U2
 | 2026-07 | Align with AYRenderer R4 engine loop; defer 3D UI |
 | 2026-07 | **Reuse UILayoutLoader** for data-driven v1; StyleSheet JSON next |
 | 2026-07 | Do not depend on AYConfig for UI v1 |
-| 2026-07 | Single event model: `UIEvent`; deprecate `AYEvent.h` |
+| 2026-07 | Single event model: `UIEvent`; deprecate `AYUI/Event.h` |
 | 2026-07 | `AYUIRenderBackend` lives in AYRenderer, not legacy AliyatRenderer path |
 | 2026-07 | Editor chrome is AYUI; modes/session in AYEditor ([§13](#13-editor-chrome)) |
 | 2026-07-17 | **v1.4 audit:** `TextLabel : Button` flagged as wrong abstraction; introduce `InteractiveWidget` base before any new control. Refactor lane R-1..R-10 precedes new-control lane C-1..C-12. See [§15](#15-control-inventory-2026-07-audit) + [§16](#16-abstraction-refactor-plan). |
@@ -539,26 +539,26 @@ Severity: 🔴 functional bug, 🟡 risk/design smell.
 
 | ID | Sev | Location | Issue |
 |----|-----|----------|-------|
-| **B1** | 🔴 | `Controls/AYTextLabel.h:7` | `TextLabel : Button` — wrong abstraction; forces TextLabel to `setEnabled(false)` to neutralize Button state machine |
+| **B1** | 🔴 | `include/AYUI/TextLabel.h:7` | `TextLabel : Button` — wrong abstraction; forces TextLabel to `setEnabled(false)` to neutralize Button state machine |
 | **B2** | 🟡 | `Controls/AYButton.cpp:24-39` | Disabled path sets `_state = Disabled` but never clears `_isMouseOver` — re-enable after hover leaves widget stuck |
 | **B3** | 🟡 | `Controls/AYWindow.cpp:11-23` | `clampAxis` mixes `_titleBarHeight` into minKeepWidth — wrong axis |
 | **B4** | 🟡 | `Controls/AYWidget.cpp:108-136` + `Controls/AYUIManager.cpp:25-34` | `_hoverWidget` dual ownership (Widget + UIManager); cursor hint leaks past mouse-up (workaround exists in `UIManager::onMouseButtonUp`) |
 | **B5** | 🟡 | `Controls/AYWidget.cpp:98-105` | `const_cast` inside const `getWorldBounds()`; multi-thread UI would break |
 | **B6** | 🟡 | `Controls/AYWindow.cpp:43-46` | `setMinSize` triggers `setSize` — implicit resize, no test covers |
 | **B7** | 🟡 | `Controls/AYImage.cpp:16-18` | `Image::performLayout` is a no-op override that exists only because Image extends `CompoundWidget` — coupling mismatch |
-| **B8** | 🟡 | `Layout/AYBox.h` + `Controls/AYButton.h` + `Controls/AYWindow.cpp` | No unified `Thickness`/`Padding` type — `FVector4(L,T,R,B)` ad-hoc everywhere; Editor reflection will be hard |
+| **B8** | 🟡 | `include/AYUI/Box.h` + `include/AYUI/Button.h` + `Controls/AYWindow.cpp` | No unified `Thickness`/`Padding` type — `FVector4(L,T,R,B)` ad-hoc everywhere; Editor reflection will be hard |
 | **B9** | 🟡 | `Controls/AYButton.cpp:75-83` | `Button::setPadding` only affects text drawing, not hit area or layout — surprising semantics |
 | **B10** | 🔴 | `Loader/AYLayoutLoader.cpp:122-135` | `isReloadNeeded` always returns `false` — hot-reload is broken (design.md §2 table says ✅) |
 | **B11** | 🟡 | `Loader/AYWidgetSerializer.cpp:135` | `serializeWidgetToJson` sets `j["type"] = widget->getStyleId()` first; if no specific branch fires (raw `Widget`), exported type is the style id |
 | **R1** | 🟡 | All `Controls/*.cpp` `onRender` | Hardcoded colors/font sizes; `StyleSheet`/`StyleManager` system never wired into widgets |
-| **R2** | 🟡 | `Controls/AYTextLabel.h:54-67` | `setTextColor`/`setBackgroundColor` store as 4 floats instead of `FVector4` |
+| **R2** | 🟡 | `include/AYUI/TextLabel.h:54-67` | `setTextColor`/`setBackgroundColor` store as 4 floats instead of `FVector4` |
 | **R4** | 🟡 | `Controls/AYUIManager.cpp:51-67` | `ensureBuiltInFactoriesRegistered` is a workaround for anonymous-namespace registrars being subject to MSVC COMDAT stripping |
-| **R5** | 🟡 | `Controls/AYWidget.h:200` | `Widget::_hoverWidget` is only meaningful for compound widgets — should live in `CompoundWidget` |
+| **R5** | 🟡 | `include/AYUI/Widget.h:200` | `Widget::_hoverWidget` is only meaningful for compound widgets — should live in `CompoundWidget` |
 | **R6** | 🟡 | `Controls/AYUIManager.cpp:170-180` | `tryReload` destroys tree without `cancelCapture()` — UAF if reload fires mid-drag |
-| **R7** | 🟡 | `Controls/AYImage.h` | `_textureHandle` void*; no release path |
-| **R9** | 🟡 | `Events/AYEvent.h` | Dead stub from old namespace; design.md §2 says "deprecate" — actually delete |
+| **R7** | 🟡 | `include/AYUI/Image.h` | `_textureHandle` void*; no release path |
+| **R9** | 🟡 | `include/AYUI/Event.h` | Dead stub from old namespace; design.md §2 says "deprecate" — actually delete |
 | **R10** | 🔴 | `Style/AYStyle.cpp` missing | `StyleSheet::loadFromString` / `loadFromFile` / `StyleBuilder::makeDefault` etc. never implemented; whole style system is empty shell |
-| **R12** | 🟡 | `Style/IAYRenderBackend.h` | `BlendMode`/`PathFillMode`/`PathWinding`/`AnimationCurve`/`BorderStyle::Position` nested inside `IRenderBackend` class — call sites need full qualification |
+| **R12** | 🟡 | `interface/AYUI/IRenderBackend.h` | `BlendMode`/`PathFillMode`/`PathWinding`/`AnimationCurve`/`BorderStyle::Position` nested inside `IRenderBackend` class — call sites need full qualification |
 
 ### 15.3 Missing widgets (priority order)
 
@@ -829,7 +829,7 @@ The 2026-08-02 review (full report at `AYDocs/AYUI_CodeReview_2026-08-02.md`) fo
 
 **New API:**
 ```cpp
-// Controls/AYTooltip.h
+// include/AYUI/Tooltip.h
 void Tooltip::detach();   // null _target + unmount from overlay + hide()
 ```
 
@@ -841,7 +841,7 @@ void Tooltip::detach();   // null _target + unmount from overlay + hide()
 
 **New API:**
 ```cpp
-// Controls/AYDockArea.h
+// include/AYUI/DockArea.h
 bool DockArea::moveInSlot(const std::string& cardId, Slot target);
 ```
 
@@ -853,7 +853,7 @@ bool DockArea::moveInSlot(const std::string& cardId, Slot target);
 
 **New API:**
 ```cpp
-// Controls/AYModal.h
+// include/AYUI/Modal.h
 void Modal::setDimmer(Dimmer* dimmer);        // NON-OWNING attach. Host owns lifetime.
 void Modal::setDimmerOwned(Dimmer* dimmer);   // OWNING attach. ~Modal deletes.
 ```
@@ -870,7 +870,7 @@ Use:
 
 **New API:**
 ```cpp
-// Controls/AYMenu.h
+// include/AYUI/Menu.h
 void Menu::clearOwnerHost();   // null _ownerHost so close() doesn't reparent into a freed host
 ```
 

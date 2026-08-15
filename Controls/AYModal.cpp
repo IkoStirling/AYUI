@@ -1,6 +1,6 @@
-#include "AYModal.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
+#include "AYUI/Modal.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
 
 namespace ayt::ui {
 

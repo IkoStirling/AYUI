@@ -1,8 +1,8 @@
 #include "AYTest.h"
-#include "AYWidget.h"
-#include "AYMenu.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Widget.h"
+#include "AYUI/Menu.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
 
 #include <cmath>
 

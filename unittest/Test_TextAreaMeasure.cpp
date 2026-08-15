@@ -1,8 +1,8 @@
 #include "AYTest.h"
-#include "AYTextArea.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "AYTextMeasure.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/TextMeasure.h"
 #include <iostream>
 
 // =============================================================================

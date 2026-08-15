@@ -1,5 +1,5 @@
-#include "AYInteractiveWidget.h"
-#include "AYDockTrace.h"
+#include "AYUI/InteractiveWidget.h"
+#include "AYUI/DockTrace.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {

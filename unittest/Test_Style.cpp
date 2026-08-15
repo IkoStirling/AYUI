@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYStyle.h"
-#include "AYMockRenderer.h"
-#include "AYButton.h"
+#include "AYUI/Style.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Button.h"
 #include <cstring>
 #include <string>
 

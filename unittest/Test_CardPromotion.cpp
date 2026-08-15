@@ -18,11 +18,11 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
-#include "AYMockRenderer.h"
-#include "AYUIManager.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIManager.h"
 
 #include <memory>
 #include <string>

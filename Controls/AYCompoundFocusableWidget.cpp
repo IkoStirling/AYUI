@@ -1,6 +1,6 @@
-#include "AYCompoundFocusableWidget.h"
+#include "AYUI/CompoundFocusableWidget.h"
 
-#include "AYWidget.h"   // for compoundDescendLayout/Tick/HitTest/Leave helpers
+#include "AYUI/Widget.h"   // for compoundDescendLayout/Tick/HitTest/Leave helpers
 
 namespace ayt::ui {
 

@@ -3,11 +3,11 @@
 // the suite is order-independent.
 
 #include "AYTest.h"
-#include "AYTheme.h"
-#include "AYStyle.h"
-#include "AYWidget.h"
-#include "AYPanel.h"
-#include "AYButton.h"
+#include "AYUI/Theme.h"
+#include "AYUI/Style.h"
+#include "AYUI/Widget.h"
+#include "AYUI/Panel.h"
+#include "AYUI/Button.h"
 
 #include <nlohmann/json.hpp>
 #include <string>

@@ -1,7 +1,7 @@
-#include "AYDockOverlay.h"
-#include "AYDockCard.h"
-#include "AYWidget.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/Widget.h"
+#include "AYUI/IRenderBackend.h"
 
 namespace ayt::ui {
 

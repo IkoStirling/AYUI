@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYImageTexture.h"
-#include "AYTextureRegistry.h"
-#include "AYImage.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/ImageTexture.h"
+#include "AYUI/TextureRegistry.h"
+#include "AYUI/Image.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetSerializer.h"
 
 #include <cstring>
 #include <vector>

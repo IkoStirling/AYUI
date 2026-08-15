@@ -1,6 +1,6 @@
-#include "AYPanel.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
+#include "AYUI/Panel.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 
 namespace ayt::ui {
 

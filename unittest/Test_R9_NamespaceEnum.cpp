@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "IAYRenderBackend.h"
-#include "AYMockRenderer.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/MockRenderer.h"
 
 using namespace ayt::ui;
 

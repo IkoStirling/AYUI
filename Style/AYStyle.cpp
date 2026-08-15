@@ -1,6 +1,6 @@
-#include "AYStyle.h"
-#include "AYTheme.h"
-#include "AYWidget.h"
+#include "AYUI/Style.h"
+#include "AYUI/Theme.h"
+#include "AYUI/Widget.h"
 #include "AYMath/MathTypes.h"
 
 #include <nlohmann/json.hpp>

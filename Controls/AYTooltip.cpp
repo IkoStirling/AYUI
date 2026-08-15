@@ -1,6 +1,6 @@
-#include "AYTooltip.h"
-#include "IAYRenderBackend.h"
-#include "AYUIManager.h"
+#include "AYUI/Tooltip.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/UIManager.h"
 #include <algorithm>
 
 namespace ayt::ui {

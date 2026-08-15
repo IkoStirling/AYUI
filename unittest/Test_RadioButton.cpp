@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYRadioButton.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
 
 #include <iostream>
 

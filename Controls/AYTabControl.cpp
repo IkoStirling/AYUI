@@ -1,6 +1,6 @@
-#include "AYTabControl.h"
-#include "AYUIManager.h"
-#include "UIKeyCode.h"
+#include "AYUI/TabControl.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {

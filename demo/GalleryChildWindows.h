@@ -12,10 +12,10 @@
 //   * hitTestSlot returns a real slot inside the dock bounds
 //   * slot rect is large enough (rejects disabled Top/Bottom at 1e-6)
 
-#include "AYUIManager.h"
-#include "AYWindowManager.h"
-#include "AYWindowTypes.h"
-#include "AYInputTypes.h"
+#include "AYUI/UIManager.h"
+#include "AYDevice/WindowManager.h"
+#include "AYDevice/WindowTypes.h"
+#include "AYDevice/InputTypes.h"
 #include "AYMath/MathTypes.h"
 
 #include <memory>

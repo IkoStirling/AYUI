@@ -1,6 +1,6 @@
-#include "AYSplitterHandle.h"
-#include "AYBox.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/SplitterHandle.h"
+#include "AYUI/Box.h"
+#include "AYUI/IRenderBackend.h"
 
 #include <cstdio>
 #include <cstdlib>

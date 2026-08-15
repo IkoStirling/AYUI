@@ -1,5 +1,5 @@
-#include "AYTheme.h"
-#include "AYStyle.h"
+#include "AYUI/Theme.h"
+#include "AYUI/Style.h"
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <vector>

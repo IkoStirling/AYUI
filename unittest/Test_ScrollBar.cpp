@@ -1,13 +1,13 @@
 #include "AYTest.h"
-#include "AYScrollBar.h"
-#include "AYScrollableWidget.h"
-#include "AYScrollView.h"
-#include "AYListView.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/ScrollableWidget.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/ListView.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
 #include <cstdio>
 #include <iostream>
 

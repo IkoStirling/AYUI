@@ -1,10 +1,10 @@
-#include "AYTextInput.h"
-#include "AYUIManager.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
-#include "AYTextMeasure.h"
-#include "AYClipboard.h"
-#include "UIKeyCode.h"
+#include "AYUI/TextInput.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
+#include "AYUI/TextMeasure.h"
+#include "AYUI/Clipboard.h"
+#include "AYUI/UIKeyCode.h"
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>

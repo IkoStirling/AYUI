@@ -1,8 +1,8 @@
-#include "AYDockTabGroup.h"
-#include "AYDockCard.h"
-#include "AYUIManager.h"
-#include "AYDockTrace.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/DockTabGroup.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/DockTrace.h"
+#include "AYUI/IRenderBackend.h"
 
 #include <algorithm>
 #include <cmath>

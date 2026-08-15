@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYInteractiveWidget.h"
-#include "AYButton.h"
-#include "AYWindow.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
+#include "AYUI/InteractiveWidget.h"
+#include "AYUI/Button.h"
+#include "AYUI/Window.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;

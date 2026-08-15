@@ -1,6 +1,6 @@
 #include "AYTest.h"
 #include "AYMath/MathUtils.h"
-#include "AYI18n.h"
+#include "AYUI/I18n.h"
 #include <iostream>
 
 using namespace ayt::ui;

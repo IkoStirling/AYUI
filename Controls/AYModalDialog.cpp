@@ -1,6 +1,6 @@
-#include "AYModalDialog.h"
-#include "AYUIManager.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/IRenderBackend.h"
 
 #include <algorithm>
 #include <utility>

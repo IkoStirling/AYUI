@@ -19,13 +19,13 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYLayoutLoader.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYWidget.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
+#include "AYUI/LayoutLoader.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/Widget.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
 #include <AYIO/File.h>
 
 #include <cstdio>

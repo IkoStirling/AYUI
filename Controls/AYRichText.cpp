@@ -1,5 +1,5 @@
-#include "AYRichText.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/RichText.h"
+#include "AYUI/IRenderBackend.h"
 #include <algorithm>
 
 namespace ayt::ui {

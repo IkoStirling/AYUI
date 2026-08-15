@@ -1,12 +1,12 @@
 #include "AYTest.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
-#include "AYBox.h"
-#include "AYWidget.h"
-#include "AYTextLabel.h"
-#include "AYButton.h"
-#include "AYMockRenderer.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/Box.h"
+#include "AYUI/Widget.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/Button.h"
+#include "AYUI/MockRenderer.h"
 #include <memory>
 
 using namespace ayt::ui;

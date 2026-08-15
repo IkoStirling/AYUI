@@ -20,7 +20,6 @@ set(SRC_FILES
     Controls/AYScrollBar.cpp
     Controls/AYScrollView.cpp
     Controls/AYImage.cpp
-    Controls/AYImageTexture.h
     Controls/AYTextureRegistry.cpp
     Controls/AYInteractiveWidget.cpp
     Controls/AYSelectableWidget.cpp
@@ -73,73 +72,73 @@ set(SRC_FILES
 
 set(HEAD_FILES
     AYUI.h
-    Events/AYEvent.h
-    Controls/AYDragDrop.h
-    Controls/AYButton.h
-    Controls/AYCheckBox.h
-    Controls/AYRadioButton.h
-    Controls/AYRadioGroup.h
-    Controls/AYSlider.h
-    Controls/AYProgressBar.h
-    Controls/AYFocusableWidget.h
-    Controls/AYTextInput.h
-    Controls/AYTextArea.h
-    Controls/AYScrollableWidget.h
-    Controls/AYScrollBar.h
-    Controls/AYScrollView.h
-    Controls/AYImage.h
-    Controls/AYImageTexture.h
-    Controls/AYTextureRegistry.h
-    Controls/AYInteractiveWidget.h
-    Controls/AYLeafWidget.h
-    Controls/AYListView.h
-    Controls/AYComboBox.h
-    Controls/AYTabControl.h
-    Controls/AYTypeaheadBuffer.h
-    Controls/AYCompoundFocusableWidget.h
-    Controls/AYSelectableWidget.h
-    Controls/AYTooltip.h
-    Controls/AYPopupAnchor.h
-    Controls/AYSeparator.h
-    Controls/AYMenuItem.h
-    Controls/AYMenu.h
-    Controls/AYMenuBar.h
-    Controls/AYToolBar.h
-    Controls/AYToolBarSeparator.h
-    Controls/AYStatusBar.h
-    Controls/AYPanel.h
-    Controls/AYTextLabel.h
-    Controls/AYTreeNode.h
-    Controls/AYTreeView.h
-    Controls/AYRichText.h
-    Controls/AYWidget.h
-    Controls/AYUIManager.h
-    Controls/AYWindow.h
-    Controls/AYModal.h
-    Controls/AYModalDialog.h
-    Controls/AYDimmer.h
-    Controls/AYClipboard.h
-    Controls/AYTabStrip.h
-    Controls/AYSpinner.h
-    Controls/AYDockArea.h
-    Controls/AYDockCard.h
-    Controls/AYDockOverlay.h
-    Controls/AYDockTabGroup.h
-    Layout/AYBox.h
-    Layout/AYSplitterHandle.h
-    Layout/AYGridPanel.h
-    Layout/AYConstraint.h
-    Loader/AYLayoutLoader.h
-    Loader/AYWidgetFactory.h
-    Loader/AYWidgetSerializer.h
-    Style/AYMockRenderer.h
-    Style/AYStyle.h
-    Style/AYTheme.h
-    Style/AYThickness.h
-    Style/AYTextContent.h
-    Style/AYTextMeasure.h
-    i18n/AYI18n.h
-    Controls/UIKeyCode.h
+    include/AYUI/Event.h
+    include/AYUI/DragDrop.h
+    include/AYUI/Button.h
+    include/AYUI/CheckBox.h
+    include/AYUI/RadioButton.h
+    include/AYUI/RadioGroup.h
+    include/AYUI/Slider.h
+    include/AYUI/ProgressBar.h
+    include/AYUI/FocusableWidget.h
+    include/AYUI/TextInput.h
+    include/AYUI/TextArea.h
+    include/AYUI/ScrollableWidget.h
+    include/AYUI/ScrollBar.h
+    include/AYUI/ScrollView.h
+    include/AYUI/Image.h
+    include/AYUI/TextureRegistry.h
+    include/AYUI/InteractiveWidget.h
+    include/AYUI/LeafWidget.h
+    include/AYUI/ListView.h
+    include/AYUI/ComboBox.h
+    include/AYUI/TabControl.h
+    include/AYUI/TypeaheadBuffer.h
+    include/AYUI/CompoundFocusableWidget.h
+    include/AYUI/SelectableWidget.h
+    include/AYUI/Tooltip.h
+    include/AYUI/PopupAnchor.h
+    include/AYUI/Separator.h
+    include/AYUI/MenuItem.h
+    include/AYUI/Menu.h
+    include/AYUI/MenuBar.h
+    include/AYUI/ToolBar.h
+    include/AYUI/ToolBarSeparator.h
+    include/AYUI/StatusBar.h
+    include/AYUI/Panel.h
+    include/AYUI/TextLabel.h
+    include/AYUI/TreeNode.h
+    include/AYUI/TreeView.h
+    include/AYUI/RichText.h
+    include/AYUI/Widget.h
+    include/AYUI/UIManager.h
+    include/AYUI/Window.h
+    include/AYUI/Modal.h
+    include/AYUI/ModalDialog.h
+    include/AYUI/Dimmer.h
+    include/AYUI/Clipboard.h
+    include/AYUI/TabStrip.h
+    include/AYUI/Spinner.h
+    include/AYUI/DockArea.h
+    include/AYUI/DockCard.h
+    include/AYUI/DockOverlay.h
+    include/AYUI/DockTabGroup.h
+    include/AYUI/Box.h
+    include/AYUI/SplitterHandle.h
+    include/AYUI/GridPanel.h
+    include/AYUI/Constraint.h
+    include/AYUI/LayoutLoader.h
+    include/AYUI/WidgetFactory.h
+    include/AYUI/WidgetSerializer.h
+    include/AYUI/MockRenderer.h
+    include/AYUI/Style.h
+    include/AYUI/Theme.h
+    include/AYUI/Thickness.h
+    include/AYUI/TextContent.h
+    include/AYUI/TextMeasure.h
+    include/AYUI/I18n.h
+    include/AYUI/UIKeyCode.h
+    interface/AYUI/IRenderBackend.h
 )
 
 set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
@@ -147,15 +146,19 @@ set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
 find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
-target_include_directories(${MODULE_NAME} PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/Controls
-    ${CMAKE_CURRENT_SOURCE_DIR}/Events
-    ${CMAKE_CURRENT_SOURCE_DIR}/Layout
-    ${CMAKE_CURRENT_SOURCE_DIR}/Loader
-    ${CMAKE_CURRENT_SOURCE_DIR}/Style
-    ${CMAKE_CURRENT_SOURCE_DIR}/i18n
-    ${AYUI_NLOHMANN_DIR}
+target_include_directories(${MODULE_NAME}
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/interface
+        ${AYUI_NLOHMANN_DIR}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Controls
+        ${CMAKE_CURRENT_SOURCE_DIR}/Events
+        ${CMAKE_CURRENT_SOURCE_DIR}/Layout
+        ${CMAKE_CURRENT_SOURCE_DIR}/Loader
+        ${CMAKE_CURRENT_SOURCE_DIR}/Style
+        ${CMAKE_CURRENT_SOURCE_DIR}/i18n
 )
 
 if(nlohmann_json_FOUND)

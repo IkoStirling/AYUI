@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYCheckBox.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
+#include "AYUI/CheckBox.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
 
 #include <iostream>
 

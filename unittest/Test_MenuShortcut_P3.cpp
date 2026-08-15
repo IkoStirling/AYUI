@@ -13,12 +13,12 @@
 //   - SetShortcut overrides any previous binding on the same item.
 
 #include "AYTest.h"
-#include "AYMenu.h"
-#include "AYMenuBar.h"
-#include "AYMenuItem.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuBar.h"
+#include "AYUI/MenuItem.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 #include <string>
 
 using namespace ayt::ui;

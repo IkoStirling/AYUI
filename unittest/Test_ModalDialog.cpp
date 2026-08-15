@@ -1,8 +1,8 @@
 #include "AYTest.h"
-#include "AYModalDialog.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

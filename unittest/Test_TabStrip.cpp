@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYTabStrip.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

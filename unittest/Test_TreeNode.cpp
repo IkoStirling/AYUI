@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYTreeNode.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
+#include "AYUI/TreeNode.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;

@@ -1,13 +1,13 @@
 #include "AYTest.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "AYButton.h"
-#include "AYTextInput.h"
-#include "AYTextArea.h"
-#include "AYWindow.h"
-#include "AYModal.h"
-#include "AYDimmer.h"
-#include "UIKeyCode.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Button.h"
+#include "AYUI/TextInput.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/Window.h"
+#include "AYUI/Modal.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/UIKeyCode.h"
 
 #include <cstdio>
 #include <fstream>

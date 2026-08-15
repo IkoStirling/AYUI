@@ -1,11 +1,11 @@
 #include "AYTest.h"
-#include "AYMenu.h"
-#include "AYMenuItem.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuItem.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 #include <iostream>
 #include <fstream>
 

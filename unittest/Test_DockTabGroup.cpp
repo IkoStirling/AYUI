@@ -14,15 +14,15 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockOverlay.h"
-#include "AYDockTabGroup.h"
-#include "AYBox.h"
-#include "AYWidget.h"
-#include "AYMockRenderer.h"
-#include "AYUIManager.h"
-#include "UIKeyCode.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/DockTabGroup.h"
+#include "AYUI/Box.h"
+#include "AYUI/Widget.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/UIKeyCode.h"
 
 #include <memory>
 

@@ -1,10 +1,10 @@
-#include "AYTextArea.h"
-#include "AYScrollBar.h"
-#include "AYUIManager.h"
-#include "AYStyle.h"
-#include "AYTextMeasure.h"
-#include "AYClipboard.h"
-#include "UIKeyCode.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/Style.h"
+#include "AYUI/TextMeasure.h"
+#include "AYUI/Clipboard.h"
+#include "AYUI/UIKeyCode.h"
 #include <algorithm>
 #include <string>
 #include <vector>

@@ -1,6 +1,6 @@
-#include "AYTabStrip.h"
-#include "IAYRenderBackend.h"
-#include "UIKeyCode.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {

@@ -15,11 +15,11 @@
 // post many calls).
 
 #include "AYTest.h"
-#include "AYTextArea.h"
-#include "AYWidgetFactory.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 #include <string>
 
 using namespace ayt::ui;

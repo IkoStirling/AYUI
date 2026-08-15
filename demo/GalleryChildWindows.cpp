@@ -1,8 +1,8 @@
 #include "GalleryChildWindows.h"
 
-#include "AYDockArea.h"
-#include "AYDockCard.h"
-#include "AYDockTrace.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/DockTrace.h"
 
 #if defined(_WIN32)
 #  include "GalleryChildBackend.h"

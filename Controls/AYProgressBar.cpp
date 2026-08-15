@@ -1,7 +1,7 @@
-#include "AYProgressBar.h"
-#include "AYValueWidget.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
+#include "AYUI/ProgressBar.h"
+#include "AYUI/ValueWidget.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {

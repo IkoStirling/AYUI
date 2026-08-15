@@ -1,5 +1,5 @@
-#include "AYDimmer.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/IRenderBackend.h"
 
 namespace ayt::ui {
 

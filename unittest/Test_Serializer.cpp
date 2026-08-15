@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYWidgetSerializer.h"
-#include "AYTextLabel.h"
-#include "AYButton.h"
-#include "AYWindow.h"
-#include "AYBox.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/Button.h"
+#include "AYUI/Window.h"
+#include "AYUI/Box.h"
 #include <iostream>
 
 using namespace ayt::ui;

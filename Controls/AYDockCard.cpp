@@ -1,12 +1,12 @@
-#include "AYDockCard.h"
-#include "AYBox.h"
-#include "AYDockArea.h"
-#include "AYDockOverlay.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
-#include "AYUIManager.h"
-#include "AYDragDrop.h"
-#include "AYDockTrace.h"
+#include "AYUI/DockCard.h"
+#include "AYUI/Box.h"
+#include "AYUI/DockArea.h"
+#include "AYUI/DockOverlay.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/DragDrop.h"
+#include "AYUI/DockTrace.h"
 
 #include <algorithm>
 #include <cmath>

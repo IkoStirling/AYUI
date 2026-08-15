@@ -1,11 +1,11 @@
 #include "AYTest.h"
 #include "AYMath/MathUtils.h"
-#include "AYBox.h"
-#include "AYSplitterHandle.h"
-#include "AYImage.h"
-#include "AYButton.h"
-#include "AYMockRenderer.h"
-#include "AYWindow.h"
+#include "AYUI/Box.h"
+#include "AYUI/SplitterHandle.h"
+#include "AYUI/Image.h"
+#include "AYUI/Button.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Window.h"
 #include <iostream>
 
 using namespace ayt::ui;

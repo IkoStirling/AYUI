@@ -1,13 +1,13 @@
 #include "AYTest.h"
-#include "AYListView.h"
-#include "AYScrollBar.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
-#include "AYComboBox.h"
-#include "UIKeyCode.h"
+#include "AYUI/ListView.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
+#include "AYUI/ComboBox.h"
+#include "AYUI/UIKeyCode.h"
 #include <iostream>
 
 // =============================================================================

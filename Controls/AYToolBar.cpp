@@ -1,10 +1,10 @@
-#include "AYToolBar.h"
-#include "AYToolBarSeparator.h"
-#include "AYButton.h"
-#include "AYScrollView.h"
-#include "AYScrollBar.h"
-#include "AYSeparator.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/ToolBar.h"
+#include "AYUI/ToolBarSeparator.h"
+#include "AYUI/Button.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/Separator.h"
+#include "AYUI/IRenderBackend.h"
 #include <algorithm>
 
 namespace ayt::ui {

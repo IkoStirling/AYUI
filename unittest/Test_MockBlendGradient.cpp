@@ -3,7 +3,7 @@
 // line) is asserted frozen: drawBorderRect still expands to the interface's
 // inline 4/8-rect decomposition, drawRectShadow to one offset rect.
 
-#include "AYMockRenderer.h"
+#include "AYUI/MockRenderer.h"
 #include "AYTest.h"
 
 TEST_SUITE(MockBlendGradientTests)

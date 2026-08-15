@@ -1,11 +1,11 @@
-﻿// Headless round-trip check for LayoutEditorSession (no HWND).
+// Headless round-trip check for LayoutEditorSession (no HWND).
 #include "LayoutEditorSession.h"
 
-#include "AYLayoutLoader.h"
-#include "AYTheme.h"
-#include "AYUIManager.h"
-#include "AYWidget.h"
-#include "AYWidgetFactory.h"
+#include "AYUI/LayoutLoader.h"
+#include "AYUI/Theme.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/Widget.h"
+#include "AYUI/WidgetFactory.h"
 
 #include <cstdio>
 #include <string>

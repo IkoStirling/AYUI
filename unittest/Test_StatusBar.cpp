@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYStatusBar.h"
-#include "AYTextLabel.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/StatusBar.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include <iostream>
 
 using namespace ayt::ui;

@@ -1,9 +1,9 @@
 #include "AYTest.h"
-#include "AYModal.h"
-#include "AYDimmer.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "UIKeyCode.h"
+#include "AYUI/Modal.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/UIKeyCode.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

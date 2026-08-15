@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYWindow.h"
-#include "AYTextLabel.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Window.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/MockRenderer.h"
 
 // =============================================================================
 // PR-B1 — Window 4-edge + 4-corner resize (PR-1 was SE-only; PR-B1 ships the

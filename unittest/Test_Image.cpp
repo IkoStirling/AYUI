@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYImage.h"
-#include "AYLeafWidget.h"
-#include "AYWidget.h"
+#include "AYUI/Image.h"
+#include "AYUI/LeafWidget.h"
+#include "AYUI/Widget.h"
 #include <iostream>
 
 using namespace ayt::ui;

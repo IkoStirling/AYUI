@@ -1,10 +1,10 @@
 #include "AYTest.h"
-#include "AYTreeView.h"
-#include "AYTreeNode.h"
-#include "AYUIManager.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
+#include "AYUI/TreeView.h"
+#include "AYUI/TreeNode.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 #include <sstream>
 

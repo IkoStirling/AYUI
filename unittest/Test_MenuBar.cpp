@@ -1,12 +1,12 @@
 #include "AYTest.h"
-#include "AYMenuBar.h"
-#include "AYMenu.h"
-#include "AYMenuItem.h"
-#include "AYButton.h"
-#include "AYUIManager.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/MenuBar.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuItem.h"
+#include "AYUI/Button.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include <iostream>
 
 using namespace ayt::ui;

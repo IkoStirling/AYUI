@@ -434,9 +434,9 @@ void Button::onRender(IRenderBackend& renderer) {
 ```
 
 **实现位置：**
-- `AYUI/Style/IAYRenderBackend.h` - 接口定义
-- `AYUI/Style/AYMockRenderer.h/cpp` - 测试用 mock 实现
-- `AliyatRenderer/.../AYUIRenderBackend.h/cpp` - 实际渲染器实现（绑定到 UIRenderer）
+- `AYUI/interface/AYUI/IRenderBackend.h` - 接口定义
+- `AYUI/include/AYUI/MockRenderer.h/cpp` - 测试用 mock 实现
+- `AliyatRenderer/.../AYRenderer/UIRenderBackend.h/cpp` - 实际渲染器实现（绑定到 UIRenderer）
 
 ---
 
@@ -665,7 +665,7 @@ AYFont/
 ├── IFontManager.h              # 字体管理器接口
 ├── Font.h                      # 字体对象接口
 ├── IGlyphRenderer.h            # 字形渲染器接口
-├── AYMockFontManager.h/cpp     # Mock 实现（测试用）
+├── AYFont/MockFontManager.h/cpp     # Mock 实现（测试用）
 └── unittest/
 ```
 
@@ -677,37 +677,37 @@ AYFont/
 AYUI/
 ├── AYUI.h                    # 主头文件
 ├── Controls/
-│   ├── AYWidget.h/cpp         # 基类（含 render/IRenderBackend）
-│   ├── AYButton.h/cpp
-│   ├── AYTextLabel.h/cpp
-│   ├── AYImage.h/cpp
-│   ├── AYWindow.h/cpp
+│   ├── AYUI/Widget.h/cpp         # 基类（含 render/IRenderBackend）
+│   ├── AYUI/Button.h/cpp
+│   ├── AYUI/TextLabel.h/cpp
+│   ├── AYUI/Image.h/cpp
+│   ├── AYUI/Window.h/cpp
 │   └── AYCompoundWidget.h
 ├── Layout/
-│   └── AYBox.h/cpp            # VBox/HBox
+│   └── AYUI/Box.h/cpp            # VBox/HBox
 ├── Spatial/
 │   ├── AYSpatialWidget.h/cpp  # 3D 空间控件基类
 │   └── AYUIPlane.h/cpp        # 3D 面片 UI
 ├── Style/
-│   ├── IAYRenderBackend.h     # 渲染器接口（UI 定义）
-│   ├── AYMockRenderer.h/cpp   # 测试用 mock 实现
-│   └── AYStyle.h/cpp          # 样式系统（混合方案）
+│   ├── AYUI/IRenderBackend.h     # 渲染器接口（UI 定义）
+│   ├── AYUI/MockRenderer.h/cpp   # 测试用 mock 实现
+│   └── AYUI/Style.h/cpp          # 样式系统（混合方案）
 ├── Events/
 │   ├── AYEventBridge.h/cpp    # 事件桥接
 │   └── AYUIEvent.h            # UI 内部事件定义
 ├── Loader/
-│   ├── AYLayoutLoader.h/cpp  # JSON 加载器
-│   ├── AYWidgetFactory.h      # 控件工厂注册
-│   └── AYWidgetSerializer.h/cpp # Widget 序列化/反序列化
+│   ├── AYUI/LayoutLoader.h/cpp  # JSON 加载器
+│   ├── AYUI/WidgetFactory.h      # 控件工厂注册
+│   └── AYUI/WidgetSerializer.h/cpp # Widget 序列化/反序列化
 ├── i18n/
-│   ├── AYI18n.h/cpp           # 国际化系统
+│   ├── AYUI/I18n.h/cpp           # 国际化系统
 │   └── LangTable.json         # 语言表
 └── unittest/
 
 AliyatRenderer/
 └── src/Core/Renderer/
     └── include/BaseRendering/UI/
-        └── AYUIRenderBackend.h/cpp  # 实际渲染器实现
+        └── AYRenderer/UIRenderBackend.h/cpp  # 实际渲染器实现
 ```
 
 ---

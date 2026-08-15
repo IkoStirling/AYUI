@@ -1,8 +1,8 @@
 #include "AYTest.h"
 #include "AYMath/MathUtils.h"
-#include "AYWidgetFactory.h"
-#include "AYWidget.h"
-#include "AYButton.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/Widget.h"
+#include "AYUI/Button.h"
 #include <iostream>
 
 using namespace ayt::ui;

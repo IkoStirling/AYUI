@@ -1,8 +1,8 @@
-#include "AYButton.h"
-#include "IAYRenderBackend.h"
-#include "AYStyle.h"
-#include "AYTextMeasure.h"
-#include "AYDockTrace.h"
+#include "AYUI/Button.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
+#include "AYUI/TextMeasure.h"
+#include "AYUI/DockTrace.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {

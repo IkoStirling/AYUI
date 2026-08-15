@@ -11,7 +11,7 @@
 
 2. **使用 AYTest 框架进行单元测试**
    - AYUI 使用 AYTest 框架（位于 D:/Projects/AYTest/）
-   - 测试文件包含 `AYTest/AYTest.h`，使用 `TEST_SUITE`、`TEST_CASE`、`CHECK_*` 等宏
+   - 测试文件包含 `AYTest.h`，使用 `TEST_SUITE`、`TEST_CASE`、`CHECK_*` 等宏
    - 测试文件放在 AYUI/unittest/ 目录下
 
 3. **可主动构建 + 跑测试**
@@ -34,7 +34,7 @@
 
 ### 事件系统
 - 双层事件架构：内部冒泡 + 外部桥接
-- 内部事件：**`UIEvent` / `UIEventType`**（`AYWidget.h`）；`Events/AYEvent.h` 待删除
+- 内部事件：**`UIEvent` / `UIEventType`**（`AYUI/Widget.h`）；`include/AYUI/Event.h` 待删除
 - EventBridge（U3）负责引擎输入 → `UIEvent`，见 `design.md` §5
 
 ### 国际化（i18n）
@@ -49,7 +49,7 @@
 
 ## 文件命名规范
 
-- 文件前缀：`AY`（如 `AYWidget.h`、`AYLayoutLoader.cpp`）
+- 文件前缀：`AY`（如 `AYUI/Widget.h`、`AYLayoutLoader.cpp`）
 - 类名：**不使用前缀**（如 `class Widget`，`class Button`）
 - 命名空间：`ayt::ui`
 

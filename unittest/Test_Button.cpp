@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYButton.h"
-#include "AYStyle.h"
-#include "AYMockRenderer.h"
+#include "AYUI/Button.h"
+#include "AYUI/Style.h"
+#include "AYUI/MockRenderer.h"
 #include <iostream>
 
 using namespace ayt::ui;

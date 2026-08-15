@@ -1,6 +1,6 @@
-#include "UIKeyCode.h"
+#include "AYUI/UIKeyCode.h"
 
-// UIKeyCode.h already pulls in AYInputTypes.h.
+// UIKeyCode.h already pulls in AYDevice/InputTypes.h.
 
 namespace ayt::ui {
 

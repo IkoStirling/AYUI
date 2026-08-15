@@ -17,13 +17,13 @@
 #include "LayoutEditorSession.h"
 
 #include "AYUI.h"
-#include "AYUIManager.h"
-#include "AYUIRenderBackend.h"
+#include "AYUI/UIManager.h"
+#include "AYRenderer/UIRenderBackend.h"
 #include "AYRenderer.h"
-#include "AYRenderTypes.h"
-#include "AYTheme.h"
-#include "AYDeviceManager.h"
-#include "UIKeyCode.h"
+#include "AYRenderer/RenderTypes.h"
+#include "AYUI/Theme.h"
+#include "AYDevice/DeviceManager.h"
+#include "AYUI/UIKeyCode.h"
 
 #include <cstdint>
 #include <cstdio>

@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYWidget.h"
-#include "AYScrollableWidget.h"
-#include "AYPopupAnchor.h"
+#include "AYUI/Widget.h"
+#include "AYUI/ScrollableWidget.h"
+#include "AYUI/PopupAnchor.h"
 #include <fstream>
 #include <string>
 

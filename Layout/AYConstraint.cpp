@@ -1,5 +1,5 @@
-#include "AYConstraint.h"
-#include "AYWidget.h"
+#include "AYUI/Constraint.h"
+#include "AYUI/Widget.h"
 // AYWidget.h provides the full CompoundWidget definition that
 // ConstraintPanel inherits from. Without this include the class
 // hierarchy is incomplete and methods like getWidth/getHeight/

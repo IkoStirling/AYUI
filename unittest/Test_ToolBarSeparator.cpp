@@ -1,10 +1,10 @@
 #include "AYTest.h"
-#include "AYToolBarSeparator.h"
-#include "AYSeparator.h"
-#include "AYToolBar.h"
-#include "AYMockRenderer.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
+#include "AYUI/ToolBarSeparator.h"
+#include "AYUI/Separator.h"
+#include "AYUI/ToolBar.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
 #include <iostream>
 
 using namespace ayt::ui;

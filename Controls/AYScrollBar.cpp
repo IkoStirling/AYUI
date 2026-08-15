@@ -1,6 +1,6 @@
-#include "AYScrollBar.h"
-#include "AYValueWidget.h"
-#include "IAYRenderBackend.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/ValueWidget.h"
+#include "AYUI/IRenderBackend.h"
 #include "AYMath/MathUtils.h"
 #include <algorithm>
 

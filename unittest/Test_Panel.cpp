@@ -1,11 +1,11 @@
 #include "AYTest.h"
-#include "AYPanel.h"
-#include "AYButton.h"
-#include "AYTextLabel.h"
-#include "AYWidgetFactory.h"
-#include "AYWidgetSerializer.h"
-#include "AYMockRenderer.h"
-#include "AYStyle.h"
+#include "AYUI/Panel.h"
+#include "AYUI/Button.h"
+#include "AYUI/TextLabel.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/WidgetSerializer.h"
+#include "AYUI/MockRenderer.h"
+#include "AYUI/Style.h"
 
 #include <iostream>
 

@@ -1,9 +1,9 @@
-#include "AYMenu.h"
-#include "IAYRenderBackend.h"
-#include "AYSeparator.h"
-#include "AYUIManager.h"
-#include "AYDockTrace.h"
-#include "UIKeyCode.h"
+#include "AYUI/Menu.h"
+#include "AYUI/IRenderBackend.h"
+#include "AYUI/Separator.h"
+#include "AYUI/UIManager.h"
+#include "AYUI/DockTrace.h"
+#include "AYUI/UIKeyCode.h"
 #include <algorithm>
 
 namespace ayt::ui {
