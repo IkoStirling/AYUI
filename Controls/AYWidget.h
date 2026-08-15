@@ -1,9 +1,10 @@
 #pragma once
 
-#include "aymath/MathTypes.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathTypes.h"
+#include "AYMath/MathUtils.h"
 #include "IAYRenderBackend.h"
 #include "AYDragDrop.h"
+#include "AYTween.h"
 
 #include <functional>
 #include <vector>
@@ -114,6 +115,9 @@ public:
     void addChildExternal(Widget* child);
     void removeChild(Widget* child);
     void detachFromParent();
+    // Reorder an already-attached child. Returns false if `child` is not
+    // ours or `index` is out of range. Used by layout editors / dock tools.
+    bool moveChildToIndex(Widget* child, size_t index);
 
     // True when attached via addChildExternal (host owns lifetime).
     bool isExternallyOwned() const { return _externallyOwned; }
@@ -129,6 +133,9 @@ public:
         if (_position.x == pos.x && _position.y == pos.y) {
             return;
         }
+        // A direct set cancels any in-flight position tween — the caller
+        // took over (mirrors setOpacity).
+        _posAnim.active = false;
         _position = pos;
         markBoundsDirty();
     }
@@ -269,7 +276,16 @@ public:
     // mirrors MockRenderer's animation handles (same easing).
     void animateOpacity(float to, float durationMs,
                         AnimationCurve curve = AnimationCurve::EaseOut);
-    bool isOpacityAnimating() const { return _opacityAnimating; }
+    bool isOpacityAnimating() const { return _opacityAnim.active; }
+
+    // UI-anim cut 2: position tween. Tweens _position from its current
+    // value to `to` over durationMs, driven by tick(dt). NOTE: only for
+    // overlay / manually-positioned children (popups, tooltips) — widgets
+    // inside a laid-out tree get their position overwritten by the parent's
+    // performLayout(), so a position tween is a no-op there by design.
+    void animatePositionTo(const math::FVector2& to, float durationMs,
+                           AnimationCurve curve = AnimationCurve::EaseOut);
+    bool isPositionAnimating() const { return _posAnim.active; }
 
     // Style
     void setStyleId(const std::string& id) { _styleId = id; }
@@ -378,14 +394,13 @@ protected:
 
     // PR-anim: tree opacity + fade transition state. _opacity == 1.0 is
     // the fast path (no pushOpacity, byte-identical rendering); the
-    // animation fields are idle until animateOpacity starts a tween.
+    // AnimState is idle until animateOpacity starts a tween.
     float _opacity = 1.0f;
-    bool  _opacityAnimating = false;
-    float _opacityAnimFrom = 1.0f;
-    float _opacityAnimTo = 1.0f;
-    float _opacityAnimElapsed = 0.0f;
-    float _opacityAnimDuration = 0.0f;
-    AnimationCurve _opacityAnimCurve = AnimationCurve::EaseOut;
+    AnimState<float> _opacityAnim;
+
+    // UI-anim cut 2: position tween (popup slide-ins). Idle by default —
+    // only popups start it; getWorldBounds self-heals on drift.
+    AnimState<math::FVector2> _posAnim;
 
     std::string _styleId;
     std::string _id;

@@ -2,7 +2,7 @@
 #include "AYValueWidget.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 namespace ayt::ui {
 

@@ -18,7 +18,7 @@
 // Returns the final position to setPosition() on the popup widget.
 // =============================================================================
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 namespace ayt::ui {
 

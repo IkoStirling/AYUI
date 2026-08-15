@@ -26,7 +26,7 @@
 #include "AYDockArea.h"
 #include "AYDockCard.h"
 #include "AYDockOverlay.h"
-#include <ayio/File.h>
+#include <AYIO/File.h>
 
 #include <cstdio>
 #include <memory>

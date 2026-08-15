@@ -17,6 +17,15 @@ public:
 
     void setPadding(float left, float top, float right, float bottom);
 
+    // Optional override for the unstyled (fallback) Hovered fill. Default
+    // palette stays a restrained grey lift; Gallery's Animation demo pins
+    // accent-blue on anim_btn* only. No-op on the styled draw path.
+    void setFallbackHoverColor(const math::FVector4& c) {
+        _fallbackHover = c;
+        _hasFallbackHover = true;
+    }
+    void clearFallbackHoverColor() { _hasFallbackHover = false; }
+
     // Phase D (D4) — preferred-size heuristic used by TabStrip when laying
     // out tab buttons. Each char ~8px + horizontal padding on each side.
     // This is intentionally rough; v1.1 swaps in a real text shaper. The
@@ -29,6 +38,8 @@ protected:
 
     std::wstring _text;
     math::FVector4 _padding{8.0f, 4.0f, 8.0f, 4.0f};
+    bool _hasFallbackHover = false;
+    math::FVector4 _fallbackHover{0.0f, 0.0f, 0.0f, 1.0f};
 };
 
 } // namespace ayt::ui

@@ -1,6 +1,6 @@
 #pragma once
 #include "AYThickness.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 #include <string>
 
 namespace ayt::ui {

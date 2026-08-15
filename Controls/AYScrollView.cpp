@@ -2,7 +2,7 @@
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
 #include "AYScrollBarSync.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -63,6 +63,8 @@ void ScrollView::ensureBarsCreated() {
         _vbar = new ScrollBar();
         _vbar->setOrientation(ScrollBar::Orientation::Vertical);
         _vbar->setOnValueChanged([this](float v) {
+            // A bar drag takes over from any glide in flight.
+            _scrollState.clearMomentum();
             // PR-Container-Shared-Contract: route through ScrollableWidget::scrollBy
             // for the canonical clamp. Preserves ScrollView's behaviour: syncContent
             // position + fire _onScroll whenever the offset actually moved.
@@ -81,6 +83,7 @@ void ScrollView::ensureBarsCreated() {
         _hbar = new ScrollBar();
         _hbar->setOrientation(ScrollBar::Orientation::Horizontal);
         _hbar->setOnValueChanged([this](float v) {
+            _scrollState.clearMomentum();
             const math::FVector2 vp = getViewportSize();
             const math::FVector2 delta(
                 v - _scrollState.getScrollOffset().x,
@@ -166,7 +169,28 @@ bool ScrollView::scrollBy(const math::FVector2& delta) {
 // wheel away from them" = content moves UP = scrollOffset INCREASES.
 // So we pass deltaY through unchanged here.
 bool ScrollView::onMouseWheel(const UIMouseWheelEvent& e) {
-    return scrollBy(math::FVector2(0.0f, e.deltaY));
+    // UI-anim cut 2: applyWheel keeps the immediate scroll AND seeds the
+    // glide velocity. The container-side sync (content position, bars,
+    // _onScroll) still runs right here so the wheel frame paints
+    // instantly — the glide only adds the post-wheel drift.
+    const bool changed =
+        _scrollState.applyWheel(math::FVector2(0.0f, e.deltaY), getViewportSize());
+    if (changed) {
+        syncContentPosition();
+        syncBarsToOffset();
+        if (_onScroll) _onScroll(_scrollState.getScrollOffset());
+    }
+    return changed;
+}
+
+void ScrollView::tick(float dt) {
+    // Chain the base cascade first (opacity/position tweens of this
+    // widget + virtual tick of content children), then glide.
+    CompoundWidget::tick(dt);
+    math::FVector2 d;
+    if (_scrollState.advanceMomentum(dt, getViewportSize(), d)) {
+        scrollBy(d);
+    }
 }
 
 void ScrollView::performLayout() {

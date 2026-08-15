@@ -84,6 +84,18 @@ public:
     // Layout & render.
     void performLayout() override;
 
+    // UI-anim cut 2: selection underline slides instead of hard-swapping.
+    // tween ms default 120; setIndicatorTweenMs(0) restores the instant
+    // swap (byte-identical to the pre-animation render path).
+    void setIndicatorTweenMs(float ms) {
+        _indicatorTweenMs = ms;
+        if (ms <= 0.0f) _indicatorAnim.active = false;
+    }
+    float getIndicatorTweenMs() const { return _indicatorTweenMs; }
+    bool isIndicatorAnimating() const { return _indicatorAnim.active; }
+
+    void tick(float dt) override;
+
     // Phase B keyboard nav mirror (B4 had the same on TabControl).
     // Left/Right cycle _selectedIndex. The host sets focus into the
     // strip for keyboard cycling (a Tab traversal host typically lands
@@ -113,6 +125,17 @@ private:
                               //            "tabs-with-underline" look
 
     std::function<void(int)> _onSelectionChanged;
+
+    // UI-anim cut 2: indicator slide. _indicatorRect packs (x, width) of
+    // the underline; tweened via the same render-driven retarget pattern
+    // as InteractiveWidget::resolveTransitionColor.
+    AnimState<math::FVector2> _indicatorAnim;
+    math::FVector2 _indicatorRect{0.0f, 0.0f};
+    float _indicatorTweenMs = 120.0f;
+    bool  _indicatorInitialized = false;
+
+    math::FVector2 indicatorTargetRect() const;
+    math::FVector2 resolveIndicatorRect(const math::FVector2& target);
 };
 
 Widget* createTabStripWidget();

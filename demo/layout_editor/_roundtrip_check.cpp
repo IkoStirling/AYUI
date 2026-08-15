@@ -32,6 +32,17 @@ int main() {
     }
 
     session.selectById("btn_hello");
+    // Regression: child then Shift-select root must not nest ancestor+child.
+    session.select(session.documentRoot(), true);
+    if (session.selection().size() != 1 ||
+        session.selected() != session.documentRoot()) {
+        std::fprintf(stderr,
+            "nested-select regression: expected exclusive root, got sel=%zu\n",
+            session.selection().size());
+        return 8;
+    }
+
+    session.selectById("btn_hello");
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");
 

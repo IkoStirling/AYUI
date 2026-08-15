@@ -52,12 +52,48 @@ public:
     bool isMouseOver() const { return _isMouseOver; }
     bool isPressed() const { return _isPressed; }
 
+    // ---------------------------------------------------------------------
+    // Color transitions (UI animation lane, cut 1). State colors in the
+    // fallback render paths normally swap instantly on hover/press; with
+    // the color tween on (default 90ms) they interpolate instead. The
+    // tween is *render-driven*: subclasses compute the target color in
+    // onRender and pass it through resolveTransitionColor(), which starts
+    // the tween when the target differs from the current color. That
+    // covers every state-change path (mouse handlers, setEnabled) without
+    // touching the state machine. setColorTweenMs(0) restores instant
+    // swap semantics (byte-identical to pre-animation rendering).
+    // ---------------------------------------------------------------------
+    void setColor(const math::FVector4& c);   // snap + cancel any tween
+    math::FVector4 getColor() const { return _color; }
+    void animateColorTo(const math::FVector4& to, float durationMs,
+                        AnimationCurve curve = AnimationCurve::EaseOut);
+    void setColorTweenMs(float ms) { _colorTweenMs = ms; }
+    float getColorTweenMs() const { return _colorTweenMs; }
+
+    // Advances the color tween; widgets whose tick is driven through
+    // compoundDescendTick (virtual dispatch) hit this override.
+    void tick(float dt) override;
+
 protected:
+    // onRender consumption point: returns the color to draw for `target`,
+    // starting / retargeting the tween as needed. Never modifies `target`
+    // semantics — with the tween disabled it is the identity function.
+    math::FVector4 resolveTransitionColor(const math::FVector4& target);
+
     ButtonState _state = ButtonState::Normal;
     bool _enabled = true;
     bool _isMouseOver = false;
     bool _isPressed = false;
     std::function<void()> _onClicked;
+
+    // UI animation lane: color transition state. _color is the currently
+    // drawn color (written by tick); _colorAnim is idle until a transition
+    // starts. _colorInitialized guards the first render — the initial
+    // {1,1,1,1} is a placeholder, not a color to tween FROM.
+    AnimState<math::FVector4> _colorAnim;
+    math::FVector4 _color{1.0f, 1.0f, 1.0f, 1.0f};
+    float _colorTweenMs = 90.0f;
+    bool _colorInitialized = false;
 };
 
 } // namespace ayt::ui

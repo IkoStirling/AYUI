@@ -46,6 +46,8 @@ public:
     void addWidget(Widget* widget, float size = 0.0f, const BoxSlotLimits& limits = {});
     void insertWidget(int index, Widget* widget, float size = 0.0f, const BoxSlotLimits& limits = {});
     void removeWidget(Widget* widget);
+    // Reorder an existing slot (and matching child). Used by layout editors.
+    bool moveSlotToIndex(Widget* widget, size_t index);
 
     void setSlotLimits(int slotIndex, const BoxSlotLimits& limits);
     float slotSize(int slotIndex) const;

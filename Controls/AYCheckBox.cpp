@@ -1,7 +1,7 @@
 #include "AYCheckBox.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -91,6 +91,10 @@ void CheckBox::onRender(IRenderBackend& renderer) {
         } else if (!isEnabled()) {
             boxBg = math::FVector4(0.18f, 0.18f, 0.18f, 1.0f);
         }
+        // UI animation lane: hover/press box fill transitions (90ms
+        // default). The checked accent below is NOT tweened — it is a
+        // selection state, not a hover response.
+        boxBg = resolveTransitionColor(boxBg);
         boxBorderColor = math::FVector4(0.5f, 0.5f, 0.55f, 1.0f);
         boxBorderWidth = 1.0f;
     }

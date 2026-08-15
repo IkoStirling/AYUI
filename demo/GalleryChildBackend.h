@@ -14,8 +14,8 @@
 // low framerate) because WM_PAINT / class brush cleared mid-frame while
 // FillRect/DrawText streamed to the front buffer.
 
-#include "aymath/MathDefs.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathDefs.h"
+#include "AYMath/MathTypes.h"
 #include "IAYRenderBackend.h"
 
 #ifndef WIN32_LEAN_AND_MEAN

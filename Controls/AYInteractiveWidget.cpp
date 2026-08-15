@@ -1,5 +1,6 @@
 #include "AYInteractiveWidget.h"
-#include "aymath/MathUtils.h"
+#include "AYDockTrace.h"
+#include "AYMath/MathUtils.h"
 
 namespace ayt::ui {
 
@@ -93,6 +94,11 @@ bool InteractiveWidget::onMouseButtonUp(const UIMouseEvent& e) {
 }
 
 void InteractiveWidget::onMouseLeave() {
+    if (ayuiTraceInputEnabled() && (_isMouseOver || _state != ButtonState::Normal)) {
+        dockTrace("[LeaveTrace] LEAVE id=%s (was hover=%d state=%d)\n",
+                  getStyleId().c_str(), _isMouseOver ? 1 : 0,
+                  static_cast<int>(_state));
+    }
     _isMouseOver = false;
     _isPressed = false;
     if (_state == ButtonState::Hovered || _state == ButtonState::Pressed) {
@@ -105,6 +111,68 @@ UiCursorHint InteractiveWidget::getCursorHint() const {
         return UiCursorHint::Hand;
     }
     return UiCursorHint::Default;
+}
+
+// ---------------------------------------------------------------------------
+// UI animation lane, cut 1 — color transitions.
+// ---------------------------------------------------------------------------
+
+void InteractiveWidget::setColor(const math::FVector4& c) {
+    _colorInitialized = true;
+    _colorAnim.snap(c);
+    _color = c;
+}
+
+void InteractiveWidget::animateColorTo(const math::FVector4& to, float durationMs,
+                                       AnimationCurve curve) {
+    if (!_colorInitialized) {
+        // Never rendered a color yet — snap to avoid a ghost tween from
+        // the {1,1,1,1} placeholder.
+        _colorInitialized = true;
+        _colorAnim.snap(to);
+        _color = to;
+        return;
+    }
+    _colorAnim.start(_color, to, durationMs, curve);
+}
+
+void InteractiveWidget::tick(float dt) {
+    Widget::tick(dt);
+    const bool wasActive = _colorAnim.active;
+    float t;
+    if (_colorAnim.advance(dt, t)) {
+        _color = tweenLerp(_colorAnim.from, _colorAnim.to, t);
+    } else if (wasActive) {
+        // Completed this frame — snap to the exact target.
+        _color = _colorAnim.to;
+    }
+}
+
+math::FVector4 InteractiveWidget::resolveTransitionColor(
+    const math::FVector4& target) {
+    // First render or tween disabled: identity — snap to the target so
+    // pre-animation semantics are byte-identical.
+    if (!_colorInitialized || _colorTweenMs <= 0.0f) {
+        _colorInitialized = true;
+        _colorAnim.snap(target);
+        _color = target;
+        return target;
+    }
+    if (_colorAnim.active) {
+        if (target == _colorAnim.to) {
+            // Still running toward the same target — return the current
+            // lerped value.
+            return _color;
+        }
+        // Target changed mid-flight — retarget from the current value.
+        _colorAnim.start(_color, target, _colorTweenMs, AnimationCurve::EaseOut);
+        return _color;
+    }
+    if (target != _color) {
+        // Idle and the target moved — start the transition from here.
+        _colorAnim.start(_color, target, _colorTweenMs, AnimationCurve::EaseOut);
+    }
+    return _color;
 }
 
 } // namespace ayt::ui

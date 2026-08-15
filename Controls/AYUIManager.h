@@ -108,6 +108,8 @@ public:
 
     bool loadLayout(const std::string& path);
     bool loadFromString(const std::string& json);
+    // Disable FileWatcher hot-reload for the active layout (layout editors).
+    void disableLayoutHotReload();
     void bindEvent(const std::string& widgetId, const std::string& eventType,
                    std::function<void()> handler);
 
@@ -188,6 +190,21 @@ public:
     // destroy=false to unmount only — required when ComboBox dismisses
     // from inside a ListView selection callback (destroy would UAF).
     void closePopup(Widget* popup, bool destroy = true);
+
+    // UI animation lane (cut 1) — animated close. Runs the closePopup
+    // bookkeeping synchronously (active-dropdown / capture / focus /
+    // hover / tooltip registry) but keeps the popup mounted so its
+    // fade-out renders, then detaches (and optionally destroys) it on a
+    // later update() once the fade completes. `companion` is a second
+    // overlay sibling to detach with the popup (Modal's dimmer). Menu
+    // popups must pass destroy=false — they soft-unmount and reparent
+    // back to the MenuBar via onPopupFadeOutCompleted. Reopening a
+    // popup before its fade completes cancels the pending close
+    // (cancelPendingPopupClose is called by openPopup / closePopup).
+    void beginPopupFadeOut(Widget* popup, bool destroy,
+                           Widget* companion = nullptr);
+    // Cancels a pending animated close (no-op if not queued).
+    void cancelPendingPopupClose(Widget* popup);
 
     // True if `widget` is `ancestor` or any descendant of `ancestor`.
     // Walks the parent chain. Used by closePopup to null _capturedWidget
@@ -475,6 +492,29 @@ private:
     // anchor tracking, a click on the ComboBox's own main area would
     // be misclassified as click-outside and the popup would flicker
     // close-then-reopen in the same frame.
+    // UI animation lane (cut 1) — popups mid-fade-out. Bookkeeping is
+    // already done (beginPopupFadeOut ran it); the popup stays mounted
+    // purely to render its fade. flushPendingPopupCloses finalizes each
+    // entry in update(); pickTopmostWidget skips them so a fading popup
+    // no longer receives input. Destroyed popups must never linger here —
+    // closePopup/abandonPopup cancel their entry first.
+    struct PendingPopupClose {
+        Widget* popup = nullptr;
+        bool    destroy = false;         // destroyWidgetTree on finalize
+        bool    notifyCombo = false;     // snapshotted at begin time
+        Widget* anchor = nullptr;        // snapshotted (ComboBox notify)
+        bool    externallyOwned = false; // snapshotted — removeChild clears it
+        Widget* companion = nullptr;     // extra overlay sibling to detach
+    };
+    std::vector<PendingPopupClose> _pendingPopupCloses;
+    void flushPendingPopupCloses();
+    bool isPendingPopupClose(const Widget* popup) const;
+    // Detaches (and optionally destroys) a popup whose fade-out ended.
+    // Companion (Modal dimmer) detaches first. Menu popups soft-unmount
+    // via onPopupFadeOutCompleted instead of dying.
+    void finishPopupClose(Widget* popup, bool destroy, bool externallyOwned,
+                          Widget* companion);
+
     Widget* _activeDropdown = nullptr;
     Widget* _activeDropdownAnchor = nullptr;
     // True when `_activeDropdownAnchor` was a ComboBox at openPopup time.

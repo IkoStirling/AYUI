@@ -110,6 +110,9 @@ TEST_CASE(button_render_preserves_hover_fill) {
 
     UIMouseEvent hover(FVector2(50.0f, 16.0f), 0);
     button.onMouseMove(hover);
+    // UI animation lane: hover fill transitions over 90ms — advance the
+    // tween to completion so the target color is asserted.
+    button.tick(0.09f);
     button.render(renderer);
 
     CHECK(renderer.getDrawCalls().size() >= 5u);

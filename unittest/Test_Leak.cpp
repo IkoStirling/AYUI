@@ -20,7 +20,7 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 #include "AYListView.h"
 #include "AYScrollView.h"
 #include "AYTabStrip.h"

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AYWidget.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 namespace ayt::ui {
 
@@ -58,6 +58,24 @@ public:
                                              const math::FVector2& viewportSize,
                                              const math::FVector2& contentSize);
 
+    // UI-anim cut 2 — wheel momentum (inertia).
+    //
+    // applyWheel() keeps the immediate scrollBy() semantics — content
+    // moves the instant the wheel fires, exactly as before — and seeds a
+    // velocity so the container's tick() glides afterwards. The container
+    // calls advanceMomentum(dt, vp, outDelta) from its tick() and feeds
+    // outDelta back into ITS OWN scrollBy() (which re-syncs content /
+    // bars / row pool in one chokepoint). Velocity decays exponentially;
+    // arriving at a scroll boundary zeroes the offending axis.
+    bool applyWheel(const math::FVector2& delta,
+                    const math::FVector2& viewportSize);
+    bool advanceMomentum(float dt,
+                         const math::FVector2& viewportSize,
+                         math::FVector2& outDelta);
+    // Bar-drag call sites call this so a drag takes over cleanly.
+    void clearMomentum();
+    bool hasMomentum() const { return _momentumActive; }
+
 protected:
     // Subclass overrides; ScrollableWidget's default impl fires the
     // callback if attached.
@@ -65,6 +83,14 @@ protected:
 
     math::FVector2 _contentSize{0.0f, 0.0f};
     math::FVector2 _scrollOffset{0.0f, 0.0f};
+
+    // Momentum state. _momentumOffset is a float accumulator so slow
+    // glides don't jitter 1px/0px under per-frame rounding — outDelta is
+    // the difference between the snapped accumulator and the snapped
+    // true offset, applied via the container's own scrollBy.
+    bool _momentumActive = false;
+    math::FVector2 _velocity{0.0f, 0.0f};
+    math::FVector2 _momentumOffset{0.0f, 0.0f};
 };
 
 } // namespace ayt::ui

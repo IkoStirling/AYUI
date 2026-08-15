@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <cstdio>
 
@@ -81,6 +81,10 @@
 #include "Test_DockTabGroup.cpp"           // dock-tree Phase 2 (leaf widget)
 #include "Test_DockTree.cpp"               // dock-tree Phase 3 (nested split / join / prune)
 #include "Test_OpacityAnimation.cpp"       // PR-anim (renderer opacity stack + widget fade tweens)
+#include "Test_Tween.cpp"                  // UI-anim cut 1 (easeCurve table lock + AnimState)
+#include "Test_ColorAnimation.cpp"         // UI-anim cut 1 (InteractiveWidget color transitions)
+#include "Test_PopupFade.cpp"              // UI-anim cut 1 (popup fade in/out via pending-close queue)
+#include "Test_Spinner.cpp"                // UI-anim cut 2 (Spinner orbit dots + ProgressBar indeterminate)
 
 void runTest()
 {

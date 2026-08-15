@@ -16,7 +16,7 @@
 #include "AYWindowManager.h"
 #include "AYWindowTypes.h"
 #include "AYInputTypes.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <memory>
 #include <string>

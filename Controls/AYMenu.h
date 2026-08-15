@@ -104,6 +104,12 @@ public:
     // Same durable-Menu* contract as close(): MenuBar keeps the pointer.
     void dismissFromManager();
 
+    // UI animation lane: called by UIManager when a fade-out close
+    // completes. Hides the plate and reparents back under the owning
+    // MenuBar (the fade-out kept the menu mounted on the overlay to
+    // render; bookkeeping was already done at beginPopupFadeOut time).
+    void onPopupFadeOutCompleted();
+
     // Hit-test override: when open, catches clicks anywhere inside Menu
     // bounds (which may extend past host's bounds).
     Widget* hitTest(const math::FVector2& worldPos) override;

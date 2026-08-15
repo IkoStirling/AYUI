@@ -285,6 +285,9 @@ public:
     // sign flipped to match ScrollView's onMouseWheel convention.
     bool onMouseWheel(const UIMouseWheelEvent& e) override;
 
+    // UI-anim cut 2 — wheel momentum glide.
+    void tick(float dt) override;
+
 protected:
     void layoutChildren() override;
     void rebuildRows();

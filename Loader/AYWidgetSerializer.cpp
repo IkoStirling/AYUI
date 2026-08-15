@@ -132,6 +132,48 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("fontSize")) {
                 label->setFontSize(j["fontSize"]);
             }
+            if (j.contains("hAlign")) {
+                if (j["hAlign"].is_string()) {
+                    const std::string a = j["hAlign"].get<std::string>();
+                    if (a == "Center") {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Center);
+                    } else if (a == "Right") {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Right);
+                    } else {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Left);
+                    }
+                } else if (j["hAlign"].is_number_integer()) {
+                    const int a = j["hAlign"].get<int>();
+                    if (a == 1) {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Center);
+                    } else if (a == 2) {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Right);
+                    } else {
+                        label->setHorizontalAlignment(TextLabel::HAlignment::Left);
+                    }
+                }
+            }
+            if (j.contains("vAlign")) {
+                if (j["vAlign"].is_string()) {
+                    const std::string a = j["vAlign"].get<std::string>();
+                    if (a == "Center" || a == "Middle") {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Center);
+                    } else if (a == "Bottom") {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Bottom);
+                    } else {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Top);
+                    }
+                } else if (j["vAlign"].is_number_integer()) {
+                    const int a = j["vAlign"].get<int>();
+                    if (a == 1) {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Center);
+                    } else if (a == 2) {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Bottom);
+                    } else {
+                        label->setVerticalAlignment(TextLabel::VAlignment::Top);
+                    }
+                }
+            }
         }
 
         if (Button* button = dynamic_cast<Button*>(widget)) {
@@ -584,6 +626,18 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "TextLabel";
         j["text"] = std::string(label->getText().begin(), label->getText().end());
         j["fontSize"] = label->getFontSize();
+        switch (label->getHorizontalAlignment()) {
+        case TextLabel::HAlignment::Center: j["hAlign"] = "Center"; break;
+        case TextLabel::HAlignment::Right:  j["hAlign"] = "Right";  break;
+        case TextLabel::HAlignment::Left:
+        default:                            j["hAlign"] = "Left";   break;
+        }
+        switch (label->getVerticalAlignment()) {
+        case TextLabel::VAlignment::Center: j["vAlign"] = "Center"; break;
+        case TextLabel::VAlignment::Bottom: j["vAlign"] = "Bottom"; break;
+        case TextLabel::VAlignment::Top:
+        default:                            j["vAlign"] = "Top";    break;
+        }
     }
     else if (Button* button = dynamic_cast<Button*>(widget)) {
         j["type"] = "Button";
@@ -694,6 +748,18 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
         j["type"] = "VBox";
         j["spacing"] = vbox->getSpacing();
+        switch (vbox->getGravity()) {
+        case BoxBase::Gravity::TopCenter: j["gravity"] = "TopCenter"; break;
+        case BoxBase::Gravity::TopRight: j["gravity"] = "TopRight"; break;
+        case BoxBase::Gravity::CenterLeft: j["gravity"] = "CenterLeft"; break;
+        case BoxBase::Gravity::Center: j["gravity"] = "Center"; break;
+        case BoxBase::Gravity::CenterRight: j["gravity"] = "CenterRight"; break;
+        case BoxBase::Gravity::BottomLeft: j["gravity"] = "BottomLeft"; break;
+        case BoxBase::Gravity::BottomCenter: j["gravity"] = "BottomCenter"; break;
+        case BoxBase::Gravity::BottomRight: j["gravity"] = "BottomRight"; break;
+        case BoxBase::Gravity::TopLeft:
+        default: j["gravity"] = "TopLeft"; break;
+        }
     }
     else if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
         // D2 — DockCard is a leaf-with-content. It subclasses Panel, so
@@ -812,6 +878,18 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
         j["type"] = "HBox";
         j["spacing"] = hbox->getSpacing();
+        switch (hbox->getGravity()) {
+        case BoxBase::Gravity::TopCenter: j["gravity"] = "TopCenter"; break;
+        case BoxBase::Gravity::TopRight: j["gravity"] = "TopRight"; break;
+        case BoxBase::Gravity::CenterLeft: j["gravity"] = "CenterLeft"; break;
+        case BoxBase::Gravity::Center: j["gravity"] = "Center"; break;
+        case BoxBase::Gravity::CenterRight: j["gravity"] = "CenterRight"; break;
+        case BoxBase::Gravity::BottomLeft: j["gravity"] = "BottomLeft"; break;
+        case BoxBase::Gravity::BottomCenter: j["gravity"] = "BottomCenter"; break;
+        case BoxBase::Gravity::BottomRight: j["gravity"] = "BottomRight"; break;
+        case BoxBase::Gravity::TopLeft:
+        default: j["gravity"] = "TopLeft"; break;
+        }
     }
     else if (dynamic_cast<SplitterHandle*>(widget) != nullptr) {
         j["type"] = "SplitterHandle";

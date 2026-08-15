@@ -826,6 +826,12 @@ TEST_CASE(test_uimanager_click_outside_closes_popup) {
     ui.onMouseButtonDown(500.0f, 500.0f, 0);
     ui.onMouseButtonUp(500.0f, 500.0f, 0);
 
+    // UI animation lane: click-outside fades the popup out (120ms). It
+    // stays mounted to render the fade and is excluded from hit-testing
+    // immediately; the detach completes on a later update.
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+    CHECK(ui.pickTopmostWidget(FVector2(120.0f, 120.0f)) != popup);
+    ui.update(0.13f);
     CHECK(ui.getOverlayRoot()->getChildren().empty());
 
     ui.shutdown();

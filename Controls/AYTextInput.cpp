@@ -5,7 +5,7 @@
 #include "AYTextMeasure.h"
 #include "AYClipboard.h"
 #include "UIKeyCode.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -307,6 +307,20 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     } else {
         setFocus(true);
     }
+
+    _scrubArmed = false;
+    _scrubbing = false;
+    if (_numericScrubEnabled && !_readOnly) {
+        // Parse current text as float for scrub baseline; fall back to 0.
+        try {
+            _scrubStartValue = std::stof(std::string(_text.begin(), _text.end()));
+        } catch (...) {
+            _scrubStartValue = 0.0f;
+        }
+        _scrubStartX = e.mousePos.x;
+        _scrubArmed = true;
+    }
+
     // First click that grants focus: select-all so default/demo text is
     // easy to replace (common single-line field UX). Subsequent clicks
     // place a caret / start a drag-select.
@@ -369,6 +383,22 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
 }
 
 bool TextInput::onMouseMove(const UIMouseEvent& e) {
+    if (_scrubArmed || _scrubbing) {
+        const float dx = e.mousePos.x - _scrubStartX;
+        if (!_scrubbing && std::fabs(dx) >= kScrubThresholdPx) {
+            _scrubbing = true;
+            _dragging = false; // cancel caret drag-select
+            clearSelection();
+        }
+        if (_scrubbing) {
+            const float newValue =
+                _scrubStartValue + dx / kScrubPixelsPerUnit;
+            if (_onNumericScrub) {
+                _onNumericScrub(newValue);
+            }
+            return true;
+        }
+    }
     if (!_dragging) return false;
     const math::FRectangle b = getWorldBounds();
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
@@ -393,6 +423,17 @@ bool TextInput::onMouseButtonUp(const UIMouseEvent& e) {
     // Phase C (C5): end the drag. The selection built up during the
     // drag stays in place; user can then copy / replace / etc.
     if (e.mouseButton != 0) return false;
+    const bool wasScrubbing = _scrubbing;
+    _scrubArmed = false;
+    _scrubbing = false;
+    if (wasScrubbing) {
+        // Scrub already live-updated via _onNumericScrub; treat as commit.
+        if (_onSubmit) {
+            _onSubmit(_text);
+        }
+        _dragging = false;
+        return false;
+    }
     if (!_dragging) return false;
     _dragging = false;
     // Returning false here lets UIManager do its normal capture-release
@@ -536,6 +577,9 @@ bool TextInput::onKeyDown(int keyCode) {
 
 UiCursorHint TextInput::getCursorHint() const {
     if (!isVisible()) return UiCursorHint::Default;
+    if (_scrubbing || (_numericScrubEnabled && _scrubArmed)) {
+        return UiCursorHint::SizeWe;
+    }
     return UiCursorHint::Beam;
 }
 
@@ -644,6 +688,11 @@ void TextInput::onFocusLost() {
     // first click, not the second of a stale pair.
     _lastClickTime = -1.0f;
     clearSelection();
+    _scrubArmed = false;
+    _scrubbing = false;
+    if (_onFocusLostNotify) {
+        _onFocusLostNotify();
+    }
 }
 
 void TextInput::onRender(IRenderBackend& renderer) {

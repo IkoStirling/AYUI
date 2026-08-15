@@ -25,7 +25,7 @@
 #include "AYTextLabel.h"
 #include "AYBox.h"
 #include "AYWidget.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 #include <cstdio>
 #include <memory>
 #include <string>

@@ -44,6 +44,17 @@ Modal::~Modal() {
         }
         _isOpen = false;
     }
+    // UI animation lane: if closeModal() left us mid-fade-out (animated
+    // close keeps the modal mounted — UIManager::closeModal skips the
+    // detach for pending popups), a host `delete` while the fade runs
+    // must still drop the overlay's references NOW, or the pending
+    // finalize / overlay teardown would deref freed memory.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->cancelPendingPopupClose(this);
+    }
+    if (getParent() != nullptr) {
+        getParent()->removeChild(this);
+    }
     _focusedBefore = nullptr;
     if (_dimmer != nullptr) {
         // Code-review 2026-08-02 #12: detach callback. Only delete
@@ -52,6 +63,10 @@ Modal::~Modal() {
         // free the dimmer. _dimmerOwned defaults to false and is
         // flipped true ONLY by setDimmerOwned().
         _dimmer->setOnDismiss(nullptr);
+        if (_dimmer->getParent() != nullptr) {
+            // Fade-out path: the dimmer is still mounted on the overlay.
+            _dimmer->getParent()->removeChild(_dimmer);
+        }
         if (_dimmerOwned) {
             delete _dimmer;
         }
@@ -190,6 +205,21 @@ void Modal::openModal() {
 
     _isOpen = true;
     performLayout();
+
+    // UI animation lane: fade the modal plate + dimmer scrim in together.
+    // The dimmer is an overlay sibling; its own pushOpacity fades the
+    // scrim as one unit.
+    setOpacity(0.0f);
+    animateOpacity(1.0f, 160.0f, AnimationCurve::EaseOut);
+    if (_dimmer != nullptr) {
+        _dimmer->setOpacity(0.0f);
+        _dimmer->animateOpacity(1.0f, 160.0f, AnimationCurve::EaseOut);
+    }
+    // UI-anim cut 2: the plate slides in from 8px above; the full-screen
+    // dimmer stays put (a scrim has nothing to slide).
+    const math::FVector2 p = getPosition();
+    setPosition(p + math::FVector2(0.0f, -8.0f));
+    animatePositionTo(p, 160.0f, AnimationCurve::EaseOut);
 }
 
 void Modal::closeModal() {
@@ -208,9 +238,27 @@ void Modal::closeModal() {
     // Detach first; if _isOpen gate is reset before closeModal call we
     // could infinite-loop.
     _isOpen = false;
-    ui.closeModal(this, /*fireOnClose*/ true);
-    if (_dimmer != nullptr && _dimmer->getParent() != nullptr) {
-        _dimmer->getParent()->removeChild(_dimmer);
+    // UI animation lane: a live manager fades the modal + dimmer scrim
+    // out instead of detaching instantly. Order matters: beginPopupFadeOut
+    // must run BEFORE ui.closeModal so the pending entry exists when
+    // closeModal's removeChild hits its isPendingPopupClose guard —
+    // otherwise the modal detaches on the close frame and has no parent
+    // to render the fade (or the fade is skipped entirely).
+    if (!ui.isShuttingDown()) {
+        constexpr float kModalFadeOutMs = 120.0f;
+        ui.beginPopupFadeOut(this, /*destroy=*/false, _dimmer);
+        ui.closeModal(this, /*fireOnClose*/ true);
+        animateOpacity(0.0f, kModalFadeOutMs, AnimationCurve::EaseIn);
+        if (_dimmer != nullptr) {
+            _dimmer->animateOpacity(0.0f, kModalFadeOutMs, AnimationCurve::EaseIn);
+        }
+        // Finalize detaches both once the fade ends. The dimmer fade
+        // covers the scrim; the plate fade covers the modal.
+    } else {
+        ui.closeModal(this, /*fireOnClose*/ true);
+        if (_dimmer != nullptr && _dimmer->getParent() != nullptr) {
+            _dimmer->getParent()->removeChild(_dimmer);
+        }
     }
     // Phase D §5.3 R3-safe focus path. We deliberately drop the focus to
     // nullptr rather than calling ui.setFocus(_focusedBefore) because:

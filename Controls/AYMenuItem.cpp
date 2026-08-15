@@ -178,16 +178,30 @@ void MenuItem::onRender(IRenderBackend& renderer) {
     const math::FRectangle b = getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
 
-    // Hover / press highlight.
-    if (isMouseOver() && isEnabled()) {
-        renderer.drawRect(b, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
-    } else if (_isKeyboardHovered && isEnabled()) {
-        // PR-C3 hotfix — keyboard-hover (typeahead letter jump) also
-        // paints a highlight bar so the user sees 'A' actually moved
-        // the focus. Without this the typeahead state is invisible —
-        // a non-visual change leaves the user wondering if the keystroke
-        // was even delivered.
-        renderer.drawRect(b, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
+    // Hover / press highlight. UI animation lane: the bar target fades in
+    // and out through resolveTransitionColor (90ms default); the gate
+    // keeps painting while a fade-out is still running, so the bar
+    // disappears smoothly instead of vanishing on the leave frame.
+    //
+    // `_color.w > 0.001f` covers the gap between "fade-out finished" and
+    // "leave frame": right after onMouseLeave the tween has NOT restarted
+    // yet (it is render-driven), so _colorAnim.active alone would skip the
+    // bar for one frame and the leave would look like an instant vanish.
+    // The flag is read BEFORE resolveTransitionColor below starts the
+    // retarget tween, so a completed hover fade (active=false, color still
+    // bright) still enters the paint branch on the leave frame.
+    const bool highlighted = (isMouseOver() || _isKeyboardHovered) && isEnabled();
+    const bool barFadingOut = _colorInitialized && _color.w > 0.001f;
+    if (highlighted || _colorAnim.active || barFadingOut) {
+        const math::FVector4 target = highlighted
+            ? math::FVector4(0.18f, 0.45f, 0.78f, 0.55f)
+            : math::FVector4(0.18f, 0.45f, 0.78f, 0.0f);
+        renderer.drawRect(b, resolveTransitionColor(target));
+    } else if (!_colorInitialized) {
+        // Prime the transition state without painting (alpha-0 target
+        // snaps in) so the FIRST hover fades in from transparent instead
+        // of jumping to full highlight.
+        resolveTransitionColor(math::FVector4(0.18f, 0.45f, 0.78f, 0.0f));
     }
 
     const float padL = 16.0f;

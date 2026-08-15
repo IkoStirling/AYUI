@@ -188,9 +188,10 @@ void Tooltip::tick(float dt, const math::FVector2& mousePos,
         if (!_visible && _hoverTime >= _hoverDelay) {
             show();
         }
-        if (_visible) {
+        if (_visible && !isPositionAnimating()) {
             // Keep position synced in case the target moves or the
-            // viewport changed while hovering.
+            // viewport changed while hovering. Skipped while the
+            // slide-in tween runs (setPosition would cancel it).
             syncPosition();
         }
     } else {
@@ -204,13 +205,46 @@ void Tooltip::tick(float dt, const math::FVector2& mousePos,
 
 void Tooltip::show() {
     _visible = true;
+    _hiding = false;
     setVisible(true);
     syncPosition();
+    // UI animation lane: pop-in fade (120ms EaseOut).
+    setOpacity(0.0f);
+    animateOpacity(1.0f, 120.0f, AnimationCurve::EaseOut);
+    // UI-anim cut 2: slide in from 8px above the sync'd position. The
+    // hover tick re-syncs position every frame — guarded by
+    // !isPositionAnimating() there so the slide isn't killed on frame 1.
+    const math::FVector2 p = getPosition();
+    setPosition(p + math::FVector2(0.0f, -8.0f));
+    animatePositionTo(p, 120.0f, AnimationCurve::EaseOut);
 }
 
 void Tooltip::hide() {
     _visible = false;
+    if (_hiding) {
+        return;
+    }
+    // UI animation lane: fade out instead of vanishing. The tooltip stays
+    // visible (rendering the fade) while _hiding is set; tick(float) flips
+    // setVisible(false) when the fade completes. Fade-out is skipped when
+    // there is no live UIManager to drive the tick — hide stays instant
+    // in teardown paths.
+    if (isVisible() && getOpacity() > 0.01f && UIManager::tryGet() != nullptr) {
+        animateOpacity(0.0f, 100.0f, AnimationCurve::EaseIn);
+        _hiding = true;
+        return;
+    }
     setVisible(false);
+}
+
+void Tooltip::tick(float dt) {
+    Widget::tick(dt);
+    // Fade-out completion — driven by the overlay cascade, so it keeps
+    // running even when the hover driver (3-arg tick) has paused.
+    if (_hiding && !isOpacityAnimating() && getOpacity() <= 0.01f) {
+        _hiding = false;
+        setVisible(false);
+    }
 }
 
 void Tooltip::syncPosition() {

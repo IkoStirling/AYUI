@@ -69,6 +69,7 @@
             { "type": "Button", "id": "nav_layout", "text": "5. Layout", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_capabilities", "text": "6. Capabilities", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_backend", "text": "7. Backend", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_animation", "text": "8. Animation", "size": { "w": 160, "h": 28 } },
             { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
             { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
           ]
@@ -307,6 +308,43 @@
               "children": [
                 { "type": "TextLabel", "id": "backend_hdr", "text": "Backend - UIRenderBackend: gradient / blend modes / SDF border + shadow / texture + 9-patch", "size": { "w": 920, "h": 24 } },
                 { "type": "TextLabel", "id": "backend_hint", "text": "The canvas below is host-drawn every frame (BackendDemoWidget::onRender) straight through the render backend.", "size": { "w": 900, "h": 20 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_animation",
+              "spacing": 10,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "anim_hdr", "text": "Animation - hover transitions / popup fade + slide-in / opacity / scroll momentum / indeterminate scan / spinner", "size": { "w": 920, "h": 24 } },
+                { "type": "TextLabel", "id": "anim_hint", "text": "Buttons below tween their fill on hover/press. Menus, ComboBox popups, Modals and Tooltips fade in on open and fade out on close.", "size": { "w": 900, "h": 20 } },
+
+                { "type": "Separator", "id": "anim_sep_demo", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "anim_demo_lbl", "text": "Hover / press transition demo (90ms color tween on the fallback fill)", "size": { "w": 900, "h": 20 } },
+                { "type": "Button", "id": "anim_btn1", "text": "Hover me (90ms)", "size": { "w": 200, "h": 28 } },
+                { "type": "Button", "id": "anim_btn2", "text": "Hover me too", "size": { "w": 200, "h": 28 } },
+                { "type": "Button", "id": "anim_btn3", "text": "Press me", "size": { "w": 200, "h": 28 } },
+
+                { "type": "Separator", "id": "anim_sep_fade", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "anim_fade_lbl", "text": "Opacity toggle (200ms) - click the button to fade the panel below in/out", "size": { "w": 900, "h": 20 } },
+                { "type": "Button", "id": "btn_fade_toggle", "text": "Toggle panel opacity", "size": { "w": 200, "h": 28 } },
+                {
+                  "type": "Panel",
+                  "id": "fade_panel",
+                  "size": { "w": 420, "h": 60 },
+                  "children": [
+                    { "type": "TextLabel", "id": "fade_panel_lbl", "text": "I fade in and out (200ms)", "size": { "w": 380, "h": 24 } }
+                  ]
+                },
+
+                { "type": "Separator", "id": "anim_sep_scan", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "anim_scan_lbl", "text": "Indeterminate scan (1.6s sweep) + Spinner orbit (0.9s/rev)", "size": { "w": 900, "h": 20 } },
+                { "type": "Button", "id": "btn_scan_toggle", "text": "Toggle indeterminate", "size": { "w": 200, "h": 28 } },
+                { "type": "ProgressBar", "id": "prg_scan", "size": { "w": 200, "h": 16 } },
+                { "type": "Spinner", "id": "spinner_demo", "size": { "w": 24, "h": 24 } },
+
+                { "type": "Separator", "id": "anim_sep_ts", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "anim_ts_hint", "text": "TabStrip indicator slides (120ms) - tabs below are cpp-built", "size": { "w": 900, "h": 20 } }
               ]
             }
               ]

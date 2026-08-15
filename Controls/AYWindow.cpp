@@ -2,7 +2,7 @@
 #include "AYScrollableWidget.h"
 #include "AYScrollBarSync.h"
 #include "IAYRenderBackend.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>

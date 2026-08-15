@@ -51,6 +51,7 @@ set(SRC_FILES
     Controls/AYClipboard.cpp
     Controls/AYClipboard_Win32.cpp
     Controls/AYTabStrip.cpp
+    Controls/AYSpinner.cpp
     Controls/AYDockArea.cpp
     Controls/AYDockCard.cpp
     Controls/AYDockOverlay.cpp
@@ -119,6 +120,7 @@ set(HEAD_FILES
     Controls/AYDimmer.h
     Controls/AYClipboard.h
     Controls/AYTabStrip.h
+    Controls/AYSpinner.h
     Controls/AYDockArea.h
     Controls/AYDockCard.h
     Controls/AYDockOverlay.h

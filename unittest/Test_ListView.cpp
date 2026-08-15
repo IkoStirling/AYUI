@@ -884,4 +884,44 @@ TEST_CASE(listview_pool_vbar_drag_rebinds_monotonically) {
     CHECK(lv.getRowPoolLogicalIndex(0) == 0);
 }
 
+// =============================================================================
+// UI-anim cut 2 — wheel momentum glide + row pool rebind.
+// =============================================================================
+
+TEST_CASE(listview_momentum_glides_and_rebinds) {
+    ListView lv;
+    lv.setSize(FVector2(200.0f, 100.0f));
+    std::vector<std::wstring> items;
+    for (int i = 0; i < 50; ++i) {
+        items.push_back(L"row " + std::to_wstring(i));
+    }
+    lv.setItems(items);
+    lv.performLayout();    // computes _contentSize (maxScroll > 0)
+
+    const int before = lv.getRowPoolLogicalIndex(0);
+    CHECK(before == 0);
+
+    UIMouseWheelEvent e(FVector2(100.0f, 50.0f), 120.0f);
+    CHECK(lv.onMouseWheel(e));
+    const float immediate = lv.getScrollOffset().y;
+    CHECK(immediate > 0.0f);
+
+    // Glide advances + rebinds the pool rows.
+    int lastFirst = lv.getRowPoolLogicalIndex(0);
+    for (int i = 0; i < 30; ++i) {
+        lv.tick(0.016f);
+        const int curFirst = lv.getRowPoolLogicalIndex(0);
+        CHECK(curFirst >= lastFirst);   // pool never scrolls backwards
+        lastFirst = curFirst;
+    }
+    CHECK(lv.getRowPoolLogicalIndex(0) > before);
+
+    // Parks eventually; pool stays consistent.
+    for (int i = 0; i < 400; ++i) lv.tick(0.016f);
+    const float parked = lv.getScrollOffset().y;
+    lv.tick(0.016f);
+    CHECK_FLOAT_EQ(lv.getScrollOffset().y, parked, 1e-5f);
+    CHECK(lv.getRowPoolLogicalIndex(0) == lastFirst);
+}
+
 TEST_SUITE_END

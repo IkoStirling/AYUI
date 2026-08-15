@@ -1,7 +1,7 @@
 #include "AYRadioButton.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 #include <algorithm>
 
 namespace ayt::ui {
@@ -103,6 +103,10 @@ void RadioButton::onRender(IRenderBackend& renderer) {
         } else if (!isEnabled()) {
             outerBg = math::FVector4(0.18f, 0.18f, 0.18f, 1.0f);
         }
+        // UI animation lane: hover/press circle fill transitions (90ms
+        // default). The selected dot below is NOT tweened — selection is
+        // not a hover response.
+        outerBg = resolveTransitionColor(outerBg);
         outerBorderColor = math::FVector4(0.5f, 0.5f, 0.55f, 1.0f);
         outerBorderWidth = 1.0f;
     }

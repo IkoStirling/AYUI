@@ -171,4 +171,75 @@ TEST_CASE(progressbar_factory_and_serializer_round_trip) {
     destroyWidgetTree(restored);
 }
 
+// =============================================================================
+// UI-anim cut 2 — indeterminate scan. The accent segment (30% of track
+// width) sweeps left→right on a 1.6s loop, ignoring _value.
+// =============================================================================
+
+// Blue accent rounded-rect draw calls (the scan segment is the only
+// accent-filled RoundedRect; the track is dark grey, the border thin).
+static std::vector<FRectangle> accentSegmentRects(const MockRenderer& r) {
+    std::vector<FRectangle> rects;
+    for (const auto& dc : r.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Rect) continue;
+        if (fabsf(dc.color.x - 0.18f) < 1e-4f &&
+            fabsf(dc.color.y - 0.45f) < 1e-4f &&
+            fabsf(dc.color.z - 0.78f) < 1e-4f &&
+            fabsf(dc.floatParam1 - 2.0f) < 1e-4f) {
+            rects.push_back(dc.bounds);
+        }
+    }
+    return rects;
+}
+
+TEST_CASE(progressbar_indeterminate_draws_moving_segment) {
+    ProgressBar p;
+    p.setSize(FVector2(200.0f, 16.0f));
+    p.setPosition(FVector2(0.0f, 0.0f));
+    p.setValue(0.5f);
+
+    // Default: value-fill path — one accent rounded rect (the filled
+    // portion), no scan segment.
+    {
+        MockRenderer r0;
+        p.render(r0);
+        CHECK(accentSegmentRects(r0).size() == 1u);
+    }
+
+    p.setIndeterminate(true);
+    {
+        MockRenderer r1;
+        p.render(r1);
+        const auto segs = accentSegmentRects(r1);
+        CHECK(segs.size() == 1u);
+        const FRectangle seg = segs[0];
+        // 30% of a 200px track = 60px wide; phase 0 parks it fully off
+        // the left edge of the track (x0 = -60).
+        CHECK_FLOAT_EQ(seg.maxX - seg.minX, 60.0f, 1e-3f);
+        CHECK_FLOAT_EQ(seg.minX, -60.0f, 1e-3f);
+    }
+
+    // 0.4s of a 1.6s sweep = phase 0.25 → segment moved +65px.
+    p.tick(0.4f);
+    {
+        MockRenderer r2;
+        p.render(r2);
+        const auto segs = accentSegmentRects(r2);
+        CHECK(segs.size() == 1u);
+        CHECK_FLOAT_EQ(segs[0].minX, 5.0f, 1e-3f);
+    }
+
+    // Back to value mode: scan segment gone, fill path restored.
+    p.setIndeterminate(false);
+    {
+        MockRenderer r3;
+        p.render(r3);
+        const auto segs = accentSegmentRects(r3);
+        CHECK(segs.size() == 1u);
+        // Value fill: 50% of 200 = 100px wide starting at 0.
+        CHECK_FLOAT_EQ(segs[0].maxX - segs[0].minX, 100.0f, 1e-3f);
+        CHECK_FLOAT_EQ(segs[0].minX, 0.0f, 1e-3f);
+    }
+}
+
 TEST_SUITE_END

@@ -4,7 +4,7 @@
 #include "AYScrollBarSync.h"
 #include "AYUIManager.h"
 #include "UIKeyCode.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -440,7 +440,26 @@ bool ListView::scrollBy(float deltaY) {
 // deltaY through unchanged. Defers to scrollBy for the clamp +
 // rebind chokepoint.
 bool ListView::onMouseWheel(const UIMouseWheelEvent& e) {
-    return scrollBy(e.deltaY);
+    // UI-anim cut 2: immediate scroll + seed glide velocity, then the
+    // container-side rebind/sync chokepoint (same as scrollBy(float)).
+    const bool changed =
+        _scrollState.applyWheel(math::FVector2(0.0f, e.deltaY), getViewportSize());
+    if (changed) {
+        const float y = _scrollState.getScrollOffset().y;
+        setScrollOffset(math::FVector2(_scrollState.getScrollOffset().x, y));
+    }
+    return changed;
+}
+
+void ListView::tick(float dt) {
+    // Chain the base cascade first (opacity/position tweens + child
+    // virtual ticks), then glide the scroll while velocity decays.
+    // scrollBy(float) does the rebind + bar sync in one chokepoint.
+    CompoundFocusableWidget::tick(dt);
+    math::FVector2 d;
+    if (_scrollState.advanceMomentum(dt, getViewportSize(), d)) {
+        scrollBy(d.y);
+    }
 }
 
 void ListView::ensureBarCreated() {
@@ -448,6 +467,8 @@ void ListView::ensureBarCreated() {
     _vbar = new ScrollBar();
     _vbar->setOrientation(ScrollBar::Orientation::Vertical);
     _vbar->setOnValueChanged([this](float v) {
+        // A bar drag takes over from any glide in flight.
+        _scrollState.clearMomentum();
         const math::FVector2 vp = getViewportSize();
         const float maxOff = (_contentSize.y - vp.y);
         if (maxOff <= 0.0f) return;
@@ -475,7 +496,16 @@ void ListView::performLayout() {
         _vbar->setPosition(math::FVector2(getWidth() - barW, 0.0f));
         _vbar->setSize(math::FVector2(barW, getHeight()));
     }
-    rebuildRows();
+    // Only rebuild the row pool when its size must change. Rebuilding
+    // every layout deletes Row widgets; if UIManager::_hoverWidget still
+    // points at a pool row (common after a click that also invalidates
+    // chrome layout), the next update() UAF-crashes in onMouseLeave.
+    const int needed = computePoolSize();
+    if (needed != static_cast<int>(_rowPool.size())) {
+        rebuildRows();
+    } else {
+        rebindPoolRows();
+    }
     layoutChildren();
 }
 
@@ -510,8 +540,21 @@ void ListView::rebuildRows() {
     // Pool size is derived from the current viewport so 5k items only
     // allocate ~11 widgets instead of 5000.
     //
-    // First: tear down the old pool (children; removeChild + delete so
-    // the tree doesn't accumulate dead nodes between setItems calls).
+    // First: tear down the old pool. Drop UIManager hover/capture/focus
+    // if they still reference a pool row — those pointers would dangle
+    // after delete (Layout Editor Shift-select crash: click sets hover
+    // on a Row, props-panel invalidateLayout → performLayout → rebuild
+    // → next frame update() calls onMouseLeave on freed Row).
+    if (UIManager* ui = UIManager::tryGet()) {
+        for (Row* r : _rowPool) {
+            if (r == nullptr) {
+                continue;
+            }
+            ui->clearHoverNoDispatch(r);
+            ui->clearCaptureNoDispatch(r);
+            ui->clearFocusNoDispatch(r);
+        }
+    }
     for (Row* r : _rowPool) {
         if (r == nullptr) continue;
         removeChild(r);

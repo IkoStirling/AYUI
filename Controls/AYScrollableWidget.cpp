@@ -15,6 +15,12 @@ math::FVector2 snapScrollPixels(const math::FVector2& v)
     return math::FVector2(std::round(v.x), std::round(v.y));
 }
 
+// UI-anim cut 2 — momentum tuning. v *= pow(friction, dt) gives an
+// exponential decay with a ~0.23s half-life; below kStopSpeed px/s an
+// axis is parked (no sub-pixel drift forever).
+constexpr float kMomentumFriction = 0.02f;
+constexpr float kMomentumStopSpeed = 2.0f;
+
 } // namespace
 
 void ScrollableWidget::setScrollOffset(const math::FVector2& offset) {
@@ -65,6 +71,63 @@ math::FVector2 ScrollableWidget::clampScrollOffset(const math::FVector2& target,
     return math::FVector2(
         std::clamp(target.x, 0.0f, maxX),
         std::clamp(target.y, 0.0f, maxY));
+}
+
+bool ScrollableWidget::applyWheel(const math::FVector2& delta,
+                                  const math::FVector2& viewportSize) {
+    // Immediate scroll first (unchanged pre-momentum semantics), then
+    // seed the glider from the snapped true offset.
+    const bool changed = scrollBy(delta, viewportSize);
+    _momentumOffset = _scrollOffset;
+    _velocity = delta;
+    _momentumActive = true;
+    return changed;
+}
+
+bool ScrollableWidget::advanceMomentum(float dt,
+                                       const math::FVector2& viewportSize,
+                                       math::FVector2& outDelta) {
+    outDelta = math::FVector2(0.0f, 0.0f);
+    if (!_momentumActive) return false;
+
+    // Exponential decay; park axes that have slowed below the stop speed.
+    const float decay = std::pow(kMomentumFriction, dt);
+    _velocity.x *= decay;
+    _velocity.y *= decay;
+    if (std::fabs(_velocity.x) < kMomentumStopSpeed) _velocity.x = 0.0f;
+    if (std::fabs(_velocity.y) < kMomentumStopSpeed) _velocity.y = 0.0f;
+    if (_velocity.x == 0.0f && _velocity.y == 0.0f) {
+        _momentumActive = false;
+        return false;
+    }
+
+    _momentumOffset += _velocity * dt;
+
+    // Boundary: hard stop an axis that ran into the edge (no bounce in
+    // v1; a fling past the end just parks at the limit).
+    const math::FVector2 maxOff = getMaxScrollOffset(viewportSize);
+    if (_momentumOffset.x < 0.0f) {
+        _momentumOffset.x = 0.0f;
+        _velocity.x = 0.0f;
+    } else if (_momentumOffset.x > maxOff.x) {
+        _momentumOffset.x = maxOff.x;
+        _velocity.x = 0.0f;
+    }
+    if (_momentumOffset.y < 0.0f) {
+        _momentumOffset.y = 0.0f;
+        _velocity.y = 0.0f;
+    } else if (_momentumOffset.y > maxOff.y) {
+        _momentumOffset.y = maxOff.y;
+        _velocity.y = 0.0f;
+    }
+
+    outDelta = snapScrollPixels(_momentumOffset) - _scrollOffset;
+    return (std::fabs(outDelta.x) > 1e-5f || std::fabs(outDelta.y) > 1e-5f);
+}
+
+void ScrollableWidget::clearMomentum() {
+    _momentumActive = false;
+    _velocity = math::FVector2(0.0f, 0.0f);
 }
 
 } // namespace ayt::ui

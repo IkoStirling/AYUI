@@ -115,6 +115,63 @@ void TabStrip::layoutChildren() {
     }
 }
 
+// UI-anim cut 2: target underline geometry = (x, width) of the active
+// tab's button, inset 2px on each side. Height is constant (button bottom
+// edge), so only x + width need to tween.
+math::FVector2 TabStrip::indicatorTargetRect() const {
+    if (_selectedIndex < 0 || _selectedIndex >= static_cast<int>(_tabButtons.size())) {
+        return _indicatorRect;
+    }
+    Button* active = _tabButtons[_selectedIndex];
+    if (active == nullptr) return _indicatorRect;
+    constexpr float kInsetX = 2.0f;
+    const math::FVector2 pos = active->getPosition();
+    const math::FVector2 sz  = active->getSize();
+    return math::FVector2(pos.x + kInsetX, sz.x - 2.0f * kInsetX);
+}
+
+// Render-driven retarget — mirror of InteractiveWidget::resolveTransitionColor:
+//   - never rendered / tween disabled → snap (first frame can't flash a
+//     zero-width underline, and tween-off is byte-identical to old render)
+//   - running toward the same target → return the interpolated rect
+//   - running and the target changed (selection moved mid-tween / layout
+//     re-ran) → retarget from the current rect
+//   - idle and the target moved → start the slide from here
+math::FVector2 TabStrip::resolveIndicatorRect(const math::FVector2& target) {
+    if (!_indicatorInitialized || _indicatorTweenMs <= 0.0f) {
+        _indicatorInitialized = true;
+        _indicatorAnim.snap(target);
+        _indicatorRect = target;
+        return target;
+    }
+    if (_indicatorAnim.active) {
+        if (target == _indicatorAnim.to) {
+            return _indicatorRect;
+        }
+        _indicatorAnim.start(_indicatorRect, target, _indicatorTweenMs,
+                             AnimationCurve::EaseOut);
+        return _indicatorRect;
+    }
+    if (target != _indicatorRect) {
+        _indicatorAnim.start(_indicatorRect, target, _indicatorTweenMs,
+                             AnimationCurve::EaseOut);
+    }
+    return _indicatorRect;
+}
+
+void TabStrip::tick(float dt) {
+    // Chain the base cascade first (opacity/position tweens of this widget
+    // + virtual tick of the tab buttons). Then advance our indicator.
+    CompoundFocusableWidget::tick(dt);
+    const bool wasActive = _indicatorAnim.active;
+    float t;
+    if (_indicatorAnim.advance(dt, t)) {
+        _indicatorRect = tweenLerp(_indicatorAnim.from, _indicatorAnim.to, t);
+    } else if (wasActive) {
+        _indicatorRect = _indicatorAnim.to;
+    }
+}
+
 void TabStrip::onRender(IRenderBackend& renderer) {
     // Selection visual: accent underline beneath the active tab. Drawn
     // AFTER the inherited render cascade so the buttons already painted
@@ -125,15 +182,14 @@ void TabStrip::onRender(IRenderBackend& renderer) {
     if (_selectedIndex >= static_cast<int>(_tabButtons.size())) return;
     Button* active = _tabButtons[_selectedIndex];
     if (active == nullptr) return;
-    const math::FVector2 pos = active->getPosition();
-    const math::FVector2 sz  = active->getSize();
-    const float insetX = 2.0f;
+    const math::FVector2 r = resolveIndicatorRect(indicatorTargetRect());
     const float thickness = 2.0f;
+    const float bottom = active->getPosition().y + active->getSize().y;
     renderer.drawRect(
-        math::FRectangle(pos.x + insetX,
-                         pos.y + sz.y - thickness,
-                         pos.x + sz.x - insetX,
-                         pos.y + sz.y),
+        math::FRectangle(r.x,
+                         bottom - thickness,
+                         r.x + r.y,
+                         bottom),
         math::FVector4(0.18f, 0.45f, 0.78f, 1.0f));
 }
 

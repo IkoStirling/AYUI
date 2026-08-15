@@ -5,7 +5,7 @@
 #include "AYStyle.h"
 #include "AYUIManager.h"
 #include "UIKeyCode.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 
@@ -193,7 +193,13 @@ void ComboBox::ensurePopupCreated() {
 
 void ComboBox::syncPopupSelection() {
     if (_popup == nullptr) return;
+    // Programmatic mirror into the popup must NOT look like a row click:
+    // ListView::setSelectedIndex fires onSelectionChanged, which would
+    // closePopup() + invoke the host callback (applyProperty mid-sync).
+    const bool wasSilent = _silentPopupSync;
+    _silentPopupSync = true;
     _popup->setSelectedIndex(_selectedIndex);
+    _silentPopupSync = wasSilent;
 }
 
 math::FRectangle ComboBox::computePopupBounds() const {
@@ -280,6 +286,13 @@ void ComboBox::openPopup() {
     // pre-mount size unless we lay out here — without this, popup row
     // clicks miss and selection never fires.
     _popup->performLayout();
+
+    // UI animation lane: popup fade-in (mirrors Menu::open's pop-in).
+    _popup->setOpacity(0.0f);
+    _popup->animateOpacity(1.0f, 140.0f, AnimationCurve::EaseOut);
+    // UI-anim cut 2: slide-in from 8px above the anchored position.
+    _popup->setPosition(pos + math::FVector2(0.0f, -8.0f));
+    _popup->animatePositionTo(pos, 160.0f, AnimationCurve::EaseOut);
 }
 
 void ComboBox::onPopupDismissedByManager() {
@@ -293,14 +306,16 @@ void ComboBox::closePopup() {
     _popupOpen = false;
     if (_popup == nullptr) return;
 
-    _popup->setVisible(false);
-
     if (_popup->getParent() != nullptr) {
-        // Unmount only (destroy=false). Selection / row-click callbacks
-        // run on the ListView stack — destroyWidgetTree here would free
-        // `this` mid-callback (0xC0000005). Foreign dismiss paths
-        // (other popup open, click-outside) still destroy via
-        // UIManager::closePopup(p, true) + onPopupDismissedByManager.
+        // UI animation lane: UX-driven close — the popup fades out on the
+        // overlay, then unmounts (destroy=false; the popup tree stays
+        // alive for reuse on the next open). _popupOpen is already false
+        // so the popup is logically closed; the fade is purely visual.
+        // Selection / row-click callbacks run on the ListView stack —
+        // destroying here would free `this` mid-callback (0xC0000005).
+        // Foreign dismiss paths (other popup open, click-outside) still
+        // destroy via UIManager::closePopup(p, true) or
+        // beginPopupFadeOut(p, true) + onPopupDismissedByManager.
         //
         // Code-review 2026-08-02 #10: prefer tryGet() over get(). get()'s
         // static-fallback bootstrap would pin the popup onto the
@@ -308,7 +323,7 @@ void ComboBox::closePopup() {
         // when this ComboBox lives in a test fixture whose manager has
         // already been torn down. Safe no-op when no manager is active.
         if (UIManager* ui = UIManager::tryGet()) {
-            ui->closePopup(_popup, /*destroy=*/false);
+            ui->beginPopupFadeOut(_popup, /*destroy=*/false);
         }
     }
 }

@@ -103,6 +103,10 @@ public:
     // default reverse child walk would give content the gutter hits.
     Widget* hitTest(const math::FVector2& worldPos) override;
 
+    // UI-anim cut 2 — wheel momentum. Chain the base cascade, then glide
+    // the scroll offset while velocity decays.
+    void tick(float dt) override;
+
 protected:
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;

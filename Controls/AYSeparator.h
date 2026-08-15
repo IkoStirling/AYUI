@@ -20,7 +20,7 @@
 // horizontal rules; menu item width for vertical rules).
 
 #include "AYLeafWidget.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 namespace ayt::ui {
 

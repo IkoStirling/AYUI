@@ -1,5 +1,5 @@
 #include "GalleryChildBackend.h"
-#include "aymath/MathDefs.h"
+#include "AYMath/MathDefs.h"
 
 // MIRROR of AYEditor/demo/GdiRenderBackend.cpp — see the header comment
 // for why two copies exist. GDI is Win32-only; guard the whole

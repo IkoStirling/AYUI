@@ -119,6 +119,20 @@ public:
     void setOnSubmit(std::function<void(const std::wstring&)> cb) {
         _onSubmit = std::move(cb);
     }
+    // Fired after focus is cleared (click-away / Tab). Hosts use this to
+    // commit typed values without applying on every keystroke.
+    void setOnFocusLostNotify(std::function<void()> cb) {
+        _onFocusLostNotify = std::move(cb);
+    }
+
+    // Horizontal drag adjusts a numeric value (Unity/industry scrub).
+    // When armed, a drag past a small pixel threshold switches from
+    // caret/selection into value scrubbing; click-without-drag still edits.
+    void setNumericScrubEnabled(bool enabled) { _numericScrubEnabled = enabled; }
+    bool isNumericScrubEnabled() const { return _numericScrubEnabled; }
+    void setOnNumericScrub(std::function<void(float /*newValue*/)> cb) {
+        _onNumericScrub = std::move(cb);
+    }
 
     // =================================================================
     // Phase C (C4) — placeholder text. Drawn when the buffer is empty
@@ -272,6 +286,17 @@ protected:
     bool _caretVisible = true;
     std::function<void(const std::wstring&)> _onTextChanged;
     std::function<void(const std::wstring&)> _onSubmit;
+    std::function<void()> _onFocusLostNotify;
+
+    // Numeric scrub (optional).
+    bool _numericScrubEnabled = false;
+    bool _scrubArmed = false;
+    bool _scrubbing = false;
+    float _scrubStartX = 0.0f;
+    float _scrubStartValue = 0.0f;
+    std::function<void(float)> _onNumericScrub;
+    static constexpr float kScrubThresholdPx = 3.0f;
+    static constexpr float kScrubPixelsPerUnit = 2.0f;
 
     // =================================================================
     // Phase C (S4): IME composition state.

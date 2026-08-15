@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 #include "AYRichText.h"
 #include "AYUIManager.h"
 #include "AYWidgetFactory.h"

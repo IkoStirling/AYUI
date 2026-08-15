@@ -1,7 +1,7 @@
 #include "AYStyle.h"
 #include "AYTheme.h"
 #include "AYWidget.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 #include <nlohmann/json.hpp>
 #include <fstream>

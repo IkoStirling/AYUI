@@ -1,7 +1,7 @@
 #include "AYScrollBar.h"
 #include "AYValueWidget.h"
 #include "IAYRenderBackend.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 #include <algorithm>
 
 namespace ayt::ui {

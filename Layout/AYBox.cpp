@@ -90,6 +90,38 @@ void BoxBase::insertWidget(int index, Widget* widget, float size, const BoxSlotL
     invalidateNaturalSizeCache();
 }
 
+bool BoxBase::moveSlotToIndex(Widget* widget, size_t index) {
+    if (widget == nullptr || widget->getParent() != this) {
+        return false;
+    }
+    if (index >= _slots.size()) {
+        return false;
+    }
+    size_t cur = static_cast<size_t>(-1);
+    for (size_t i = 0; i < _slots.size(); ++i) {
+        if (_slots[i].widget == widget) {
+            cur = i;
+            break;
+        }
+    }
+    if (cur == static_cast<size_t>(-1)) {
+        return false;
+    }
+    if (cur == index) {
+        return true;
+    }
+    Slot slot = _slots[cur];
+    _slots.erase(_slots.begin() + static_cast<std::ptrdiff_t>(cur));
+    // `index` is the desired FINAL slot index after the move.
+    _slots.insert(_slots.begin() + static_cast<std::ptrdiff_t>(index), slot);
+    moveChildToIndex(widget, index);
+    if (slot.isSplitter) {
+        rebindSplitters();
+    }
+    invalidateNaturalSizeCache();
+    return true;
+}
+
 void BoxBase::removeWidget(Widget* widget) {
     if (widget == nullptr) {
         return;

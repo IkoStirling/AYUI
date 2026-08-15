@@ -2,6 +2,7 @@
 #include "IAYRenderBackend.h"
 #include "AYSeparator.h"
 #include "AYUIManager.h"
+#include "AYDockTrace.h"
 #include "UIKeyCode.h"
 #include <algorithm>
 
@@ -137,10 +138,21 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     // PR-anim: pop-in fade. The menu tree renders at full alpha a frame
     // later (Widget::render pushes the tweened opacity), so first paint
     // is already the start of the fade — no first-frame pop. Fade-out on
-    // close is deliberately NOT animated: close() destroys the tree
-    // synchronously, and a fade-out would need a delayed-destroy dance.
+    // close runs through UIManager::beginPopupFadeOut (UI animation lane),
+    // which keeps the menu mounted until the fade ends.
     setOpacity(0.0f);
     animateOpacity(1.0f, 140.0f, AnimationCurve::EaseOut);
+    // UI-anim cut 2: slide-in from 6px above the anchor with the snappy
+    // Spring curve (fast start, small mid-flight wiggle — math never
+    // overshoots past the target, so no out-of-viewport risk). Only for
+    // overlay-mounted menus: position tweens are overwritten by layout for
+    // in-tree widgets, which is exactly the no-op we want.
+    setPosition(anchorPos + math::FVector2(0.0f, -6.0f));
+    animatePositionTo(anchorPos, 160.0f, AnimationCurve::Spring);
+    if (ayuiTraceInputEnabled()) {
+        dockTrace("[MenuTrace] open host=%s fade-in started (opacity=0->1, 140ms)\n",
+                  host ? typeid(*host).name() : "-");
+    }
 }
 
 void Menu::detachForHostDestruction()
@@ -169,7 +181,6 @@ void Menu::close() {
         }
     }
     _hoveredIndex = -1;
-    setVisible(false);
     // Soft unmount: MenuBar keeps a durable Menu* for the session.
     // closePopup(..., destroy=true) used to free the tree here, which
     // left MenuBar::_menus[i].menu dangling after the first item click
@@ -191,11 +202,42 @@ void Menu::close() {
         } else {
             _focusedWidgetBefore = nullptr;
         }
+        // UI animation lane: a live, mounted menu fades out instead of
+        // vanishing — bookkeeping (focus / _onClose / _open) already ran
+        // above, so the fade is purely visual; onPopupFadeOutCompleted
+        // reparents us back under the MenuBar when it ends. The legacy
+        // instant path (shutdown, or not mounted) keeps the old behavior.
+        if (!ui->isShuttingDown() && getParent() != nullptr) {
+            if (ayuiTraceInputEnabled()) {
+                dockTrace("[MenuTrace] close animated beginPopupFadeOut "
+                          "opacity=%.2f visible=%d parent=%s\n",
+                          static_cast<double>(getOpacity()),
+                          isVisible() ? 1 : 0,
+                          getParent() ? typeid(*getParent()).name() : "-");
+            }
+            ui->beginPopupFadeOut(this, /*destroy=*/false);
+            return;
+        }
+        setVisible(false);
         ui->closePopup(this, /*destroy=*/false);
+    } else {
+        setVisible(false);
     }
     // Reparent under the owning MenuBar so MenuBar still tracks us.
     // Must be External — MenuBar::_menus owns delete in ~MenuBar;
     // addChild would let destroyWidgetTree free us first → UAF.
+    if (_ownerHost != nullptr && getParent() == nullptr) {
+        _ownerHost->addChildExternal(this);
+    }
+}
+
+void Menu::onPopupFadeOutCompleted() {
+    // Finalize of an animated close: the menu was kept mounted to render
+    // its fade-out; UIManager already removed it from the overlay. Hide
+    // the plate and reparent back under the owning MenuBar (same contract
+    // as the legacy close path). No focus / callback work — that all ran
+    // synchronously in close()/dismissFromManager().
+    setVisible(false);
     if (_ownerHost != nullptr && getParent() == nullptr) {
         _ownerHost->addChildExternal(this);
     }
@@ -275,7 +317,12 @@ void Menu::performLayout() {
 }
 
 void Menu::onRender(IRenderBackend& renderer) {
-    if (!_open || !isVisible()) {
+    // UI animation lane: during a fade-out close _open is already false
+    // but the plate must keep rendering. Safe — every close path also
+    // sets visible=false (legacy close, onPopupFadeOutCompleted,
+    // detachForHostDestruction), so there is no closed-but-visible menu
+    // that would paint a ghost plate here.
+    if (!isVisible()) {
         return;
     }
     // Use local position + size to avoid a stale getWorldBounds when the
@@ -468,12 +515,11 @@ void Menu::activateItem(int index) {
 void Menu::dismissFromManager() {
     // UIManager click-outside / swap-dropdown path. Same soft contract
     // as close(): keep Menu* alive for MenuBar, clear _open, and let
-    // closePopup(false) clear UIManager::_activeDropdown.
+    // UIManager clear _activeDropdown.
     if (!_open && getParent() == nullptr) {
         return;
     }
     _open = false;
-    setVisible(false);
     if (UIManager* ui = UIManager::tryGet()) {
         if (!ui->isShuttingDown()) {
             if (_focusedWidgetBefore != nullptr) {
@@ -487,7 +533,22 @@ void Menu::dismissFromManager() {
         } else {
             _focusedWidgetBefore = nullptr;
         }
+        // UI animation lane: animated close (mirror of close()).
+        if (!ui->isShuttingDown() && getParent() != nullptr) {
+            if (ayuiTraceInputEnabled()) {
+                dockTrace("[MenuTrace] close animated beginPopupFadeOut "
+                          "opacity=%.2f visible=%d parent=%s\n",
+                          static_cast<double>(getOpacity()),
+                          isVisible() ? 1 : 0,
+                          getParent() ? typeid(*getParent()).name() : "-");
+            }
+            ui->beginPopupFadeOut(this, /*destroy=*/false);
+            return;
+        }
+        setVisible(false);
         ui->closePopup(this, /*destroy=*/false);
+    } else {
+        setVisible(false);
     }
     if (_ownerHost != nullptr && getParent() == nullptr) {
         _ownerHost->addChildExternal(this);

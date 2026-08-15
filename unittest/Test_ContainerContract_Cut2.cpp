@@ -6,7 +6,7 @@
 #include "AYTreeView.h"
 #include "AYMockRenderer.h"
 #include "AYUIManager.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 
 using namespace ayt::ui;
 using namespace ayt::math;

@@ -38,8 +38,34 @@ void TextLabel::onRender(IRenderBackend& renderer) {
                           math::FVector4(_bgR, _bgG, _bgB, _bgA));
     }
 
-    renderer.drawText(getWorldBounds(), getText(), _fontSize,
-                      math::FVector4(_textR, _textG, _textB, _textA));
+    IRenderBackend::TextStyle style;
+    style.color = math::FVector4(_textR, _textG, _textB, _textA);
+    style.wrapToBounds = _wordWrap;
+    switch (_hAlign) {
+    case HAlignment::Center:
+        style.align = IRenderBackend::TextStyle::Align::Center;
+        break;
+    case HAlignment::Right:
+        style.align = IRenderBackend::TextStyle::Align::Right;
+        break;
+    case HAlignment::Left:
+    default:
+        style.align = IRenderBackend::TextStyle::Align::Left;
+        break;
+    }
+    switch (_vAlign) {
+    case VAlignment::Center:
+        style.valign = IRenderBackend::TextStyle::VAlign::Middle;
+        break;
+    case VAlignment::Bottom:
+        style.valign = IRenderBackend::TextStyle::VAlign::Bottom;
+        break;
+    case VAlignment::Top:
+    default:
+        style.valign = IRenderBackend::TextStyle::VAlign::Top;
+        break;
+    }
+    renderer.drawText(getWorldBounds(), getText(), _fontSize, style);
 }
 
 } // namespace ayt::ui

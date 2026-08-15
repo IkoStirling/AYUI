@@ -32,6 +32,11 @@ public:
     Widget* loadFromFile(const std::string& filepath);
     Widget* loadFromString(const std::string& json);
 
+    // Stop filesystem watching for the last loaded path (no-op if idle).
+    // Layout editors call this after chrome load so Save of a sibling
+    // *.ui.json cannot hot-reload/destroy the chrome mid-button-callback.
+    void stopHotReload();
+
     // D4 (2026-07-26): Layout persistence.
     // saveLayout serializes the Widget tree via WidgetSerializer and writes
     // it to disk; saveLayoutToString does the same into an out-param. Both

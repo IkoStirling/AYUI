@@ -28,6 +28,8 @@
 #include "AYProgressBar.h"
 #include "AYTextLabel.h"
 #include "AYTextInput.h"
+#include "AYTabStrip.h"
+#include "AYSpinner.h"
 #include "AYListView.h"
 #include "AYComboBox.h"
 #include "AYMenuBar.h"
@@ -103,6 +105,10 @@ struct GalleryState {
     std::string layoutPath;
 
     int clickCount = 0;
+    // Animation page: fade-panel visibility latch (survives reload like
+    // the other knobs; lives here, not in a button lambda, so the state
+    // is not destroyed with the JSON tree).
+    bool panelVisible = true;
     std::unique_ptr<ayt::ui::ModalDialog> modal;
     std::unique_ptr<ayt::ui::TextLabel> modalBody;
 
@@ -181,7 +187,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
     static const char* kPages[] = {
         "page_basics", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
-        "page_backend",
+        "page_backend", "page_animation",
     };
     for (const char* id : kPages) {
         if (ayt::ui::Widget* w = ui.findById(id)) {
@@ -215,6 +221,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
             else if (std::strcmp(pageId, "page_layout") == 0) msg += L"layout";
             else if (std::strcmp(pageId, "page_capabilities") == 0) msg += L"capabilities";
             else if (std::strcmp(pageId, "page_backend") == 0) msg += L"backend";
+            else if (std::strcmp(pageId, "page_animation") == 0) msg += L"animation";
             lbl->setText(msg);
         }
     }
@@ -412,6 +419,60 @@ void wireGallery(GalleryState& state)
     bindNav("nav_layout", "page_layout");
     bindNav("nav_capabilities", "page_capabilities");
     bindNav("nav_backend", "page_backend");
+    bindNav("nav_animation", "page_animation");
+
+    // --- Animation (UI animation lane, cut 1) ---
+    // Demo-only loud hover (accent blue). Global Button fallback stays a
+    // restrained grey; soft-clip coverPx is what makes the tween visible.
+    {
+        const ayt::math::FVector4 accentHover(0.40f, 0.65f, 1.00f, 1.0f);
+        for (const char* id : {"anim_btn1", "anim_btn2", "anim_btn3"}) {
+            if (auto* btn = dynamic_cast<ayt::ui::Button*>(ui.findById(id))) {
+                btn->setFallbackHoverColor(accentHover);
+            }
+        }
+    }
+    // Fade toggle: the panel's opacity tweens 1 ↔ 0 over 200ms.
+    if (auto* btn = dynamic_cast<ayt::ui::Button*>(ui.findById("btn_fade_toggle"))) {
+        btn->setOnClicked([&state, &ui]() {
+            state.panelVisible = !state.panelVisible;
+            if (auto* panel = ui.findById("fade_panel")) {
+                panel->animateOpacity(state.panelVisible ? 1.0f : 0.0f, 200.0f,
+                                      ayt::ui::AnimationCurve::EaseOut);
+            }
+        });
+    }
+    // Indeterminate scan toggle: the ProgressBar sweeps a 30% accent
+    // segment on a 1.6s loop instead of drawing _value.
+    if (auto* btn = dynamic_cast<ayt::ui::Button*>(ui.findById("btn_scan_toggle"))) {
+        btn->setOnClicked([&ui]() {
+            if (auto* prg = dynamic_cast<ayt::ui::ProgressBar*>(ui.findById("prg_scan"))) {
+                prg->setIndeterminate(!prg->isIndeterminate());
+            }
+        });
+    }
+    // TabStrip is cpp-built (not factory-registered): four tabs whose
+    // underline indicator slides between tabs on a 120ms tween.
+    if (auto* page = ui.findById("page_animation")) {
+        auto* strip = new ayt::ui::TabStrip();
+        strip->setSize(ayt::math::FVector2(600.0f, 28.0f));
+        strip->addTab(L"One");
+        strip->addTab(L"Two");
+        strip->addTab(L"Three");
+        strip->addTab(L"Four");
+        strip->setOnSelectionChanged([&ui](int index) {
+            if (auto* hint = dynamic_cast<ayt::ui::TextLabel*>(
+                    ui.findById("anim_ts_hint"))) {
+                wchar_t buf[64];
+                std::swprintf(buf, 64, L"TabStrip indicator slid to tab %d (120ms)",
+                              index + 1);
+                hint->setText(buf);
+            }
+        });
+        page->addChild(strip);
+        ui.invalidateLayout();
+        ui.layout();
+    }
 
     // In-UI build stamp (OS title / console are easy to miss). If Layout
     // header doesn't contain this id, the running Gallery is stale.

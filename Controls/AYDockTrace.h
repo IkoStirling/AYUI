@@ -5,15 +5,35 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 
+// MUST be outside any namespace: including windows.h inside ayt::ui nests
+// HANDLE/DWORD/HWND into that namespace and trips the SDK include guard, so
+// later global #include <windows.h> (FileWatcher, Gallery GDI) sees no types.
 #if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
 #endif
 
 namespace ayt::ui {
+
+// PR-InputTrace: env-gated input trace switch. Set AYUI_TRACE_INPUT=1
+// before launching (GUI apps launched from Git Bash lose stderr, so the
+// callers pair this with dockTrace's file-backed sink). Cached per process.
+inline bool ayuiTraceInputEnabled()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* env = std::getenv("AYUI_TRACE_INPUT");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
 
 inline const char* dockTracePath() {
     static char path[512] = {};

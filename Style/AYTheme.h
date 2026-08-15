@@ -1,6 +1,6 @@
 #pragma once
 
-#include "aymath/MathTypes.h"
+#include "AYMath/MathTypes.h"
 #include <functional>
 #include <string>
 #include <unordered_map>

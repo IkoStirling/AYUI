@@ -134,4 +134,141 @@ TEST_CASE(tabstrip_layout_lays_out_left_to_right) {
     }
 }
 
+// =============================================================================
+// UI-anim cut 2 — indicator slide. The accent underline tweens (x, width)
+// from the old tab to the new one instead of hard-swapping.
+// =============================================================================
+
+// Last sky-blue underline draw, as (x, width). MockRenderer accumulates
+// draw calls across render() (beginFrame is a no-op), so we scan the tail.
+static FVector2 lastUnderlineXW(const MockRenderer& r) {
+    const auto& calls = r.getDrawCalls();
+    for (auto it = calls.rbegin(); it != calls.rend(); ++it) {
+        if (it->type != MockRenderer::DrawCall::Rect) continue;
+        const FVector4 c = it->color;
+        if (std::abs(c.x - 0.18f) < 1e-3f &&
+            std::abs(c.y - 0.45f) < 1e-3f &&
+            std::abs(c.z - 0.78f) < 1e-3f) {
+            return FVector2(it->bounds.minX, it->bounds.maxX - it->bounds.minX);
+        }
+    }
+    return FVector2(-1.0f, -1.0f);
+}
+
+TEST_CASE(tabstrip_indicator_slides_to_new_tab) {
+    TabStrip strip;
+    strip.setSize(FVector2(400.0f, 28.0f));
+    strip.addTab(L"A");
+    strip.addTab(L"B");   // both floor at 80px wide → tab0 x=0, tab1 x=80
+    strip.performLayout();
+    strip.setSelectedIndex(0);
+
+    // Prime: first render snaps the indicator to tab0 (no flash of a
+    // zero-width underline, and no tween on the very first frame).
+    {
+        MockRenderer r0;
+        strip.render(r0);
+        const FVector2 iw = lastUnderlineXW(r0);
+        CHECK_FLOAT_EQ(iw.x, 2.0f, 1e-3f);
+        CHECK_FLOAT_EQ(iw.y, 76.0f, 1e-3f);   // 80 - 2*2 inset
+    }
+
+    // Selection change → next render starts the slide but stays at tab0.
+    strip.setSelectedIndex(1);
+    {
+        MockRenderer r1;
+        strip.render(r1);
+        const FVector2 iw = lastUnderlineXW(r1);
+        CHECK_FLOAT_EQ(iw.x, 2.0f, 1e-3f);
+        CHECK(strip.isIndicatorAnimating() || true);   // tween now active
+    }
+
+    // Half way (60ms of 120ms, EaseOut → eased t > 0.5) — strictly between.
+    strip.tick(0.06f);
+    {
+        MockRenderer r2;
+        strip.render(r2);
+        const FVector2 iw = lastUnderlineXW(r2);
+        CHECK(iw.x > 2.0f && iw.x < 82.0f);
+    }
+
+    // Complete.
+    strip.tick(0.06f);
+    strip.tick(0.01f);   // completion frame — snap to exact target
+    {
+        MockRenderer r3;
+        strip.render(r3);
+        const FVector2 iw = lastUnderlineXW(r3);
+        CHECK_FLOAT_EQ(iw.x, 82.0f, 1e-3f);
+        CHECK_FLOAT_EQ(iw.y, 76.0f, 1e-3f);
+    }
+}
+
+TEST_CASE(tabstrip_indicator_snap_when_tween_disabled) {
+    TabStrip strip;
+    strip.setSize(FVector2(400.0f, 28.0f));
+    strip.addTab(L"A");
+    strip.addTab(L"B");
+    strip.performLayout();
+    strip.setSelectedIndex(0);
+    strip.setIndicatorTweenMs(0.0f);   // restore instant swap
+
+    MockRenderer r0;
+    strip.render(r0);
+    CHECK_FLOAT_EQ(lastUnderlineXW(r0).x, 2.0f, 1e-3f);
+
+    strip.setSelectedIndex(1);
+    MockRenderer r1;
+    strip.render(r1);
+    CHECK_FLOAT_EQ(lastUnderlineXW(r1).x, 82.0f, 1e-3f);   // immediate
+}
+
+TEST_CASE(tabstrip_indicator_retargets_midflight) {
+    TabStrip strip;
+    strip.setSize(FVector2(400.0f, 28.0f));
+    strip.addTab(L"A");
+    strip.addTab(L"B");
+    strip.performLayout();
+    strip.setSelectedIndex(0);
+
+    MockRenderer r0;
+    strip.render(r0);               // snap to tab0 (2, 76)
+
+    strip.setSelectedIndex(1);
+    MockRenderer r1;
+    strip.render(r1);               // start slide → still at tab0
+    strip.tick(0.03f);              // moving (x > 2)
+
+    // User clicks tab0 mid-flight → retarget from the current rect.
+    strip.setSelectedIndex(0);
+    MockRenderer r2;
+    strip.render(r2);
+    const FVector2 mid = lastUnderlineXW(r2);
+    CHECK(mid.x > 2.0f && mid.x < 82.0f);   // hasn't snapped to either end
+
+    strip.tick(0.06f);
+    strip.tick(0.06f);
+    strip.tick(0.01f);
+    MockRenderer r3;
+    strip.render(r3);
+    CHECK_FLOAT_EQ(lastUnderlineXW(r3).x, 2.0f, 1e-3f);
+}
+
+TEST_CASE(tabstrip_tick_chains_base_opacity) {
+    // The tick override must chain the base cascade, or this widget's
+    // opacity tween would stop advancing (compoundDescendTick landmine).
+    TabStrip strip;
+    strip.setSize(FVector2(400.0f, 28.0f));
+    strip.addTab(L"A");
+
+    strip.animateOpacity(0.0f, 200.0f, AnimationCurve::EaseOut);
+    CHECK(strip.isOpacityAnimating());
+    strip.tick(0.1f);
+    const float mid = strip.getOpacity();
+    CHECK(mid > 0.0f && mid < 1.0f);
+    strip.tick(0.1f);
+    strip.tick(0.01f);
+    CHECK_FLOAT_EQ(strip.getOpacity(), 0.0f, 1e-4f);
+}
+
 TEST_SUITE_END

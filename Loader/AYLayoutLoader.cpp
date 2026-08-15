@@ -24,7 +24,7 @@
 #include "AYWidgetSerializer.h"
 #include "AYLayoutLoader.h"
 
-#include <ayio/FileWatcher.h>
+#include <AYIO/FileWatcher.h>
 
 #include <fstream>
 #include <sstream>
@@ -236,6 +236,13 @@ Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
     }
 
     return loadFromString(_lastJson);
+}
+
+void UILayoutLoader::stopHotReload() {
+    if (_watcher && !_lastFilePath.empty()) {
+        _watcher->unwatch(_lastFilePath);
+    }
+    _dirty = false;
 }
 
 Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {

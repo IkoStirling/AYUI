@@ -1,5 +1,6 @@
 #include "AYUIManager.h"
 #include "AYWidget.h"
+#include "AYInteractiveWidget.h"
 #include "AYFocusableWidget.h"
 #include "AYBox.h"
 #include "AYButton.h"
@@ -34,7 +35,7 @@
 #include "AYDimmer.h"
 #include "AYSplitterHandle.h"
 #include "AYDockTrace.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 #include "AYWidgetFactory.h"
 
 #include <algorithm>
@@ -58,20 +59,6 @@ bool splitterDebugEnabled()
 }
 
 // AYUI_TRACE_INPUT — opt-in stderr trace for input-related root type and
-// pickTopmostWidget routing. Used to verify Gallery S1/S2 (2026-08-07):
-// is _root actually CompoundWidget (so pickTopmostWidget descends), or
-// is it plain Widget (so hitTest only matches self, blocking bar drags)?
-// Run: set AYUI_TRACE_INPUT=1 in env before launching AYUI_Gallery.
-bool ayuiTraceInputEnabled()
-{
-    static int cached = -1;
-    if (cached < 0) {
-        const char* env = std::getenv("AYUI_TRACE_INPUT");
-        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
-    }
-    return cached != 0;
-}
-
 // PR-InputTrace: emit root/overlay type info at any point — used both
 // after UIManager::initialize (default canvas) and after loadLayout /
 // loadFromString (where Gallery replaces _root with the loaded tree).
@@ -485,6 +472,20 @@ void UIManager::tearDownOverlayChildren() {
     // and _activeModal clears above.
     _tooltips.clear();
 
+    // UI animation lane — flush the pending-close queue BEFORE the
+    // destroy loop below. Soft-close entries (destroy=false) detach here,
+    // leaving the popup an orphan for its owner (ComboBox dtor) to free —
+    // exactly the pre-fade contract. destroy=true entries' popups are
+    // still mounted, so the destroy loop below frees them as usual; the
+    // queue must be cleared so no stale entry dereferences the freed
+    // pointer on a later update.
+    for (auto& entry : _pendingPopupCloses) {
+        if (entry.popup != nullptr && !entry.destroy) {
+            entry.popup->detachFromParent();
+        }
+    }
+    _pendingPopupCloses.clear();
+
     if (_overlayRoot == nullptr) {
         return;
     }
@@ -698,6 +699,10 @@ bool UIManager::loadFromString(const std::string& json) {
     return _root != nullptr;
 }
 
+void UIManager::disableLayoutHotReload() {
+    _loader.stopHotReload();
+}
+
 void UIManager::bindEvent(const std::string& widgetId, const std::string& eventType,
                           std::function<void()> handler) {
     _loader.bindEvent(widgetId, eventType, handler);
@@ -788,6 +793,15 @@ void UIManager::update(float dt) {
     // re-arm hover every tick while the cursor is idle on the band.
     if (_root != nullptr && _hasLastMouse && _capturedWidget == nullptr) {
         Widget* hit = pickTopmostWidget(math::FVector2(_lastMouseX, _lastMouseY));
+        if (ayuiTraceInputEnabled() && hit != _hoverWidget) {
+            dockTrace("[RevalTrace] lastMouse=(%.1f,%.1f) hover=%s -> hit=%s "
+                      "type=%s\n",
+                      static_cast<double>(_lastMouseX),
+                      static_cast<double>(_lastMouseY),
+                      widgetLabel(_hoverWidget),
+                      widgetLabel(hit),
+                      hit ? typeid(*hit).name() : "-");
+        }
         if (splitterDebugEnabled() && _hoverWidget != nullptr
             && _hoverWidget->isSplitterHandle() && hit != _hoverWidget) {
             std::fprintf(stderr,
@@ -826,6 +840,11 @@ void UIManager::update(float dt) {
             }
         }
     }
+
+    // UI animation lane: finalize popups whose fade-out completed this
+    // frame (detach / destroy). Runs AFTER the tick cascade so the fade
+    // tween itself was advanced above.
+    flushPendingPopupCloses();
 }
 
 void UIManager::invalidateLayout() {
@@ -939,6 +958,11 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     if (popup == nullptr) return;
     if (_overlayRoot == nullptr) return;
 
+    // UI animation lane: reopening a popup cancels any pending fade-out
+    // close (the popup is logically open again). The in-flight fade-out
+    // tween is overwritten by the reopen's own fade-in below.
+    cancelPendingPopupClose(popup);
+
     // Close any other popup first. Single-active invariant.
     // Menus are soft-dismissed (MenuBar keeps durable Menu*); ComboBox
     // and other popups still take the hard-destroy path.
@@ -974,6 +998,9 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
 
 void UIManager::abandonPopup(Widget* popup) {
     if (popup == nullptr) return;
+    // UI animation lane: the popup is going away through a non-close
+    // path — drop any pending fade-out finalize so it can't double-free.
+    cancelPendingPopupClose(popup);
     // Bookkeeping only — no isDescendantOf (may walk freed parents) and
     // no removeChild (parent may be mid-destruction with a dead vector).
     if (_activeDropdown == popup) {
@@ -994,6 +1021,10 @@ void UIManager::abandonPopup(Widget* popup) {
 
 void UIManager::closePopup(Widget* popup, bool destroy) {
     if (popup == nullptr) return;
+    // UI animation lane: a synchronous close must cancel any pending
+    // fade-out finalize, or the popup would be destroyed twice (once
+    // here, once by flushPendingPopupCloses).
+    cancelPendingPopupClose(popup);
 
     // Capture anchor BEFORE clearing bookkeeping — ComboBox hosts need a
     // dismiss notification so they can null their non-owning popup pointer
@@ -1063,6 +1094,169 @@ void UIManager::closePopup(Widget* popup, bool destroy) {
             return;
         }
         destroyWidgetTree(popup);
+    }
+}
+
+// =============================================================================
+// UI animation lane (cut 1) — animated popup close (fade-out).
+//
+// closePopup stays synchronous and is used by every path that must not
+// linger (openPopup's close-previous, teardown, host dtor). beginPopupFadeOut
+// is the UX-driven close: bookkeeping runs NOW (the popup is logically
+// closed — input/focus/capture stop immediately), but the popup stays
+// mounted to render its fade-out, and a later update() finalizes the
+// detach (+ optional destroy) once the fade completes. Reopening the
+// popup before then cancels the pending close via openPopup's
+// cancelPendingPopupClose, so a quick toggle never eats the popup.
+// =============================================================================
+namespace {
+
+constexpr float kPopupFadeOutMs = 120.0f;
+
+} // namespace
+
+void UIManager::beginPopupFadeOut(Widget* popup, bool destroy,
+                                  Widget* companion) {
+    if (popup == nullptr) return;
+    if (isPendingPopupClose(popup)) return;
+
+    // Capture anchor BEFORE clearing bookkeeping — ComboBox hosts need a
+    // dismiss notification so they can null their non-owning popup pointer
+    // before we destroyWidgetTree it. Same snapshot contract as closePopup.
+    Widget* anchor = nullptr;
+    bool notifyCombo = false;
+    if (_activeDropdown == popup) {
+        anchor = _activeDropdownAnchor;
+        notifyCombo = _activeDropdownAnchorIsComboBox;
+        _activeDropdown = nullptr;
+        _activeDropdownAnchor = nullptr;
+        _activeDropdownAnchorIsComboBox = false;
+    }
+
+    // If the captured widget is inside this popup, null it BEFORE the
+    // popup is logically closed. Otherwise the next mouse event
+    // dereferences a widget that stopped being interactive.
+    if (_capturedWidget != nullptr) {
+        if (_capturedWidget == popup ||
+            isDescendantOf(_capturedWidget, popup)) {
+            _capturedWidget = nullptr;
+        }
+    }
+
+    // Same contract for focus / hover — a closing popup must not keep
+    // the manager's focus / hover pointers (mirror of closePopup).
+    if (_focusedWidget != nullptr) {
+        if (_focusedWidget == popup ||
+            isDescendantOf(_focusedWidget, popup)) {
+            clearFocusNoDispatch(_focusedWidget);
+        }
+    }
+    if (_hoverWidget != nullptr) {
+        if (_hoverWidget == popup ||
+            isDescendantOf(_hoverWidget, popup)) {
+            clearHoverNoDispatch(_hoverWidget);
+        }
+    }
+
+    // Snapshot the external-owned flag — removeChild at finalize would
+    // clear it (same reason closePopup snapshots it).
+    const bool externallyOwned = popup->isExternallyOwned();
+
+    // PR-C1 mirror: a fading Tooltip must leave the hover-timer driver
+    // list immediately (it is logically hidden).
+    if (Tooltip* tip = dynamic_cast<Tooltip*>(popup)) {
+        unregisterTooltip(tip);
+    }
+
+    // destroy=true: the ComboBox anchor must forget its non-owning popup
+    // pointer NOW — the tree dies at finalize and the anchor must not
+    // touch it before then.
+    if (destroy && notifyCombo && anchor != nullptr) {
+        static_cast<ComboBox*>(anchor)->onPopupDismissedByManager();
+    }
+
+    // Start the fade-out (from the current opacity — also correct when a
+    // fade-in is cut short by an early close). A popup that is already
+    // fully transparent finalizes immediately: no queue entry, no visual.
+    popup->animateOpacity(0.0f, kPopupFadeOutMs, AnimationCurve::EaseIn);
+    if (!popup->isOpacityAnimating() && popup->getOpacity() <= 0.01f) {
+        finishPopupClose(popup, destroy, externallyOwned, companion);
+        return;
+    }
+
+    PendingPopupClose entry;
+    entry.popup = popup;
+    entry.destroy = destroy;
+    entry.notifyCombo = notifyCombo;
+    entry.anchor = anchor;
+    entry.externallyOwned = externallyOwned;
+    entry.companion = companion;
+    _pendingPopupCloses.push_back(entry);
+}
+
+void UIManager::finishPopupClose(Widget* popup, bool destroy,
+                                 bool externallyOwned, Widget* companion) {
+    // Detach the companion (Modal dimmer) first — it renders after the
+    // popup on the overlay.
+    if (companion != nullptr && companion->getParent() != nullptr) {
+        companion->getParent()->removeChild(companion);
+    }
+    if (popup->getParent() != nullptr) {
+        popup->getParent()->removeChild(popup);
+    }
+    // Menu soft-unmount: the MenuBar owns the tree for the session, so the
+    // menu reparents back under it instead of dying.
+    if (Menu* menu = dynamic_cast<Menu*>(popup)) {
+        menu->onPopupFadeOutCompleted();
+        return;
+    }
+    if (destroy && !externallyOwned) {
+        destroyWidgetTree(popup);
+    }
+}
+
+void UIManager::cancelPendingPopupClose(Widget* popup) {
+    if (popup == nullptr) return;
+    auto& vec = _pendingPopupCloses;
+    for (auto it = vec.begin(); it != vec.end(); ++it) {
+        if (it->popup == popup) {
+            vec.erase(it);
+            return;
+        }
+    }
+}
+
+bool UIManager::isPendingPopupClose(const Widget* popup) const {
+    if (popup == nullptr) return false;
+    for (const auto& entry : _pendingPopupCloses) {
+        if (entry.popup == popup) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void UIManager::flushPendingPopupCloses() {
+    if (_pendingPopupCloses.empty()) {
+        return;
+    }
+    // Move the list out first: finishPopupClose mutates the overlay
+    // (removeChild / destroyWidgetTree) and can re-enter the manager;
+    // erasing while iterating the live vector would invalidate us.
+    std::vector<PendingPopupClose> pending = std::move(_pendingPopupCloses);
+    _pendingPopupCloses.clear();
+    for (const auto& entry : pending) {
+        if (entry.popup == nullptr) {
+            continue;
+        }
+        if (!entry.popup->isOpacityAnimating() &&
+            entry.popup->getOpacity() <= 0.01f) {
+            finishPopupClose(entry.popup, entry.destroy,
+                             entry.externallyOwned, entry.companion);
+        } else {
+            // Fade still running — re-queue for the next update.
+            _pendingPopupCloses.push_back(entry);
+        }
     }
 }
 
@@ -1153,7 +1347,11 @@ void UIManager::closeModal(Modal* modal, bool fireOnClose) {
     // fireOnClose path: Modal::closeModal restores focus via setFocus
     // _focusedBefore. We don't touch _focusedWidget here.
 
-    if (modal->getParent() != nullptr) {
+    // UI animation lane: a modal mid-fade-out (closeModal followed by
+    // beginPopupFadeOut) stays mounted to render its fade — the pending
+    // finalize detaches it instead. Plain close / dtor paths detach here
+    // as before.
+    if (modal->getParent() != nullptr && !isPendingPopupClose(modal)) {
         modal->getParent()->removeChild(modal);
     }
     _activeModal = nullptr;
@@ -1192,6 +1390,11 @@ Widget* UIManager::pickTopmostWidget(const math::FVector2& worldPos) {
     if (_overlayRoot != nullptr) {
         const auto& overlayKids = _overlayRoot->getChildren();
         for (auto it = overlayKids.rbegin(); it != overlayKids.rend(); ++it) {
+            // UI animation lane: a popup mid-fade-out is logically closed
+            // — it renders but must not receive input.
+            if (isPendingPopupClose(*it)) {
+                continue;
+            }
             if (Widget* hit = pickWidgetAt(*it, worldPos)) {
                 return hit;
             }
@@ -1264,7 +1467,27 @@ bool UIManager::onMouseMove(float x, float y) {
     updateHoverWidget(_hoverWidget, hit);
 
     if (hit != nullptr) {
-        return hit->onMouseMove(UIMouseEvent(pos, 0));
+        const bool handled = hit->onMouseMove(UIMouseEvent(pos, 0));
+        if (ayuiTraceInputEnabled()) {
+            if (auto* iw = dynamic_cast<InteractiveWidget*>(hit)) {
+                dockTrace("[InputTrace] onMouseMove pos=(%.1f,%.1f) hit=%s "
+                          "type=%s parent=%s handled=%d hover=%d state=%d\n",
+                          static_cast<double>(x), static_cast<double>(y),
+                          widgetLabel(hit), typeid(*hit).name(),
+                          (hit->getParent() != nullptr)
+                              ? widgetLabel(hit->getParent()) : "-",
+                          handled ? 1 : 0,
+                          iw->isMouseOver() ? 1 : 0,
+                          static_cast<int>(iw->getState()));
+            } else {
+                dockTrace("[InputTrace] onMouseMove pos=(%.1f,%.1f) hit=%s "
+                          "type=%s handled=%d (non-interactive)\n",
+                          static_cast<double>(x), static_cast<double>(y),
+                          widgetLabel(hit), typeid(*hit).name(),
+                          handled ? 1 : 0);
+            }
+        }
+        return handled;
     }
     return false;
 }
@@ -1389,7 +1612,11 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
             if (Menu* menu = dynamic_cast<Menu*>(_activeDropdown)) {
                 menu->dismissFromManager();
             } else {
-                closePopup(_activeDropdown);
+                // UI animation lane: UX-driven close — fade out instead of
+                // vanishing. Pass the popup by value (beginPopupFadeOut
+                // clears _activeDropdown, so a later read would be null).
+                // destroy=true: the popup tree is freed at finalize.
+                beginPopupFadeOut(_activeDropdown, /*destroy=*/true);
             }
         }
     }

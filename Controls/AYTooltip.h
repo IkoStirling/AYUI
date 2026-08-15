@@ -89,6 +89,12 @@ public:
     void tick(float dt, const math::FVector2& mousePos,
               const math::FVector2& viewportSize);
 
+    // UI animation lane: drives the fade-out completion check. Driven by
+    // UIManager's overlay cascade (compoundDescendTick), NOT the 3-arg
+    // hover driver — that one pauses when _hasLastMouse is false or the
+    // tip is unregistered, which would freeze a fade mid-air.
+    void tick(float dt) override;
+
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
 
@@ -106,6 +112,7 @@ private:
 
     bool  _hovering = false;
     bool  _visible  = false;
+    bool  _hiding   = false;   // UI animation lane: fade-out in flight
     float _hoverTime = 0.0f;
     float _hoverDelay = kDefaultHoverDelay;
 

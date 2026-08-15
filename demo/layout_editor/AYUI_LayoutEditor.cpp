@@ -23,14 +23,41 @@
 #include "AYRenderTypes.h"
 #include "AYTheme.h"
 #include "AYDeviceManager.h"
+#include "UIKeyCode.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
 
+#if defined(_WIN32)
+#  include <DbgHelp.h>
+#  pragma comment(lib, "Dbghelp.lib")
+#endif
+
 namespace {
+
+#if defined(_WIN32)
+LONG WINAPI layoutEditorCrashFilter(EXCEPTION_POINTERS* info) {
+    FILE* f = nullptr;
+    if (fopen_s(&f, "layout_editor_crash.log", "w") == 0 && f != nullptr) {
+        std::fprintf(f, "ExceptionCode=0x%08lX\n",
+            static_cast<unsigned long>(info->ExceptionRecord->ExceptionCode));
+        std::fprintf(f, "ExceptionAddress=%p\n",
+            info->ExceptionRecord->ExceptionAddress);
+        void* stack[62] = {};
+        const USHORT n = CaptureStackBackTrace(0, 62, stack, nullptr);
+        std::fprintf(f, "Stack (%u frames):\n", static_cast<unsigned>(n));
+        for (USHORT i = 0; i < n; ++i) {
+            std::fprintf(f, "  [%u] %p\n", static_cast<unsigned>(i), stack[i]);
+        }
+        std::fclose(f);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
 
 constexpr int kWidth = 1280;
 constexpr int kHeight = 720;
@@ -123,8 +150,34 @@ struct AppState {
     ayt::device::DeviceManager* devices = nullptr;
     int clientW = kWidth;
     int clientH = kHeight;
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
     bool running = true;
 };
+
+static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint) {
+    static const HCURSOR arrow = ::LoadCursorW(nullptr, IDC_ARROW);
+    static const HCURSOR hand  = ::LoadCursorW(nullptr, IDC_HAND);
+    static const HCURSOR we    = ::LoadCursorW(nullptr, IDC_SIZEWE);
+    static const HCURSOR ns    = ::LoadCursorW(nullptr, IDC_SIZENS);
+    static const HCURSOR nwse  = ::LoadCursorW(nullptr, IDC_SIZENWSE);
+    static const HCURSOR nesw  = ::LoadCursorW(nullptr, IDC_SIZENESW);
+    static const HCURSOR move  = ::LoadCursorW(nullptr, IDC_SIZEALL);
+    static const HCURSOR beam  = ::LoadCursorW(nullptr, IDC_IBEAM);
+    switch (hint) {
+    case ayt::ui::UiCursorHint::Hand:  return hand;
+    case ayt::ui::UiCursorHint::SizeWe:
+    case ayt::ui::UiCursorHint::SizeHorizontal: return we;
+    case ayt::ui::UiCursorHint::SizeNs:
+    case ayt::ui::UiCursorHint::SizeVertical:   return ns;
+    case ayt::ui::UiCursorHint::SizeNwse: return nwse;
+    case ayt::ui::UiCursorHint::SizeNesw: return nesw;
+    case ayt::ui::UiCursorHint::Move:  return move;
+    case ayt::ui::UiCursorHint::Beam:  return beam;
+    case ayt::ui::UiCursorHint::Default:
+    default: return arrow;
+    }
+}
 
 std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam,
                             std::intptr_t lParam, bool& handled) {
@@ -135,6 +188,19 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
     ayt::ui::UIManager& ui = *state->ui;
 
     switch (msg) {
+    case WM_SETCURSOR: {
+        ayt::ui::UiCursorHint hint = ayt::ui::UiCursorHint::Default;
+        if (state->session != nullptr) {
+            hint = state->session->canvasCursorHint(
+                ayt::math::FVector2(state->mouseX, state->mouseY));
+        }
+        if (hint == ayt::ui::UiCursorHint::Default) {
+            hint = ui.getCursorHint();
+        }
+        ::SetCursor(cursorForHint(hint));
+        handled = true;
+        return TRUE;
+    }
     case WM_SIZE: {
         state->clientW = LOWORD(lParam);
         state->clientH = HIWORD(lParam);
@@ -159,25 +225,61 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
         return 0;
     }
     case WM_MOUSEMOVE: {
-        ui.onMouseMove(static_cast<float>(GET_X_LPARAM(lParam)),
-                       static_cast<float>(GET_Y_LPARAM(lParam)));
+        const float x = static_cast<float>(GET_X_LPARAM(lParam));
+        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
+        state->mouseX = x;
+        state->mouseY = y;
+        const ayt::math::FVector2 pos(x, y);
+        if (state->session != nullptr && state->session->onPointerMove(pos)) {
+            handled = true;
+            return 0;
+        }
+        ui.onMouseMove(x, y);
         return 0;
     }
     case WM_LBUTTONDOWN: {
         const float x = static_cast<float>(GET_X_LPARAM(lParam));
         const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        ui.onMouseButtonDown(x, y, 0);
-        if (state->session != nullptr) {
-            state->session->onCanvasClick(ayt::math::FVector2(x, y));
+        const ayt::math::FVector2 pos(x, y);
+        if (state->session != nullptr && state->session->onPointerDown(pos, 0)) {
+            handled = true;
+            return 0;
         }
+        ui.onMouseButtonDown(x, y, 0);
         handled = true;
         return 0;
     }
     case WM_LBUTTONUP: {
-        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)),
-                           static_cast<float>(GET_Y_LPARAM(lParam)), 0);
+        const float x = static_cast<float>(GET_X_LPARAM(lParam));
+        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
+        const ayt::math::FVector2 pos(x, y);
+        if (state->session != nullptr && state->session->onPointerUp(pos, 0)) {
+            handled = true;
+            return 0;
+        }
+        ui.onMouseButtonUp(x, y, 0);
         handled = true;
         return 0;
+    }
+    case WM_MBUTTONDOWN: {
+        const float x = static_cast<float>(GET_X_LPARAM(lParam));
+        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
+        if (state->session != nullptr &&
+            state->session->onPointerDown(ayt::math::FVector2(x, y), 2)) {
+            handled = true;
+            return 0;
+        }
+        break;
+    }
+    case WM_MBUTTONUP: {
+        const float x = static_cast<float>(GET_X_LPARAM(lParam));
+        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
+        if (state->session != nullptr &&
+            state->session->onPointerUp(ayt::math::FVector2(x, y), 2)) {
+            handled = true;
+            return 0;
+        }
+        break;
     }
     case WM_RBUTTONDOWN: {
         ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)),
@@ -203,13 +305,27 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
                 ::ScreenToClient(hwnd, &pt);
             }
         }
+        const ayt::math::FVector2 pos(static_cast<float>(pt.x),
+                                      static_cast<float>(pt.y));
+        if (state->session != nullptr && state->session->onWheel(pos, deltaY)) {
+            handled = true;
+            return 0;
+        }
         ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y), deltaY);
         handled = true;
         return 0;
     }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-        ui.onKeyDown(static_cast<int>(wParam));
+        const int key = static_cast<int>(wParam);
+        if (key == ayt::ui::UIKey_Shift || key == ayt::ui::UIKey_Control ||
+            key == ayt::ui::UIKey_Alt) {
+            ui.onKeyDown(key);
+        } else if (state->session != nullptr && state->session->onKeyDown(key)) {
+            // Editor shortcuts (Ctrl+Z/Y, Delete) — skip UIManager.
+        } else {
+            ui.onKeyDown(key);
+        }
         handled = true;
         return 0;
     }
@@ -228,10 +344,22 @@ std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    AllocConsole();
-    FILE* dummy = nullptr;
-    freopen_s(&dummy, "CONOUT$", "w", stdout);
-    freopen_s(&dummy, "CONOUT$", "w", stderr);
+#if defined(_WIN32)
+    ::SetUnhandledExceptionFilter(layoutEditorCrashFilter);
+#endif
+    const bool reproShiftRoot =
+        (std::wcsstr(::GetCommandLineW(), L"--repro-shift-root") != nullptr);
+
+    if (!reproShiftRoot) {
+        AllocConsole();
+        FILE* dummy = nullptr;
+        freopen_s(&dummy, "CONOUT$", "w", stdout);
+        freopen_s(&dummy, "CONOUT$", "w", stderr);
+    } else {
+        FILE* log = nullptr;
+        freopen_s(&log, "layout_editor_repro.log", "w", stderr);
+        freopen_s(&log, "layout_editor_repro.log", "a", stdout);
+    }
 
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
@@ -320,6 +448,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     state.session = &session;
     session.setOpenPathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setSavePathPicker([hwnd]() { return showSaveUiJsonDialog(hwnd); });
+    session.setTitleUpdater([hwnd](const std::wstring& title) {
+        if (hwnd != nullptr) {
+            ::SetWindowTextW(hwnd, title.c_str());
+        }
+    });
     if (!session.attach(ui)) {
         std::fprintf(stderr, "[AYUI_LayoutEditor] session.attach failed\n");
         ui.shutdown();
@@ -348,8 +481,60 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     ::QueryPerformanceFrequency(&qpcFreq);
     ::QueryPerformanceCounter(&qpcPrev);
 
+    int reproPhase = reproShiftRoot ? 0 : -1;
+    int reproFrames = 0;
+
     while (state.running && window.isWindowValid()) {
         devices.pollEvents();
+        if (state.session != nullptr) {
+            state.session->pumpDeferred();
+        }
+
+        if (reproPhase >= 0) {
+            ++reproFrames;
+            // Warm up a few frames, then mirror: select child → Shift-select root.
+            if (reproPhase == 0 && reproFrames >= 5) {
+                std::fprintf(stderr, "[repro] select btn_hello\n");
+                session.selectById("btn_hello");
+                reproPhase = 1;
+                reproFrames = 0;
+            } else if (reproPhase == 1 && reproFrames >= 5) {
+                std::fprintf(stderr, "[repro] focus prop_text + hierarchy Shift-click root\n");
+                if (ayt::ui::Widget* prop = ui.findById("prop_text")) {
+                    ui.setFocus(prop);
+                }
+                ui.onKeyDown(ayt::ui::UIKey_Shift);
+                ayt::ui::Widget* hier = ui.findById("list_hierarchy");
+                if (hier != nullptr) {
+                    const ayt::math::FRectangle hb = hier->getWorldBounds();
+                    const ayt::math::FVector2 clickPos(
+                        hb.minX + 40.0f, hb.minY + 12.0f);
+                    std::fprintf(stderr, "[repro] pointer down/up at %.1f,%.1f\n",
+                        clickPos.x, clickPos.y);
+                    session.onPointerDown(clickPos, 0);
+                    session.onPointerUp(clickPos, 0);
+                    // Orphaned UIManager up (real path when up isn't consumed):
+                    // previously UAF'd after ListView::rebuildRows deleted the
+                    // hovered Row during the following layout pass.
+                    ui.onMouseButtonUp(clickPos.x, clickPos.y, 0);
+                } else {
+                    session.select(session.documentRoot(), true);
+                }
+                ui.onKeyUp(ayt::ui::UIKey_Shift);
+                std::fprintf(stderr, "[repro] after select sel=%zu primary=%s\n",
+                    session.selection().size(),
+                    session.selected() != nullptr
+                        ? session.selected()->getId().c_str() : "(null)");
+                reproPhase = 2;
+                reproFrames = 0;
+            } else if (reproPhase == 2) {
+                if (reproFrames >= 10) {
+                    std::fprintf(stderr, "[repro] OK — no crash\n");
+                    std::fflush(stderr);
+                    state.running = false;
+                }
+            }
+        }
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);

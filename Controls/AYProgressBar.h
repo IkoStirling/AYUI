@@ -40,6 +40,17 @@ public:
         _onValueChanged = std::move(cb);
     }
 
+    // UI-anim cut 2: indeterminate mode draws a 30%-wide segment scanning
+    // left→right forever (tick-driven, ignores _value). Hosts switch it on
+    // for "unknown duration" work and off to return to the value bar.
+    void setIndeterminate(bool v) {
+        _indeterminate = v;
+        if (!v) _scanPhase = 0.0f;
+    }
+    bool isIndeterminate() const { return _indeterminate; }
+
+    void tick(float dt) override;
+
     math::FRectangle getBarRect() const;
     math::FRectangle getFilledRect() const;
 
@@ -50,6 +61,10 @@ protected:
     float _max = 1.0f;
     float _value = 0.5f;
     std::function<void(float)> _onValueChanged;
+
+    // Indeterminate scan phase (0..1) advanced by tick; 1.6s per sweep.
+    bool  _indeterminate = false;
+    float _scanPhase = 0.0f;
 };
 
 Widget* createProgressBarWidget();

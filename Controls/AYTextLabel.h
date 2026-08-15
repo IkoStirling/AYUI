@@ -39,6 +39,8 @@ public:
 
     void setHorizontalAlignment(HAlignment align) { _hAlign = align; }
     void setVerticalAlignment(VAlignment align) { _vAlign = align; }
+    HAlignment getHorizontalAlignment() const { return _hAlign; }
+    VAlignment getVerticalAlignment() const { return _vAlign; }
 
     void setWordWrap(bool wrap) { _wordWrap = wrap; }
     bool getWordWrap() const { return _wordWrap; }

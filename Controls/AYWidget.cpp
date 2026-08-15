@@ -1,36 +1,11 @@
 #include "AYWidget.h"
 #include "AYCompoundFocusableWidget.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 #include <algorithm>
 #include <cmath>
 
 namespace ayt::ui {
-
-namespace {
-
-// PR-anim: easing table for widget tweens. Mirrors MockRenderer's
-// AnimationData::update switch so a Widget::animateOpacity tween and a
-// renderer-side animation handle interpolate identically.
-float easeCurve(float t, AnimationCurve curve)
-{
-    switch (curve) {
-    case AnimationCurve::EaseIn:
-        return t * t;
-    case AnimationCurve::EaseOut:
-        return 1.0f - (1.0f - t) * (1.0f - t);
-    case AnimationCurve::EaseInOut:
-        return t < 0.5f ? 2.0f * t * t : 1.0f - 2.0f * (1.0f - t) * (1.0f - t);
-    case AnimationCurve::Spring:
-        // Simplified spring — same formula as MockRenderer.
-        return t + std::sin(t * 6.28f) * 0.1f * (1.0f - t);
-    case AnimationCurve::Linear:
-    default:
-        return t;
-    }
-}
-
-} // namespace
 
 // =============================================================================
 // Phase B (S3): shared compound-descent helpers. Both CompoundWidget and
@@ -229,6 +204,30 @@ void Widget::removeChild(Widget* child) {
             return;
         }
     }
+}
+
+bool Widget::moveChildToIndex(Widget* child, size_t index) {
+    if (child == nullptr || child->_parent != this) {
+        return false;
+    }
+    if (index >= _children.size()) {
+        return false;
+    }
+    size_t cur = static_cast<size_t>(-1);
+    for (size_t i = 0; i < _children.size(); ++i) {
+        if (_children[i] == child) {
+            cur = i;
+            break;
+        }
+    }
+    if (cur == static_cast<size_t>(-1) || cur == index) {
+        return cur == index;
+    }
+    _children.erase(_children.begin() + static_cast<std::ptrdiff_t>(cur));
+    // `index` is the desired FINAL index after the move. Do not
+    // decrement when index > cur — that made "move down" a no-op.
+    _children.insert(_children.begin() + static_cast<std::ptrdiff_t>(index), child);
+    return true;
 }
 
 void Widget::detachFromParent() {
@@ -458,24 +457,31 @@ void Widget::tick(float dt) {
     // PR-anim: advance the opacity tween. compoundDescendTick forces this
     // base implementation for every tree node, so a fade keeps running
     // even under subclasses that override tick without chaining.
-    if (!_opacityAnimating) {
-        return;
+    const bool wasActive = _opacityAnim.active;
+    float t;
+    if (_opacityAnim.advance(dt, t)) {
+        _opacity = tweenLerp(_opacityAnim.from, _opacityAnim.to, t);
+    } else if (wasActive) {
+        // Tween completed this frame — snap to the exact target (the eased
+        // path never runs on the completion frame).
+        _opacity = _opacityAnim.to;
     }
-    _opacityAnimElapsed += dt;
-    if (_opacityAnimElapsed >= _opacityAnimDuration) {
-        _opacity = _opacityAnimTo;
-        _opacityAnimating = false;
-        return;
+
+    // UI-anim cut 2: position tween. Writes _position directly (not via
+    // setPosition — that would cancel the in-flight tween we're feeding).
+    const bool posActive = _posAnim.active;
+    float pt;
+    if (_posAnim.advance(dt, pt)) {
+        _position = tweenLerp(_posAnim.from, _posAnim.to, pt);
+    } else if (posActive) {
+        _position = _posAnim.to;
     }
-    const float t = easeCurve(_opacityAnimElapsed / _opacityAnimDuration,
-                              _opacityAnimCurve);
-    _opacity = _opacityAnimFrom + (_opacityAnimTo - _opacityAnimFrom) * t;
 }
 
 void Widget::setOpacity(float opacity) {
     _opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
     // A direct set cancels any in-flight tween — the caller took over.
-    _opacityAnimating = false;
+    _opacityAnim.active = false;
 }
 
 void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
@@ -483,15 +489,22 @@ void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
     if (durationMs <= 0.0f) {
         // Instant snap — same semantics as setOpacity.
         _opacity = target;
-        _opacityAnimating = false;
+        _opacityAnim.active = false;
         return;
     }
-    _opacityAnimFrom = _opacity;
-    _opacityAnimTo = target;
-    _opacityAnimDuration = durationMs * 0.001f;  // ms -> s
-    _opacityAnimElapsed = 0.0f;
-    _opacityAnimCurve = curve;
-    _opacityAnimating = true;
+    _opacityAnim.start(_opacity, target, durationMs, curve);
+}
+
+void Widget::animatePositionTo(const math::FVector2& to, float durationMs,
+                               AnimationCurve curve) {
+    if (durationMs <= 0.0f) {
+        // Instant snap — same semantics as setPosition (and it cancels any
+        // in-flight tween the same way).
+        _position = to;
+        _posAnim.active = false;
+        return;
+    }
+    _posAnim.start(_position, to, durationMs, curve);
 }
 
 void Widget::renderChildren(IRenderBackend& renderer) {

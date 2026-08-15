@@ -2,7 +2,7 @@
 #include "AYValueWidget.h"
 #include "IAYRenderBackend.h"
 #include "AYStyle.h"
-#include "aymath/MathUtils.h"
+#include "AYMath/MathUtils.h"
 
 namespace ayt::ui {
 
@@ -79,6 +79,16 @@ math::FRectangle ProgressBar::getFilledRect() const {
     return bar;
 }
 
+void ProgressBar::tick(float dt) {
+    // Chain the base cascade (opacity/position tweens), then advance the
+    // indeterminate scan phase when enabled.
+    Widget::tick(dt);
+    if (_indeterminate) {
+        _scanPhase += dt / 1.6f;   // one full sweep per 1.6s
+        if (_scanPhase > 1.0f) _scanPhase -= 1.0f;
+    }
+}
+
 void ProgressBar::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) {
@@ -102,6 +112,22 @@ void ProgressBar::onRender(IRenderBackend& renderer) {
     // B3: rounded fills match the 2px rounded border (bar keeps its
     // rounded cap at the fill edge, which reads as a progress bar).
     renderer.drawRoundedRect(bar, unfilledBg, 2.0f);
+
+    // UI-anim cut 2: indeterminate mode — a 30%-wide accent segment scans
+    // left→right across the track, clipped to the bar. The value-fill path
+    // below stays byte-identical when disabled.
+    if (_indeterminate) {
+        const float barW = bar.maxX - bar.minX;
+        const float segW = std::max(barW * 0.30f, 4.0f);
+        const float x0 = bar.minX - segW + _scanPhase * (barW + segW);
+        renderer.pushClip(bar);
+        renderer.drawRoundedRect(
+            math::FRectangle(x0, bar.minY, x0 + segW, bar.maxY),
+            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f), 2.0f);
+        renderer.popClip();
+        renderer.drawBorderRect(bar, unfilledBorder, unfilledBorderWidth, 2.0f);
+        return;
+    }
 
     // Filled portion — clamp to >= 1px width when normalized > 0 so a
     // tiny non-zero value still shows a visible bar.
