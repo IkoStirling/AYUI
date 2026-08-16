@@ -14,8 +14,7 @@ target_include_directories(${MODULE_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../i18n
 )
 
-ay_configure_test_tmpdir(${MODULE_NAME})
-add_test(NAME ${MODULE_NAME} COMMAND ${MODULE_NAME})
+ay_add_test(${MODULE_NAME})
 
 # Tests run from the build directory; pass the AYUI source root so
 # they can locate source files via the AYUI_SOURCE_DIR macro.
