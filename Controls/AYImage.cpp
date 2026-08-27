@@ -53,6 +53,7 @@ void Image::releaseCurrent() {
 }
 
 void Image::setTexture(const std::string& textureName) {
+    markDirty();
     if (textureName.empty()) {
         // Treat empty-string as "clear" so callers don't have to
         // special-case it. Mirrors the prior void* null pattern.
@@ -67,6 +68,7 @@ void Image::setTexture(const std::string& textureName) {
 
 void Image::setTexture(const ImageTextureHandle& h) {
     releaseCurrent();
+    markDirty();
     if (!h.name.empty()) {
         // Caller is asking us to adopt a named handle. The registry
         // already holds the refcount; just take a copy of the data.
@@ -81,6 +83,7 @@ void Image::setTexture(const ImageTextureHandle& h) {
 void Image::setTexture(void* rawHandle) {
     // Legacy void* path — anonymous, w/h = 0, no format change.
     releaseCurrent();
+    markDirty();
     _tex.handle = rawHandle;
 }
 

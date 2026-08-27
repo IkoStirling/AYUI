@@ -65,16 +65,16 @@ TEST_CASE(menubar_under_window_destroy_no_crash) {
     MockRenderer renderer;
     ui.initialize(&renderer);
 
-    Window host;
-    host.setSize(FVector2(400.0f, 300.0f));
+    Window* host = new Window();
+    host->setSize(FVector2(400.0f, 300.0f));
 
-    MenuBar bar;
-    bar.setSize(FVector2(380.0f, 26.0f));
-    host.addChild(&bar);
+    MenuBar* bar = new MenuBar();
+    bar->setSize(FVector2(380.0f, 26.0f));
+    host->addChild(bar);
 
-    Menu* file = bar.addMenu(L"File");
-    Menu* edit = bar.addMenu(L"Edit");
-    Menu* help = bar.addMenu(L"Help");
+    Menu* file = bar->addMenu(L"File");
+    Menu* edit = bar->addMenu(L"Edit");
+    Menu* help = bar->addMenu(L"Help");
     CHECK_NOT_NULL(file);
     CHECK_NOT_NULL(edit);
     CHECK_NOT_NULL(help);
@@ -86,7 +86,7 @@ TEST_CASE(menubar_under_window_destroy_no_crash) {
 
     // Tear the whole tree down. Pre-fix the host's destroyWidgetTree
     // chain triggered ~MenuBar's UAF on the way to ~Widget's child walk.
-    destroyWidgetTree(&host);
+    destroyWidgetTree(host);
 
     ui.shutdown();
 }

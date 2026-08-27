@@ -35,16 +35,16 @@ public:
     ~Separator() override;
 
     Orientation getOrientation() const { return _orientation; }
-    void setOrientation(Orientation o) { _orientation = o; markBoundsDirty(); }
+    void setOrientation(Orientation o) { _orientation = o; markBoundsDirty(); markDirty(); }
 
     float getThickness() const { return _thickness; }
-    void setThickness(float t) { _thickness = (t < 1.0f ? 1.0f : t); markBoundsDirty(); }
+    void setThickness(float t) { _thickness = (t < 1.0f ? 1.0f : t); markBoundsDirty(); markDirty(); }
 
     const math::FVector4& getColor() const { return _color; }
-    void setColor(const math::FVector4& c) { _color = c; markBoundsDirty(); }
+    void setColor(const math::FVector4& c) { _color = c; markBoundsDirty(); markDirty(); }
 
     float getInset() const { return _inset; }
-    void setInset(float i) { _inset = (i < 0.0f ? 0.0f : i); markBoundsDirty(); }
+    void setInset(float i) { _inset = (i < 0.0f ? 0.0f : i); markBoundsDirty(); markDirty(); }
 
     void onRender(IRenderBackend& renderer) override;
 

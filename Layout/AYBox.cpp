@@ -239,6 +239,18 @@ void BoxBase::render(IRenderBackend& renderer) {
     if (!_visible) {
         return;
     }
+    // BoxBase owns a slot-ordered child traversal, so it cannot delegate to
+    // Widget::render(). Keep the same paint gate and lifecycle here;
+    // otherwise a clean container can swallow a child's dirty propagation
+    // and prevent the containing ScrollView from repainting.
+    if (!_dirtyThis && !hasDirtyRect()) {
+        return;
+    }
+
+    const bool fading = _opacity < (1.0f - 1e-5f);
+    if (fading) {
+        renderer.pushOpacity(_opacity);
+    }
 
     // Slots first (insertion order — splitters sit between panels).
     // Then any child that was attached via addChild without addWidget:
@@ -264,6 +276,17 @@ void BoxBase::render(IRenderBackend& renderer) {
             child->render(renderer);
         }
     }
+
+    if (_isCurrentDropTarget) {
+        const math::FRectangle b = getWorldBounds();
+        renderer.drawBorderRect(b,
+            math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 2.0f);
+    }
+    if (fading) {
+        renderer.popOpacity();
+    }
+    _dirtyThis = false;
+    _dirtyRect = math::FRectangle();
 }
 
 Widget* BoxBase::hitTest(const math::FVector2& worldPos) {

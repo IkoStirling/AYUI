@@ -47,13 +47,13 @@ public:
     size_t getRunCount() const { return _runs.size(); }
     const RichRun& getRun(size_t i) const { return _runs[i]; }
 
-    void setDefaultColor(const math::FVector4& c) { _defaultColor = c; }
+    void setDefaultColor(const math::FVector4& c) { _defaultColor = c; markDirty(); }
     math::FVector4 getDefaultColor() const { return _defaultColor; }
-    void setDefaultFontSize(int s) { _defaultFontSize = s; }
+    void setDefaultFontSize(int s) { _defaultFontSize = s; markDirty(); }
     int  getDefaultFontSize() const { return _defaultFontSize; }
 
     // 0 = no wrap; >0 = wrap to that pixel width.
-    void setWrapWidth(float w) { _wrapWidth = w; markBoundsDirty(); }
+    void setWrapWidth(float w) { _wrapWidth = w; markBoundsDirty(); markDirty(); }
     float getWrapWidth() const { return _wrapWidth; }
 
 protected:

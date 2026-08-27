@@ -50,19 +50,19 @@ public:
     ~TreeNode() override;
 
     // Hierarchy data
-    void setDepth(int d) { _depth = d; markBoundsDirty(); }
+    void setDepth(int d) { _depth = d; markBoundsDirty(); markDirty(); }
     int  getDepth() const { return _depth; }
 
-    void setHasChildren(bool h) { _hasChildren = h; markBoundsDirty(); }
+    void setHasChildren(bool h) { _hasChildren = h; markBoundsDirty(); markDirty(); }
     bool hasChildren() const { return _hasChildren; }
 
     void setExpanded(bool e);     // fires _onExpandToggled if changed
     bool isExpanded() const { return _expanded; }
 
-    void setIcon(const std::wstring& glyph) { _icon = glyph; markBoundsDirty(); }
+    void setIcon(const std::wstring& glyph) { _icon = glyph; markBoundsDirty(); markDirty(); }
     const std::wstring& getIcon() const { return _icon; }
 
-    void setLabel(const std::wstring& s) { _label = s; markBoundsDirty(); }
+    void setLabel(const std::wstring& s) { _label = s; markBoundsDirty(); markDirty(); }
     const std::wstring& getLabel() const { return _label; }
 
     void setOnExpandToggled(std::function<void(bool)> cb) {

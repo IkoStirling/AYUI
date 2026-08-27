@@ -101,15 +101,16 @@ public:
     size_t getSelectionEnd() const { return _selEnd; }
 
     // Length cap (0 = unlimited). Default unlimited.
-    void   setMaxLength(size_t n) { _maxLength = n; }
+    void   setMaxLength(size_t n) { _maxLength = n; markDirty(); }
     size_t getMaxLength() const { return _maxLength; }
 
-    void setReadOnly(bool ro) { _readOnly = ro; }
+    void setReadOnly(bool ro) { _readOnly = ro; markDirty(); }
     bool isReadOnly() const { return _readOnly; }
 
     void setPasswordMode(bool p) {
         _passwordMode = p;
         if (p) clearSelection();
+        markDirty();
     }
     bool isPasswordMode() const { return _passwordMode; }
 
@@ -140,7 +141,7 @@ public:
     // `placeholderColor` (WidgetStyle key added in PR-1). Default muted
     // gray, semitransparent.
     // =================================================================
-    void setPlaceholder(const std::wstring& text) { _placeholder = text; }
+    void setPlaceholder(const std::wstring& text) { _placeholder = text; markDirty(); }
     const std::wstring& getPlaceholder() const { return _placeholder; }
 
     bool onMouseButtonDown(const UIMouseEvent& e) override;
@@ -197,7 +198,7 @@ public:
     // existing test that pins drawRect bounds stays green.
     // =================================================================
     enum class HAlign { Left, Center, Right };
-    void  setHAlign(HAlign a) { _hAlign = a; }
+    void  setHAlign(HAlign a) { _hAlign = a; markDirty(); }
     HAlign getHAlign() const   { return _hAlign; }
 
     UiCursorHint getCursorHint() const override;

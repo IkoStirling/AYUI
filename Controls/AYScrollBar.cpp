@@ -16,6 +16,7 @@ void ScrollBar::setRange(float minV, float maxV) {
     if (maxV < minV + kMinMaxEpsilon) maxV = minV + kMinMaxEpsilon;
     _min = minV;
     _max = maxV;
+    markDirty();
     // Re-clamp value.
     setValue(clampValueToRange(_value, _min, _max));
 }
@@ -24,6 +25,7 @@ void ScrollBar::setValue(float v) {
     const float clamped = clampValueToRange(v, _min, _max);
     if (fabsf(clamped - _value) < kMinMaxEpsilon) return;
     _value = clamped;
+    markDirty();
     if (_onValueChanged) _onValueChanged(_value);
 }
 

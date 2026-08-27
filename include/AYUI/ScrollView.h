@@ -137,7 +137,11 @@ private:
     ScrollBar* _hbar = nullptr;
     bool _vbarEnabled = true;
     bool _hbarEnabled = false;
+    // When the host supplies a virtual extent, performLayout must not
+    // collapse it back to the viewport-sized content widget.
+    bool _contentSizeExplicit = false;
     std::function<void(const math::FVector2&)> _onScroll;
+    bool _syncingBars = false;
 
     ScrollableWidget _scrollState;
 };

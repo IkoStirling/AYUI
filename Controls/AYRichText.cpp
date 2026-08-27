@@ -19,11 +19,13 @@ void RichText::addRun(const std::wstring& text,
     r.fontSize = fontSize > 0 ? fontSize : _defaultFontSize;
     _runs.push_back(std::move(r));
     markBoundsDirty();
+    markDirty();
 }
 
 void RichText::clearRuns() {
     _runs.clear();
     markBoundsDirty();
+    markDirty();
 }
 
 float RichText::measureRunWidth(IRenderBackend& renderer,

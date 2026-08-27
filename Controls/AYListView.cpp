@@ -455,11 +455,24 @@ bool ListView::scrollBy(float deltaY) {
 bool ListView::onMouseWheel(const UIMouseWheelEvent& e) {
     // UI-anim cut 2: immediate scroll + seed glide velocity, then the
     // container-side rebind/sync chokepoint (same as scrollBy(float)).
+    const math::FVector2 prev = _scrollState.getScrollOffset();
     const bool changed =
         _scrollState.applyWheel(math::FVector2(0.0f, e.deltaY), getViewportSize());
     if (changed) {
-        const float y = _scrollState.getScrollOffset().y;
-        setScrollOffset(math::FVector2(_scrollState.getScrollOffset().x, y));
+        // applyWheel mutates the helper state itself. Calling setScrollOffset
+        // with that already-applied value is therefore a no-op and skips the
+        // row-pool rebind. Keep this path explicit so the visible rows,
+        // hit-test positions, scrollbar and host callback all follow the
+        // wheel in the same frame.
+        syncBarToOffset();
+        rebindPoolRows();
+        if (_onScroll) {
+            const math::FVector2 next = _scrollState.getScrollOffset();
+            if (std::fabs(next.x - prev.x) > 0.01f
+                || std::fabs(next.y - prev.y) > 0.01f) {
+                _onScroll(next);
+            }
+        }
     }
     return changed;
 }

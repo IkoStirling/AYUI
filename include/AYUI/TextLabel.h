@@ -26,7 +26,7 @@ public:
         markDirty();
     }
 
-    void setFontSize(int size) { _fontSize = size; }
+    void setFontSize(int size) { _fontSize = size; markDirty(); }
     int getFontSize() const { return _fontSize; }
 
     void setTextColor(const math::FVector4& color) {
@@ -34,33 +34,35 @@ public:
         _textG = color.y;
         _textB = color.z;
         _textA = color.w;
+        markDirty();
     }
 
     math::FVector4 getTextColor() const {
         return math::FVector4(_textR, _textG, _textB, _textA);
     }
 
-    void setFontFamily(const std::wstring& family) { _fontFamily = family; }
+    void setFontFamily(const std::wstring& family) { _fontFamily = family; markDirty(); }
     const std::wstring& getFontFamily() const { return _fontFamily; }
 
     enum class HAlignment { Left, Center, Right };
     enum class VAlignment { Top, Center, Bottom };
 
-    void setHorizontalAlignment(HAlignment align) { _hAlign = align; }
-    void setVerticalAlignment(VAlignment align) { _vAlign = align; }
+    void setHorizontalAlignment(HAlignment align) { _hAlign = align; markDirty(); }
+    void setVerticalAlignment(VAlignment align) { _vAlign = align; markDirty(); }
     HAlignment getHorizontalAlignment() const { return _hAlign; }
     VAlignment getVerticalAlignment() const { return _vAlign; }
 
-    void setWordWrap(bool wrap) { _wordWrap = wrap; }
+    void setWordWrap(bool wrap) { _wordWrap = wrap; markDirty(); }
     bool getWordWrap() const { return _wordWrap; }
 
-    void setWrapWidth(float width) { _wrapWidth = width; }
+    void setWrapWidth(float width) { _wrapWidth = width; markDirty(); markBoundsDirty(); }
 
     void setBackgroundColor(const math::FVector4& color) {
         _bgR = color.x;
         _bgG = color.y;
         _bgB = color.z;
         _bgA = color.w;
+        markDirty();
     }
 
 protected:

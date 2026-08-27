@@ -16,6 +16,7 @@ Panel::~Panel() {
 
 void Panel::setPadding(float left, float top, float right, float bottom) {
     _padding = math::FVector4(left, top, right, bottom);
+    markDirty();
 }
 
 void Panel::onRender(IRenderBackend& renderer) {

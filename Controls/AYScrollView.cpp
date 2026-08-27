@@ -55,6 +55,8 @@ void ScrollView::setContent(Widget* content) {
 
 void ScrollView::setContentSize(const math::FVector2& size) {
     _scrollState.setContentSize(size);
+    _contentSizeExplicit = true;
+    markDirty();
     syncBarsToOffset();
 }
 
@@ -64,7 +66,9 @@ void ScrollView::ensureBarsCreated() {
         _vbar->setOrientation(ScrollBar::Orientation::Vertical);
         _vbar->setOnValueChanged([this](float v) {
             // A bar drag takes over from any glide in flight.
-            _scrollState.clearMomentum();
+            if (!_syncingBars) {
+                _scrollState.clearMomentum();
+            }
             // PR-Container-Shared-Contract: route through ScrollableWidget::scrollBy
             // for the canonical clamp. Preserves ScrollView's behaviour: syncContent
             // position + fire _onScroll whenever the offset actually moved.
@@ -83,7 +87,9 @@ void ScrollView::ensureBarsCreated() {
         _hbar = new ScrollBar();
         _hbar->setOrientation(ScrollBar::Orientation::Horizontal);
         _hbar->setOnValueChanged([this](float v) {
-            _scrollState.clearMomentum();
+            if (!_syncingBars) {
+                _scrollState.clearMomentum();
+            }
             const math::FVector2 vp = getViewportSize();
             const math::FVector2 delta(
                 v - _scrollState.getScrollOffset().x,
@@ -154,12 +160,15 @@ math::FRectangle ScrollView::contentClipRect() const {
 }
 
 void ScrollView::syncBarsToOffset() {
+    const bool wasSyncing = _syncingBars;
+    _syncingBars = true;
     const math::FVector2 vp = getViewportSize();
     const math::FVector2 content = _scrollState.getContentSize();
     // PR-SyncVerticalBar: direction-agnostic helper. ScrollView is the
     // only H consumer — passing .x keeps the contract identical.
     syncVerticalBar(_vbar, content.y, vp.y, _scrollState.getScrollOffset().y);
     syncVerticalBar(_hbar, content.x, vp.x, _scrollState.getScrollOffset().x);
+    _syncingBars = wasSyncing;
 }
 
 // AYUI-DirtyRect-2026-08-26 Batch B (rebase fix): performLayout was
@@ -243,7 +252,8 @@ void ScrollView::performLayout() {
     // natural width and hide the hbar.
     const bool sizeContentToClient = (_content != nullptr)
         && _content->isLayoutSizeManaged()
-        && !_hbarEnabled;
+        && !_hbarEnabled
+        && !_contentSizeExplicit;
 
     if (sizeContentToClient) {
         const math::FVector2 cs = clientSize();
@@ -274,8 +284,9 @@ void ScrollView::performLayout() {
                 }
                 const math::FVector2 known = _scrollState.getContentSize();
                 const math::FVector2 contentSz = _content->getSize();
-                if (std::fabs(contentSz.x - known.x) > 0.5f
-                    || std::fabs(contentSz.y - known.y) > 0.5f) {
+                if (!_contentSizeExplicit
+                    && (std::fabs(contentSz.x - known.x) > 0.5f
+                        || std::fabs(contentSz.y - known.y) > 0.5f)) {
                     _scrollState.setContentSize(contentSz);
                 }
                 syncContentPosition();
@@ -297,8 +308,9 @@ void ScrollView::performLayout() {
                 std::max(pref.x, sz.x),
                 std::max(pref.y, sz.y));
             const math::FVector2 known = _scrollState.getContentSize();
-            if (std::fabs(next.x - known.x) > 0.5f
-                || std::fabs(next.y - known.y) > 0.5f) {
+            if (!_contentSizeExplicit
+                && (std::fabs(next.x - known.x) > 0.5f
+                    || std::fabs(next.y - known.y) > 0.5f)) {
                 _scrollState.setContentSize(next);
             }
             syncContentPosition();

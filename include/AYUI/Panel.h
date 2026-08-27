@@ -30,20 +30,20 @@ public:
 
     // Toggle the optional border. Border uses the resolved style's
     // border.color/border.width when true. Default: true.
-    void setBorderEnabled(bool enabled) { _borderEnabled = enabled; }
+    void setBorderEnabled(bool enabled) { _borderEnabled = enabled; markDirty(); }
     bool isBorderEnabled() const { return _borderEnabled; }
 
     // When false, onRender skips the opaque body fill (and border).
     // Editor Play composite uses this on `card_viewport` so PostProcess
     // 3D remains visible under the DockCard hole. Default: true.
-    void setBackgroundEnabled(bool enabled) { _backgroundEnabled = enabled; }
+    void setBackgroundEnabled(bool enabled) { _backgroundEnabled = enabled; markDirty(); }
     bool isBackgroundEnabled() const { return _backgroundEnabled; }
 
     // Padding inset (logical pixels) for child layout. Panel does not
     // lay out children itself — this is exposed as a property so a future
     // layout pass (C-2 helpers) can read it without re-fetching from a
     // style. Stored as FVector4 to match WidgetStyle::padding.
-    void setPadding(const math::FVector4& padding) { _padding = padding; }
+    void setPadding(const math::FVector4& padding) { _padding = padding; markDirty(); }
     void setPadding(float left, float top, float right, float bottom);
     const math::FVector4& getPadding() const { return _padding; }
 

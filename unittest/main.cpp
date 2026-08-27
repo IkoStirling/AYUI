@@ -1,6 +1,10 @@
 #include "AYTest.h"
 #include "AYMath/MathTypes.h"
 
+// Test translation units are included below intentionally; keep this file
+// as the rebuild anchor when any included test source changes.
+// The anchor also keeps focused audit probes reproducible after edits.
+
 #include <cstdio>
 
 #include "Test_Widget.cpp"

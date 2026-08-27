@@ -127,9 +127,8 @@ TEST_CASE(world_bounds_cache_size_change_cascades) {
     // Resize child — descendants must invalidate.
     child->setSize(FVector2(40.0f, 80.0f));
     r = grand->getWorldBounds();
-    CHECK_FLOAT_EQ(r.maxY, 110.0f, 1e-4f);  // 50+10 (grand local Y) + 50 grand height
-    // Actually: child is at 50,50 with size 40,80. Grand is at 10,10 with
-    // size 10,10. World rect of grand: x = 50+10..60+10, y = 50+10..60+10.
+    // Resizing the child changes its own bounds, not the grandchild's local
+    // offset. The grandchild therefore remains at y=50+10..50+10+10.
     CHECK_FLOAT_EQ(r.minX, 60.0f, 1e-4f);
     CHECK_FLOAT_EQ(r.minY, 60.0f, 1e-4f);
     CHECK_FLOAT_EQ(r.maxX, 70.0f, 1e-4f);

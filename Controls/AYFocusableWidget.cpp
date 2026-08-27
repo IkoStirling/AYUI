@@ -27,6 +27,9 @@ void FocusableWidget::setFocus(bool focus) {
     } else {
         onFocusLost();
     }
+    // Focused controls commonly change border, caret, selection, or hint.
+    // Re-arm the dirty-render gate after the state transition.
+    markDirty();
 }
 
 bool FocusableWidget::onKeyDown(int keyCode) {

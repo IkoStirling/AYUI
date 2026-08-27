@@ -250,15 +250,9 @@ public:
             return;
         }
         _visible = visible;
-        // AYUI-DirtyRect-2026-08-26: becoming visible REQUIRES a re-render
-        // (we have to actually paint our pixels on the parent's surface).
-        // Becoming invisible short-circuits in render() so no mark is
-        // needed — the next frame will simply skip us. The order matters:
-        // we set _visible BEFORE markDirty() so the propagation to parent
-        // sees the new state.
-        if (visible) {
-            markDirty();
-        }
+        // Both transitions must dirty the parent. Hiding a previously
+        // painted child otherwise leaves its old pixels on the surface.
+        markDirty();
     }
 
     // Event handling - override in subclasses
@@ -422,7 +416,11 @@ public:
     // Not part of the host-facing API; public only because UIManager is
     // friended via the .cpp implementation.
     bool isCurrentDropTarget() const            { return _isCurrentDropTarget; }
-    void setCurrentDropTarget(bool t)          { _isCurrentDropTarget = t; }
+    void setCurrentDropTarget(bool t) {
+        if (_isCurrentDropTarget == t) return;
+        _isCurrentDropTarget = t;
+        markDirty();
+    }
 
     // ID
     void setId(const std::string& id) { _id = id; }

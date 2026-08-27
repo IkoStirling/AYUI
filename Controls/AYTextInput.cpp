@@ -220,6 +220,7 @@ void TextInput::clear() {
     if (_onTextChanged) {
         _onTextChanged(_text);
     }
+    markDirty();
 }
 
 void TextInput::appendText(const std::wstring& s) {
@@ -230,6 +231,7 @@ void TextInput::appendText(const std::wstring& s) {
 void TextInput::setCaret(size_t pos) {
     _caret = std::min(pos, _text.size());
     resetSelectionToCaret();
+    markDirty();
 }
 
 void TextInput::setSelection(size_t start, size_t end) {
@@ -238,16 +240,19 @@ void TextInput::setSelection(size_t start, size_t end) {
     _selEnd   = std::min(end,   len);
     if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
     _caret = _selEnd;
+    markDirty();
 }
 
 void TextInput::clearSelection() {
     resetSelectionToCaret();
+    markDirty();
 }
 
 void TextInput::selectAll() {
     _selStart = 0;
     _selEnd = _text.size();
     _caret = _selEnd;
+    markDirty();
 }
 
 void TextInput::clampCaret() {
@@ -255,6 +260,7 @@ void TextInput::clampCaret() {
     if (_selStart > _text.size()) _selStart = _text.size();
     if (_selEnd > _text.size()) _selEnd = _text.size();
     if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
+    markDirty();
 }
 
 void TextInput::resetSelectionToCaret() {
@@ -296,6 +302,7 @@ void TextInput::replaceRange(size_t a, size_t b, const std::wstring& replacement
     if (_onTextChanged) {
         _onTextChanged(_text);
     }
+    markDirty();
 }
 
 bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
@@ -610,6 +617,7 @@ bool TextInput::onImeCompositionStart(const std::string& text, int caret) {
         _compositionCaretBytes = static_cast<int>(byteMap[caret]);
     }
     _composing = true;
+    markDirty();
     return true;
 }
 
@@ -627,6 +635,7 @@ bool TextInput::onImeCompositionUpdate(const std::string& text, int caret) {
     } else {
         _compositionCaretBytes = static_cast<int>(byteMap[caret]);
     }
+    markDirty();
     return true;
 }
 
@@ -648,6 +657,7 @@ bool TextInput::onImeCompositionEnd(const std::string& committed) {
     _compositionPreview.clear();
     _compositionCaretBytes = 0;
     _composing = false;
+    markDirty();
     return true;
 }
 
@@ -950,6 +960,7 @@ void TextInput::restoreSnapshot(const TextEditSnapshot& s) {
     _selEnd   = std::min(s.selEnd, _text.size());
     if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
     // Do NOT fire _onTextChanged — see invariant 4 above.
+    markDirty();
 }
 
 void TextInput::pushUndo() {

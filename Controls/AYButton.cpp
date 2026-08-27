@@ -18,6 +18,7 @@ Button::~Button() {
 
 void Button::setPadding(float left, float top, float right, float bottom) {
     _padding = math::FVector4(left, top, right, bottom);
+    markDirty();
 }
 
 math::FRectangle Button::getTextBounds() const {

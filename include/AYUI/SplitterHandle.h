@@ -33,7 +33,7 @@ public:
     bool isSplitterHandle() const override { return true; }
 
     // Must be set before bindPanels. Horizontal == legacy HBox behavior.
-    void setOrientation(Orientation orientation) { _orientation = orientation; }
+    void setOrientation(Orientation orientation) { _orientation = orientation; markBoundsDirty(); markDirty(); }
     Orientation getOrientation() const { return _orientation; }
 
     // `beforePanelSlot`/`afterPanelSlot` are the owner's slot indices of

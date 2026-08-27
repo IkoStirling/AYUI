@@ -181,6 +181,8 @@ void Widget::addChild(Widget* child) {
     child->_parent = this;
     child->_externallyOwned = false;
     _children.push_back(child);
+    // Re-attaching a child must re-open the parent's paint gate.
+    markDirty();
 }
 
 void Widget::addChildExternal(Widget* child) {
@@ -191,6 +193,7 @@ void Widget::addChildExternal(Widget* child) {
         child->_parent = this;
         child->_externallyOwned = true;
         _children.push_back(child);
+        markDirty();
     }
 }
 
@@ -201,6 +204,9 @@ void Widget::removeChild(Widget* child) {
             child->_parent = nullptr;
             child->_externallyOwned = false;
             _children.erase(it);
+            // Repaint the parent so the removed child's old pixels are
+            // covered on the next frame.
+            markDirty();
             return;
         }
     }
@@ -227,6 +233,7 @@ bool Widget::moveChildToIndex(Widget* child, size_t index) {
     // `index` is the desired FINAL index after the move. Do not
     // decrement when index > cur — that made "move down" a no-op.
     _children.insert(_children.begin() + static_cast<std::ptrdiff_t>(index), child);
+    markDirty();
     return true;
 }
 
@@ -246,6 +253,7 @@ void Widget::bringToFront() {
         if (*it == this) {
             siblings.erase(it);
             siblings.push_back(this);
+            _parent->markDirty();
             return;
         }
     }
@@ -430,7 +438,11 @@ void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4&
 }
 
 void Widget::clearStyleTokenOverrides() {
+    if (_tokenOverrides.empty()) {
+        return;
+    }
     _tokenOverrides.clear();
+    markDirty();
 }
 
 bool Widget::hasStyleTokenOverride(const std::string& key) const {
@@ -554,6 +566,8 @@ void Widget::tick(float dt) {
     // AYUI-DirtyRect-2026-08-26 (rebase fix): position tween frames
     // must repaint each step (popup slide-ins etc.).
     if (_position.x != prevPos.x || _position.y != prevPos.y) {
+        markBoundsDirty();
+        markDescendantsBoundsDirty();
         markDirty();
     }
 }
@@ -575,8 +589,8 @@ void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
     const float target = to < 0.0f ? 0.0f : (to > 1.0f ? 1.0f : to);
     if (durationMs <= 0.0f) {
         // Instant snap — same semantics as setOpacity.
-        _opacity = target;
         _opacityAnim.active = false;
+        setOpacity(target);
         return;
     }
     _opacityAnim.start(_opacity, target, durationMs, curve);
@@ -587,8 +601,8 @@ void Widget::animatePositionTo(const math::FVector2& to, float durationMs,
     if (durationMs <= 0.0f) {
         // Instant snap — same semantics as setPosition (and it cancels any
         // in-flight tween the same way).
-        _position = to;
         _posAnim.active = false;
+        setPosition(to);
         return;
     }
     _posAnim.start(_position, to, durationMs, curve);

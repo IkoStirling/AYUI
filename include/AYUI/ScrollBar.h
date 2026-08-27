@@ -40,7 +40,7 @@ public:
     ScrollBar();
     ~ScrollBar() override;
 
-    void setOrientation(Orientation o) { _orientation = o; }
+    void setOrientation(Orientation o) { _orientation = o; markBoundsDirty(); markDirty(); }
     Orientation getOrientation() const { return _orientation; }
 
     // Range / value mirroring the host ScrollView's exposed API.
@@ -50,7 +50,7 @@ public:
 
     // Visible viewport size — bar computes thumb ratio from this vs
     // (maxV - minV).
-    void  setViewportSize(float vs) { _viewportSize = vs; markBoundsDirty(); }
+    void  setViewportSize(float vs) { _viewportSize = vs; markBoundsDirty(); markDirty(); }
     float getViewportSize() const { return _viewportSize; }
 
     void setOnValueChanged(std::function<void(float)> cb) {

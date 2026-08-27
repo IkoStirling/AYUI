@@ -149,6 +149,7 @@ bool SplitterHandle::onMouseButtonDown(const UIMouseEvent& e) {
 
     _dragging = true;
     _hover = true;
+    markDirty();
     _dragStartMouseAxisPos = cursorAxisPos(e.mousePos);
     _adjustBefore = _owner->slotSize(_beforePanelSlot) > 0.0f;
     const int targetSlot = _adjustBefore ? _beforePanelSlot : _afterPanelSlot;
@@ -180,9 +181,13 @@ bool SplitterHandle::onMouseButtonUp(const UIMouseEvent& e) {
 }
 
 void SplitterHandle::clearHoverReveal() {
+    const bool wasRevealed = isRevealed();
     const bool had = _hover || _hoverElapsed >= 0.0f;
     _hover = false;
     _hoverElapsed = -1.0f;
+    if (wasRevealed && !_dragging) {
+        markDirty();
+    }
     if (splitterDebugEnabled() && had) {
         // If revealed stays 1 here, `_dragging` is still true — that is
         // NOT a hover bug; isRevealed() treats drag as always-on.
@@ -202,8 +207,14 @@ void SplitterHandle::endDrag() {
             "[SplitterDebug] %s endDrag (was dragging=%d hover=%d)\n",
             widgetLabel(this), _dragging ? 1 : 0, _hover ? 1 : 0);
     }
+    const bool wasRevealed = isRevealed();
     _dragging = false;
     clearHoverReveal();
+    if (wasRevealed) {
+        // clearHoverReveal() cannot see the pre-transition drag state after
+        // _dragging is reset, but the drag paint still needs erasing.
+        markDirty();
+    }
 }
 
 void SplitterHandle::onMouseLeave() {
@@ -245,6 +256,12 @@ void SplitterHandle::tick(float dt) {
     if (!_dragging && _hoverElapsed >= 0.0f) {
         const bool wasRevealed = isRevealed();
         _hoverElapsed += dt;
+        if (!wasRevealed && isRevealed()) {
+            // The reveal transition happens in tick(), after the previous
+            // frame may already have consumed this widget's dirty flag.
+            // Re-arm the paint gate so the accent and grab handle appear.
+            markDirty();
+        }
         if (splitterDebugEnabled() && !wasRevealed && isRevealed()) {
             std::fprintf(stderr,
                 "[SplitterDebug] %s REVEAL threshold crossed elapsed=%.3f\n",

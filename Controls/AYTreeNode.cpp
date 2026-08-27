@@ -17,6 +17,7 @@ void TreeNode::setExpanded(bool e) {
     _expanded = e;
     if (_onExpandToggled) _onExpandToggled(_expanded);
     markBoundsDirty();
+    markDirty();
 }
 
 bool TreeNode::onMouseButtonUp(const UIMouseEvent& e) {

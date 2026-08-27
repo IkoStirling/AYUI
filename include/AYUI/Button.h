@@ -28,8 +28,9 @@ public:
     void setFallbackHoverColor(const math::FVector4& c) {
         _fallbackHover = c;
         _hasFallbackHover = true;
+        markDirty();
     }
-    void clearFallbackHoverColor() { _hasFallbackHover = false; }
+    void clearFallbackHoverColor() { _hasFallbackHover = false; markDirty(); }
 
     // Phase D (D4) — preferred-size heuristic used by TabStrip when laying
     // out tab buttons. Each char ~8px + horizontal padding on each side.

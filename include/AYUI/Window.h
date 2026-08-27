@@ -28,19 +28,19 @@ public:
     Window();
     virtual ~Window();
 
-    void setTitle(const std::wstring& title) { _title = title; }
+    void setTitle(const std::wstring& title) { _title = title; markDirty(); }
     const std::wstring& getTitle() const { return _title; }
 
-    void setMovable(bool movable) { _movable = movable; }
+    void setMovable(bool movable) { _movable = movable; markDirty(); }
     bool isMovable() const { return _movable; }
 
     void setResizable(bool resizable) { _resizable = resizable; }
     bool isResizable() const { return _resizable; }
 
-    void setClosable(bool closable) { _closable = closable; }
+    void setClosable(bool closable) { _closable = closable; markDirty(); }
     bool isClosable() const { return _closable; }
 
-    void setModal(bool modal) { _modal = modal; }
+    void setModal(bool modal) { _modal = modal; markDirty(); }
     bool isModal() const { return _modal; }
 
     void setOnClose(std::function<void()> callback) { _onClose = callback; }
@@ -69,7 +69,7 @@ public:
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onMouseButtonUp(const UIMouseEvent& e) override;
 
-    void setTitleBarHeight(float height) { _titleBarHeight = height; }
+    void setTitleBarHeight(float height) { _titleBarHeight = height; markBoundsDirty(); markDirty(); }
     float getTitleBarHeight() const { return _titleBarHeight; }
 
     bool isDragging() const { return _isDragging; }
@@ -87,7 +87,7 @@ public:
 
     // When body children exceed the client height, a vertical scrollbar
     // appears and layout offsets children by -_scrollY.
-    void setBodyScrollEnabled(bool enabled) { _bodyScrollEnabled = enabled; }
+    void setBodyScrollEnabled(bool enabled) { _bodyScrollEnabled = enabled; markDirty(); }
     bool isBodyScrollEnabled() const { return _bodyScrollEnabled; }
     bool scrollBodyBy(float dy);
 

@@ -63,10 +63,10 @@ public:
     const std::string& getTextureName() const { return _tex.name; }
     bool hasTexture() const { return _tex.handle != nullptr; }
 
-    void setColor(const math::FVector4& color) { _color = color; }
+    void setColor(const math::FVector4& color) { _color = color; markDirty(); }
     const math::FVector4& getColor() const { return _color; }
 
-    void setUV(const math::FRectangle& uv) { _uv = uv; }
+    void setUV(const math::FRectangle& uv) { _uv = uv; markDirty(); }
     const math::FRectangle& getUV() const { return _uv; }
 
     void onRender(IRenderBackend& renderer) override;
