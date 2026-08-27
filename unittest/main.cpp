@@ -88,6 +88,10 @@
 #include "Test_TextStyle_Fields.cpp"       // AYUI-Audit-2026-08-26: TextStyle field recording (MockRenderer drawText(styled))
 #include "Test_CardStyle_Render.cpp"       // AYUI-Audit-2026-08-26: drawCard round-trip (MockRenderer Card recording)
 #include "Test_WidgetSerializer_AllTypes.cpp" // AYUI-Audit-2026-08-26: parameterized round-trip across 29 widget types
+#include "Test_DirtyRect.cpp"                // AYUI-Audit-2026-08-26 Batch B: dirty-rect system (markDirty / render short-circuit)
+#include "Test_GetWorldBoundsCache.cpp"      // AYUI-Audit-2026-08-26 Batch C: worldBounds cache + markDescendantsBoundsDirty
+#include "Test_TextAreaLifecycle.cpp"        // AYUI-Audit-2026-08-26 Batch A: ~TextArea _document leak regression
+#include "Test_MenuBarLifecycle.cpp"         // AYUI-Audit-2026-08-26 Batch A: ~MenuBar dtor UAF regression
 
 void runTest()
 {

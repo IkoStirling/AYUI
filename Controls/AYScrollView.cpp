@@ -162,6 +162,11 @@ void ScrollView::syncBarsToOffset() {
     syncVerticalBar(_hbar, content.x, vp.x, _scrollState.getScrollOffset().x);
 }
 
+// AYUI-DirtyRect-2026-08-26 Batch B (rebase fix): performLayout was
+// already declared public in the header (rebase fix for Test_DirtyRect's
+// ScrollOffsetChangeTriggersRerender). The actual implementation lives
+// further down in this file — see the second occurrence below.
+
 bool ScrollView::scrollBy(const math::FVector2& delta) {
     const bool changed = _scrollState.scrollBy(delta, getViewportSize());
     if (changed) {

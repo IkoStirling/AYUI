@@ -173,4 +173,4 @@ TEST_CASE(world_bounds_cache_no_invalidate_when_unchanged) {
     destroyWidgetTree(root);
 }
 
-TEST_SUITE_END()
+TEST_SUITE_END

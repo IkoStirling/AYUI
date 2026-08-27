@@ -268,7 +268,7 @@ TEST_CASE(resolve_style_memo_returns_stable_result) {
     StyleManager::get().setStyleSheet(nullptr);
     StyleSheet sheet;
     WidgetStyle custom = StyleBuilder::makeButton();
-    custom.backgroundColor = math::FVector4(0.42f, 0.13f, 0.66f, 1.0f);
+    custom.backgroundColor = ayt::math::FVector4(0.42f, 0.13f, 0.66f, 1.0f);
     custom.border.cornerRadius = 7.0f;
     sheet.setStyle("memo_test", custom);
     StyleManager::get().setStyleSheet(&sheet);
@@ -296,7 +296,7 @@ TEST_CASE(resolve_style_memo_returns_stable_result) {
     // Mutating the StyleSheet invalidates the cache version, forcing a
     // rebuild on the next resolveStyle() call.
     WidgetStyle alt = custom;
-    alt.backgroundColor = math::FVector4(0.99f, 0.01f, 0.02f, 1.0f);
+    alt.backgroundColor = ayt::math::FVector4(0.99f, 0.01f, 0.02f, 1.0f);
     sheet.setStyle("memo_test", alt);
     CHECK(StyleManager::get().getResolveCacheVersion() != v1);
 

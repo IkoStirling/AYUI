@@ -32,7 +32,11 @@ TEST_CASE(styled_draw_text_records_color) {
     CHECK(calls[0].type == MockRenderer::DrawCall::Text);
     CHECK(calls[0].text == L"hello");
     CHECK(calls[0].fontSize == 14);
-    CHECK(calls[0].bounds == bounds);
+    // FRectangle has no operator== — compare fields explicitly.
+    CHECK_FLOAT_EQ(calls[0].bounds.minX, bounds.minX, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.minY, bounds.minY, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.maxX, bounds.maxX, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.maxY, bounds.maxY, 1e-4f);
     // Color is multiplied by the opacity stack (default 1.0); so the
     // alpha remains 0.80. Use a direct tolerance comparison rather
     // than ayt::math::abs to avoid an extra include dependency.

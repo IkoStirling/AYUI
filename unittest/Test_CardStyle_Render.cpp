@@ -28,7 +28,11 @@ TEST_CASE(draw_card_records_single_card_call) {
     const auto& calls = renderer.getDrawCalls();
     CHECK(calls.size() == 1u);
     CHECK(calls[0].type == MockRenderer::DrawCall::Card);
-    CHECK(calls[0].bounds == bounds);
+    // FRectangle has no operator== — compare fields explicitly.
+    CHECK_FLOAT_EQ(calls[0].bounds.minX, bounds.minX, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.minY, bounds.minY, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.maxX, bounds.maxX, 1e-4f);
+    CHECK_FLOAT_EQ(calls[0].bounds.maxY, bounds.maxY, 1e-4f);
 }
 
 TEST_CASE(draw_card_records_fill_layer) {

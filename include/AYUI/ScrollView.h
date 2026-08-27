@@ -107,8 +107,15 @@ public:
     // the scroll offset while velocity decays.
     void tick(float dt) override;
 
-protected:
+    // AYUI-DirtyRect-2026-08-26 Batch B test surface: was `protected:` here
+    // but the base Widget::performLayout is `virtual void performLayout()`
+    // (public). Narrowing access on an override trips MSVC C2248 for any
+    // caller that names the derived class directly. Promote to public so
+    // Test_DirtyRect::DirtyRect_ScrollOffsetChangeTriggersRerender can
+    // prime the dirty state explicitly before the first render.
     void performLayout() override;
+
+protected:
     void onRender(IRenderBackend& renderer) override;
     // Content + bars are drawn explicitly in onRender (content offset by
     // -scroll). Default renderChildren would paint content again at the
