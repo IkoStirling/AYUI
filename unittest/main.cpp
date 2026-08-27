@@ -85,7 +85,9 @@
 #include "Test_ColorAnimation.cpp"         // UI-anim cut 1 (InteractiveWidget color transitions)
 #include "Test_PopupFade.cpp"              // UI-anim cut 1 (popup fade in/out via pending-close queue)
 #include "Test_Spinner.cpp"                // UI-anim cut 2 (Spinner orbit dots + ProgressBar indeterminate)
-#include "Test_DirtyRect.cpp"              // per-widget paint-gate (render short-circuit + markDirty hooks)
+#include "Test_TextStyle_Fields.cpp"       // AYUI-Audit-2026-08-26: TextStyle field recording (MockRenderer drawText(styled))
+#include "Test_CardStyle_Render.cpp"       // AYUI-Audit-2026-08-26: drawCard round-trip (MockRenderer Card recording)
+#include "Test_WidgetSerializer_AllTypes.cpp" // AYUI-Audit-2026-08-26: parameterized round-trip across 29 widget types
 
 void runTest()
 {

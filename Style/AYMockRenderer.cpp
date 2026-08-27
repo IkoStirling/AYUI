@@ -123,7 +123,32 @@ void MockRenderer::drawWithAlpha(const math::FRectangle& bounds, void* textureHa
 }
 
 void MockRenderer::drawText(const math::FRectangle& bounds, const std::wstring& text, int fontSize, const TextStyle& style) {
-    drawText(bounds, text, fontSize, style.color);
+    // AYUI-Audit-2026-08-26: previously this delegated to the base
+    // color overload and silently dropped wrapToBounds / valign /
+    // outlineWidth / outlineColor / shadowColor / shadowOffset /
+    // shadowBlurRadius / letterSpacing / lineSpacing. Record every
+    // TextStyle field into a DrawCall so tests can assert on them.
+    DrawCall dc;
+    dc.type = DrawCall::Text;
+    dc.bounds = bounds;
+    dc.color = tintWithOpacity(style.color);
+    dc.text = text;
+    dc.fontSize = fontSize;
+    dc.textStyle = style;
+    dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
+    // Outline + shadow + spacing + alignment
+    dc.outlineColor      = style.outlineColor;
+    dc.outlineWidth      = style.outlineWidth;
+    dc.shadowColor       = style.shadowColor;
+    dc.shadowOffset      = style.shadowOffset;
+    dc.shadowBlurRadius  = style.shadowBlurRadius;
+    dc.letterSpacing     = style.letterSpacing;
+    dc.lineSpacing       = style.lineSpacing;
+    dc.wrapToBounds      = style.wrapToBounds;
+    dc.align             = style.align;
+    dc.valign            = style.valign;
+    _drawCalls.push_back(dc);
 }
 
 void MockRenderer::drawGradientRect(const math::FRectangle& bounds,
@@ -189,6 +214,37 @@ void MockRenderer::drawRectShadow(const math::FRectangle& bounds, const ShadowSt
         bounds.maxY + shadow.offset.y
     );
     drawRect(shadowBounds, shadow.color);
+}
+
+// AYUI-Audit-2026-08-26: drawCard override. The base IRenderBackend
+// implementation expands a Card into shadow → fill → border sub-calls,
+// which works for visual fidelity but makes it impossible for tests to
+// observe that a caller actually invoked drawCard (vs. drawRect +
+// drawBorderRect manually). Record the full CardStyle into a single
+// DrawCall::Card entry so round-trip tests can verify the API surface.
+void MockRenderer::drawCard(const math::FRectangle& bounds, const CardStyle& style) {
+    DrawCall dc;
+    dc.type = DrawCall::Card;
+    dc.bounds = bounds;
+    dc.texture = nullptr;
+    dc.blendMode = _currentBlend;
+    // Fill rides in `color` (multiplied by current opacity) AND in
+    // `cardFillColor` (raw). Tests that want to check the post-tint
+    // color can read `color`; tests checking the raw style payload
+    // read `cardFillColor`. Both are intentional.
+    dc.color = tintWithOpacity(style.fillColor);
+    dc.cardFillColor        = style.fillColor;
+    dc.cardBorderColor      = style.borderColor;
+    dc.cardBorderWidth      = style.borderWidth;
+    dc.cardBorderPosition   = style.borderPosition;
+    dc.cardShadowColor      = style.shadowColor;
+    dc.cardShadowOffset     = style.shadowOffset;
+    dc.cardShadowBlurRadius = style.shadowBlurRadius;
+    dc.cardRadii[0] = style.cornerRadius.topLeft;
+    dc.cardRadii[1] = style.cornerRadius.topRight;
+    dc.cardRadii[2] = style.cornerRadius.bottomRight;
+    dc.cardRadii[3] = style.cornerRadius.bottomLeft;
+    _drawCalls.push_back(dc);
 }
 
 // Path methods / 路径方法

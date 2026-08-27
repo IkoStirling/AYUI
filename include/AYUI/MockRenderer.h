@@ -11,7 +11,11 @@ namespace ayt::ui {
 class MockRenderer : public IRenderBackend {
 public:
     struct DrawCall {
-        enum Type { Rect, Text, Image, Path, Particle, Blur };
+        // AYUI-Audit-2026-08-26: added `Card` to support drawCard()
+        // round-trip assertions. Card rides the same enum so existing
+        // aggregate-free initializers continue to compile (Card is
+        // appended after Blur, not inserted in the middle).
+        enum Type { Rect, Text, Image, Path, Particle, Blur, Card };
         Type type;
         math::FRectangle bounds;
         math::FVector4 color;
@@ -30,6 +34,36 @@ public:
         // and per-corner gradient colors in param order TL TR BL BR.
         BlendMode blendMode = BlendMode::Normal;
         math::FVector4 cornerColors[4];
+        // AYUI-Audit-2026-08-26: full TextStyle recording. The styled
+        // drawText() override stores every TextStyle field here so tests
+        // can assert outline / shadow / wrap / valign were passed through
+        // instead of being silently dropped by the base overload.
+        math::FVector4 outlineColor = math::FVector4(0, 0, 0, 0);
+        float          outlineWidth = 0.0f;
+        math::FVector4 shadowColor = math::FVector4(0, 0, 0, 0);
+        math::FVector2 shadowOffset = math::FVector2(0, 0);
+        float          shadowBlurRadius = 0.0f;
+        int            letterSpacing = 0;
+        int            lineSpacing = 0;
+        bool           wrapToBounds = false;
+        TextStyle::Align  align = TextStyle::Align::Left;
+        TextStyle::VAlign valign = TextStyle::VAlign::Middle;
+        // AYUI-Audit-2026-08-26: CardStyle recording for drawCard() tests.
+        // Card payload rides alongside the existing fields — fillColor is
+        // reused as the layer-fill color, borderWidth/Color as the ring,
+        // shadow* as the drop shadow, and CornerRadii slots replace the
+        // per-corner gradient palette.
+        math::FVector4  cardFillColor   = math::FVector4(0, 0, 0, 0);
+        math::FVector4  cardBorderColor = math::FVector4(0, 0, 0, 0);
+        float           cardBorderWidth = 0.0f;
+        BorderStyle::Position cardBorderPosition = BorderStyle::Position::Center;
+        math::FVector4  cardShadowColor = math::FVector4(0, 0, 0, 0);
+        math::FVector2  cardShadowOffset = math::FVector2(0, 0);
+        float           cardShadowBlurRadius = 0.0f;
+        // Per-corner radii in order TL TR BR BL. We reuse the same 4-wide
+        // slot the gradient used to claim, so the storage footprint stays
+        // unchanged.
+        float           cardRadii[4] = {0, 0, 0, 0};
     };
 
     MockRenderer();
@@ -59,6 +93,14 @@ public:
     void drawBorderRect(const math::FRectangle& bounds, const math::FVector4& color, float borderWidth, float cornerRadius) override;
     void drawRoundedRect(const math::FRectangle& bounds, const math::FVector4& color, float cornerRadius) override;
     void drawRectShadow(const math::FRectangle& bounds, const ShadowStyle& shadow) override;
+
+    // AYUI-Audit-2026-08-26: drawCard override. Records a single Card
+    // DrawCall carrying the full CardStyle so tests can assert the
+    // shadow+fill+stroke payload round-trips into the recorded call
+    // instead of expanding into the default IRenderBackend shadow→
+    // fill→border sub-cascade. Tests assert against dc.type ==
+    // DrawCall::Card and the recorded card* fields.
+    void drawCard(const math::FRectangle& bounds, const CardStyle& style) override;
 
     // Path methods / 路径方法
     PathHandle createPath() override;

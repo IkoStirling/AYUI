@@ -3,7 +3,9 @@
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/Widget.h"
 #include "AYUI/Button.h"
-#include <iostream>
+#include <vector>
+#include <string>
+#include <utility>
 
 using namespace ayt::ui;
 using namespace ayt::math;
@@ -54,6 +56,136 @@ TEST_CASE(test_widget_factory_register_macro) {
     CHECK(factory.isRegistered("Button"));
     CHECK(factory.isRegistered("VBox"));
     CHECK(factory.isRegistered("HBox"));
+}
+
+// AYUI-Audit-2026-08-26: comprehensive coverage. The factory registers
+// 30+ widget types in DefaultWidgetRegistrar (AYWidgetFactory.cpp).
+// Previously only ~5 of them were asserted in tests; this loop covers
+// every registered type and asserts factory.create(name) returns a
+// non-null Widget for each.
+TEST_CASE(test_widget_factory_all_registered_types_create_non_null) {
+    WidgetFactory& factory = WidgetFactory::get();
+
+    // Pinned list: every type the DefaultWidgetRegistrar registers. If
+    // a future PR adds a new REGISTER_WIDGET(...) call, that type must
+    // also be appended here or this case will fail (intentional — new
+    // widget types must come with a test assertion that their factory
+    // path works).
+    static const std::vector<std::string> kAllTypes = {
+        "Widget",
+        "Button",
+        "TextLabel",
+        "CheckBox",
+        "RadioButton",
+        "Slider",
+        "ProgressBar",
+        "Spinner",
+        "TextInput",
+        "TextArea",
+        "ScrollBar",
+        "ScrollView",
+        "ListView",
+        "ComboBox",
+        "TabControl",
+        "TreeNode",
+        "TreeView",
+        "RichText",
+        "Tooltip",
+        "Separator",
+        "MenuItem",
+        "Menu",
+        "MenuBar",
+        "ToolBar",
+        "ToolBarSeparator",
+        "StatusBar",
+        "Image",
+        "Window",
+        "Panel",
+        "VBox",
+        "HBox",
+        "SplitterHandle",
+        "GridPanel",
+        "DockArea",
+        "DockCard",
+        "DockOverlay",
+    };
+
+    int registeredCount = 0;
+    int createdCount    = 0;
+    for (const std::string& typeName : kAllTypes) {
+        if (!factory.isRegistered(typeName)) {
+            // Skip silently if a future PR removed a type without
+            // updating this list — but still CHECK so a regression
+            // shows up in the failure log.
+            CHECK(factory.isRegistered(typeName));
+            continue;
+        }
+        ++registeredCount;
+        Widget* widget = factory.create(typeName);
+        if (widget != nullptr) {
+            ++createdCount;
+            delete widget;
+        }
+    }
+    // Sanity: must have registered + created at least 30 of the types.
+    CHECK(registeredCount >= 30);
+    CHECK(createdCount    == registeredCount);
+}
+
+TEST_CASE(test_widget_factory_isRegistered_matches_create) {
+    // AYUI-Audit-2026-08-26: contract check — for every known
+    // registered name, factory.create(name) must return non-null;
+    // for every UNKNOWN name, factory.create(name) must return null.
+    // This pins the isRegistered/create contract so a future bug that
+    // registers without a working creator (or vice versa) is caught.
+    WidgetFactory& factory = WidgetFactory::get();
+
+    static const std::vector<std::string> kKnownTypes = {
+        "Widget", "Button", "TextLabel", "CheckBox", "RadioButton",
+        "Slider", "ProgressBar", "Spinner", "TextInput", "TextArea",
+        "ScrollBar", "ScrollView", "ListView", "ComboBox",
+        "TabControl", "TreeNode", "TreeView", "RichText", "Tooltip",
+        "Separator", "MenuItem", "Menu", "MenuBar", "ToolBar",
+        "ToolBarSeparator", "StatusBar", "Image", "Window", "Panel",
+        "VBox", "HBox", "SplitterHandle", "GridPanel", "DockArea",
+        "DockCard", "DockOverlay",
+    };
+
+    for (const std::string& typeName : kKnownTypes) {
+        CHECK(factory.isRegistered(typeName));
+        Widget* w = factory.create(typeName);
+        CHECK(w != nullptr);
+        delete w;
+    }
+
+    // Unknown names return null, NOT a crash.
+    static const std::vector<std::string> kUnknownTypes = {
+        "", "UnknownWidget", "button", "BUTTON", "NotAType",
+        "WidgetFactory", "DoCkArEa"  // case-sensitive on purpose
+    };
+    for (const std::string& typeName : kUnknownTypes) {
+        if (factory.isRegistered(typeName)) continue;  // safety
+        Widget* w = factory.create(typeName);
+        CHECK(w == nullptr);
+    }
+}
+
+TEST_CASE(test_widget_factory_unregister_is_idempotent_safe) {
+    // AYUI-Audit-2026-08-26: unregister on an unknown name must be a
+    // safe no-op (no crash, no exception). Pinning this prevents a
+    // future regression where a teardown path tries to unregister a
+    // type that was never registered (e.g. when a test file's static
+    // registrar order differs).
+    WidgetFactory& factory = WidgetFactory::get();
+    CHECK(factory.isRegistered("Button"));
+    factory.unregister("Button");
+    CHECK(!factory.isRegistered("Button"));
+    Widget* w = factory.create("Button");
+    CHECK(w == nullptr);
+    // Re-register so other tests that depend on Button don't silently
+    // break. DefaultWidgetRegistrar is a static so re-registering a
+    // custom creator works for the rest of the test process.
+    WidgetFactory::get().registerCreator("Button", []() { return new Button(); });
 }
 
 TEST_SUITE_END
