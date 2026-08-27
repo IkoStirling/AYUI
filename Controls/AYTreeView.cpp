@@ -50,8 +50,23 @@ void TreeView::flatten() {
     _flatToSrc.reserve(_source.size());
     _pendingDepths.reserve(_source.size());
 
+    // AYUI-Perf-2026-08-26: precompute the parent → [child indices]
+    // map once per setTree() so the DFS below does O(1) child lookup
+    // instead of the previous O(N) parentIndex scan per node. The
+    // pre-fix code was O(N^2) overall; this map drops the inner loop
+    // to O(children-of-current), which is O(N) summed across the
+    // whole tree (each node has exactly one parent).
+    _childrenByParent.clear();
+    _childrenByParent.reserve(_source.size());
+    for (int i = 0; i < static_cast<int>(_source.size()); ++i) {
+        const int p = _source[i].parentIndex;
+        // Roots (parentIndex == -1) share a synthetic bucket — using
+        // the literal -1 key keeps the DFS loop generic.
+        _childrenByParent[p].push_back(i);
+    }
+
     // Depth-first walk over root nodes (-1 = root). Within each node,
-    // recurse into children — we identify children by parentIndex match.
+    // recurse into children via the precomputed map.
     // _maxDepth guard keeps stack bounded for pathological inputs.
     constexpr int kMaxDepth = 64;
 
@@ -62,17 +77,26 @@ void TreeView::flatten() {
         _flatToSrc.push_back(srcIdx);
         _pendingDepths.push_back(depth);
         if (_source[srcIdx].expanded) {
-            for (int i = 0; i < static_cast<int>(_source.size()); ++i) {
-                if (_source[i].parentIndex == srcIdx) {
-                    visit(i, depth + 1);
+            // AYUI-Perf-2026-08-26: O(1) child lookup via the
+            // precomputed parent→children map. The pre-fix code did an
+            // O(N) parentIndex scan here, making the whole flatten()
+            // call O(N^2) on a balanced tree.
+            const auto it = _childrenByParent.find(srcIdx);
+            if (it != _childrenByParent.end()) {
+                for (int childIdx : it->second) {
+                    visit(childIdx, depth + 1);
                 }
             }
         }
     };
 
-    for (int i = 0; i < static_cast<int>(_source.size()); ++i) {
-        if (_source[i].parentIndex == -1) {
-            visit(i, 0);
+    // AYUI-Perf-2026-08-26: roots bucket key is -1 (TreeNodeData::parentIndex
+    // sentinel). Iterate via the same map so the loop is symmetric with
+    // the inner recursion.
+    const auto rootsIt = _childrenByParent.find(-1);
+    if (rootsIt != _childrenByParent.end()) {
+        for (int rootIdx : rootsIt->second) {
+            visit(rootIdx, 0);
         }
     }
 }

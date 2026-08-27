@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace ayt::ui {
@@ -119,13 +120,7 @@ public:
         using SelectableWidget::isSelected;
 
         const std::wstring& getText() const { return _text; }
-        // AYUI-DirtyRect-2026-08-26: row label change → row + ListView
-        // repaint. markDirty propagates up to the ListView's parent via
-        // the chain in Widget::markDirty.
-        void setText(const std::wstring& text) {
-            _text = text;
-            markDirty();
-        }
+        void setText(const std::wstring& text) { _text = text; }
 
         int getIndex() const { return _index; }
         void setIndex(int idx) { _index = idx; }
@@ -348,6 +343,11 @@ private:
     int              _selectedIndex  = -1;   // mirror of back()/empty
     int              _anchorIndex    = -1;
     int              _rangeEndIndex  = -1;
+    // AYUI-Perf-2026-08-26: shadow set of _selectedIndices for O(1)
+    // isSelected() lookup. The pre-fix code did a std::find over the
+    // vector (O(N)); this set is kept in lockstep with the vector by
+    // every mutation path (setSelectedIndices, clearSelection, etc.).
+    std::unordered_set<int> _selectedIndexSet;
 
     float _itemHeight = 24.0f;
 

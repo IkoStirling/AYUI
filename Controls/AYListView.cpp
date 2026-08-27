@@ -330,6 +330,14 @@ void ListView::setSelectedIndices(const std::vector<int>& indices) {
     }
     // Apply new selection visuals + state.
     _selectedIndices = filtered;
+    // AYUI-Perf-2026-08-26: rebuild the shadow set in lockstep with
+    // the vector. Single insertion per selected index — the set is the
+    // O(1) isSelected() backing store.
+    _selectedIndexSet.clear();
+    _selectedIndexSet.reserve(_selectedIndices.size());
+    for (int idx : _selectedIndices) {
+        _selectedIndexSet.insert(idx);
+    }
     for (int idx : _selectedIndices) {
         if (Row* r = rowForLogical(idx)) {
             r->setSelected(true);
@@ -361,8 +369,13 @@ void ListView::setSelectedIndices(const std::vector<int>& indices) {
 
 bool ListView::isSelected(int index) const {
     if (index < 0 || index >= static_cast<int>(_items.size())) return false;
-    return std::find(_selectedIndices.begin(), _selectedIndices.end(), index)
-        != _selectedIndices.end();
+    // AYUI-Perf-2026-08-26: O(1) lookup via shadow set. The vector
+    // remains the authoritative source (preserves insertion order for
+    // callback payloads and the "last-selected wins" primary), but the
+    // hot per-row paint path that calls isSelected from
+    // ListView::renderChildren every frame now hits a hash set instead
+    // of doing a linear std::find.
+    return _selectedIndexSet.find(index) != _selectedIndexSet.end();
 }
 
 void ListView::clearSelection() {

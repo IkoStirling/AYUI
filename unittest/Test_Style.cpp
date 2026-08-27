@@ -259,4 +259,56 @@ TEST_CASE(resolveStyle_panel_default_resolves) {
     StyleManager::get().setStyleSheet(nullptr);
 }
 
+// AYUI-Perf-2026-08-26: regression for the resolveStyle() memo. The
+// public overload caches results by (styleId, themeVersion); a second
+// call with the same args must return an equal (by value) ResolvedStyle
+// without rebuilding. We also verify the cache invalidates when the
+// theme version bumps (StyleSheet mutation or setStyleSheet call).
+TEST_CASE(resolve_style_memo_returns_stable_result) {
+    StyleManager::get().setStyleSheet(nullptr);
+    StyleSheet sheet;
+    WidgetStyle custom = StyleBuilder::makeButton();
+    custom.backgroundColor = math::FVector4(0.42f, 0.13f, 0.66f, 1.0f);
+    custom.border.cornerRadius = 7.0f;
+    sheet.setStyle("memo_test", custom);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    const uint64_t v1 = StyleManager::get().getResolveCacheVersion();
+    const ResolvedStyle r1 = resolveStyle("memo_test");
+    CHECK(r1.hasStyle == true);
+    CHECK_FLOAT_EQ(r1.backgroundColor.x, 0.42f, 1e-5f);
+    CHECK_FLOAT_EQ(r1.backgroundColor.z, 0.66f, 1e-5f);
+    CHECK_FLOAT_EQ(r1.cornerRadius, 7.0f, 1e-5f);
+
+    // Second call: cache hit. The result must be byte-identical.
+    const ResolvedStyle r2 = resolveStyle("memo_test");
+    CHECK(r2.hasStyle == r1.hasStyle);
+    CHECK_FLOAT_EQ(r2.backgroundColor.x, r1.backgroundColor.x, 1e-7f);
+    CHECK_FLOAT_EQ(r2.backgroundColor.y, r1.backgroundColor.y, 1e-7f);
+    CHECK_FLOAT_EQ(r2.backgroundColor.z, r1.backgroundColor.z, 1e-7f);
+    CHECK_FLOAT_EQ(r2.borderWidth, r1.borderWidth, 1e-7f);
+    CHECK_FLOAT_EQ(r2.cornerRadius, r1.cornerRadius, 1e-7f);
+    CHECK_FLOAT_EQ(r2.borderColor.x, r1.borderColor.x, 1e-7f);
+
+    // Cache version unchanged across cache-hit reads.
+    CHECK(StyleManager::get().getResolveCacheVersion() == v1);
+
+    // Mutating the StyleSheet invalidates the cache version, forcing a
+    // rebuild on the next resolveStyle() call.
+    WidgetStyle alt = custom;
+    alt.backgroundColor = math::FVector4(0.99f, 0.01f, 0.02f, 1.0f);
+    sheet.setStyle("memo_test", alt);
+    CHECK(StyleManager::get().getResolveCacheVersion() != v1);
+
+    const ResolvedStyle r3 = resolveStyle("memo_test");
+    CHECK_FLOAT_EQ(r3.backgroundColor.x, 0.99f, 1e-5f);
+
+    // setStyleSheet(nullptr) must also bump the version so cached
+    // results from the prior sheet don't survive a swap to a fresh one.
+    StyleManager::get().setStyleSheet(nullptr);
+    CHECK(StyleManager::get().getResolveCacheVersion() != v1);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
 TEST_SUITE_END

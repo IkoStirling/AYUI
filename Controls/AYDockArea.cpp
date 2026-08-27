@@ -1238,6 +1238,20 @@ void DockArea::paintDropGuide(IRenderBackend& renderer) {
         cursor = ui->getDragLastMousePos();
     }
 
+    // AYUI-Perf-2026-08-26: cursor-gate. If the cursor hasn't moved
+    // (within 1 px) since the last paint, skip the resolver + draw
+    // calls entirely. The render loop calls paintDropGuide every
+    // frame at 60Hz; during a drag where the mouse sits still over
+    // a slot, the cached hit would otherwise re-run resolveDropTarget
+    // and a tree-walk hit-test each frame.
+    const bool cursorMoved = (std::fabs(cursor.x - _lastDropGuideCursor.x) > 1.0f)
+                          || (std::fabs(cursor.y - _lastDropGuideCursor.y) > 1.0f);
+    if (!cursorMoved && _lastDropGuidePainted) {
+        return;
+    }
+    _lastDropGuideCursor = cursor;
+    _lastDropGuidePainted = true;
+
     // Owned in-dock drag OR external child redock: one resolver.
     if (_rootNode != nullptr
         && (external || (ui != nullptr && dragBelongsToDock(*this, ui)))) {

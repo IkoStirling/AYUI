@@ -265,18 +265,55 @@ void Widget::updateWorldBounds() {
     _bounds.f[2] = worldPos.x + _size.x;
     _bounds.f[3] = worldPos.y + _size.y;
     _boundsDirty = false;
+    // AYUI-Perf-2026-08-26: refresh the world-bounds cache after a
+    // recompute. Both _bounds and _boundsCache carry the same value;
+    // callers that want the cached path use _boundsCache directly.
+    _boundsCache = _bounds;
+    _boundsCacheDirty = false;
+}
+
+void Widget::markDescendantsBoundsDirty() {
+    // AYUI-Perf-2026-08-26: parent's setPosition/setSize calls this so
+    // every descendant's cached world-bounds is invalidated. Without it,
+    // a moved parent would leave every child reading a stale world rect
+    // from the cache until each child itself moved (which doesn't happen
+    // during layout — only the parent is repositioned).
+    for (Widget* child : _children) {
+        if (child == nullptr) continue;
+        child->_boundsCacheDirty = true;
+        child->markDescendantsBoundsDirty();
+    }
 }
 
 math::FRectangle Widget::getWorldBounds() const {
-    // Lazy propagate with cache validation: parent may have moved, run
-    // updateWorldBounds (clearing its dirty flag), then render children
-    // whose local pos did not change. Those children still hold a stale
-    // _bounds — compare against parentOrigin+local and refresh.
+    // AYUI-Perf-2026-08-26: cache fast path. Previously this method walked
+    // the parent chain on every call (O(depth)) and re-checked the
+    // parent-origin / local-position drift on the way back up. Combined
+    // with the dock-tree hit-test (which calls getWorldBounds once per
+    // candidate node), this was O(depth^2) per query. With the cache,
+    // the common "tree hasn't moved since last query" case is a single
+    // boolean check.
+
+    // First: lazily flush any dirty parent so its world origin is
+    // up-to-date. We don't need its rect — we just need to ensure the
+    // ancestor chain has been recomputed if any link is dirty.
     if (_parent != nullptr) {
         (void)_parent->getWorldBounds();
     }
+
+    // Cache hit — return the cached rect directly. This is the new
+    // hot path; everything below runs only on cache miss.
+    if (!_boundsCacheDirty) {
+        return _boundsCache;
+    }
+
+    // Cache miss path — same body as the pre-cache implementation, with
+    // the recompute counter increment for tests.
     if (_boundsDirty) {
         const_cast<Widget*>(this)->updateWorldBounds();
+#ifndef NDEBUG
+        _worldBoundsRecomputeCount++;
+#endif
         return _bounds;
     }
     if (_parent != nullptr) {
@@ -285,7 +322,25 @@ math::FRectangle Widget::getWorldBounds() const {
         if (std::fabs(_bounds.minX - expected.x) > 0.01f
             || std::fabs(_bounds.minY - expected.y) > 0.01f) {
             const_cast<Widget*>(this)->updateWorldBounds();
+#ifndef NDEBUG
+            _worldBoundsRecomputeCount++;
+#endif
+        } else {
+            // Parent origin matches the last-cached local + parent
+            // world — the cache was dirty for another reason (e.g. a
+            // position tween just landed). Refresh the cache from the
+            // already-correct _bounds rather than running the math
+            // path again.
+            _boundsCache = _bounds;
+            _boundsCacheDirty = false;
         }
+    } else {
+        // No parent + dirty cache means _bounds may also be stale.
+        // updateWorldBounds does the work and populates the cache.
+        const_cast<Widget*>(this)->updateWorldBounds();
+#ifndef NDEBUG
+        _worldBoundsRecomputeCount++;
+#endif
     }
     return _bounds;
 }
@@ -368,10 +423,7 @@ void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4&
     // Allow '$foo' or bare 'foo' input — normalize to bare form so the
     // map key matches Theme's storage (which uses bare names without '$').
     const std::string norm = (key[0] == '$') ? key.substr(1) : key;
-    // AYUI-DirtyRect-2026-08-26: token override change re-tints the
-    // resolved style for this widget; onRender must re-run.
     _tokenOverrides[norm] = value;
-    markDirty();
 }
 
 void Widget::clearStyleTokenOverrides() {
@@ -431,18 +483,6 @@ void CompoundWidget::onChildRemoved(Widget* child) {
 
 void Widget::render(IRenderBackend& renderer) {
     if (!_visible) return;
-    // AYUI-DirtyRect-2026-08-26: short-circuit when nothing in this
-    // subtree is dirty. _dirtyThis=true on a fresh widget so it renders
-    // once; setters / animation ticks call markDirty() to re-arm. The
-    // hasDirtyRect() branch is for partial-damage callers (host damage
-    // callbacks, scroll-delta updates); typical setters use the
-    // markDirty() default (invalid rect → _dirtyThis=true).
-    //
-    // Note: popOpacity/pushOpacity parity is preserved by the early
-    // return — no fade stack was pushed yet, so nothing to pop.
-    if (!_dirtyThis && !hasDirtyRect()) {
-        return;
-    }
     // PR-anim: push the node opacity so the whole subtree (own paints +
     // children) fades as one unit. Fast path when fully opaque — the
     // pre-opacity rendering path is byte-identical.
@@ -466,11 +506,6 @@ void Widget::render(IRenderBackend& renderer) {
     if (fading) {
         renderer.popOpacity();
     }
-    // AYUI-DirtyRect-2026-08-26: clear the dirty flags so the next frame
-    // short-circuits unless something marks us again. _dirtyThis is the
-    // load-bearing flag; _dirtyRect collapses to default (clean).
-    _dirtyThis = false;
-    _dirtyRect = math::FRectangle();
 }
 
 void Widget::tick(float dt) {
@@ -478,7 +513,6 @@ void Widget::tick(float dt) {
     // base implementation for every tree node, so a fade keeps running
     // even under subclasses that override tick without chaining.
     const bool wasActive = _opacityAnim.active;
-    const float prevOpacity = _opacity;
     float t;
     if (_opacityAnim.advance(dt, t)) {
         _opacity = tweenLerp(_opacityAnim.from, _opacityAnim.to, t);
@@ -487,59 +521,33 @@ void Widget::tick(float dt) {
         // path never runs on the completion frame).
         _opacity = _opacityAnim.to;
     }
-    // AYUI-DirtyRect-2026-08-26: any opacity change means the rendered
-    // alpha is different — must repaint. Mark dirty unconditionally for
-    // any opacity movement so the fade frames keep repainting.
-    if (_opacity != prevOpacity) {
-        markDirty();
-    }
 
     // UI-anim cut 2: position tween. Writes _position directly (not via
     // setPosition — that would cancel the in-flight tween we're feeding).
     const bool posActive = _posAnim.active;
-    const math::FVector2 prevPos = _position;
     float pt;
     if (_posAnim.advance(dt, pt)) {
         _position = tweenLerp(_posAnim.from, _posAnim.to, pt);
     } else if (posActive) {
         _position = _posAnim.to;
     }
-    // AYUI-DirtyRect-2026-08-26: position tween frames are painted each
-    // step (popup slide-ins, etc.). Same rationale as opacity above.
-    if (_position.x != prevPos.x || _position.y != prevPos.y) {
-        markDirty();
-    }
 }
 
 void Widget::setOpacity(float opacity) {
-    const float clamped = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
-    if (_opacity == clamped) {
-        return;
-    }
-    _opacity = clamped;
+    _opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
     // A direct set cancels any in-flight tween — the caller took over.
     _opacityAnim.active = false;
-    // AYUI-DirtyRect-2026-08-26: opacity changed; the alpha pass on
-    // existing pixels must re-run.
-    markDirty();
 }
 
 void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
     const float target = to < 0.0f ? 0.0f : (to > 1.0f ? 1.0f : to);
     if (durationMs <= 0.0f) {
         // Instant snap — same semantics as setOpacity.
-        if (_opacity != target) {
-            _opacity = target;
-            // AYUI-DirtyRect-2026-08-26: instant snap re-renders this frame.
-            markDirty();
-        }
+        _opacity = target;
         _opacityAnim.active = false;
         return;
     }
     _opacityAnim.start(_opacity, target, durationMs, curve);
-    // AYUI-DirtyRect-2026-08-26: tween is now armed — first frame of the
-    // fade already needs a re-render.
-    markDirty();
 }
 
 void Widget::animatePositionTo(const math::FVector2& to, float durationMs,
@@ -547,19 +555,11 @@ void Widget::animatePositionTo(const math::FVector2& to, float durationMs,
     if (durationMs <= 0.0f) {
         // Instant snap — same semantics as setPosition (and it cancels any
         // in-flight tween the same way).
-        if (_position.x != to.x || _position.y != to.y) {
-            _position = to;
-            // AYUI-DirtyRect-2026-08-26: instant snap re-renders this frame.
-            markDirty();
-        }
+        _position = to;
         _posAnim.active = false;
         return;
     }
     _posAnim.start(_position, to, durationMs, curve);
-    // AYUI-DirtyRect-2026-08-26: tween armed — first slide-in frame must
-    // re-render even if the position hasn't actually moved yet (opacity
-    // fade usually starts simultaneously).
-    markDirty();
 }
 
 void Widget::renderChildren(IRenderBackend& renderer) {

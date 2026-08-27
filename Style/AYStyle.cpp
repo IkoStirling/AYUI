@@ -9,6 +9,11 @@
 
 namespace ayt::ui {
 
+// AYUI-Perf-2026-08-26: forward-declare the no-widget overload so the
+// memoized public overload (above) can build the cache key before
+// dispatching. Implementation lives in the same TU.
+ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget);
+
 namespace {
 
 using json = nlohmann::json;
@@ -130,6 +135,10 @@ bool StyleSheet::loadFromString(const char* data, size_t length) {
                 _styles[it.key()] = parsed;
             }
         }
+        // AYUI-Perf-2026-08-26: a fresh load may overwrite any number
+        // of style entries. Bump the memo version once instead of N
+        // times (N setStyle calls would each have invalidated).
+        StyleManager::get().invalidateResolveCache();
         return true;
     }
     catch (const std::exception&) {
@@ -164,6 +173,11 @@ const WidgetStyle* StyleSheet::getStyle(const std::string& styleId) const {
 
 void StyleSheet::setStyle(const std::string& styleId, const WidgetStyle& style) {
     _styles[styleId] = style;
+    // AYUI-Perf-2026-08-26: a per-style mutation may change the
+    // resolved output for `styleId`. Bump the StyleManager's memo
+    // version so the cache key no longer matches and the next
+    // resolveStyle() call rebuilds.
+    StyleManager::get().invalidateResolveCache();
 }
 
 WidgetStyle StyleSheet::getComputedStyle(const std::string& styleId) const {
@@ -183,6 +197,10 @@ StyleManager& StyleManager::get() {
 
 void StyleManager::setStyleSheet(StyleSheet* sheet) {
     _styleSheet = sheet;
+    // AYUI-Perf-2026-08-26: a fresh StyleSheet can change the resolved
+    // output of every styleId — bump the memo version so the next
+    // resolveStyle() call rebuilds the cache from the new sheet.
+    _resolveCacheVersion++;
 }
 
 const WidgetStyle* StyleManager::getStyle(const std::string& styleId) const {
@@ -275,7 +293,65 @@ ResolvedStyle resolveStyle(const std::string& styleId) {
     return resolveStyle(styleId, nullptr);
 }
 
+namespace {
+
+// AYUI-Perf-2026-08-26: per-(styleId, themeVersion) memo. ResolvedStyle
+// is a small POD-ish value (~32 bytes), so the cache is cheap; the
+// saving is the avoid-the-lookup + avoid-the-std::string("$")+tok +
+// avoid-the-makeDefault allocation on every styled widget every frame.
+// Key includes the StyleManager's resolveCacheVersion so theme swaps
+// invalidate stale entries in O(1).
+using ResolveCacheKey = std::pair<std::string, uint64_t>;
+struct ResolveCacheKeyHash {
+    size_t operator()(const ResolveCacheKey& k) const noexcept {
+        // Combine hash of the string with the version. FNV-style mix
+        // is overkill here — a plain XOR works because version is
+        // small and varies independently of the string content.
+        return std::hash<std::string>{}(k.first) * 1315423911u
+               + static_cast<size_t>(k.second);
+    }
+};
+std::unordered_map<ResolveCacheKey, ResolvedStyle, ResolveCacheKeyHash>&
+resolveCache() {
+    static std::unordered_map<ResolveCacheKey, ResolvedStyle, ResolveCacheKeyHash> cache;
+    return cache;
+}
+
+// AYUI-Perf-2026-08-26: pre-computed default style. StyleBuilder::makeDefault()
+// runs ~25 field assignments every call; previously resolveStyle()
+// invoked it on every call just to compare the sentinel backgroundColor.
+// Cache it as a static — only the first call to resolveStyle (or a test
+// that swapped the StyleSheet) ever re-runs the constructor.
+const WidgetStyle& defaultStyleCached() {
+    static const WidgetStyle def = StyleBuilder::makeDefault();
+    return def;
+}
+
+} // namespace
+
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
+    // AYUI-Perf-2026-08-26: memoize the result by (styleId, themeVersion).
+    // Memo only applies to the (widget == nullptr) path — a per-widget
+    // override map would require keying by widget pointer too, which is
+    // not worth the cache lookup cost for the rare override case.
+    if (widget == nullptr) {
+        StyleManager& mgr = StyleManager::get();
+        const uint64_t version = mgr.getResolveCacheVersion();
+        const ResolveCacheKey key{styleId, version};
+        auto& cache = resolveCache();
+        const auto it = cache.find(key);
+        if (it != cache.end()) {
+            return it->second;
+        }
+
+        ResolvedStyle out = resolveStyleImpl(styleId, nullptr);
+        cache[key] = out;
+        return out;
+    }
+    return resolveStyleImpl(styleId, widget);
+}
+
+ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget) {
     ResolvedStyle out;
     if (styleId.empty()) {
         return out;
@@ -288,7 +364,9 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
     // matches, treat as "no explicit background override" so the
     // hardcoded fallback still wins. See the long-form comment on
     // ResolvedStyle in AYStyle.h for the rationale.
-    const WidgetStyle def = StyleBuilder::makeDefault();
+    // AYUI-Perf-2026-08-26: use the cached default style instead of
+    // calling StyleBuilder::makeDefault() each time (~25 field copies).
+    const WidgetStyle& def = defaultStyleCached();
     const bool bgIsDefault = (s->backgroundColor.x == def.backgroundColor.x &&
                               s->backgroundColor.y == def.backgroundColor.y &&
                               s->backgroundColor.z == def.backgroundColor.z &&

@@ -34,6 +34,7 @@
 #include "AYUI/TreeNode.h"
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::ui {
@@ -119,6 +120,12 @@ private:
     std::vector<TreeNode*>    _nodes;           // matching widgets (owned via addChild)
     std::vector<int>          _flatToSrc;       // flat index → source index (1:1)
     std::vector<int>          _pendingDepths;   // depth per flat entry (rebuilt each flatten)
+
+    // AYUI-Perf-2026-08-26: parentIndex → [child indices] map rebuilt
+    // once per setTree() so flatten()'s DFS does an O(1) lookup instead
+    // of an O(N) parentIndex scan inside every node's child loop. The
+    // pre-fix code was O(N^2) overall; with this map it drops to O(N).
+    std::unordered_map<int, std::vector<int>> _childrenByParent;
 
     int  _selectedIndex = -1;
     float _itemHeight = 16.0f;

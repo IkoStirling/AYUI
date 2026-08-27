@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYMath/MathTypes.h"
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -111,12 +112,25 @@ public:
 
     void applyStyle(Widget* widget) const;
 
+    // AYUI-Perf-2026-08-26: bump the theme-version counter so the
+    // resolveStyle() memo knows to discard stale entries. Theme swaps
+    // (ThemeManager::setActiveTheme) and StyleSheet mutations both call
+    // this; the cached (styleId, themeVersion) → ResolvedStyle entries
+    // are otherwise reusable across frames.
+    void invalidateResolveCache() { _resolveCacheVersion++; }
+    uint64_t getResolveCacheVersion() const { return _resolveCacheVersion; }
+
 private:
     StyleManager();
     StyleManager(const StyleManager&) = delete;
     StyleManager& operator=(const StyleManager&) = delete;
 
     StyleSheet* _styleSheet;
+    // AYUI-Perf-2026-08-26: monotonically increasing cache-version
+    // counter. resolveStyle() keys its memo by (styleId, version); the
+    // counter is bumped whenever anything that could change the resolved
+    // output mutates (theme swap, StyleSheet change).
+    uint64_t _resolveCacheVersion = 1;
 };
 
 // Helper to define styles in code
