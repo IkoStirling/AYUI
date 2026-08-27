@@ -44,8 +44,14 @@ public:
     // left→right forever (tick-driven, ignores _value). Hosts switch it on
     // for "unknown duration" work and off to return to the value bar.
     void setIndeterminate(bool v) {
+        if (_indeterminate == v) return;
         _indeterminate = v;
         if (!v) _scanPhase = 0.0f;
+        // AYUI-DirtyRect-2026-08-26 Batch B follow-up: toggling mode
+        // changes which paint path runs (scan segment vs value fill) and
+        // resets the scan phase. Without markDirty(), the dirty-rect
+        // short-circuit in render() would skip the swap frame.
+        markDirty();
     }
     bool isIndeterminate() const { return _indeterminate; }
 

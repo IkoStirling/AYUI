@@ -86,6 +86,12 @@ void ProgressBar::tick(float dt) {
     if (_indeterminate) {
         _scanPhase += dt / 1.6f;   // one full sweep per 1.6s
         if (_scanPhase > 1.0f) _scanPhase -= 1.0f;
+        // AYUI-DirtyRect-2026-08-26 Batch B follow-up: dirty-rect render
+        // short-circuits on !_dirtyThis && !hasDirtyRect(). The scan
+        // phase advances every frame but never writes a setter, so a
+        // clean ProgressBar would freeze visually. markDirty() arms the
+        // next render so the accent segment keeps moving.
+        markDirty();
     }
 }
 

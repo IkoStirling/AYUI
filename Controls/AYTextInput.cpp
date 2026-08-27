@@ -652,6 +652,10 @@ bool TextInput::onImeCompositionEnd(const std::string& committed) {
 }
 
 void TextInput::tick(float dt) {
+    // Chain the base cascade so opacity / position tweens on this widget
+    // run. (Pre Batch B, TextInput's tick never chained — this fix is
+    // also a Batch B follow-up.)
+    Widget::tick(dt);
     if (!_hasFocus) {
         _caretVisible = false;
         _caretBlinkTimer = 0.0f;
@@ -671,10 +675,19 @@ void TextInput::tick(float dt) {
             _lastClickTime = -1.0f;
         }
     }
+    const bool prevCaret = _caretVisible;
     _caretBlinkTimer += dt;
     while (_caretBlinkTimer >= kCaretBlinkSeconds) {
         _caretBlinkTimer -= kCaretBlinkSeconds;
         _caretVisible = !_caretVisible;
+    }
+    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: render short-circuits
+    // when !_dirtyThis && !hasDirtyRect(). The blink toggle changes the
+    // rendered caret bit but never writes a setter, so a focused TextInput
+    // would freeze visually. markDirty() only on the flip — steady-state
+    // blinks are silent.
+    if (_caretVisible != prevCaret) {
+        markDirty();
     }
 }
 

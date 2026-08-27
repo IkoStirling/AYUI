@@ -69,12 +69,21 @@ const std::wstring& TabStrip::getTabLabel(int index) const {
 void TabStrip::setSelectedIndex(int index) {
     if (_labels.empty()) {
         _selectedIndex = -1;
+        // AYUI-DirtyRect-2026-08-26 Batch B follow-up: clearing selection
+        // still changes the painted state (indicator hides, active button
+        // swaps) — arm the next render.
+        markDirty();
         return;
     }
     int clamped = std::clamp(index, 0, static_cast<int>(_labels.size()) - 1);
     if (clamped == _selectedIndex) return;
     _selectedIndex = clamped;
     if (_onSelectionChanged) _onSelectionChanged(clamped);
+    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: selection flip should
+    // visibly repaint immediately even if the indicator tween is short /
+    // disabled. Without this, the first post-click frame short-circuits
+    // in render() because nothing else marked dirty yet.
+    markDirty();
 }
 
 bool TabStrip::isOverflown() const {
@@ -163,12 +172,20 @@ void TabStrip::tick(float dt) {
     // Chain the base cascade first (opacity/position tweens of this widget
     // + virtual tick of the tab buttons). Then advance our indicator.
     CompoundFocusableWidget::tick(dt);
+    const math::FVector2 prevRect = _indicatorRect;
     const bool wasActive = _indicatorAnim.active;
     float t;
     if (_indicatorAnim.advance(dt, t)) {
         _indicatorRect = tweenLerp(_indicatorAnim.from, _indicatorAnim.to, t);
     } else if (wasActive) {
         _indicatorRect = _indicatorAnim.to;
+    }
+    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: the underline slides
+    // through _indicatorRect without going through a setter, so the
+    // dirty-rect render short-circuit would freeze the slide mid-flight.
+    // Only markDirty when the rect actually moved (idle tween = silent).
+    if (_indicatorRect.x != prevRect.x || _indicatorRect.y != prevRect.y) {
+        markDirty();
     }
 }
 
