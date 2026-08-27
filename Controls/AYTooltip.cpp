@@ -125,6 +125,11 @@ void Tooltip::ensureLabelCreated() {
 void Tooltip::setText(const std::wstring& text) {
     ensureLabelCreated();
     _label->setText(text);
+    // AYUI-DirtyRect-2026-08-26: the label re-marks dirty on its own, but
+    // the tooltip's own plate (drawn by onRender) needs to repaint
+    // because the bounds may change with the new text width. markDirty
+    // propagates up to the overlay root so the popup refreshes.
+    markDirty();
 }
 
 const std::wstring& Tooltip::getText() const {
@@ -217,6 +222,11 @@ void Tooltip::show() {
     const math::FVector2 p = getPosition();
     setPosition(p + math::FVector2(0.0f, -8.0f));
     animatePositionTo(p, 120.0f, AnimationCurve::EaseOut);
+    // AYUI-DirtyRect-2026-08-26: becoming visible mid-frame; setVisible
+    // already markDirty'd, but the multi-property mutation above
+    // (opacity, position, size) can race with render ordering — mark
+    // once more to guarantee the next frame redraws.
+    markDirty();
 }
 
 void Tooltip::hide() {

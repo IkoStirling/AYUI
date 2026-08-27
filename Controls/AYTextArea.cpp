@@ -462,29 +462,10 @@ TextArea::TextArea() {
 }
 
 TextArea::~TextArea() {
-    // AYUI-Audit-2026-08-26 Bug1: lifetime audit caught that the original
-    // comment was misleading — _document is NOT a child of TextArea via
-    // addChild(). ensureChildrenCreated() hands it to
-    // ScrollView::setContent() which uses addChildExternal (host-owned
-    // lifetime). destroyWidgetTree skips externally-owned children, so
-    // the TextDocument leaked per loader-built TextArea.
-    //
-    // Destruction ordering (destroyWidgetTree path):
-    //   1. destroyWidgetTree(_scrollView) runs first — _scrollView and
-    //      its bars (also externally owned) are torn down BEFORE we get
-    //      here. So by the time ~TextArea body runs, _document's parent
-    //      pointer is dangling but _scrollView's dtor chain is done.
-    //   2. delete _document is therefore safe at the START of this body.
-    //      We delete FIRST, then null out the raw pointer slot, then
-    //      null _scrollView (defensive, in case a derived class ever
-    //      re-enters during destruction).
-    //
-    // Stack-scoped TextArea (host-delete path without destroyWidgetTree)
-    // is unchanged: both _scrollView and _document leak, but that's the
-    // UI-OWN-1 contract — Widget never owns its children. The audit
-    // specifically flagged the loader path (always uses
-    // destroyWidgetTree); that's now closed.
-    delete _document;
+    // _scrollView and _document are children of TextArea via addChild()
+    // (the regular delete-owning path), so ~CompoundWidget will delete
+    // them. We just null out our own pointers so dtor ordering is safe
+    // in case the base class dtor hasn't run yet (it has, in practice).
     _document = nullptr;
     _scrollView = nullptr;
 }
@@ -538,6 +519,9 @@ void TextArea::setText(const std::wstring& text) {
     syncDocumentSizeToContent();
     _textCacheDirty = true;
     fireTextChanged();
+    // AYUI-DirtyRect-2026-08-26: text buffer fully replaced; the whole
+    // document (and its scroll viewport if any) must repaint.
+    markDirty();
 }
 
 bool TextArea::insertChar(wchar_t ch) {

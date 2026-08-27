@@ -15,7 +15,16 @@ public:
 
     // TextLabel now owns its own text (was inherited from Button pre-R-3).
     const std::wstring& getText() const { return _text; }
-    void setText(const std::wstring& text) { _text = text; }
+    // AYUI-DirtyRect-2026-08-26: setText swaps the rendered glyph run —
+    // must re-render this frame. The early-out on equal text is omitted
+    // here deliberately: callers use setText as the canonical "label
+    // changed, redraw it" signal even when (rarely) the new text equals
+    // the old (e.g. i18n key resolved to the same string). The next
+    // render() will clear the dirty flag, so the cost is one frame.
+    void setText(const std::wstring& text) {
+        _text = text;
+        markDirty();
+    }
 
     void setFontSize(int size) { _fontSize = size; }
     int getFontSize() const { return _fontSize; }

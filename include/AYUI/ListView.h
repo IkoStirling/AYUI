@@ -119,7 +119,13 @@ public:
         using SelectableWidget::isSelected;
 
         const std::wstring& getText() const { return _text; }
-        void setText(const std::wstring& text) { _text = text; }
+        // AYUI-DirtyRect-2026-08-26: row label change → row + ListView
+        // repaint. markDirty propagates up to the ListView's parent via
+        // the chain in Widget::markDirty.
+        void setText(const std::wstring& text) {
+            _text = text;
+            markDirty();
+        }
 
         int getIndex() const { return _index; }
         void setIndex(int idx) { _index = idx; }

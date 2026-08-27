@@ -107,7 +107,17 @@ void ScrollView::syncContentPosition() {
     // but belt-and-suspenders so layout never parks content on a
     // half-pixel (1px SDF borders shimmer under fractional offsets).
     const math::FVector2 off = _scrollState.getScrollOffset();
-    _content->setPosition(math::FVector2(-std::round(off.x), -std::round(off.y)));
+    const math::FVector2 prevPos = _content->getPosition();
+    const math::FVector2 nextPos(-std::round(off.x), -std::round(off.y));
+    // AYUI-DirtyRect-2026-08-26: only dirty when the offset actually
+    // changed. setPosition already short-circuits on equal values, but
+    // we want to markDirty() here only when work happened — otherwise a
+    // scrollBy(0,0) would propagate a no-op markDirty up the tree.
+    if (prevPos.x != nextPos.x || prevPos.y != nextPos.y) {
+        _content->setPosition(nextPos);
+        _content->markDirty();
+        markDirty();
+    }
 }
 
 // PR-Container-Contract-Cut2: getClientRect is the single source of truth

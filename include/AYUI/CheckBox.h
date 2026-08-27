@@ -36,7 +36,11 @@ public:
     void setChecked(bool checked);
 
     const std::wstring& getText() const { return _text; }
-    void setText(const std::wstring& text) { _text = text; }
+    // AYUI-DirtyRect-2026-08-26: setText swaps the rendered glyph run.
+    void setText(const std::wstring& text) {
+        _text = text;
+        markDirty();
+    }
 
     // Toggle-specific callback: fires with the NEW value.
     // Distinct from _onClicked (which still fires as well — matches Button's

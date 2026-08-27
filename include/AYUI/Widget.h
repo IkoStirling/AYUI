@@ -6,6 +6,7 @@
 #include "AYUI/DragDrop.h"
 #include "AYUI/Tween.h"
 
+#include <algorithm>
 #include <functional>
 #include <vector>
 #include <string>
@@ -138,6 +139,13 @@ public:
         _posAnim.active = false;
         _position = pos;
         markBoundsDirty();
+        // AYUI-DirtyRect-2026-08-26: position change can move our painted
+        // pixels on the parent's surface. The widget must re-render this
+        // frame; also propagate to ancestors so the old slot (if any) is
+        // repainted as background. markDirty() (default = invalid rect)
+        // marks the whole widget and propagates a "you must paint this
+        // frame" flag up to parent — see Widget::markDirty().
+        markDirty();
     }
 
     const math::FVector2& getSize() const { return _size; }
@@ -147,6 +155,9 @@ public:
         }
         _size = size;
         markBoundsDirty();
+        // AYUI-DirtyRect-2026-08-26: same reasoning as setPosition — a
+        // size change reshapes our paint + the parent's render regions.
+        markDirty();
     }
 
     // PR-B3 hotfix — scrollable content size separate from the widget's
@@ -223,7 +234,21 @@ public:
 
     // Visibility
     bool isVisible() const { return _visible; }
-    void setVisible(bool visible) { _visible = visible; }
+    void setVisible(bool visible) {
+        if (_visible == visible) {
+            return;
+        }
+        _visible = visible;
+        // AYUI-DirtyRect-2026-08-26: becoming visible REQUIRES a re-render
+        // (we have to actually paint our pixels on the parent's surface).
+        // Becoming invisible short-circuits in render() so no mark is
+        // needed — the next frame will simply skip us. The order matters:
+        // we set _visible BEFORE markDirty() so the propagation to parent
+        // sees the new state.
+        if (visible) {
+            markDirty();
+        }
+    }
 
     // Event handling - override in subclasses
     virtual bool onMouseMove(const UIMouseEvent& e);
@@ -288,7 +313,15 @@ public:
     bool isPositionAnimating() const { return _posAnim.active; }
 
     // Style
-    void setStyleId(const std::string& id) { _styleId = id; }
+    void setStyleId(const std::string& id) {
+        // AYUI-DirtyRect-2026-08-26: style id change swaps which colors
+        // and metrics onRender reads from the StyleSheet — must re-render.
+        if (_styleId == id) {
+            return;
+        }
+        _styleId = id;
+        markDirty();
+    }
     const std::string& getStyleId() const { return _styleId; }
 
     // =================================================================
@@ -371,6 +404,75 @@ public:
         _boundsDirty = true;
     }
 
+    // =================================================================
+    // AYUI-DirtyRect-2026-08-26: dirty-rect system (per-widget paint gate).
+    // =================================================================
+    // Without this gate, populateFrame() walks the entire tree and every
+    // widget repaints every frame. With 80-400 widgets per frame, that's
+    // 5k-24k item submissions/sec wasted on static TextLabels.
+    //
+    // markDirty(invalidRect) marks THIS widget dirty. The default (invalid
+    // rect) means "the whole widget must repaint this frame". Passing a
+    // valid rect unions it into _dirtyRect (used by per-pixel damage
+    // callbacks; v1 typically just passes invalid).
+    //
+    // If we were clean, propagate markDirty(invalid) to the parent so
+    // the ancestor render walks this frame — the union of children's
+    // dirty rects doesn't matter to the parent (it walks children
+    // unconditionally), only "did anything change?" matters.
+    //
+    // render() short-circuits when both _dirtyThis is false AND
+    // _dirtyRect is empty (default-constructed == zero area == empty),
+    // so a freshly-marked widget re-renders exactly once and stays clean
+    // until something mutates it again.
+    //
+    // NOTE: "invalid" here = FRectangle{0,0,0,0}, which is the default
+    // ctor and has zero area. We don't need a separate sentinel; the
+    // default-constructed rectangle serves as both "clean" and "invalid
+    // mark the whole widget" — see Widget::markDirty() body. AYMath
+    // doesn't ship a `FRectangle::empty()` helper, so we use a static
+    // helper here.
+    static bool isDirtyRectEmpty(const math::FRectangle& r) {
+        // Zero-area rect = the default ctor output. Inverse or equal min/max
+        // also count as "no paint region".
+        return r.maxX <= r.minX || r.maxY <= r.minY;
+    }
+
+    void markDirty(const math::FRectangle& r = math::FRectangle()) {
+        const bool wasDirty = _dirtyThis || !isDirtyRectEmpty(_dirtyRect);
+        if (!isDirtyRectEmpty(r)) {
+            // Union into _dirtyRect. Empty union (current rect empty)
+            // collapses to just r.
+            if (isDirtyRectEmpty(_dirtyRect)) {
+                _dirtyRect = r;
+            } else {
+                _dirtyRect = math::FRectangle::fromMinMax(
+                    math::FVector2(
+                        std::min(_dirtyRect.minX, r.minX),
+                        std::min(_dirtyRect.minY, r.minY)),
+                    math::FVector2(
+                        std::max(_dirtyRect.maxX, r.maxX),
+                        std::max(_dirtyRect.maxY, r.maxY)));
+            }
+        } else {
+            // Empty/invalid rect passed → mark the whole widget.
+            _dirtyThis = true;
+            _dirtyRect = math::FRectangle();
+        }
+        // Propagate only if we just transitioned clean → dirty. Once
+        // dirty, the parent is already dirty too — no need to chain
+        // again (avoid O(N) blow-up on deep trees where every widget
+        // is dirty).
+        if (!wasDirty && _parent != nullptr) {
+            _parent->markDirty();
+        }
+    }
+
+    // Test/debug: which dirty markers does this widget currently hold?
+    // Used by Test_DirtyRect to assert "widget did/did not render".
+    bool isDirtyThis() const { return _dirtyThis; }
+    bool hasDirtyRect() const { return !isDirtyRectEmpty(_dirtyRect); }
+
 protected:
     // Override in subclasses to implement specific rendering
     virtual void onRender(IRenderBackend& renderer) {}
@@ -438,6 +540,25 @@ protected:
 
     std::unordered_map<UIEventType, std::vector<std::function<void(UIEvent&)>>> _eventHandlers;
     IRenderBackend* _renderBackend = nullptr;
+
+    // =================================================================
+    // AYUI-DirtyRect-2026-08-26: per-widget paint gate.
+    // =================================================================
+    // _dirtyThis: "the whole widget must repaint this frame". Set true on
+    // ctor (a freshly-added widget MUST paint at least once) and cleared
+    // at the END of render() — so the same widget doesn't re-render until
+    // something marks it dirty again.
+    //
+    // _dirtyRect: a sub-rectangle union of all damage since the last
+    // render. Default-constructed == zero area == empty == clean. Used by
+    // partial-redraw callers (host damage callbacks); for typical
+    // setters, markDirty(invalid) is sufficient and clears _dirtyRect.
+    //
+    // render() short-circuits when both _dirtyThis is false AND
+    // _dirtyRect is empty. This is the load-bearing invariant — if a
+    // widget doesn't dirty itself in a setter, it won't repaint.
+    bool _dirtyThis = true;
+    math::FRectangle _dirtyRect;
 
     void updateWorldBounds();
     math::FVector2 getWorldPosition() const;

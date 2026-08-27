@@ -29,6 +29,9 @@ void InteractiveWidget::setEnabled(bool enabled) {
         // mouse-up with no down event.
         _state = _isMouseOver ? ButtonState::Hovered : ButtonState::Normal;
     }
+    // AYUI-DirtyRect-2026-08-26: enabled/disabled swaps the rendered fill
+    // (Disabled grays out) — must re-render.
+    markDirty();
 }
 
 bool InteractiveWidget::onMouseMove(const UIMouseEvent& e) {
@@ -46,6 +49,9 @@ bool InteractiveWidget::onMouseMove(const UIMouseEvent& e) {
         } else {
             _state = isOver ? ButtonState::Hovered : ButtonState::Normal;
         }
+        // AYUI-DirtyRect-2026-08-26: hover state changed → button's fill
+        // is different → must repaint.
+        markDirty();
     }
 
     return isOver;
@@ -63,6 +69,8 @@ bool InteractiveWidget::onMouseButtonDown(const UIMouseEvent& e) {
     if (bounds.contains(e.mousePos)) {
         _isPressed = true;
         _state = ButtonState::Pressed;
+        // AYUI-DirtyRect-2026-08-26: pressed state change re-tints.
+        markDirty();
         return true;
     }
     return false;
@@ -82,12 +90,16 @@ bool InteractiveWidget::onMouseButtonUp(const UIMouseEvent& e) {
         math::FRectangle bounds = getWorldBounds();
         if (bounds.contains(e.mousePos)) {
             _state = ButtonState::Hovered;
+            // AYUI-DirtyRect-2026-08-26: state change on release.
+            markDirty();
             if (_onClicked) {
                 _onClicked();
             }
             return true;
         } else {
             _state = ButtonState::Normal;
+            // AYUI-DirtyRect-2026-08-26: state change on release-out.
+            markDirty();
         }
     }
     return false;
@@ -99,10 +111,18 @@ void InteractiveWidget::onMouseLeave() {
                   getStyleId().c_str(), _isMouseOver ? 1 : 0,
                   static_cast<int>(_state));
     }
+    const bool wasHover = _isMouseOver || _state == ButtonState::Hovered
+                            || _state == ButtonState::Pressed;
     _isMouseOver = false;
     _isPressed = false;
     if (_state == ButtonState::Hovered || _state == ButtonState::Pressed) {
         _state = ButtonState::Normal;
+    }
+    // AYUI-DirtyRect-2026-08-26: leaving the hover state swaps the fill;
+    // markDirty only when there was actually a hovered state to clear
+    // (no-op on a non-hovered leave avoids spurious repaints).
+    if (wasHover) {
+        markDirty();
     }
 }
 
@@ -118,9 +138,15 @@ UiCursorHint InteractiveWidget::getCursorHint() const {
 // ---------------------------------------------------------------------------
 
 void InteractiveWidget::setColor(const math::FVector4& c) {
+    const bool wasInit = _colorInitialized;
     _colorInitialized = true;
     _colorAnim.snap(c);
-    _color = c;
+    if (_color.x != c.x || _color.y != c.y || _color.z != c.z || _color.w != c.w
+        || !wasInit) {
+        _color = c;
+        // AYUI-DirtyRect-2026-08-26: snap-recolor triggers immediate repaint.
+        markDirty();
+    }
 }
 
 void InteractiveWidget::animateColorTo(const math::FVector4& to, float durationMs,
@@ -134,17 +160,25 @@ void InteractiveWidget::animateColorTo(const math::FVector4& to, float durationM
         return;
     }
     _colorAnim.start(_color, to, durationMs, curve);
+    // AYUI-DirtyRect-2026-08-26: tween armed — first frame must redraw.
+    markDirty();
 }
 
 void InteractiveWidget::tick(float dt) {
     Widget::tick(dt);
     const bool wasActive = _colorAnim.active;
+    const math::FVector4 prevColor = _color;
     float t;
     if (_colorAnim.advance(dt, t)) {
         _color = tweenLerp(_colorAnim.from, _colorAnim.to, t);
     } else if (wasActive) {
         // Completed this frame — snap to the exact target.
         _color = _colorAnim.to;
+    }
+    // AYUI-DirtyRect-2026-08-26: color tween frame — must repaint.
+    if (_color.x != prevColor.x || _color.y != prevColor.y
+        || _color.z != prevColor.z || _color.w != prevColor.w) {
+        markDirty();
     }
 }
 

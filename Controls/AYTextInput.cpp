@@ -165,6 +165,9 @@ void TextInput::setText(const std::wstring& text) {
     if (_onTextChanged) {
         _onTextChanged(_text);
     }
+    // AYUI-DirtyRect-2026-08-26: text + caret + selection all changed —
+    // the whole field must repaint.
+    markDirty();
 }
 
 bool TextInput::insertChar(wchar_t ch) {

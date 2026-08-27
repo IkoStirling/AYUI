@@ -989,6 +989,12 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     } else {
         _overlayRoot->addChild(popup);
     }
+    // AYUI-DirtyRect-2026-08-26: popup just mounted → overlay must render
+    // the new child. Popup's own setVisible path covers its own dirty;
+    // the overlay ancestor must also be marked so the next populateFrame
+    // walks the overlay subtree.
+    _overlayRoot->markDirty();
+    popup->markDirty();
 
     // Track as active.
     _activeDropdown = popup;
@@ -1744,6 +1750,12 @@ void UIManager::updateGhostPosition(const math::FVector2& pos) {
     // mouse cursor (small "+12, +8" indirection — matches Qt's default
     // and most editor conventions).
     _dragGhost->setPosition(math::FVector2(pos.x + 12.0f, pos.y + 8.0f));
+    // AYUI-DirtyRect-2026-08-26: ghost moves every onMouseMove during a
+    // drag — setPosition already markDirty's, but be explicit because
+    // the ghost is a special path (its setPosition early-out would skip
+    // dirty when the cursor delta is sub-pixel; we want the frame to
+    // repaint even at sub-pixel movement for buttery ghost tracking).
+    _dragGhost->markDirty();
 }
 
 void UIManager::paintGhost(IRenderBackend& renderer) {
@@ -1805,6 +1817,9 @@ bool UIManager::beginDrag(Widget* source) {
     ensureGhostCreated();
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(true);
+        // AYUI-DirtyRect-2026-08-26: ghost just became visible mid-frame;
+        // setVisible(true) already markDirty's, but the first paint at the
+        // press position is rendered this frame anyway.
         // PR-S5e: start the ghost at the PRESS position (last known
         // cursor), not the source's center. The old code spawned it at
         // the card's center and the first onMouseMove snapped it to the
@@ -1867,6 +1882,10 @@ void UIManager::updateDrag(float x, float y) {
         // Leave old target.
         if (_dragSession.currentTarget != nullptr) {
             _dragSession.currentTarget->setCurrentDropTarget(false);
+            // AYUI-DirtyRect-2026-08-26: drop-target highlight is drawn
+            // by Widget::render when _isCurrentDropTarget is true; toggling
+            // it off must trigger a repaint so the border disappears.
+            _dragSession.currentTarget->markDirty();
             if (_dragSession.currentTarget->_onDragLeave) {
                 _dragSession.currentTarget->_onDragLeave();
             }
@@ -1874,6 +1893,8 @@ void UIManager::updateDrag(float x, float y) {
         // Enter new target.
         if (newTarget != nullptr) {
             newTarget->setCurrentDropTarget(true);
+            // AYUI-DirtyRect-2026-08-26: drop-target highlight toggle on.
+            newTarget->markDirty();
             if (newTarget->_onDragEnter) {
                 newTarget->_onDragEnter(_dragSession.payload);
             }
@@ -1897,11 +1918,20 @@ bool UIManager::endDrag(bool accepted) {
 
     if (target != nullptr) {
         target->setCurrentDropTarget(false);
+        // AYUI-DirtyRect-2026-08-26: drop-target highlight off → must
+        // repaint to remove the border ring.
+        target->markDirty();
     }
     _dragSession.active        = false;
     _dragSession.currentTarget = nullptr;
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(false);
+        // AYUI-DirtyRect-2026-08-26: ghost just hidden — setVisible(false)
+        // doesn't mark dirty (visibility==false short-circuits anyway),
+        // but we explicitly clear the dirty flag so a stale dirty won't
+        // resurrect the ghost's render on a later frame.
+        _dragGhost->setCurrentDropTarget(false);
+        _dragGhost->markDirty();
     }
 
     if (target != nullptr) {
@@ -2053,13 +2083,17 @@ void UIManager::setFocus(Widget* widget) {
     }
     Widget* prev = _focusedWidget;
     _focusedWidget = widget;
+    // AYUI-DirtyRect-2026-08-26: focus outline / caret blinks depend on
+    // focus state — must repaint both widgets this frame.
     if (prev != nullptr) {
+        prev->markDirty();
         FocusableWidget* prevAsFw = dynamic_cast<FocusableWidget*>(prev);
         if (prevAsFw != nullptr) {
             prevAsFw->setFocus(false);
         }
     }
     if (_focusedWidget != nullptr) {
+        _focusedWidget->markDirty();
         FocusableWidget* nextAsFw =
             dynamic_cast<FocusableWidget*>(_focusedWidget);
         if (nextAsFw != nullptr) {

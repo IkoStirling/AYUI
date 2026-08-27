@@ -51,7 +51,11 @@ public:
     void setChecked(bool checked);
 
     const std::wstring& getText() const { return _text; }
-    void setText(const std::wstring& text) { _text = text; }
+    // AYUI-DirtyRect-2026-08-26: setText swaps the rendered glyph run.
+    void setText(const std::wstring& text) {
+        _text = text;
+        markDirty();
+    }
 
     // Fires with the NEW value (true = selected, false = deselected).
     void setOnToggled(std::function<void(bool)> cb) { _onToggled = std::move(cb); }

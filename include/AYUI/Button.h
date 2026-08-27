@@ -13,7 +13,12 @@ public:
     virtual ~Button();
 
     const std::wstring& getText() const { return _text; }
-    void setText(const std::wstring& text) { _text = text; }
+    // AYUI-DirtyRect-2026-08-26: setText swaps the rendered glyph run.
+    // No early-out — the next render() clears the dirty flag.
+    void setText(const std::wstring& text) {
+        _text = text;
+        markDirty();
+    }
 
     void setPadding(float left, float top, float right, float bottom);
 

@@ -66,7 +66,14 @@ public:
     ~MenuItem() override;
 
     const std::wstring& getText() const { return _text; }
-    void setText(const std::wstring& text) { _text = text; markBoundsDirty(); }
+    // AYUI-DirtyRect-2026-08-26: setText swaps the rendered glyph run.
+    // markBoundsDirty stays (text-width change may re-flow the row) and
+    // markDirty triggers a repaint.
+    void setText(const std::wstring& text) {
+        _text = text;
+        markBoundsDirty();
+        markDirty();
+    }
 
     const std::wstring& getShortcut() const { return _shortcut; }
     // Polish (P3): setShortcut parses the string into (mods, keyCode).
@@ -92,14 +99,26 @@ public:
                               int& outKey);
 
     bool hasSubmenu() const { return _submenu != nullptr; }
-    void setSubmenu(Menu* m) { _submenu = m; markBoundsDirty(); }
+    // AYUI-DirtyRect-2026-08-26: submenu toggle shows/hides the chevron
+    // arrow on the row → must repaint.
+    void setSubmenu(Menu* m) {
+        if (_submenu == m) return;
+        _submenu = m;
+        markBoundsDirty();
+        markDirty();
+    }
 
     // PR-C3 hotfix — keyboard-hover state. Menu::setHoveredIndex flips
     // this on the matching item so onRender draws a highlight bar even
     // when the user pressed a letter (no mouse ever landed on the row).
     // isMouseOver() (the existing mouse hover flag) is a separate axis:
     // the row can be keyboard-hovered AND mouse-hovered simultaneously.
-    void setKeyboardHovered(bool h) { _isKeyboardHovered = h; }
+    // AYUI-DirtyRect-2026-08-26: highlight bar swaps fill → must redraw.
+    void setKeyboardHovered(bool h) {
+        if (_isKeyboardHovered == h) return;
+        _isKeyboardHovered = h;
+        markDirty();
+    }
     bool isKeyboardHovered() const { return _isKeyboardHovered; }
 
     // Activate callback. Fires on click after the menu typically closes.

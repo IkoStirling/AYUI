@@ -133,12 +133,26 @@ public:
 
     // Host-window chrome (promoted OS HWND only). Overlay floating
     // DockCards must leave these false — no maximize 口, no SE grip.
-    void setShowResizeGrip(bool show) { _showResizeGrip = show; }
+    // AYUI-DirtyRect-2026-08-26: chrome toggle / maximize visual change
+    // both affect what onRender draws.
+    void setShowResizeGrip(bool show) {
+        if (_showResizeGrip == show) return;
+        _showResizeGrip = show;
+        markDirty();
+    }
     bool showResizeGrip() const { return _showResizeGrip; }
-    void setShowMaximizeButton(bool show) { _showMaximizeButton = show; }
+    void setShowMaximizeButton(bool show) {
+        if (_showMaximizeButton == show) return;
+        _showMaximizeButton = show;
+        markDirty();
+    }
     bool showMaximizeButton() const { return _showMaximizeButton; }
     // Visual only — host keeps this in sync with OS IsZoomed.
-    void setMaximizedVisual(bool maximized) { _maximizedVisual = maximized; }
+    void setMaximizedVisual(bool maximized) {
+        if (_maximizedVisual == maximized) return;
+        _maximizedVisual = maximized;
+        markDirty();
+    }
     bool maximizedVisual() const { return _maximizedVisual; }
 
     // Raw handler (not std::function): promote runs mid-drag while the

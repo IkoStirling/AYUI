@@ -158,6 +158,9 @@ void MenuItem::setShortcut(const std::wstring& s) {
     _accelMods = mods;
     _accelKey  = key;
     markBoundsDirty();
+    // AYUI-DirtyRect-2026-08-26: shortcut text changes the rendered row
+    // (right-aligned hint).
+    markDirty();
 }
 
 bool MenuItem::handleClick() {
