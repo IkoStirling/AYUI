@@ -424,6 +424,9 @@ void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4&
     // map key matches Theme's storage (which uses bare names without '$').
     const std::string norm = (key[0] == '$') ? key.substr(1) : key;
     _tokenOverrides[norm] = value;
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): token override change
+    // re-tints the resolved style; onRender must re-run.
+    markDirty();
 }
 
 void Widget::clearStyleTokenOverrides() {
@@ -483,6 +486,13 @@ void CompoundWidget::onChildRemoved(Widget* child) {
 
 void Widget::render(IRenderBackend& renderer) {
     if (!_visible) return;
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): short-circuit when
+    // nothing in this subtree is dirty. _dirtyThis=true on a fresh
+    // widget so it renders once; setters / animation ticks call
+    // markDirty() to re-arm.
+    if (!_dirtyThis && !hasDirtyRect()) {
+        return;
+    }
     // PR-anim: push the node opacity so the whole subtree (own paints +
     // children) fades as one unit. Fast path when fully opaque — the
     // pre-opacity rendering path is byte-identical.
@@ -501,11 +511,15 @@ void Widget::render(IRenderBackend& renderer) {
     if (_isCurrentDropTarget) {
         const math::FRectangle b = getWorldBounds();
         renderer.drawBorderRect(b,
-            math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 1.0f, 2.0f);
+            math::FVector4(0.40f, 0.48f, 0.62f, 1.0f), 2.0f);
     }
     if (fading) {
         renderer.popOpacity();
     }
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): clear the dirty flags so
+    // the next frame short-circuits unless something marks us again.
+    _dirtyThis = false;
+    _dirtyRect = math::FRectangle();
 }
 
 void Widget::tick(float dt) {
@@ -513,6 +527,7 @@ void Widget::tick(float dt) {
     // base implementation for every tree node, so a fade keeps running
     // even under subclasses that override tick without chaining.
     const bool wasActive = _opacityAnim.active;
+    const float prevOpacity = _opacity;
     float t;
     if (_opacityAnim.advance(dt, t)) {
         _opacity = tweenLerp(_opacityAnim.from, _opacityAnim.to, t);
@@ -521,22 +536,39 @@ void Widget::tick(float dt) {
         // path never runs on the completion frame).
         _opacity = _opacityAnim.to;
     }
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): opacity change → repaint.
+    if (_opacity != prevOpacity) {
+        markDirty();
+    }
 
     // UI-anim cut 2: position tween. Writes _position directly (not via
     // setPosition — that would cancel the in-flight tween we're feeding).
     const bool posActive = _posAnim.active;
+    const math::FVector2 prevPos = _position;
     float pt;
     if (_posAnim.advance(dt, pt)) {
         _position = tweenLerp(_posAnim.from, _posAnim.to, pt);
     } else if (posActive) {
         _position = _posAnim.to;
     }
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): position tween frames
+    // must repaint each step (popup slide-ins etc.).
+    if (_position.x != prevPos.x || _position.y != prevPos.y) {
+        markDirty();
+    }
 }
 
 void Widget::setOpacity(float opacity) {
-    _opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
+    const float clamped = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
+    if (_opacity == clamped) {
+        return;
+    }
+    _opacity = clamped;
     // A direct set cancels any in-flight tween — the caller took over.
     _opacityAnim.active = false;
+    // AYUI-DirtyRect-2026-08-26 (rebase fix): opacity changed; the
+    // alpha pass on existing pixels must re-run.
+    markDirty();
 }
 
 void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
