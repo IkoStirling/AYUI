@@ -138,11 +138,6 @@ public:
         _posAnim.active = false;
         _position = pos;
         markBoundsDirty();
-        // AYUI-Perf-2026-08-26: invalidate every descendant's cached
-        // world-bounds. The parent's world origin shifted; without this,
-        // children would hand back a stale cached rect on the next
-        // getWorldBounds call until each child itself moved.
-        markDescendantsBoundsDirty();
     }
 
     const math::FVector2& getSize() const { return _size; }
@@ -152,13 +147,6 @@ public:
         }
         _size = size;
         markBoundsDirty();
-        // AYUI-Perf-2026-08-26: a size change shifts the rect's max
-        // corner, so descendants whose layout derived offsets from
-        // this widget's size (rare but legal) also need their caches
-        // invalidated. Cheap insurance against a class of bugs where
-        // a parent resizes but children silently keep reading the
-        // old world rect.
-        markDescendantsBoundsDirty();
     }
 
     // PR-B3 hotfix — scrollable content size separate from the widget's
@@ -347,6 +335,40 @@ public:
     // gets onDragEnter + onDragLeave + onDrop callbacks.
     void  setAcceptDrops(bool a) { _acceptDrops = a; }
     bool  isAcceptDrops() const  { return _acceptDrops; }
+    // ====================================================================
+    // AYUI-Audit-2026-08-26: per-kind acceptance API. setAcceptDrops(true)
+    // opts in to all kinds (legacy behavior). To restrict which kinds this
+    // target honors, also call setAcceptDropKinds({"FileList", "Image"})
+    // -- an empty list (default) means "accept any kind", matching the
+    // previous opaque any-accepts-anything behavior so existing hosts do
+    // not silently start rejecting drops. UIManager::updateDrag /
+    // ::endDrag consult acceptsKind() while walking for targets; a kind
+    // not in the list is invisible to the drag system (no enter/leave
+    // highlight, no onDrop callback).
+    //
+    // Vector-over-unordered-set rationale: drop-accept lists are tiny
+    // (hosts typically enumerate 1-3 kinds per target), and a linear
+    // scan keeps the API trivially copyable without a custom hash. The
+    // hot path is the hitTest walk during drag, which already costs a
+    // stack frame per ancestor -- a vector finds a match in 1-3 cycles.
+    // ====================================================================
+    void  setAcceptDropKinds(std::vector<std::string> kinds) {
+        _acceptDropKinds = std::move(kinds);
+    }
+    const std::vector<std::string>& getAcceptDropKinds() const {
+        return _acceptDropKinds;
+    }
+    // True when kinds list is empty (accept any) OR kinds contains `kind`.
+    bool  acceptsKind(const std::string& kind) const {
+        if (_acceptDropKinds.empty()) {
+            return true;
+        }
+        for (const std::string& k : _acceptDropKinds) {
+            if (k == kind) return true;
+        }
+        return false;
+    }
+
     void  setOnDrop      (std::function<void(const DragPayload&)> cb) {
         _onDrop = std::move(cb);
     }
@@ -381,20 +403,7 @@ public:
         // flagged here; getWorldBounds() walks UP the parent chain — if
         // any ancestor is dirty, the current node recomputes too.
         _boundsDirty = true;
-        // AYUI-Perf-2026-08-26: also flip the cache dirty flag so a
-        // subsequent getWorldBounds() call sees the dirty bit and
-        // recomputes. Without this, a stale _boundsCache field could
-        // survive a setPosition cycle (the parent chain has changed but
-        // the cached rect still reflects the old world origin).
-        _boundsCacheDirty = true;
     }
-
-    // AYUI-Perf-2026-08-26: walk children recursively, marking each
-    // subtree's bounds cache stale. Used by setPosition/setSize so the
-    // parent's own movement cascades through every descendant (the
-    // parent's world-origin shift would otherwise leave every child
-    // reading from a stale cached rect on the next getWorldBounds).
-    void markDescendantsBoundsDirty();
 
 protected:
     // Override in subclasses to implement specific rendering
@@ -405,28 +414,6 @@ protected:
     math::FVector2 _size;
     math::FRectangle _bounds;
     bool _boundsDirty;
-
-    // AYUI-Perf-2026-08-26: cached world-bounds result + dirty flag.
-    // mutable so the const getWorldBounds() can update the cache after
-    // a recompute without breaking the const contract. _boundsCacheDirty
-    // is true whenever the cache holds a stale value (initial state, or
-    // after markBoundsDirty / markDescendantsBoundsDirty fired). The
-    // cache is invalidated by setPosition, setSize, and a parent's
-    // position/size change (which propagates downward recursively).
-    mutable math::FRectangle _boundsCache;
-    mutable bool _boundsCacheDirty = true;
-
-    // Debug counter for tests — incremented whenever getWorldBounds()
-    // does a fresh chain walk + recompute (as opposed to returning the
-    // cached rect). Build with #undef NDEBUG to surface it; default
-    // builds compile the increment out.
-#ifndef NDEBUG
-    mutable int _worldBoundsRecomputeCount = 0;
-public:
-    int debugGetWorldBoundsRecomputeCount() const { return _worldBoundsRecomputeCount; }
-    void debugResetWorldBoundsRecomputeCount() { _worldBoundsRecomputeCount = 0; }
-protected:
-#endif
 
     Widget* _parent;
     std::vector<Widget*> _children;
@@ -466,6 +453,10 @@ protected:
     // duplicates this exact field set per subclass.
     bool _draggable = false;
     bool _acceptDrops = false;
+    // AYUI-Audit-2026-08-26: per-kind acceptance filter. Empty by default
+    // so existing hosts that only call setAcceptDrops(true) keep the old
+    // any-accepts-anything contract (acceptsKind returns true when empty).
+    std::vector<std::string> _acceptDropKinds;
     DragPayload _dragPayload;
     std::function<void()>                       _onDragStart;
     std::function<void(bool /*accepted*/)>      _onDragEnd;

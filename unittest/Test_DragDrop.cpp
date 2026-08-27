@@ -393,4 +393,158 @@ TEST_CASE(dragdrop_widget_dtor_clears_drag_state_no_uaf) {
     ui.shutdown();
 }
 
+// =============================================================================
+// AYUI-Audit-2026-08-26: per-kind acceptance API on Widget. setAcceptDrops()
+// alone opts in to all kinds (legacy behavior). setAcceptDropKinds(...)
+// filters by payload.kind via acceptsKind(). UIManager::updateDrag walks
+// the ancestor chain with the kind filter, so a target tuned for one
+// kind does not get drops of another kind.
+// =============================================================================
+
+// AYUI-Audit-2026-08-26: DragDrop_TargetRejectsForeignKind — target lists
+// only "FileList"; the drag carries "TextBlock"; no enter/leave fires,
+// no onDrop fires, currentDropTarget stays null.
+TEST_CASE(DragDrop_TargetRejectsForeignKind) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "TextBlock";
+    source.setDragPayload(p);
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setAcceptDropKinds({"FileList"});
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    int enterCount = 0;
+    int dropCount = 0;
+    target.setOnDragEnter([&enterCount](const DragPayload&) { ++enterCount; });
+    target.setOnDrop([&dropCount](const DragPayload&) { ++dropCount; });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    // Move over target with kind="TextBlock" — target must be invisible
+    // to this drag because acceptsKind("TextBlock") is false.
+    ui.updateDrag(220.0f, 220.0f);
+    CHECK(ui.getCurrentDropTarget() == nullptr);
+    CHECK(enterCount == 0);
+    CHECK_FALSE(target.isCurrentDropTarget());
+
+    ui.endDrag(true);
+    CHECK(dropCount == 0);   // no drop fired
+
+    ui.shutdown();
+}
+
+// AYUI-Audit-2026-08-26: DragDrop_TargetAcceptsListedKind — target lists
+// "FileList"; the drag carries "FileList"; enter + drop fire as normal.
+TEST_CASE(DragDrop_TargetAcceptsListedKind) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(40.0f, 40.0f));
+    source.setPosition(FVector2(0.0f, 0.0f));
+    DragPayload p;
+    p.kind = "FileList";
+    p.text = L"a.txt";
+    source.setDragPayload(p);
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    target.setAcceptDropKinds({"FileList", "Image"});
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    int enterCount = 0;
+    int dropCount = 0;
+    std::string droppedKind;
+    target.setOnDragEnter([&enterCount](const DragPayload&) { ++enterCount; });
+    target.setOnDrop([&](const DragPayload& payload) {
+        ++dropCount;
+        droppedKind = payload.kind;
+    });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    CHECK(ui.beginDrag(&source));
+    ui.updateDrag(220.0f, 220.0f);
+    CHECK(ui.getCurrentDropTarget() == &target);
+    CHECK(target.isCurrentDropTarget());
+    CHECK(enterCount == 1);
+    ui.endDrag(true);
+    CHECK(dropCount == 1);
+    CHECK(droppedKind == "FileList");
+
+    ui.shutdown();
+}
+
+// AYUI-Audit-2026-08-26: DragDrop_TargetAcceptsAnyWhenKindsEmpty — empty
+// kinds list (default) preserves the pre-audit "accept any kind"
+// contract. We drag multiple distinct kinds and verify every drop fires.
+TEST_CASE(DragDrop_TargetAcceptsAnyWhenKindsEmpty) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    Widget target;
+    target.setAcceptDrops(true);
+    // Default kinds list is empty => acceptsKind(any) == true.
+    target.setSize(FVector2(100.0f, 50.0f));
+    target.setPosition(FVector2(200.0f, 200.0f));
+    int dropCount = 0;
+    target.setOnDrop([&](const DragPayload&) { ++dropCount; });
+    ui.getOverlayRoot()->addChildExternal(&target);
+
+    // Round 1: a "TextBlock" drag with no kinds configured — should drop.
+    {
+        Widget source;
+        source.setDraggable(true);
+        source.setSize(FVector2(40.0f, 40.0f));
+        source.setPosition(FVector2(0.0f, 0.0f));
+        DragPayload p;
+        p.kind = "TextBlock";
+        source.setDragPayload(p);
+        ui.getOverlayRoot()->addChildExternal(&source);
+
+        CHECK(ui.beginDrag(&source));
+        ui.updateDrag(220.0f, 220.0f);
+        CHECK(ui.getCurrentDropTarget() == &target);   // empty kinds → any
+        ui.endDrag(true);
+        CHECK(dropCount == 1);
+        ui.getOverlayRoot()->removeChild(&source);
+    }
+
+    // Round 2: an "Image" drag — also drops (kinds still empty).
+    {
+        Widget source2;
+        source2.setDraggable(true);
+        source2.setSize(FVector2(40.0f, 40.0f));
+        source2.setPosition(FVector2(0.0f, 0.0f));
+        DragPayload p;
+        p.kind = "Image";
+        source2.setDragPayload(p);
+        ui.getOverlayRoot()->addChildExternal(&source2);
+
+        CHECK(ui.beginDrag(&source2));
+        ui.updateDrag(220.0f, 220.0f);
+        CHECK(ui.getCurrentDropTarget() == &target);
+        ui.endDrag(true);
+        CHECK(dropCount == 2);
+    }
+
+    ui.shutdown();
+}
+
 TEST_SUITE_END

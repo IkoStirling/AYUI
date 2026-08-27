@@ -448,5 +448,43 @@ TEST_CASE(menu_typeahead_invalidated_by_navigation_keys) {
     ui.shutdown();
 }
 
+// =============================================================================
+// AYUI-Audit-2026-08-26: detachForHostDestruction — when the host window
+// dies mid-menu-open, a subsequent Esc / shutdown must not UAF on the
+// menu's saved `_focusedWidgetBefore` or its overlay reparent path.
+// Menu::detachForHostDestruction runs BEFORE close to clear the owner-host
+// pointer; ~MenuBar (host) then drops the menu without reparenting it back
+// to the dying host. Test: open menu on a host-owned widget via the
+// host-pointer stored outside the Menu, call detachForHostDestruction
+// (simulating host mid-destruction), drop the host reference and verify
+// close() is still safe.
+// =============================================================================
+TEST_CASE(Menu_DetachForHostDestruction) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    // Manager-side owned widget pair — UIManager destroys them via
+    // _root in shutdown().
+    Widget host;
+    host.setSize(FVector2(100.0f, 20.0f));
+
+    Menu* menu = new Menu();
+    menu->addItem(L"A");
+    menu->open(&host, FVector2(0.0f, 20.0f));
+    CHECK(menu->isOpen());
+    CHECK(ui.getOverlayRoot()->getChildren().size() == 1u);
+
+    // simulate host mid-destruction by clearing owner host pointer
+    // before close. After detachForHostDestruction, closing the menu
+    // must NOT try to reparent back to the dying host.
+    menu->detachForHostDestruction();
+    menu->close();
+
+    // After close, UIManager::closePopup destroys the menu tree. The
+    // test passes if no UAF occurred during close.
+    ui.shutdown();
+}
+
 TEST_SUITE_END
 

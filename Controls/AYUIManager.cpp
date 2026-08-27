@@ -129,12 +129,7 @@ void endStuckSplitterDrags(Widget* root)
     if (root == nullptr) {
         return;
     }
-    // AYUI-Perf-2026-08-26: reuse a thread-local scratch buffer instead
-    // of allocating a fresh std::vector every call. The function is
-    // invoked once per window on the stuck-drag recovery path; the
-    // allocation is small but hot (millisecond budget on shutdown).
-    static thread_local std::vector<Widget*> stack;
-    stack.clear();
+    std::vector<Widget*> stack;
     stack.push_back(root);
     while (!stack.empty()) {
         Widget* w = stack.back();
@@ -1852,7 +1847,13 @@ void UIManager::updateDrag(float x, float y) {
             w = w->getParent();
             continue;
         }
-        if (w->isAcceptDrops()) {
+        // AYUI-Audit-2026-08-26: per-kind acceptance. isAcceptDrops()
+        // opts in to the drag system at all; acceptsKind() filters by
+        // the payload kind so a target tuned for "FileList" is
+        // invisible to "TextBlock" drags (no enter highlight, no drop).
+        // An empty kinds list (default) is "accept any kind", matching
+        // the pre-audit single-flag contract.
+        if (w->isAcceptDrops() && w->acceptsKind(_dragSession.payload.kind)) {
             newTarget = w;
             break;
         }
