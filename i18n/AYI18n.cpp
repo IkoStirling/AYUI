@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdint>
+#include <cstdio>
 
 namespace ayt::ui {
 
@@ -77,6 +78,20 @@ void I18n::setCurrentLanguage(const std::string& lang) {
 }
 
 bool I18n::loadFromString(const char* jsonData, size_t length) {
+    // AYUI-Audit-2026-08-26 DoS: cap the raw payload at 64 MiB before
+    // touching nlohmann. Without this, a hostile / corrupted language
+    // table can grow the parse to multi-GiB and stall the UI thread.
+    // 64 MiB is ~500x the largest known real-world table (Gallery's
+    // bundled ~120 KiB zh-CN + en table) and well below the typical
+    // desktop single-allocation heap budget.
+    constexpr size_t kMaxJsonBytes = 64ULL * 1024 * 1024;
+    if (length > kMaxJsonBytes) {
+        std::fprintf(stderr,
+            "[I18n] rejecting oversized language table (%zu bytes > "
+            "64 MiB cap)\n", length);
+        return false;
+    }
+
     try {
         json j = json::parse(jsonData, jsonData + length);
 
@@ -118,6 +133,21 @@ bool I18n::loadFromFile(const char* filepath) {
     std::stringstream ss;
     ss << file.rdbuf();
     std::string content = ss.str();
+
+    // AYUI-Audit-2026-08-26 DoS: cap the raw file size BEFORE handing
+    // the buffer to loadFromString. loadFromString also caps, but
+    // checking here lets us emit a filepath-tagged error and avoids
+    // materializing a multi-GiB std::string in the first place when
+    // the file is already over the limit. 64 MiB cap matches the
+    // loadFromString ceiling.
+    constexpr size_t kMaxJsonBytes = 64ULL * 1024 * 1024;
+    if (content.size() > kMaxJsonBytes) {
+        std::fprintf(stderr,
+            "[I18n] rejecting oversized language file '%s' "
+            "(%zu bytes > 64 MiB cap)\n",
+            filepath ? filepath : "<null>", content.size());
+        return false;
+    }
 
     return loadFromString(content.c_str(), content.size());
 }

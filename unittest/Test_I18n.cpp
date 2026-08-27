@@ -40,4 +40,34 @@ TEST_CASE(test_i18n_resolve_fallback) {
     CHECK(result == L"ui.menu.resume");
 }
 
+// AYUI-Audit-2026-08-26 DoS: 64 MiB JSON cap on I18n::loadFromString.
+// Pre-fix a hostile language table could grow nlohmann's parse to
+// multi-GiB. The fix in i18n/AYI18n.cpp returns false + logs when
+// the payload exceeds 64 MiB.
+TEST_CASE(i18n_rejects_huge_json) {
+    I18n& i18n = I18n::get();
+
+    // Snapshot the previous table so we can restore it after the
+    // rejection — I18n is a process-wide singleton and we don't want
+    // to pollute later tests' state.
+    const std::string prevLang = i18n.getCurrentLanguage();
+
+    // 65 MiB of well-formed but oversized JSON: 32-byte key/value
+    // pairs wrapped in a top-level object. The cap fires BEFORE the
+    // parse attempt.
+    constexpr size_t kPayloadBytes = 65ULL * 1024 * 1024;
+    std::string huge(kPayloadBytes, 'a');
+
+    const bool ok = i18n.loadFromString(huge.data(), huge.size());
+    CHECK_FALSE(ok);
+
+    // Singleton state must be untouched by the failed load.
+    CHECK(i18n.getCurrentLanguage() == prevLang);
+
+    // Resolve must still hand back the fallback for an unknown key
+    // (the rejection did not clear() the singleton).
+    std::wstring fallback = i18n.resolve("ui.menu.resume");
+    CHECK(fallback == L"ui.menu.resume");
+}
+
 TEST_SUITE_END

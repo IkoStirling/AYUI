@@ -213,6 +213,26 @@ Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
     _lastJson = ss.str();
     _lastFilePath = filepath;
 
+    // AYUI-Audit-2026-08-26 DoS: enforce a 64 MiB upper bound on the
+    // raw JSON payload before delegating to loadFromString. nlohmann's
+    // json::parse will happily attempt to materialize a multi-GiB
+    // document, exhausting memory and stalling the UI thread. We
+    // refuse early here (before the file watcher is also re-armed
+    // below) and return nullptr so callers see the same shape as a
+    // parse failure. 64 MiB is comfortably above the largest known
+    // layout file (Gallery's editor shell ~200 KiB) and below the
+    // single-allocation threshold for typical desktop heap budgets.
+    constexpr size_t kMaxJsonBytes = 64ULL * 1024 * 1024;
+    if (_lastJson.size() > kMaxJsonBytes) {
+        std::fprintf(stderr,
+            "[UILayoutLoader] rejecting oversized layout file '%s' "
+            "(%zu bytes > 64 MiB cap)\n",
+            filepath.c_str(), _lastJson.size());
+        _lastJson.clear();
+        _lastFilePath.clear();
+        return nullptr;
+    }
+
     // R-4: register (or refresh) the watch on this file. The watcher is the
     // canonical cross-platform filesystem notification (ReadDirectoryChangesW
     // on Windows, inotify on POSIX). Watching is single-file: events are
@@ -246,6 +266,20 @@ void UILayoutLoader::stopHotReload() {
 }
 
 Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
+    // AYUI-Audit-2026-08-26 DoS: cap the raw payload at 64 MiB before
+    // touching nlohmann. Mirrors the loadFromFile check so a malicious
+    // or runaway layout JSON cannot exhaust memory regardless of which
+    // entrypoint the caller used. Returning nullptr + logged error
+    // matches the existing parse-failure contract; callers destroy
+    // their previous tree (if any) on nullptr the same way.
+    constexpr size_t kMaxJsonBytes = 64ULL * 1024 * 1024;
+    if (jsonStr.size() > kMaxJsonBytes) {
+        std::fprintf(stderr,
+            "[UILayoutLoader] rejecting oversized layout JSON "
+            "(%zu bytes > 64 MiB cap)\n", jsonStr.size());
+        return nullptr;
+    }
+
     // Code-review 2026-08-02 #15: do NOT clear _widgetsById before
     // buildWidgetTree. A throw mid-recursion (deeply nested + malformed
     // JSON) would otherwise wipe the previous load's id index AND leak

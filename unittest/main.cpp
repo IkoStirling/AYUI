@@ -35,12 +35,14 @@
 #include "Test_TabControl.cpp"
 #include "Test_GridPanel.cpp"
 #include "Test_TextArea.cpp"
+#include "Test_TextAreaLifecycle.cpp"   // AYUI-Audit-2026-08-26 Bug1: TextArea destructor lifecycle
 #include "Test_SelectableWidget.cpp"
 #include "Test_Tooltip.cpp"
 #include "Test_Separator.cpp"
 #include "Test_MenuItem.cpp"
 #include "Test_Menu.cpp"
 #include "Test_MenuBar.cpp"
+#include "Test_MenuBarLifecycle.cpp"   // AYUI-Audit-2026-08-26 Bug2: MenuBar dtor UAF
 #include "Test_ToolBar.cpp"
 #include "Test_ToolBarSeparator.cpp"
 #include "Test_StatusBar.cpp"

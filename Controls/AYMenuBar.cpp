@@ -46,6 +46,36 @@ MenuBar::~MenuBar() {
     // manager is already gone), fall back to an explicit delete.
     const std::vector<MenuEntry> snapshot = _menus;
     _menus.clear();
+    // AYUI-Audit-2026-08-26 Bug2: UAF in base dtor. Each Menu was added
+    // via addChildExternal() (see addMenu), so Menu* lives in this
+    // MenuBar's `_children` list. We `delete e.menu` below, but THEN
+    // ~Widget runs and walks `_children` writing `child->_parent =
+    // nullptr` through the now-freed pointer — classic UAF.
+    //
+    // The fix: drop the deleted Menu entries from `_children` BEFORE
+    // the delete loop. After this clear, ~Widget's child walk skips
+    // the freed memory entirely. We use _children.clear() (rather than
+    // selective removeChild) because MenuBar owns its menus via the
+    // _menus snapshot above — the _children list contains only those
+    // external menus, and we're about to delete every one of them.
+    {
+        const std::vector<Widget*> kidsSnapshot = _children;
+        _children.clear();
+        // Restore non-menu children so the base dtor can still clear
+        // their back-pointers (e.g. anchor Buttons, which are added
+        // via addChild owning and CompoundWidget destroys them on
+        // delete). We only removed the externally-owned Menu entries.
+        for (Widget* kid : kidsSnapshot) {
+            if (kid == nullptr) continue;
+            bool isMenu = false;
+            for (const MenuEntry& e : snapshot) {
+                if (e.menu == kid) { isMenu = true; break; }
+            }
+            if (!isMenu) {
+                _children.push_back(kid);
+            }
+        }
+    }
     for (const MenuEntry& e : snapshot) {
         if (e.menu == nullptr) continue;
         // Break the open-menu's _ownerHost back-pointer so its close()

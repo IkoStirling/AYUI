@@ -518,4 +518,31 @@ TEST_CASE(test_layout_loader_gravity_default_fallback) {
     destroyWidgetTree(root);
 }
 
+// AYUI-Audit-2026-08-26 DoS: 64 MiB JSON cap. Pre-fix nlohmann::json::parse
+// would happily attempt to materialize a multi-GiB document, exhausting
+// memory and stalling the UI thread. The fix in
+// Loader/AYLayoutLoader.cpp returns nullptr + logs an error when the
+// payload exceeds 64 MiB.
+TEST_CASE(layout_loader_rejects_huge_json) {
+    UILayoutLoader loader;
+
+    // 65 MiB of "{}" padding — strictly above the 64 MiB cap.
+    // Avoid allocating two copies: build the JSON exactly once and
+    // hand the same buffer to loadFromString. The cap check uses
+    // jsonStr.size() so the literal character count matters, not the
+    // parsed shape.
+    constexpr size_t kPayloadBytes = 65ULL * 1024 * 1024;
+    std::string huge(kPayloadBytes, '{');
+    huge.append(1, '}');
+
+    CHECK(huge.size() > kPayloadBytes);
+
+    Widget* root = loader.loadFromString(huge);
+    CHECK_NULL(root);
+
+    // Loader's _widgetsById index must not have been mutated by a
+    // failed huge-load attempt.
+    CHECK(loader.findWidgetById("anything") == nullptr);
+}
+
 TEST_SUITE_END
