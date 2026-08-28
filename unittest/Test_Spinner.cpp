@@ -54,11 +54,15 @@ TEST_CASE(spinner_renders_4_dots) {
     CHECK(d.size() == 4u);
 
     // All four sit on the 6px orbit around the centre (12, 12).
+    int orbitMismatchCount = 0;
     for (const Dot& dot : d) {
         const float dist = std::sqrt((dot.cx - 12.0f) * (dot.cx - 12.0f) +
                                      (dot.cy - 12.0f) * (dot.cy - 12.0f));
-        CHECK_FLOAT_EQ(dist, Spinner::kOrbitRadius, 1e-3f);
+        if (std::abs(dist - Spinner::kOrbitRadius) > 1e-3f) {
+            ++orbitMismatchCount;
+        }
     }
+    CHECK(orbitMismatchCount == 0);
 
     // Alpha staircase {0.9, 0.55, 0.35, 0.2} — one of each.
     std::vector<float> alphas;

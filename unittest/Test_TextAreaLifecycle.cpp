@@ -79,14 +79,24 @@ TEST_CASE(textarea_repeated_load_and_destroy) {
         "size": { "w": 100, "h": 50 }
     })";
 
+    int nullRootCount = 0;
+    int wrongTypeCount = 0;
     for (int i = 0; i < 5; ++i) {
         Widget* root = loader.loadFromString(json);
-        CHECK_NOT_NULL(root);
+        if (root == nullptr) {
+            ++nullRootCount;
+            continue;
+        }
         auto* ta = dynamic_cast<TextArea*>(root);
-        CHECK_NOT_NULL(ta);
-        ta->setText(L"iteration");
+        if (ta == nullptr) {
+            ++wrongTypeCount;
+        } else {
+            ta->setText(L"iteration");
+        }
         destroyWidgetTree(root);
     }
+    CHECK(nullRootCount == 0);
+    CHECK(wrongTypeCount == 0);
 }
 
 TEST_SUITE_END

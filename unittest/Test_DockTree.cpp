@@ -1486,14 +1486,17 @@ TEST_CASE(test_split_away_from_g_n_prunes_empty_source) {
     if (atOldG0 == nullptr) return;
     CHECK(atOldG0->getTabCount() >= 1);
 
+    int emptyUnpinnedLeafCount = 0;
     if (HBox* mid = midBox(dock.get())) {
         for (Widget* c : mid->getChildren()) {
             auto* leaf = dynamic_cast<DockTabGroup*>(c);
-            if (leaf != nullptr && !leaf->isPinned()) {
-                CHECK(leaf->getTabCount() > 0);
+            if (leaf != nullptr && !leaf->isPinned()
+                && leaf->getTabCount() == 0) {
+                ++emptyUnpinnedLeafCount;
             }
         }
     }
+    CHECK(emptyUnpinnedLeafCount == 0);
 }
 
 // -------------------------------------------------------------------------
@@ -1603,6 +1606,7 @@ TEST_CASE(test_vacant_nest_with_hidden_center_dissolves) {
     if (mid == nullptr) return;
 
     // No mid child box may be vacant (0 visible non-splitter panels).
+    int vacantNestedBoxCount = 0;
     for (Widget* c : mid->getChildren()) {
         auto* nest = dynamic_cast<BoxBase*>(c);
         if (nest == nullptr) {
@@ -1618,8 +1622,11 @@ TEST_CASE(test_vacant_nest_with_hidden_center_dissolves) {
                 ++visible;
             }
         }
-        CHECK(visible > 0);
+        if (visible == 0) {
+            ++vacantNestedBoxCount;
+        }
     }
+    CHECK(vacantNestedBoxCount == 0);
 
     // Visible panels + splitters must cover the mid (no black gap band).
     const FRectangle mb = mid->getWorldBounds();

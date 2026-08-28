@@ -130,10 +130,11 @@ static const std::vector<TypePayload> kPayloads = {
 // The test logs (via the SUITE summary) a one-line PASS/FAIL per
 // type so a regression is reported by name.
 TEST_CASE(serializer_round_trip_all_registered_types) {
-    WidgetFactory& factory = WidgetFactory::get();
     int covered = 0;
     int passed  = 0;
-    int skipped = 0;
+    int deserializeFailureCount = 0;
+    int typeMismatchCount = 0;
+    int roundTripFailureCount = 0;
     for (const TypePayload& entry : kPayloads) {
         ++covered;
         // (1) deserialize.
@@ -142,8 +143,7 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
             // Factory must at least recognize the type. A null return
             // here means the JSON path returned null, which is a real
             // failure (not "type unknown").
-            CHECK(widget != nullptr);
-            delete widget;
+            ++deserializeFailureCount;
             continue;
         }
         // (2) type check via re-serialize — the serializer writes
@@ -158,27 +158,30 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
             !serializedJson.is_discarded() &&
             serializedJson.value("type", std::string()) == entry.typeName;
         if (!typeOk) {
+            ++typeMismatchCount;
             const std::string actualType = serializedJson.is_discarded()
                 ? "<invalid-json>"
                 : serializedJson.value("type", std::string("<missing>"));
             std::printf("         serializer type mismatch: expected %s, got %s\n",
                         entry.typeName, actualType.c_str());
         }
-        CHECK(typeOk);
         // (3) serialize and (4) re-deserialize.
         Widget* roundTripped = WidgetSerializer::deserialize(serialized);
         if (roundTripped != nullptr) {
             ++passed;
             delete roundTripped;
         } else {
-            ++skipped;
+            ++roundTripFailureCount;
         }
         delete widget;
     }
     // Sanity: we must have processed at least 25 of the 29 branches.
     // Anything below that means the kPayloads list silently lost rows.
     CHECK(covered >= 25);
-    CHECK(passed + skipped == covered);
+    CHECK(deserializeFailureCount == 0);
+    CHECK(typeMismatchCount == 0);
+    CHECK(roundTripFailureCount == 0);
+    CHECK(passed == covered);
 }
 
 TEST_CASE(serializer_unknown_type_falls_back_to_widget) {
@@ -205,9 +208,13 @@ TEST_CASE(serializer_factory_recognizes_every_payload_type) {
     // removes a creator, this case fails fast (instead of waiting for
     // the round-trip case above to fail with a confusing null widget).
     WidgetFactory& factory = WidgetFactory::get();
+    int missingCreatorCount = 0;
     for (const TypePayload& entry : kPayloads) {
-        CHECK(factory.isRegistered(entry.typeName));
+        if (!factory.isRegistered(entry.typeName)) {
+            ++missingCreatorCount;
+        }
     }
+    CHECK(missingCreatorCount == 0);
 }
 
 TEST_SUITE_END

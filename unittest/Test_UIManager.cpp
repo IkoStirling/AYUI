@@ -630,10 +630,14 @@ TEST_CASE(test_uimanager_splitter_leave_holds_through_continuous_tick) {
     CHECK(!split->isRevealed());
 
     // Keep ticking for 5 seconds of sim time — splitter must stay hidden.
+    int unexpectedRevealCount = 0;
     for (int i = 0; i < 50; ++i) {
         ui.update(0.10f);
-        CHECK(!split->isRevealed());
+        if (split->isRevealed()) {
+            ++unexpectedRevealCount;
+        }
     }
+    CHECK(unexpectedRevealCount == 0);
 
     ui.shutdown();
 }

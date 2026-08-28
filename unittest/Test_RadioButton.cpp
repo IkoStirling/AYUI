@@ -228,15 +228,16 @@ TEST_CASE(radiobutton_render_unchecked_no_accent) {
     CHECK(textCount == 0);
 
     // No accent fill (0.18, 0.45, 0.78) when unchecked.
+    int unexpectedAccentFillCount = 0;
     for (const auto& dc : renderer.getDrawCalls()) {
         if (dc.type != MockRenderer::DrawCall::Rect) continue;
         if (fabsf(dc.color.x - 0.18f) < 1e-4f &&
             fabsf(dc.color.y - 0.45f) < 1e-4f &&
             fabsf(dc.color.z - 0.78f) < 1e-4f) {
-            CHECK(false);  // unexpected accent fill
-            break;
+            ++unexpectedAccentFillCount;
         }
     }
+    CHECK(unexpectedAccentFillCount == 0);
 }
 
 // C-2b: render — selected state emits an accent-colored inner fill

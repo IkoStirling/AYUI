@@ -72,13 +72,21 @@ TEST_CASE(scrollview_wheel_sets_velocity_and_glides) {
 
     // Eventually parks; never over the boundary, never backwards.
     float last = sv->getScrollOffset().y;
+    int backwardStepCount = 0;
+    int overflowStepCount = 0;
     for (int i = 0; i < 400; ++i) {
         sv->tick(0.016f);
         const float y = sv->getScrollOffset().y;
-        CHECK(y >= last);
-        CHECK(y <= 900.0f);
+        if (y < last) {
+            ++backwardStepCount;
+        }
+        if (y > 900.0f) {
+            ++overflowStepCount;
+        }
         last = y;
     }
+    CHECK(backwardStepCount == 0);
+    CHECK(overflowStepCount == 0);
     const float parked = sv->getScrollOffset().y;
     sv->tick(0.016f);
     CHECK_FLOAT_EQ(sv->getScrollOffset().y, parked, 1e-5f);

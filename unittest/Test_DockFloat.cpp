@@ -382,11 +382,19 @@ TEST_CASE(test_get_slot_rect_matches_hit_test) {
         { FVector2(400.0f, 300.0f), DockArea::Slot::Center },
         { FVector2(700.0f, 300.0f), DockArea::Slot::Right },
     };
+    int containmentFailureCount = 0;
+    int hitTestFailureCount = 0;
     for (const Probe& p : probes) {
         const FRectangle r = dock.getSlotRect(p.slot);
-        CHECK(r.contains(p.pos));
-        CHECK(dock.hitTestSlot(p.pos) == p.slot);
+        if (!r.contains(p.pos)) {
+            ++containmentFailureCount;
+        }
+        if (dock.hitTestSlot(p.pos) != p.slot) {
+            ++hitTestFailureCount;
+        }
     }
+    CHECK(containmentFailureCount == 0);
+    CHECK(hitTestFailureCount == 0);
     // Invalid slot → empty rect.
     CHECK(dock.getSlotRect(static_cast<DockArea::Slot>(99)).maxX
           <= dock.getSlotRect(static_cast<DockArea::Slot>(99)).minX);

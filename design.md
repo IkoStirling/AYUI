@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-08-27
+**文档修订：** 2026-08-28
 
 **CMake 目标版本：** 1.0.0
 
@@ -289,13 +289,17 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 
 ## 13. 测试与审计基线
 
-2026-08-27 全模块审计统计：
+2026-08-28 全模块审计统计：
 
 - 73 个公共/支持 header
 - 61 个非 demo、非 unittest 的 `.cpp`
 - 89 个 `Test_*.cpp`
 - 963 个 `TEST_CASE`
-- Windows Debug：`7405 / 7405` 条断言通过
+- Windows Debug：`4229 / 4229` 条断言通过
+
+断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
+迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
+数和输入迭代次数均未减少。
 
 审计覆盖：
 
@@ -305,6 +309,7 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - 控件生命周期和拥有/非拥有指针
 - dirty/cache invalidation、frame-local backend replay、world-bounds cache 和容器 clip/hit-test 契约
 - TreeView 千节点重复建树性能
+- 全部 `for` / `while` / `do` 循环及标准算法回调中的重复断言扫描
 - Docking、布局保存/加载和 popup/modal 行为
 - 生产 GPU 后端的 `OrderedRuns` / `OverlapAware` 九路径逐像素对照
 - README/design 与当前实现偏差
@@ -315,6 +320,10 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - Spinner serializer 类型缺口。
 - LayoutLoader 与 WidgetSerializer 的 UTF-8 无损转换。
 - TreeView 复用 row widget pool，避免重复 allocator churn。
+- 23 个测试文件中的循环内断言改为失败计数汇总；静态复扫结果为 0 个循环内 `CHECK`。
+- AYUI 单测试采用单 translation unit include 模式；CMake 显式声明全部 `Test_*.cpp` 为
+  `main.cpp` 的对象依赖，防止 MSVC/Ninja 漏记 include 后运行陈旧测试二进制。
+- TreeView 千节点性能门槛按测试名统一为单次平均 `< 5ms`，不再误用 50 次总耗时 `< 100ms`。
 - 独立 Factory 补齐 Dimmer/Modal/ModalDialog/TabStrip 注册。
 - ScrollView 运行时 scrollbar enable/disable、Box 自然尺寸缓存和多个视觉 setter 的 invalidation。
 - 公共聚合头和 CMake header 清单补齐。
@@ -338,6 +347,27 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 
 这些限制不阻塞当前 v1.5 功能，但实现新特性时不得继续扩大重复路径。
+
+### 14.1 高价值扩展顺序
+
+后续扩展按依赖关系和收益排序，不以增加控件数量为优先目标：
+
+1. **Retained display-list**：dirty Widget 只重建自己的本地绘制指令；缓存指令仍需每帧按
+   z-order replay 给即时提交后端。第一阶段不得缓存 bgfx transient buffer 或跨帧保留
+   `UiItem`，并保留当前完整 Widget replay 作为运行时兜底和 A/B 基线。
+2. **UI Layer / RenderTarget 抽象**：在 display-list 契约稳定后再引入子树离屏缓存、滤镜、
+   背景模糊和多 viewport。必须先定义透明、clip、resize、DPI、overlay 以及纹理失效规则；
+   该层也是未来 `UIPlane` / 世界空间 UI 的前置依赖。
+3. **Serializer 完整化**：补齐 GridPanel cell attachment，并为 Modal、ModalDialog、TabStrip、
+   DockOverlay 明确独立 wire contract 或正式声明专用宿主持久化边界。
+4. **高级裁剪和矢量路径**：增加 path tessellation 与 stencil/mask clip。不能跨越的 stencil、
+   render-target 或特殊混合操作必须记录为合批排序屏障，不能复制第二套绘制后端。
+5. **产品化能力**：补充 DPI/UI scale、无障碍语义、主题继承、TabStrip overflow、完整
+   RichText 排版和 POSIX Clipboard。
+
+`OrderedRuns` 与 `OverlapAware` 只允许在提交顺序规划上分叉；图元记录、合批兼容键、
+顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明
+排序屏障，而不是在两种 batch mode 中各实现一次。
 
 ## 15. 决策摘要
 

@@ -61,9 +61,13 @@ TEST_CASE(test_dock_loader_minimal) {
     if (!dock) return;
     CHECK(dock->getId() == "shell");
     CHECK(dock->getOverlay() != nullptr);
+    int nonEmptySlotCount = 0;
     for (int i = 0; i < (int)DockArea::Slot::Count; ++i) {
-        CHECK(dock->getCardCount((DockArea::Slot)i) == 0);
+        if (dock->getCardCount((DockArea::Slot)i) != 0) {
+            ++nonEmptySlotCount;
+        }
     }
+    CHECK(nonEmptySlotCount == 0);
     CHECK(dock->getOverlay()->getFloatingCardCount() == 0);
     CHECK_FLOAT_EQ(dock->getSlotWeight(DockArea::Slot::Left), 0.20f, 1e-5f);
     CHECK_FLOAT_EQ(dock->getSlotWeight(DockArea::Slot::Center), 0.55f, 1e-5f);

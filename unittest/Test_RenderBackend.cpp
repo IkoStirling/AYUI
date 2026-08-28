@@ -17,12 +17,20 @@ TEST_CASE(draw_border_rect_uses_edge_strips) {
     CHECK(calls.size() == 4u);
 
     const float fullArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+    int nonRectCallCount = 0;
+    int fullAreaCallCount = 0;
     for (const MockRenderer::DrawCall& call : calls) {
-        CHECK(call.type == MockRenderer::DrawCall::Rect);
+        if (call.type != MockRenderer::DrawCall::Rect) {
+            ++nonRectCallCount;
+        }
         const float area = (call.bounds.maxX - call.bounds.minX)
                          * (call.bounds.maxY - call.bounds.minY);
-        CHECK(area < fullArea);
+        if (area >= fullArea) {
+            ++fullAreaCallCount;
+        }
     }
+    CHECK(nonRectCallCount == 0);
+    CHECK(fullAreaCallCount == 0);
 }
 
 TEST_CASE(draw_border_rect_with_corner_radius_adds_corner_patches) {

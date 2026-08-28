@@ -116,12 +116,10 @@ TEST_CASE(test_widget_factory_all_registered_types_create_non_null) {
 
     int registeredCount = 0;
     int createdCount    = 0;
+    int missingRegistrationCount = 0;
     for (const std::string& typeName : kAllTypes) {
         if (!factory.isRegistered(typeName)) {
-            // Skip silently if a future PR removed a type without
-            // updating this list — but still CHECK so a regression
-            // shows up in the failure log.
-            CHECK(factory.isRegistered(typeName));
+            ++missingRegistrationCount;
             continue;
         }
         ++registeredCount;
@@ -132,6 +130,7 @@ TEST_CASE(test_widget_factory_all_registered_types_create_non_null) {
         }
     }
     // Sanity: must have registered + created at least 30 of the types.
+    CHECK(missingRegistrationCount == 0);
     CHECK(registeredCount >= 30);
     CHECK(createdCount    == registeredCount);
 }
@@ -156,23 +155,40 @@ TEST_CASE(test_widget_factory_isRegistered_matches_create) {
         "TabStrip",
     };
 
+    int missingKnownRegistrationCount = 0;
+    int knownCreateFailureCount = 0;
     for (const std::string& typeName : kKnownTypes) {
-        CHECK(factory.isRegistered(typeName));
+        if (!factory.isRegistered(typeName)) {
+            ++missingKnownRegistrationCount;
+        }
         Widget* w = factory.create(typeName);
-        CHECK(w != nullptr);
+        if (w == nullptr) {
+            ++knownCreateFailureCount;
+        }
         delete w;
     }
+    CHECK(missingKnownRegistrationCount == 0);
+    CHECK(knownCreateFailureCount == 0);
 
     // Unknown names return null, NOT a crash.
     static const std::vector<std::string> kUnknownTypes = {
         "", "UnknownWidget", "button", "BUTTON", "NotAType",
         "WidgetFactory", "DoCkArEa"  // case-sensitive on purpose
     };
+    int unexpectedUnknownRegistrationCount = 0;
+    int unexpectedUnknownCreateCount = 0;
     for (const std::string& typeName : kUnknownTypes) {
-        if (factory.isRegistered(typeName)) continue;  // safety
+        if (factory.isRegistered(typeName)) {
+            ++unexpectedUnknownRegistrationCount;
+        }
         Widget* w = factory.create(typeName);
-        CHECK(w == nullptr);
+        if (w != nullptr) {
+            ++unexpectedUnknownCreateCount;
+        }
+        delete w;
     }
+    CHECK(unexpectedUnknownRegistrationCount == 0);
+    CHECK(unexpectedUnknownCreateCount == 0);
 }
 
 TEST_CASE(test_widget_factory_unregister_is_idempotent_safe) {

@@ -26,6 +26,8 @@ TEST_CASE(ease_curve_table_matches_mockrenderer) {
     const float ts[] = { 0.1f, 0.3f, 0.5f, 0.7f, 0.9f };
 
     MockRenderer r;
+    int updateFailureCount = 0;
+    int valueMismatchCount = 0;
     for (AnimationCurve c : curves) {
         for (float t : ts) {
             // Fresh handle per point; single-step update lands elapsed
@@ -33,12 +35,18 @@ TEST_CASE(ease_curve_table_matches_mockrenderer) {
             // and current is the interpolated value).
             IRenderBackend::AnimationHandle h =
                 r.createAnimation(0.0f, 1.0f, 1.0f, c);
-            CHECK(r.updateAnimation(h, t));
+            if (!r.updateAnimation(h, t)) {
+                ++updateFailureCount;
+            }
             const float mock = r.getAnimationValue(h);
             // Spring uses math::sin vs std::sin — a ulp or two may differ.
-            CHECK_FLOAT_EQ(mock, easeCurve(t, c), 1e-5f);
+            if (std::abs(mock - easeCurve(t, c)) > 1e-5f) {
+                ++valueMismatchCount;
+            }
         }
     }
+    CHECK(updateFailureCount == 0);
+    CHECK(valueMismatchCount == 0);
 }
 
 TEST_CASE(anim_state_advance_progresses) {

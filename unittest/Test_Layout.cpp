@@ -433,9 +433,13 @@ TEST_CASE(splitter_render_hover_emits_fill_and_grab_handle) {
     MockRenderer renderer;
     split->render(renderer);
     CHECK(renderer.getDrawCalls().size() == 2u);
+    int nonRectCallCount = 0;
     for (const auto& dc : renderer.getDrawCalls()) {
-        CHECK(dc.type == MockRenderer::DrawCall::Rect);
+        if (dc.type != MockRenderer::DrawCall::Rect) {
+            ++nonRectCallCount;
+        }
     }
+    CHECK(nonRectCallCount == 0);
 
     // The first draw call must cover the full splitter bounds (the
     // accent fill). The second is the 2px grab handle inset by 4px
@@ -538,10 +542,14 @@ TEST_CASE(splitter_leave_after_reveal_stays_invisible_across_ticks) {
 
     // Subsequent ticks must NOT re-reveal — _hover=false and onMouseMove
     // isn't being called again.
+    int unexpectedRevealCount = 0;
     for (int i = 0; i < 5; ++i) {
         split->tick(0.05f);
-        CHECK(!split->isRevealed());
+        if (split->isRevealed()) {
+            ++unexpectedRevealCount;
+        }
     }
+    CHECK(unexpectedRevealCount == 0);
 
     MockRenderer renderer;
     split->render(renderer);

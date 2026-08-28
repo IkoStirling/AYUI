@@ -48,13 +48,17 @@ TEST_CASE(world_bounds_cache_initial_walk_only) {
 #endif
 
     // Hammer the leaf 1000 times — counter must NOT advance.
+    int boundsMismatchCount = 0;
     for (int i = 0; i < 1000; ++i) {
         const FRectangle r = leaf->getWorldBounds();
         // Sanity: same rect.
-        CHECK_FLOAT_EQ(r.minX, 90.0f, 1e-4f);
-        CHECK_FLOAT_EQ(r.minY, 90.0f, 1e-4f);
+        if (std::abs(r.minX - 90.0f) > 1e-4f
+            || std::abs(r.minY - 90.0f) > 1e-4f) {
+            ++boundsMismatchCount;
+        }
         (void)r.maxX; (void)r.maxY;
     }
+    CHECK(boundsMismatchCount == 0);
 
 #ifndef NDEBUG
     CHECK(leaf->debugGetWorldBoundsRecomputeCount() == afterFirst);

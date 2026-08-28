@@ -872,13 +872,21 @@ TEST_CASE(listview_pool_vbar_drag_rebinds_monotonically) {
     int prevFirst = lv.getRowPoolLogicalIndex(0);
     CHECK(prevFirst == 0);
     // Scroll down a few times.
+    int backwardRebindCount = 0;
+    int outOfRangeRebindCount = 0;
     for (int i = 0; i < 5; ++i) {
         lv.setScrollOffset(FVector2(0.0f, (i + 1) * 48.0f));   // 2 rows each
         const int curFirst = lv.getRowPoolLogicalIndex(0);
-        CHECK(curFirst >= prevFirst);   // monotonic (no wrap)
-        CHECK(curFirst <= 200 - static_cast<int>(lv.getRowPoolSize()));
+        if (curFirst < prevFirst) {
+            ++backwardRebindCount;
+        }
+        if (curFirst > 200 - static_cast<int>(lv.getRowPoolSize())) {
+            ++outOfRangeRebindCount;
+        }
         prevFirst = curFirst;
     }
+    CHECK(backwardRebindCount == 0);
+    CHECK(outOfRangeRebindCount == 0);
     // Scroll back to top — pool rebinds back to item 0.
     lv.setScrollOffset(FVector2(0.0f, 0.0f));
     CHECK(lv.getRowPoolLogicalIndex(0) == 0);
@@ -908,12 +916,16 @@ TEST_CASE(listview_momentum_glides_and_rebinds) {
 
     // Glide advances + rebinds the pool rows.
     int lastFirst = lv.getRowPoolLogicalIndex(0);
+    int backwardRebindCount = 0;
     for (int i = 0; i < 30; ++i) {
         lv.tick(0.016f);
         const int curFirst = lv.getRowPoolLogicalIndex(0);
-        CHECK(curFirst >= lastFirst);   // pool never scrolls backwards
+        if (curFirst < lastFirst) {
+            ++backwardRebindCount;
+        }
         lastFirst = curFirst;
     }
+    CHECK(backwardRebindCount == 0);
     CHECK(lv.getRowPoolLogicalIndex(0) > before);
 
     // Parks eventually; pool stays consistent.

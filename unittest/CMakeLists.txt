@@ -3,6 +3,18 @@ cmake_minimum_required(VERSION 3.12)
 set(MODULE_NAME AYUI_UnitTests)
 
 add_executable(${MODULE_NAME} main.cpp)
+
+# main.cpp intentionally includes every Test_*.cpp into one translation unit.
+# Some MSVC/Ninja environments do not report those textual includes in the
+# depfile, which can leave the test executable stale after a test-only edit.
+# Pin them as explicit object dependencies so incremental builds are reliable.
+file(GLOB AYUI_INCLUDED_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Test_*.cpp"
+)
+set_property(SOURCE main.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${AYUI_INCLUDED_TEST_SOURCES}"
+)
+
 target_link_libraries(${MODULE_NAME} PRIVATE AYUI AYTest)
 target_include_directories(${MODULE_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

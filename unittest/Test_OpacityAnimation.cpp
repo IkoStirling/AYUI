@@ -82,12 +82,16 @@ TEST_CASE(opacity_fades_every_draw_type) {
         FVector4(0.0f, 0.0f, 0.0f, 0.5f), FVector2(0, 2), 4.0f, 0.0f});
     // flat + text + rounded + border(8 rects via base impl) + shadow.
     CHECK(r.getDrawCalls().size() == 12u);
+    int alphaMismatchCount = 0;
     for (size_t i = 0; i < r.getDrawCalls().size(); ++i) {
         // Every draw fades: alpha 1.0 × 0.5 = 0.5; the shadow is the
         // LAST call and its own alpha (0.5) multiplies on top → 0.25.
         const float expected = (i == r.getDrawCalls().size() - 1) ? 0.25f : 0.5f;
-        CHECK_FLOAT_EQ(r.getDrawCalls()[i].color.w, expected, 1e-5f);
+        if (std::abs(r.getDrawCalls()[i].color.w - expected) > 1e-5f) {
+            ++alphaMismatchCount;
+        }
     }
+    CHECK(alphaMismatchCount == 0);
 }
 
 TEST_CASE(widget_default_opacity_is_noop) {
@@ -196,15 +200,19 @@ TEST_CASE(menu_open_fades_in_via_ui_update) {
     MockRenderer r0;
     menu->render(r0);
     {
-        bool found = false;
+        int plateCount = 0;
+        int alphaMismatchCount = 0;
         for (const auto& dc : r0.getDrawCalls()) {
             if (dc.type == MockRenderer::DrawCall::Rect &&
                 std::abs(dc.floatParam1 - 3.0f) < 1e-4f) {
-                CHECK(dc.color.w < 0.05f);
-                found = true;
+                ++plateCount;
+                if (dc.color.w >= 0.05f) {
+                    ++alphaMismatchCount;
+                }
             }
         }
-        CHECK(found);
+        CHECK(plateCount > 0);
+        CHECK(alphaMismatchCount == 0);
     }
 
     // UIManager::update drives the overlay cascade; the menu's base
@@ -214,15 +222,19 @@ TEST_CASE(menu_open_fades_in_via_ui_update) {
     MockRenderer r1;
     menu->render(r1);
     {
-        bool found = false;
+        int plateCount = 0;
+        int alphaMismatchCount = 0;
         for (const auto& dc : r1.getDrawCalls()) {
             if (dc.type == MockRenderer::DrawCall::Rect &&
                 std::abs(dc.floatParam1 - 3.0f) < 1e-4f) {
-                CHECK_FLOAT_EQ(dc.color.w, 0.96f, 1e-4f);  // plate alpha
-                found = true;
+                ++plateCount;
+                if (std::abs(dc.color.w - 0.96f) > 1e-4f) {
+                    ++alphaMismatchCount;
+                }
             }
         }
-        CHECK(found);
+        CHECK(plateCount > 0);
+        CHECK(alphaMismatchCount == 0);
     }
 
     menu->close();

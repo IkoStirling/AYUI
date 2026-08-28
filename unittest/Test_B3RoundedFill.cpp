@@ -96,17 +96,21 @@ TEST_CASE(b3_slider_handle_fill_is_rounded) {
     w.render(r);
 
     // Locate the handle fill by its default colour (0.85, 0.88, 0.92).
-    bool found = false;
+    int matchedHandleCount = 0;
+    int radiusMismatchCount = 0;
     for (const auto& dc : r.getDrawCalls()) {
         if (dc.type == MockRenderer::DrawCall::Rect &&
             std::abs(dc.color.x - 0.85f) < 0.01f &&
             std::abs(dc.color.y - 0.88f) < 0.01f &&
             std::abs(dc.color.z - 0.92f) < 0.01f) {
-            CHECK_FLOAT_EQ(dc.floatParam1, 2.0f, 1e-5f);
-            found = true;
+            ++matchedHandleCount;
+            if (std::abs(dc.floatParam1 - 2.0f) > 1e-5f) {
+                ++radiusMismatchCount;
+            }
         }
     }
-    CHECK(found);
+    CHECK(matchedHandleCount > 0);
+    CHECK(radiusMismatchCount == 0);
 }
 
 TEST_SUITE_END

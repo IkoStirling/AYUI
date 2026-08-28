@@ -54,9 +54,13 @@ TEST_CASE(combobox_popup_fades_in) {
     MockRenderer r0;
     fx.popup()->render(r0);
     CHECK(!r0.getDrawCalls().empty());
+    int visibleDuringFadeInCount = 0;
     for (const auto& dc : r0.getDrawCalls()) {
-        CHECK(dc.color.w < 0.05f);
+        if (dc.color.w >= 0.05f) {
+            ++visibleDuringFadeInCount;
+        }
     }
+    CHECK(visibleDuringFadeInCount == 0);
 
     // UIManager::update drives the overlay cascade; 140ms fade completes.
     fx.ui.update(0.14f);
@@ -64,9 +68,13 @@ TEST_CASE(combobox_popup_fades_in) {
     MockRenderer r1;
     fx.popup()->render(r1);
     CHECK(!r1.getDrawCalls().empty());
+    int translucentAfterFadeInCount = 0;
     for (const auto& dc : r1.getDrawCalls()) {
-        CHECK(dc.color.w > 0.95f);
+        if (dc.color.w <= 0.95f) {
+            ++translucentAfterFadeInCount;
+        }
     }
+    CHECK(translucentAfterFadeInCount == 0);
 
     fx.ui.shutdown();
 }
@@ -200,16 +208,24 @@ TEST_CASE(tooltip_show_fades_in_hide_fades_out) {
     MockRenderer r0;
     tip->render(r0);
     CHECK(!r0.getDrawCalls().empty());
+    int visibleDuringFadeInCount = 0;
     for (const auto& dc : r0.getDrawCalls()) {
-        CHECK(dc.color.w < 0.05f);
+        if (dc.color.w >= 0.05f) {
+            ++visibleDuringFadeInCount;
+        }
     }
+    CHECK(visibleDuringFadeInCount == 0);
 
     ui.update(0.13f);             // 120ms fade completes
     MockRenderer r1;
     tip->render(r1);
+    int translucentAfterFadeInCount = 0;
     for (const auto& dc : r1.getDrawCalls()) {
-        CHECK(dc.color.w > 0.95f);
+        if (dc.color.w <= 0.95f) {
+            ++translucentAfterFadeInCount;
+        }
     }
+    CHECK(translucentAfterFadeInCount == 0);
 
     // Move out of the target → hide: visually faded out, but the widget
     // stays visible (rendering the fade) until the tween completes.

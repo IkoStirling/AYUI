@@ -135,18 +135,26 @@ TEST_CASE(menuitem_shortcut_render_uses_backend_measure) {
     // Pre-PR was 6 * 7.0f = 42.0f; PR-B2 is 46.8f. Search the recorded
     // drawText bounds for the shortcut text — the right-aligned rect's
     // width should match the new measure, NOT 42.0f.
-    bool foundShortcut = false;
+    int shortcutRecordCount = 0;
+    int measuredWidthMismatchCount = 0;
+    int legacyWidthMatchCount = 0;
     for (const auto& rec : renderer.getDrawCalls()) {
         if (rec.text == L"Ctrl+C") {
+            ++shortcutRecordCount;
             const float rectW = rec.bounds.maxX - rec.bounds.minX;
             // Backend measure path: rectW ≈ expectedW (small slack for
             // floating point + right-edge snap).
-            CHECK(std::abs(rectW - expectedW) < 0.5f);
-            CHECK_FALSE(std::abs(rectW - 42.0f) < 0.5f);  // not pre-PR
-            foundShortcut = true;
+            if (std::abs(rectW - expectedW) >= 0.5f) {
+                ++measuredWidthMismatchCount;
+            }
+            if (std::abs(rectW - 42.0f) < 0.5f) {
+                ++legacyWidthMatchCount;
+            }
         }
     }
-    CHECK(foundShortcut);
+    CHECK(shortcutRecordCount > 0);
+    CHECK(measuredWidthMismatchCount == 0);
+    CHECK(legacyWidthMatchCount == 0);
 
     ui.shutdown();
 }

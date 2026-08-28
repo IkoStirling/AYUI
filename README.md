@@ -4,7 +4,7 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 
 - CMake 目标版本：`1.0.0`
 - 当前功能里程碑：v1.5 已实现
-- 最近全模块审计：2026-08-27
+- 最近全模块审计：2026-08-28
 - 权威架构文档：[design.md](design.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
 
@@ -23,7 +23,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
 - Gallery 与独立 Layout Editor
 
-2026-08-28 修复逐帧提交契约后的 Windows Debug 基线为 `7405 / 7405` 条断言通过。
+2026-08-28 Windows Debug 基线为 `4229 / 4229` 条断言通过。旧基线中的循环内重复
+`CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 保留 Widget 状态和树，`UIRenderBackend` 保持即时、逐帧提交。后端在 `beginFrame()` 清空上一帧命令，因此所有可见 Widget 必须每帧 replay；dirty 标记仅用于 presentation/cache invalidation，不能跳过当前帧提交。真正减少静态 UI 的 CPU 构建开销需要 retained display-list 或离屏层缓存。
 

@@ -103,12 +103,16 @@ TEST_CASE(scrollbar_drag_thumb_full_track_traversal) {
     // Drag from y=50 down to y=99 in 10-pixel steps; capture value at
     // each step and assert monotonically non-decreasing.
     float prevValue = sb.getValue();
+    int backwardStepCount = 0;
     for (float y = 50.0f; y <= 99.0f; y += 5.0f) {
         sb.onMouseMove(UIMouseEvent(FVector2(6.0f, y), 0));
         const float v = sb.getValue();
-        CHECK(v >= prevValue);          // monotonic
+        if (v < prevValue) {
+            ++backwardStepCount;
+        }
         prevValue = v;
     }
+    CHECK(backwardStepCount == 0);
     // After dragging near the bottom of the track, value should be
     // near the max (maxScroll = content - viewport = 100 - 25 = 75).
     // Allow a generous tolerance because applyNormalized maps the

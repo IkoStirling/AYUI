@@ -125,13 +125,17 @@ TEST_CASE(tabstrip_layout_lays_out_left_to_right) {
 
     CHECK_INT_EQ(static_cast<int>(strip.getChildren().size()), 3);
     FVector2 prevPos(-1.0f, -1.0f);
+    int nonIncreasingPositionCount = 0;
     for (Widget* w : strip.getChildren()) {
         const FVector2 p = w->getPosition();
         if (prevPos.x >= 0.0f) {
-            CHECK(p.x > prevPos.x);   // strictly increasing
+            if (p.x <= prevPos.x) {
+                ++nonIncreasingPositionCount;
+            }
         }
         prevPos = p;
     }
+    CHECK(nonIncreasingPositionCount == 0);
 }
 
 // =============================================================================

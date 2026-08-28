@@ -170,9 +170,13 @@ TEST_CASE(draw_rect_with_border_routes_through_drawBorderRect) {
     // With cornerRadius=4 and a non-trivial border, we expect at
     // least 4 edge strips + 4 corner patches = 8 Rect records.
     CHECK(calls.size() >= 4u);
+    int nonRectCallCount = 0;
     for (const MockRenderer::DrawCall& call : calls) {
-        CHECK(call.type == MockRenderer::DrawCall::Rect);
+        if (call.type != MockRenderer::DrawCall::Rect) {
+            ++nonRectCallCount;
+        }
     }
+    CHECK(nonRectCallCount == 0);
 }
 
 TEST_SUITE_END

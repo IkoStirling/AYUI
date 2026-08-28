@@ -273,13 +273,17 @@ TEST_CASE(tabcontrol_tab_strip_layout_is_horizontal) {
 
     // Buttons are strictly left-to-right with non-decreasing X.
     FVector2 prev(-1.0f, -1.0f);
+    int nonIncreasingPositionCount = 0;
     for (Widget* w : strip->getChildren()) {
         const FVector2 p = w->getPosition();
         if (prev.x >= 0.0f) {
-            CHECK(p.x > prev.x);
+            if (p.x <= prev.x) {
+                ++nonIncreasingPositionCount;
+            }
         }
         prev = p;
     }
+    CHECK(nonIncreasingPositionCount == 0);
 
     destroyWidgetTree(a);
     destroyWidgetTree(b);
