@@ -12,7 +12,7 @@ namespace ayt::ui {
 // C-10 TextArea: a multi-line plain-text editor.
 // =============================================================================
 //
-// Architecture (v1):
+// Architecture:
 //   TextArea (CompoundWidget — not FocusableWidget; see DECISION 3)
 //     └─ _scrollView: ScrollView* (vbar always on; hbar off by default)
 //         └─ _document: TextDocument* (a Widget that owns the line buffer,
@@ -28,51 +28,13 @@ namespace ayt::ui {
 //
 // Line model: `vector<wstring> _lines`; the buffer is "\n"-joined for
 // getText() and split on "\n" for setText(). Empty input becomes one empty
-// line. Lines do NOT soft-wrap (DECISION 5) — a line longer than the
-// viewport scrolls horizontally. Hosts needing soft wrap should pre-wrap or
-// wait for v1.1.
+// line. Optional soft wrapping is a visual projection only: caret and
+// selection remain logical-line/code-unit positions snapped to graphemes.
 //
-// -----------------------------------------------------------------------------
-// v1 design decisions + known limitations + v1.1 upgrade paths
-// -----------------------------------------------------------------------------
-//
-// DECISION 1: No word wrap. Lines are stored as-is.
-//   Why: word wrap requires a TextShaper to measure pixels per glyph +
-//   decide break points — significant new code for a 1.0 milestone.
-//   Horizontal scrolling via the embedded ScrollView is good enough.
-//   v1.1 upgrade: enable hbar when line width > viewport, expose
-//   `setWordWrap(bool)` and re-measure lines on viewport width change.
-//
-// DECISION 2: No IME / composition.
-//   Matches TextInput v1 deferral. v1.1: host routes onTextInput to
-//   TextArea::insertChar via FocusableWidget. Composition strings go to
-//   a temporary `_composition` overlay (next to caret) — same as TextInput.
-//
-// Phase C (S4, PR-2) update: composition is now wired through TextDocument
-// (the inner FocusableWidget). It overrides the three onImeComposition*
-// hooks on FocusableWidget, and `isTextEditingWidget() = true` so UIManager's
-// focus gate flips AYDevice::TextInput when TextArea's document is focused.
-//
-// DECISION 3: TextArea extends CompoundWidget, NOT FocusableWidget.
-//   Why: matches ComboBox DECISION 3 pattern (parallel-base trick used by
-//   TextInput doesn't apply here — TextArea is a container that hosts the
-//   scroll view + document; putting the whole TextArea behind focus would
-//   require re-implementing focus routing into the document). Instead,
-//   TextArea routes focus internally: on first click it sets focus on
-//   `_document` (the FocusableWidget). Keyboard input goes to the focused
-//   sub-widget, not to TextArea itself.
-//   v1.1 upgrade: this works in practice but causes a UIManager quirk
-//   where `getFocusedWidget()` returns the inner document, not the
-//   outer TextArea. Add `TextArea::getFocusedSubWidget()` for tests.
-//
-// DECISION 4: No undo / redo.
-//   v1 deferred. v1.1: snapshot stack of `vector<wstring>` lines + caret
-//   + selection. Ctrl+Z / Ctrl+Y wired via onKeyDown.
-//
-// DECISION 5: No drag-to-select. Single click moves caret; double-click
-//   selects the word under the caret. Shift+arrow extends the selection.
-//   v1.1 upgrade: capture mouse on button-down, extend selection on
-//   button-down → drag → button-up.
+// The inner TextDocument receives focus and owns input routing. TextArea
+// provides measured soft wrapping, grapheme-safe caret/selection/editing,
+// drag and word selection, IME composition, clipboard shortcuts and bounded
+// undo/redo history. One committed text event is one edit transaction.
 // =============================================================================
 
 class TextArea : public CompoundWidget {
@@ -105,6 +67,7 @@ public:
     // Edit. Returns true on real change. insertChar / deleteLeft /
     // deleteRight honor selection ranges (replace) and readOnly.
     bool insertChar(wchar_t ch);
+    bool insertText(const std::wstring& text);
     bool deleteLeft();
     bool deleteRight();
     void clear();
@@ -116,8 +79,8 @@ public:
     int  getCaretCol()  const;
 
     // Selection is two caret positions (anchor + active). setSelection
-    // sets both, moves the caret to `active`, and orders them internally
-    // so getSelectionStart is always <= getSelectionEnd per axis.
+    // preserves their direction and moves the caret to `active`; edit and
+    // rendering paths normalize a copy when they need ordered endpoints.
     void setSelection(int startLine, int startCol, int endLine, int endCol);
     void clearSelection();
     void selectAll();
@@ -137,23 +100,15 @@ public:
     float getLineHeight() const { return _lineHeight; }
 
     // =================================================================
-    // Phase C (C6) — word-wrap toggle.
-    // =================================================================
-    // When enabled, lines longer than (viewportWidth - 2*kPaddingX) /
-    // approxCharWidth get greedy word-broken for rendering. The
-    // underlying _lines buffer still splits on '\n' (no soft '\n'
-    // insertion); wrapped-line index computation happens in render.
-    // syncDocumentSizeToContent recomputes document height to match the
-    // visual line count after a toggle.
-    //
-    // Width approximation uses the same 7px-per-char factor as the
-    // renderer and selection highlight — R3 best-effort. v1.2 with a
-    // real text shaper will tighten this.
+    // Word wrapping is a measured visual projection. It never inserts soft
+    // newlines into the logical buffer; hit testing, selection and caret
+    // placement share the same VisualLine projection used by rendering.
     void setWordWrap(bool w) {
         if (_wordWrap == w) return;
         _wordWrap = w;
         syncDocumentSizeToContent();
         markBoundsDirty();
+        invalidateDocument();
         markDirty();
     }
     bool isWordWrap() const { return _wordWrap; }
@@ -212,6 +167,13 @@ public:
     static constexpr size_t kMaxHistoryEntries = 100;
 
 private:
+    struct VisualLine {
+        int logicalLine = 0;
+        int startCol = 0;
+        int endCol = 0;
+        float width = 0.0f;
+    };
+
     // One snapshot of the editing state at a moment in time. Captured
     // BEFORE a mutation so the mutation can be reversed by restore()
     // back to this exact state. Held by value in the history stacks.
@@ -230,6 +192,13 @@ private:
     void syncDocumentSizeToContent();
     void syncTextToDocument();
     void fireTextChanged();
+    std::vector<VisualLine> buildVisualLines(float availableWidth) const;
+    void hitTestDocumentPosition(const math::FVector2& local,
+                                 int& line, int& col) const;
+    void setCaretExtendingSelection(int line, int col);
+    void selectWordAt(int line, int col);
+    void deleteSelectionWithoutHistory();
+    void invalidateDocument();
 
     // Polish (P1): capture current state into a snapshot. Called at
     // the top of every mutating op; _redoStack is cleared at the same

@@ -5,11 +5,39 @@
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/MockRenderer.h"
+#include <cmath>
 #include <iostream>
 #include <sstream>
 
 using namespace ayt::ui;
 using namespace ayt::math;
+
+namespace {
+class ContextSensitiveShapeRenderer final : public MockRenderer {
+public:
+    ShapedText shapeText(const std::wstring& text, int fontSize,
+                         const TextStyle& style) const override {
+        (void)fontSize;
+        ShapedText out;
+        out.rightToLeft = style.direction == TextDirection::RightToLeft;
+        const float advance = 5.0f + static_cast<float>(text.size());
+        float x = 0.0f;
+        const UnicodeTextAnalysis analysis = analyzeUnicodeText(text, style.direction);
+        for (const UnicodeTextCluster& cluster : analysis.clusters) {
+            ShapedTextCluster shaped;
+            shaped.sourceStart = cluster.textStart;
+            shaped.sourceLength = cluster.textLength;
+            shaped.xStart = x;
+            x += advance;
+            shaped.xEnd = x;
+            shaped.bidiLevel = cluster.bidiLevel;
+            out.clusters.push_back(shaped);
+        }
+        out.metrics = TextMetrics{x, 16.0f, 12.0f, 4.0f};
+        return out;
+    }
+};
+}
 
 TEST_SUITE(AYUI_RichText)
 
@@ -122,6 +150,29 @@ TEST_CASE(richtext_factory_and_serializer_roundtrip) {
 
     destroyWidgetTree(raw);
     destroyWidgetTree(restored);
+}
+
+TEST_CASE(richtext_final_fragments_use_their_actual_shaping_context) {
+    RichText rt;
+    rt.setSize(FVector2(120.0f, 100.0f));
+    rt.setWrapWidth(38.0f);
+    rt.setWrapMode(RichTextWrapMode::Character);
+    rt.addRun(L"abcdefgh", FVector4(1, 1, 1, 1), 14);
+    ContextSensitiveShapeRenderer renderer;
+    const RichTextLayout layout = rt.layout(renderer);
+    CHECK(layout.lines.size() >= 2u);
+    CHECK(!layout.fragments.empty());
+    for (const RichTextFragment& fragment : layout.fragments) {
+        const RichRun& run = rt.getRun(fragment.runIndex);
+        const std::wstring text = run.text.substr(
+            fragment.runTextStart, fragment.textLength);
+        IRenderBackend::TextStyle style;
+        style.direction = fragment.rightToLeft
+            ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+        const auto shaped = renderer.shapeText(text, run.fontSize, style);
+        const float submittedWidth = fragment.bounds.maxX - fragment.bounds.minX;
+        CHECK_FLOAT_EQ(submittedWidth, shaped.metrics.width, 1e-3f);
+    }
 }
 
 TEST_SUITE_END

@@ -35,6 +35,23 @@ UnicodeTextAnalysis analyzeUnicodeText(
     const std::wstring& text,
     TextDirection direction = TextDirection::Auto);
 
+// Strict UTF-8 conversion shared by committed text and IME paths. Invalid
+// sequences are replaced with U+FFFD. On UTF-16 platforms supplementary
+// code points are emitted as surrogate pairs, never as truncated wchar_t
+// values. When requested, byteToTextOffset maps every UTF-8 byte offset (and
+// the final end offset) to a std::wstring code-unit offset.
+std::wstring decodeUtf8Text(
+    const std::string& utf8,
+    std::vector<size_t>* byteToTextOffset = nullptr);
+
+// Grapheme-safe editing helpers. Indices are std::wstring code-unit offsets.
+// floor/ceil keep an already-valid boundary unchanged; previous/next always
+// move by one complete extended grapheme cluster when possible.
+size_t floorGraphemeBoundary(const std::wstring& text, size_t offset);
+size_t ceilGraphemeBoundary(const std::wstring& text, size_t offset);
+size_t previousGraphemeBoundary(const std::wstring& text, size_t offset);
+size_t nextGraphemeBoundary(const std::wstring& text, size_t offset);
+
 // UAX #9 L2 visual reordering for a contiguous cluster range (normally one
 // laid-out line). Returned values are indices into analysis.clusters.
 std::vector<size_t> reorderUnicodeClusters(

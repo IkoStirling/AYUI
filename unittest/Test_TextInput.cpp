@@ -4,6 +4,7 @@
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/WidgetSerializer.h"
 #include <cstdio>
+#include <climits>
 #include "AYUI/MockRenderer.h"
 #include "AYUI/Style.h"
 #include "AYUI/UIKeyCode.h"
@@ -887,6 +888,80 @@ TEST_CASE(textinput_halign_right_shifts_placeholder) {
     CHECK(dc != nullptr);
     CHECK(dc->bounds.minX > 6.0f + 50.0f);   // shifted right
     CHECK(dc->text == L"enter name");
+}
+
+TEST_CASE(textinput_device_utf8_commit_is_one_atomic_unicode_edit) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+    TextInput input;
+    um.root()->addChildExternal(&input);
+    um.setFocus(&input);
+
+    CHECK(um.onDeviceChar("\xf0\x9f\x98\x80", 4));
+    CHECK(input.getText() == L"\U0001f600");
+    CHECK(input.getCaret() == input.getText().size());
+    CHECK(input.getUndoStackSize() == 1u);
+
+    input.undo();
+    CHECK(input.getText().empty());
+    um.shutdown();
+}
+
+TEST_CASE(textinput_delete_and_arrows_move_by_grapheme) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+    TextInput input;
+    input.setText(L"e\x0301\U0001f469\u200d\U0001f4bbx");
+    um.root()->addChildExternal(&input);
+    um.setFocus(&input);
+
+    input.setCaret(input.getText().size() - 1u);
+    CHECK(input.deleteLeft());
+    CHECK(input.getText() == L"e\x0301x");
+    input.setCaret(2u);
+    CHECK(um.onKeyDown(UIKey_Left));
+    CHECK(input.getCaret() == 0u);
+    CHECK(um.onKeyDown(UIKey_Right));
+    CHECK(input.getCaret() == 2u);
+    um.shutdown();
+}
+
+TEST_CASE(textinput_max_length_never_stores_half_surrogate_pair) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+    TextInput input;
+    input.setMaxLength(1u);
+    um.root()->addChildExternal(&input);
+    um.setFocus(&input);
+#if WCHAR_MAX <= 0xffff
+    CHECK_FALSE(um.onDeviceChar("\xf0\x9f\x98\x80", 4));
+    CHECK(input.getText().empty());
+#else
+    CHECK(um.onDeviceChar("\xf0\x9f\x98\x80", 4));
+    CHECK(input.getText() == L"\U0001f600");
+#endif
+    um.shutdown();
+}
+
+TEST_CASE(textinput_lowered_max_length_replacement_cannot_underflow) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+    TextInput input;
+    input.setText(L"abcdefghij");
+    input.setMaxLength(5u);
+    input.setSelection(2u, 4u);
+    um.root()->addChildExternal(&input);
+    um.setFocus(&input);
+    CHECK(um.onTextInputText(L"Z"));
+    CHECK(input.getText() == L"abefghij");
+    CHECK(input.getText().size() < 10u);
+    input.undo();
+    CHECK(input.getText() == L"abcdefghij");
+    um.shutdown();
 }
 
 TEST_SUITE_END

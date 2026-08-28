@@ -65,4 +65,30 @@ TEST_CASE(unicode_bidi_keeps_ltr_number_run_inside_rtl_paragraph) {
     CHECK(evenLevelCount >= 2u);
 }
 
+TEST_CASE(unicode_utf8_decoder_preserves_supplementary_codepoint) {
+    const std::wstring decoded = decodeUtf8Text("\xf0\x9f\x98\x80");
+    CHECK(decoded == L"\U0001f600");
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(decoded);
+    CHECK(analysis.clusters.size() == 1u);
+    CHECK(analysis.clusters[0].textLength == decoded.size());
+}
+
+TEST_CASE(unicode_utf8_decoder_replaces_overlong_and_surrogate_sequences) {
+    const std::wstring decoded = decodeUtf8Text("\xc0\xaf\xed\xa0\x80");
+    CHECK(!decoded.empty());
+    for (wchar_t ch : decoded) CHECK(ch == static_cast<wchar_t>(0xfffd));
+}
+
+TEST_CASE(unicode_grapheme_edit_boundaries_never_split_cluster) {
+    const std::wstring text = L"e\x0301\U0001f469\u200d\U0001f4bbx";
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    CHECK(analysis.clusters.size() == 3u);
+    const size_t firstEnd = analysis.clusters[0].textLength;
+    const size_t secondEnd = firstEnd + analysis.clusters[1].textLength;
+    CHECK(nextGraphemeBoundary(text, 0) == firstEnd);
+    CHECK(previousGraphemeBoundary(text, secondEnd) == firstEnd);
+    CHECK(floorGraphemeBoundary(text, firstEnd + 1u) == firstEnd);
+    CHECK(ceilGraphemeBoundary(text, firstEnd + 1u) == secondEnd);
+}
+
 TEST_SUITE_END

@@ -290,6 +290,7 @@ public:
     bool  onKeyDown(int keyCode);
     bool  onKeyUp(int keyCode);
     bool  onTextInput(wchar_t ch);
+    bool  onTextInputText(const std::wstring& text);
 
     // =====================================================================
     // Phase B — S3 keyboard navigation
@@ -321,12 +322,10 @@ public:
     // delivers two streams of UTF-8 chunks:
     //
     //   - committed text (WM_CHAR / IME result): arrives via onCommit
-    //     callbacks. We translate into per-codepoint onTextInput(wchar_t)
-    //     calls on the focused widget. BMP codepoints are single calls;
-    //     supplementary-plane codepoints (U+10000..U+10FFFF, e.g. some
-    //     CJK extensions) arrive as TWO onTextInput calls — first the
-    //     high surrogate half, then the low half. TextInput's replaceRange
-    //     concatenates them (R4 in the Phase C plan).
+    //     callbacks. We strictly decode the whole chunk and deliver one
+    //     atomic onTextInputText() event. Supplementary-plane characters
+    //     become a valid UTF-16 surrogate pair on Windows and remain one
+    //     undoable edit.
     //
     //   - in-progress IME composition (WM_IME_COMPOSITION): arrives via
     //     onCompositionUpdate. We map the AYDevice "empty sentinel" onto

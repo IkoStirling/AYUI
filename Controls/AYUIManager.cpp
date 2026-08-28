@@ -28,6 +28,7 @@
 #include "AYUI/TreeNode.h"
 #include "AYUI/TreeView.h"
 #include "AYUI/RichText.h"
+#include "AYUI/UnicodeText.h"
 #include "AYUI/Image.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/Window.h"
@@ -2274,6 +2275,12 @@ bool UIManager::onTextInput(wchar_t ch) {
     return _focusedWidget->onTextInput(ch);
 }
 
+bool UIManager::onTextInputText(const std::wstring& text) {
+    const ActiveScope selfGuard(this);
+    if (_focusedWidget == nullptr || text.empty()) return false;
+    return _focusedWidget->onTextInputText(text);
+}
+
 bool UIManager::onDeviceKeyDown(::ayt::device::KeyCode kc) {
     return onKeyDown(static_cast<int>(fromDeviceKey(kc)));
 }
@@ -2308,48 +2315,10 @@ bool UIManager::onDeviceChar(const char* utf8, int byteCount) {
     if (utf8 == nullptr || byteCount <= 0) return false;
     if (_focusedWidget == nullptr) return false;
 
-    // Phase C: UTF-8 → wchar_t decode. AYDevice delivers UTF-8 (Win32
-    // WM_CHAR + WideCharToMultiByte; SDL_TEXTINPUT is also UTF-8). We
-    // convert per-codepoint and call onTextInput for each. Surrogate
-    // pairs (supplementary-plane codepoints) arrive as two calls; the
-    // TextInput stores them in std::wstring which concatenates — same
-    // behaviour as typing two halves manually. R4 in the Phase C plan.
-    const auto* p = reinterpret_cast<const unsigned char*>(utf8);
-    int i = 0;
-    while (i < byteCount) {
-        unsigned char c = p[i];
-        uint32_t cp = 0;
-        int bytes = 0;
-        if      ((c & 0x80u) == 0x00u) { cp = c;                       bytes = 1; }
-        else if ((c & 0xE0u) == 0xC0u) { cp = c & 0x1Fu;                bytes = 2; }
-        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu;                bytes = 3; }
-        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u;                bytes = 4; }
-        else {
-            // Invalid leading byte; skip one byte to avoid infinite loop.
-            ++i;
-            continue;
-        }
-        // Bounds check on continuation bytes.
-        if (i + bytes > byteCount) break;
-        for (int k = 1; k < bytes; ++k) {
-            if ((p[i + k] & 0xC0u) != 0x80u) {
-                // Invalid continuation; abandon this codepoint.
-                cp = 0;
-                break;
-            }
-            cp = (cp << 6) | (p[i + k] & 0x3Fu);
-        }
-        if (cp != 0) {
-            // Forward as wchar_t. On Windows wchar_t is 16-bit; surrogate
-            // pairs (cp > 0xFFFF) will be truncated to a single 16-bit
-            // value by the cast. TextInput tests assume BMP input; the
-            // multi-codepoint supplementary-plane path is exercised only
-            // by host applications needing it. R4 documented in header.
-            _focusedWidget->onTextInput(static_cast<wchar_t>(cp));
-        }
-        i += bytes;
-    }
-    return true;
+    const std::wstring committed = decodeUtf8Text(
+        std::string(utf8, static_cast<size_t>(byteCount)));
+    if (committed.empty()) return false;
+    return _focusedWidget->onTextInputText(committed);
 }
 
 void UIManager::onDeviceCompositionStart(const std::string& text, int caret) {

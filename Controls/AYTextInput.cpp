@@ -3,6 +3,7 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/Style.h"
 #include "AYUI/TextMeasure.h"
+#include "AYUI/UnicodeText.h"
 #include "AYUI/Clipboard.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYMath/MathUtils.h"
@@ -20,78 +21,23 @@ namespace {
 
 constexpr int kTextFontSize = ayt::ui::kDefaultTextFontSize;
 
-size_t columnFromLocalX(const std::wstring& text, float localX) {
+size_t columnFromLocalX(const std::wstring& text,
+                        const std::wstring& display,
+                        float localX) {
     if (localX <= 0.0f || text.empty()) return 0;
-    size_t lo = 0;
-    size_t hi = text.size();
-    while (lo < hi) {
-        const size_t mid = (lo + hi + 1) / 2;
-        if (measurePrefixWidth(text, mid) <= localX) {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    size_t previous = 0;
+    float previousX = 0.0f;
+    for (const UnicodeTextCluster& cluster : analysis.clusters) {
+        const size_t boundary = cluster.textStart + cluster.textLength;
+        const float boundaryX = measurePrefixWidth(display, boundary);
+        if (localX < (previousX + boundaryX) * 0.5f) return previous;
+        previous = boundary;
+        previousX = boundaryX;
     }
-    return lo;
+    return text.size();
 }
 
-} // namespace
-
-// =============================================================================
-// Phase C (S4) — UTF-8 → std::wstring helper for IME composition.
-// =============================================================================
-//
-// Shared with AYTextArea.cpp via copy-paste (the helpers are tiny — ~30 LOC —
-// and we'd rather not couple two unrelated compilation units through a new
-// shared header just for this). Mirrors UIManager::onDeviceChar's UTF-8
-// decoder exactly so behavior is consistent between committed-char and
-// composition-char paths.
-//
-// Returns:
-//   - std::wstring with the decoded codepoints (BMP only — supplementary
-//     planes are best-effort, kept as two surrogate halves in wchar_t
-//     because Windows wchar_t is 16-bit. R4 in the Phase C plan.)
-//   - outByteToWChar (optional): mapping array, outByteToWChar[i] is the
-//     wchar_t index corresponding to UTF-8 byte i. Used to translate
-//     AYDevice's byte caret (GCS_CURSORPOS) into our wchar_t caret.
-// =============================================================================
-namespace {
-std::wstring utf8ToWString(const std::string& utf8,
-                            std::vector<size_t>* outByteToWChar = nullptr) {
-    std::wstring out;
-    out.reserve(utf8.size());
-    const auto* p = reinterpret_cast<const unsigned char*>(utf8.data());
-    const int n = static_cast<int>(utf8.size());
-    for (int i = 0; i < n; ) {
-        unsigned char c = p[i];
-        uint32_t cp = 0;
-        int bytes = 0;
-        if      ((c & 0x80u) == 0x00u) { cp = c;            bytes = 1; }
-        else if ((c & 0xE0u) == 0xC0u) { cp = c & 0x1Fu;    bytes = 2; }
-        else if ((c & 0xF0u) == 0xE0u) { cp = c & 0x0Fu;    bytes = 3; }
-        else if ((c & 0xF8u) == 0xF0u) { cp = c & 0x07u;    bytes = 4; }
-        else { ++i; continue; }
-        if (i + bytes > n) break;
-        bool ok = true;
-        for (int k = 1; k < bytes; ++k) {
-            if ((p[i + k] & 0xC0u) != 0x80u) { ok = false; break; }
-            cp = (cp << 6) | (p[i + k] & 0x3Fu);
-        }
-        if (outByteToWChar != nullptr) {
-            // Map every consumed byte to the same wchar_t index (the
-            // start codepoint of this UTF-8 sequence). AYDevice's caret
-            // is a byte offset into the source UTF-8 string.
-            for (int k = 0; k < bytes; ++k) {
-                outByteToWChar->push_back(out.size());
-            }
-        }
-        if (ok) {
-            out.push_back(static_cast<wchar_t>(cp));
-        }
-        i += bytes;
-    }
-    return out;
-}
 } // namespace
 
 // Phase B (S3): TextInput uses UIKeyCode (UIKey_Backspace etc.) instead
@@ -145,7 +91,7 @@ TextInput::~TextInput() {
 void TextInput::setText(const std::wstring& text) {
     std::wstring newText = text;
     if (_maxLength > 0 && newText.size() > _maxLength) {
-        newText = newText.substr(0, _maxLength);
+        newText.resize(floorGraphemeBoundary(newText, _maxLength));
     }
     if (newText == _text) {
         // Idempotent — same value, no callback.
@@ -193,7 +139,7 @@ bool TextInput::deleteLeft() {
         return true;
     }
     if (_caret == 0) return false;
-    replaceRange(_caret - 1, _caret, L"");
+    replaceRange(previousGraphemeBoundary(_text, _caret), _caret, L"");
     return true;
 }
 
@@ -204,7 +150,7 @@ bool TextInput::deleteRight() {
         return true;
     }
     if (_caret >= _text.size()) return false;
-    replaceRange(_caret, _caret + 1, L"");
+    replaceRange(_caret, nextGraphemeBoundary(_text, _caret), L"");
     return true;
 }
 
@@ -229,16 +175,15 @@ void TextInput::appendText(const std::wstring& s) {
 }
 
 void TextInput::setCaret(size_t pos) {
-    _caret = std::min(pos, _text.size());
+    _caret = floorGraphemeBoundary(_text, pos);
     resetSelectionToCaret();
     markDirty();
 }
 
 void TextInput::setSelection(size_t start, size_t end) {
-    const size_t len = _text.size();
-    _selStart = std::min(start, len);
-    _selEnd   = std::min(end,   len);
-    if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
+    if (end < start) std::swap(start, end);
+    _selStart = floorGraphemeBoundary(_text, start);
+    _selEnd   = ceilGraphemeBoundary(_text, end);
     _caret = _selEnd;
     markDirty();
 }
@@ -256,9 +201,9 @@ void TextInput::selectAll() {
 }
 
 void TextInput::clampCaret() {
-    if (_caret > _text.size()) _caret = _text.size();
-    if (_selStart > _text.size()) _selStart = _text.size();
-    if (_selEnd > _text.size()) _selEnd = _text.size();
+    _caret = floorGraphemeBoundary(_text, _caret);
+    _selStart = floorGraphemeBoundary(_text, _selStart);
+    _selEnd = ceilGraphemeBoundary(_text, _selEnd);
     if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
     markDirty();
 }
@@ -270,33 +215,32 @@ void TextInput::resetSelectionToCaret() {
 
 void TextInput::replaceRange(size_t a, size_t b, const std::wstring& replacement) {
     if (a > b) std::swap(a, b);
-    if (a > _text.size()) a = _text.size();
-    if (b > _text.size()) b = _text.size();
-    // PR-A3: detect no-op before pushing undo — a no-op replace (a==b
-    // and replacement empty) shouldn't bloat the history stack. The
-    // maxLength-trim case below also has a no-op fast path (room==0)
-    // which returns without mutating; that one returns BEFORE
-    // capturing the snapshot so we don't push on a no-op.
+    a = floorGraphemeBoundary(_text, a);
+    b = ceilGraphemeBoundary(_text, b);
+    // Detect a trivial no-op before pushing undo. A replacement that becomes
+    // empty after maxLength clipping is checked again from the final candidate
+    // below, while a real selection deletion remains a valid edit.
     const bool isNoOp = (a == b && replacement.empty());
     if (isNoOp) return;
     pushUndo();
-    std::wstring before = _text.substr(0, a);
-    std::wstring after  = _text.substr(b);
-    if (_maxLength > 0 && before.size() + replacement.size() + after.size() > _maxLength) {
-        // Trim replacement to fit; if still no room, no-op. We must
-        // pop the snapshot we just pushed since the text didn't change
-        // after all.
-        const size_t room = _maxLength - before.size() - after.size();
-        if (room == 0) {
-            _undoStack.pop_back();
-            return;
+    const std::wstring before = _text.substr(0, a);
+    const std::wstring after  = _text.substr(b);
+    std::wstring accepted = replacement;
+    if (_maxLength > 0) {
+        const size_t retained = before.size() + after.size();
+        const size_t room = retained < _maxLength
+            ? _maxLength - retained : 0u;
+        if (accepted.size() > room) {
+            accepted.resize(floorGraphemeBoundary(accepted, room));
         }
-        _text = before + replacement.substr(0, room) + after;
-        _caret = a + std::min(room, replacement.size());
-    } else {
-        _text = before + replacement + after;
-        _caret = a + replacement.size();
     }
+    std::wstring candidate = before + accepted + after;
+    if (candidate == _text) {
+        _undoStack.pop_back();
+        return;
+    }
+    _text = std::move(candidate);
+    _caret = a + accepted.size();
     _selStart = _caret;
     _selEnd = _caret;
     if (_onTextChanged) {
@@ -351,7 +295,7 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
     const std::wstring& display = _passwordMode
         ? std::wstring(_text.size(), L'*') : _text;
-    const size_t colAtClick = columnFromLocalX(display, localX);
+    const size_t colAtClick = columnFromLocalX(_text, display, localX);
     // PR-A3: double-click word select. We only fire this on a SECOND
     // click within kDoubleClickSeconds AND within ±kDoubleClickColSlack
     // columns of the previous click. A first-click that would also
@@ -389,6 +333,7 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     _lastClickCol = colAtClick;
     _caretBlinkTimer = 0.0f;
     _caretVisible = true;
+    markDirty();
     return true;
 }
 
@@ -414,7 +359,7 @@ bool TextInput::onMouseMove(const UIMouseEvent& e) {
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
     const std::wstring& display = _passwordMode
         ? std::wstring(_text.size(), L'*') : _text;
-    const size_t cur = columnFromLocalX(display, localX);
+    const size_t cur = columnFromLocalX(_text, display, localX);
     const size_t anchor = _dragAnchorCol;
     if (cur < anchor) {
         _selStart = cur;
@@ -426,6 +371,7 @@ bool TextInput::onMouseMove(const UIMouseEvent& e) {
     _caret = _selEnd;
     _caretBlinkTimer = 0.0f;
     _caretVisible = true;
+    markDirty();
     return true;
 }
 
@@ -457,6 +403,21 @@ bool TextInput::onTextInput(wchar_t ch) {
     // Drop C0 controls (Ctrl+C → 0x03 etc.); shortcuts go through onKeyDown.
     if (ch < 0x20 && ch != L'\t') return true;
     return insertChar(ch);
+}
+
+bool TextInput::onTextInputText(const std::wstring& text) {
+    if (!_hasFocus || _readOnly) return false;
+    std::wstring accepted;
+    accepted.reserve(text.size());
+    for (wchar_t ch : text) {
+        if (ch == L'\n' || ch == L'\r') continue;
+        if (ch < 0x20 && ch != L'\t') continue;
+        accepted.push_back(ch);
+    }
+    if (accepted.empty()) return true;
+    const std::wstring before = _text;
+    replaceRange(_selStart, _selEnd, accepted);
+    return _text != before;
 }
 
 bool TextInput::onKeyDown(int keyCode) {
@@ -541,18 +502,18 @@ bool TextInput::onKeyDown(int keyCode) {
     case UIKey_Left:
         // PR-A3: Shift+arrow extends selection rather than collapsing.
         if (shift) {
-            const size_t newCaret = (_caret > 0) ? _caret - 1 : 0;
+            const size_t newCaret = previousGraphemeBoundary(_text, _caret);
             setCaretExtendingSelection(newCaret);
         } else if (_caret > 0) {
-            setCaret(_caret - 1);
+            setCaret(previousGraphemeBoundary(_text, _caret));
         }
         break;
     case UIKey_Right:
         if (shift) {
-            const size_t newCaret = std::min(_caret + 1, _text.size());
+            const size_t newCaret = nextGraphemeBoundary(_text, _caret);
             setCaretExtendingSelection(newCaret);
         } else if (_caret < _text.size()) {
-            setCaret(_caret + 1);
+            setCaret(nextGraphemeBoundary(_text, _caret));
         }
         break;
     case UIKey_Home:
@@ -608,7 +569,7 @@ UiCursorHint TextInput::getCursorHint() const {
 bool TextInput::onImeCompositionStart(const std::string& text, int caret) {
     if (!_hasFocus || _readOnly) return false;
     std::vector<size_t> byteMap;
-    _compositionPreview = utf8ToWString(text, &byteMap);
+    _compositionPreview = decodeUtf8Text(text, &byteMap);
     // Translate AYDevice byte caret (GCS_CURSORPOS) into our wchar_t
     // caret by clamping into the byteMap. caret < 0 → caret at end.
     if (caret < 0 || static_cast<size_t>(caret) >= byteMap.size()) {
@@ -629,7 +590,7 @@ bool TextInput::onImeCompositionUpdate(const std::string& text, int caret) {
         return onImeCompositionStart(text, caret);
     }
     std::vector<size_t> byteMap;
-    _compositionPreview = utf8ToWString(text, &byteMap);
+    _compositionPreview = decodeUtf8Text(text, &byteMap);
     if (caret < 0 || static_cast<size_t>(caret) >= byteMap.size()) {
         _compositionCaretBytes = static_cast<int>(_compositionPreview.size());
     } else {
@@ -645,7 +606,7 @@ bool TextInput::onImeCompositionEnd(const std::string& committed) {
     // selection). reject if !_hasFocus (host bypass). reject if
     // _readOnly (drop the candidate entirely without writing).
     if (!_readOnly) {
-        std::wstring committedText = utf8ToWString(committed);
+        std::wstring committedText = decodeUtf8Text(committed);
         if (!committedText.empty()) {
             // Use replaceRange to honor selection; the pre-edit candidate
             // never made it into _text (it lives in _compositionPreview),
@@ -872,13 +833,14 @@ Widget* createTextInputWidget() {
 // =============================================================================
 
 void TextInput::setCaretExtendingSelection(size_t newCaret) {
-    if (newCaret > _text.size()) newCaret = _text.size();
+    newCaret = floorGraphemeBoundary(_text, newCaret);
     // If the selection is currently collapsed, the previous caret
     // position becomes the anchor for the new selection. We achieve
     // that by ensuring _selStart stays put (which is the same value
     // as _caret pre-call) and only _selEnd / _caret move.
     _selEnd = newCaret;
     _caret  = newCaret;
+    markDirty();
     // _selStart is intentionally NOT changed here — the caller
     // guarantees it holds the original anchor.
     // Note: setCaret() (used by the non-shift branch) calls
@@ -887,7 +849,7 @@ void TextInput::setCaretExtendingSelection(size_t newCaret) {
 }
 
 void TextInput::selectWordAt(size_t col) {
-    if (col > _text.size()) col = _text.size();
+    col = floorGraphemeBoundary(_text, col);
     // std::iswalnum is true for CJK ideographs in the C locale; that
     // matches Windows TextBox behavior (double-clicking a CJK run
     // selects the whole run). We additionally treat '_' as a word
@@ -952,9 +914,9 @@ TextInput::TextEditSnapshot TextInput::captureSnapshot() const {
 
 void TextInput::restoreSnapshot(const TextEditSnapshot& s) {
     _text     = s.text;
-    _caret    = std::min(s.caret, _text.size());
-    _selStart = std::min(s.selStart, _text.size());
-    _selEnd   = std::min(s.selEnd, _text.size());
+    _caret    = floorGraphemeBoundary(_text, s.caret);
+    _selStart = floorGraphemeBoundary(_text, s.selStart);
+    _selEnd   = ceilGraphemeBoundary(_text, s.selEnd);
     if (_selEnd < _selStart) std::swap(_selStart, _selEnd);
     // Do NOT fire _onTextChanged — see invariant 4 above.
     markDirty();

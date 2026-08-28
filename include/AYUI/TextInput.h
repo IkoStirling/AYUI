@@ -147,6 +147,7 @@ public:
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onMouseButtonUp(const UIMouseEvent& e) override;
     bool onTextInput(wchar_t ch) override;
+    bool onTextInputText(const std::wstring& text) override;
     bool onKeyDown(int keyCode) override;
 
     // =================================================================
@@ -154,11 +155,10 @@ public:
     // the state-machine contract. We override here because TextInput is
     // the canonical single-line recipient of IME composition.
     //
-    // Byte caret (from AYDevice / GCS_CURSORPOS) is converted to a
-    // wchar_t-codepoint caret internally so replaceRange and selection
-    // operations work on _text directly. R4 in the Phase C plan: we
-    // accept that surrogate-pair codepoints arrive as two UTF-16 halves
-    // on Windows wchar_t.
+    // Byte caret (from AYDevice / GCS_CURSORPOS) is converted to a UTF-16
+    // code-unit offset on Windows (or wchar_t offset elsewhere). Editing
+    // and navigation then snap that offset to a Unicode grapheme boundary,
+    // so surrogate pairs and combining sequences remain indivisible.
     // =================================================================
     bool onImeCompositionStart(const std::string& text, int caret) override;
     bool onImeCompositionUpdate(const std::string& text, int caret) override;
@@ -176,9 +176,8 @@ public:
     // is the captured widget) extends the selection from anchor to
     // current position. onMouseButtonUp clears _dragging.
     //
-    // Width approximation: we don't have a precise text shaper, so the
-    // caret x position uses a 7px-per-char approximation (same as
-    // TextArea's rendering). R3 applies here too.
+    // Hit testing measures candidate grapheme spans through the renderer,
+    // matching the same text path used for drawing.
     // =================================================================
     bool onMouseMove(const UIMouseEvent& e) override;
 

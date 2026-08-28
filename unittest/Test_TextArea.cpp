@@ -9,45 +9,9 @@
 #include "AYUI/UIKeyCode.h"
 #include <iostream>
 
-// =============================================================================
-// Known-not-covered scenarios for C-10 TextArea v1
-// =============================================================================
-// See Controls/AYTextArea.h top-of-file "v1 design decisions" block for
-// design rationale + upgrade paths. Pinned here as entry points.
-//
-// A1. Word wrap.
-//     v1 does NOT wrap long lines (DECISION 1). A line wider than the
-//     viewport scrolls horizontally; hbar is off by default. v1.1 fix:
-//     add setWordWrap(bool) + re-measure lines on viewport width change
-//     using a TextShaper.
-//
-// A2. IME / composition.
-//     v1 routes plain text via insertChar; composition strings are NOT
-//     tracked. v1.1: preedit buffer drawn near caret, Escape cancels.
-//
-// A3. Undo / redo.
-//     v1 has no snapshot stack. v1.1: snapshot _lines + caret +
-//     selection; Ctrl+Z / Ctrl+Y routed via onKeyDown.
-//
-// A4. Drag-to-select.
-//     v1: single click moves caret; double-click selects a word;
-//     Shift+arrow extends. Drag-to-select requires mouse capture (see
-//     SplitterHandle drag-end pattern at the widget-state level).
-//
-// A5. Multi-line selection highlight.
-//     v1: only single-line ranges get a visual highlight. Multi-line
-//     selections are tracked in the data model but render as the active
-//     line's range only. v1.1 fix: render N rects per line crossed.
-//
-// A6. Placeholder text.
-//     v1 has no placeholder. v1.1: add setPlaceholder + render when
-//     buffer is one empty line.
-//
-// A7. ScrollView horizontal scrollbar auto-enable on long lines.
-//     v1 ships hbar off (DECISION 1). Long lines just clip. v1.1: enable
-//     hbar when content width > viewport, mirror DECISION 1's wrap
-//     upgrade.
-// =============================================================================
+// TextArea regressions cover measured soft wrapping, IME, clipboard,
+// grapheme-safe editing, drag/word selection, multi-line highlights and
+// bounded undo/redo. Horizontal scrollbar policy remains a ScrollView concern.
 
 using namespace ayt::ui;
 using namespace ayt::math;
@@ -478,10 +442,9 @@ TEST_CASE(textarea_drag_select_extends_selection_across_lines) {
     doc->onMouseMove(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
     CHECK(ta.hasSelection());
     CHECK(ta.getCaretLine() == 2);
-    // TextDocument computes col as raw pixel offset minus padding (no
-    // 7px char-width division). x=30, padding=6 → col=24, clamped to
-    // line length 5 (line3 has 5 chars).
-    CHECK(ta.getCaretCol() == 5);
+    // Pixel hit-testing uses measured glyph advances. x=30, padding=6
+    // lands near the third ASCII caret stop with the fallback metrics.
+    CHECK(ta.getCaretCol() == 3);
 
     doc->onMouseButtonUp(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
     CHECK(ta.hasSelection());
@@ -561,6 +524,104 @@ TEST_CASE(textarea_wordwrap_no_wrap_keeps_height_unchanged) {
     ta.setWordWrap(false);
     const float h1 = ta.getScrollView()->getContent()->getSize().y;
     CHECK_FLOAT_EQ(h0, h1, 1e-3f);
+}
+
+TEST_CASE(textarea_insert_text_is_one_undoable_edit) {
+    TextArea ta;
+    ta.setText(L"before");
+    ta.setCaret(0, 6);
+    const size_t undoBefore = ta.getUndoStackSize();
+    CHECK(ta.insertText(L"\U0001f600\nnext"));
+    CHECK(ta.getText() == L"before\U0001f600\nnext");
+    CHECK(ta.getUndoStackSize() == undoBefore + 1u);
+    ta.undo();
+    CHECK(ta.getText() == L"before");
+}
+
+TEST_CASE(textarea_delete_moves_by_complete_grapheme) {
+    TextArea ta;
+    ta.setText(L"e\x0301\U0001f469\u200d\U0001f4bbx");
+    ta.setCaret(0, static_cast<int>(ta.getText().size() - 1u));
+    CHECK(ta.deleteLeft());
+    CHECK(ta.getText() == L"e\x0301x");
+    ta.setCaret(0, 0);
+    CHECK(ta.deleteRight());
+    CHECK(ta.getText() == L"x");
+}
+
+TEST_CASE(textarea_wordwrap_renders_all_visual_rows) {
+    TextArea ta;
+    ta.setSize(FVector2(55.0f, 160.0f));
+    ta.setText(L"abcdefghijklmno");
+    ta.setWordWrap(true);
+    ta.performLayout();
+    MockRenderer renderer;
+    ta.render(renderer);
+    std::wstring submitted;
+    size_t textDraws = 0;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Text) continue;
+        submitted += dc.text;
+        ++textDraws;
+    }
+    CHECK(textDraws >= 2u);
+    CHECK(submitted == L"abcdefghijklmno");
+}
+
+TEST_CASE(textarea_multiline_selection_paints_each_visual_row) {
+    TextArea ta;
+    ta.setSize(FVector2(200.0f, 120.0f));
+    ta.setText(L"alpha\nbeta\ngamma");
+    ta.setSelection(0, 1, 2, 3);
+    ta.performLayout();
+    MockRenderer renderer;
+    ta.render(renderer);
+    size_t highlights = 0;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Rect
+            && std::abs(dc.color.x - 0.30f) < 0.01f
+            && std::abs(dc.color.y - 0.45f) < 0.01f
+            && std::abs(dc.color.z - 0.78f) < 0.01f) ++highlights;
+    }
+    CHECK(highlights == 3u);
+}
+
+TEST_CASE(textarea_shift_arrow_extends_by_grapheme) {
+    MockRenderer backend;
+    UIManager um;
+    um.initialize(&backend);
+    TextArea ta;
+    ta.setText(L"e\x0301x");
+    um.root()->addChildExternal(&ta);
+    um.setFocus(ta.getDocumentAsFocusable());
+    ta.setCaret(0, 0);
+    CHECK(um.onKeyDown(UIKey_Shift));
+    CHECK(um.onKeyDown(UIKey_Right));
+    CHECK(um.onKeyUp(UIKey_Shift));
+    CHECK(ta.hasSelection());
+    CHECK(ta.getCaretCol() == 2);
+    CHECK(ta.getSelectedText() == L"e\x0301");
+    um.shutdown();
+}
+
+TEST_CASE(textarea_set_text_normalizes_crlf_and_honors_grapheme_max_length) {
+    TextArea ta;
+    ta.setMaxLength(4u);
+    ta.setText(L"a\r\ne\x0301z");
+    CHECK(ta.getText() == L"a\ne\x0301");
+    CHECK(ta.getCaretLine() == 1);
+    CHECK(ta.getCaretCol() == 2);
+}
+
+TEST_CASE(textarea_lowered_max_length_replacement_reduces_existing_text) {
+    TextArea ta;
+    ta.setText(L"abcdefghij");
+    ta.setMaxLength(5u);
+    ta.setSelection(0, 2, 0, 4);
+    CHECK(ta.insertText(L"Z"));
+    CHECK(ta.getText() == L"abefghij");
+    ta.undo();
+    CHECK(ta.getText() == L"abcdefghij");
 }
 
 TEST_SUITE_END

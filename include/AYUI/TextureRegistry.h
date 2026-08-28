@@ -33,11 +33,11 @@ public:
 
     static TextureRegistry& get();
 
-    // Register a backend-supplied texture under `name`. Idempotent: a
-    // second register with the same name + same handle is a no-op; a
-    // second register with the same name + DIFFERENT handle is a host
-    // bug — we keep the original and log nothing (callers must debug).
-    // Refcount starts at 0; callers bump via acquire().
+    // Register a backend-supplied texture under `name`. Re-registering the
+    // exact same descriptor is a no-op. A changed descriptor is a hot reload:
+    // the previous live handle is released, the generation advances, and
+    // retained Image widgets rebuild their commands on their next render.
+    // Refcount starts at 0 for a new entry; callers bump it via acquire().
     void registerExternal(const std::string& name,
                           void* handle, int width, int height,
                           TextureFormat fmt);
@@ -48,6 +48,11 @@ public:
     // registerExternal() before render. Returns by value so the caller
     // can stash it in an Image without holding a reference into the map.
     ImageTextureHandle acquire(const std::string& name);
+
+    // Resolve the latest texture without changing refcount. Returned handles
+    // carry a monotonically increasing generation so retained Image widgets
+    // can rebuild commands before an old backend pointer is replayed.
+    ImageTextureHandle lookup(const std::string& name) const;
 
     // Decrement refcount. When it hits 0, fires the release callback
     // (if set) and erases the entry. No-op if the name is unknown.
@@ -81,6 +86,7 @@ private:
     };
     std::unordered_map<std::string, Entry> _entries;
     ReleaseCallback _onRelease;
+    uint64_t _nextGeneration = 1;
 };
 
 } // namespace ayt::ui

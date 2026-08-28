@@ -202,44 +202,56 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         }
     }
 
-    // Use the same backend shaping path as drawText. This prevents ligatures
-    // and Arabic joining from producing different advances during layout.
-    for (size_t begin = 0; begin < atoms.size();) {
-        if (atoms[begin].newline) { ++begin; continue; }
-        size_t end = begin + 1u;
-        while (end < atoms.size() && !atoms[end].newline
-            && atoms[end].runIndex == atoms[begin].runIndex
-            && atoms[end].rightToLeft() == atoms[begin].rightToLeft()
-            && atoms[end - 1].runTextStart + atoms[end - 1].textLength
-                == atoms[end].runTextStart) ++end;
-        const RichRun& run = _runs[atoms[begin].runIndex];
-        const size_t localStart = atoms[begin].runTextStart;
-        const size_t localEnd = atoms[end - 1].runTextStart + atoms[end - 1].textLength;
-        const std::wstring span = run.text.substr(localStart, localEnd - localStart);
-        const TextDirection spanDirection = atoms[begin].rightToLeft()
-            ? TextDirection::RightToLeft : TextDirection::LeftToRight;
-        const auto shaped = renderer.shapeText(span, run.fontSize,
-                                               makeTextStyle(run, spanDirection));
-        if (!shaped.clusters.empty()) {
-            for (size_t i = begin; i < end; ++i) atoms[i].width = 0.0f;
-            for (const auto& shapedCluster : shaped.clusters) {
-                const size_t sourceBegin = localStart + shapedCluster.sourceStart;
-                const size_t sourceEnd = sourceBegin + shapedCluster.sourceLength;
-                std::vector<size_t> covered;
-                for (size_t i = begin; i < end; ++i) {
-                    const size_t atomBegin = atoms[i].runTextStart;
-                    const size_t atomEnd = atomBegin + atoms[i].textLength;
-                    if (atomBegin < sourceEnd && sourceBegin < atomEnd) covered.push_back(i);
-                }
-                if (covered.empty()) continue;
-                const float clusterWidth = std::abs(shapedCluster.xEnd
-                                                    - shapedCluster.xStart);
-                const float share = clusterWidth / static_cast<float>(covered.size());
-                for (size_t i : covered) atoms[i].width += share;
+    // Shape only final visual-line spans. Shaping the full paragraph before
+    // wrapping gives Arabic joining and ligatures context that drawText no
+    // longer has after the line is split, so measured and submitted advances
+    // can diverge. This helper is applied after line breaking and again after
+    // any overflow repair.
+    auto shapeAtomSpan = [&](std::vector<LayoutAtom>& shapedAtoms) {
+        for (size_t begin = 0; begin < shapedAtoms.size();) {
+            if (shapedAtoms[begin].newline || shapedAtoms[begin].synthetic) {
+                ++begin;
+                continue;
             }
+            size_t end = begin + 1u;
+            while (end < shapedAtoms.size() && !shapedAtoms[end].newline
+                && !shapedAtoms[end].synthetic
+                && shapedAtoms[end].runIndex == shapedAtoms[begin].runIndex
+                && shapedAtoms[end].rightToLeft() == shapedAtoms[begin].rightToLeft()
+                && shapedAtoms[end - 1].runTextStart + shapedAtoms[end - 1].textLength
+                    == shapedAtoms[end].runTextStart) ++end;
+            const RichRun& run = _runs[shapedAtoms[begin].runIndex];
+            const size_t localStart = shapedAtoms[begin].runTextStart;
+            const size_t localEnd = shapedAtoms[end - 1].runTextStart
+                + shapedAtoms[end - 1].textLength;
+            const std::wstring span = run.text.substr(localStart, localEnd - localStart);
+            const TextDirection spanDirection = shapedAtoms[begin].rightToLeft()
+                ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+            const auto shaped = renderer.shapeText(span, run.fontSize,
+                                                   makeTextStyle(run, spanDirection));
+            if (!shaped.clusters.empty()) {
+                for (size_t i = begin; i < end; ++i) shapedAtoms[i].width = 0.0f;
+                for (const auto& shapedCluster : shaped.clusters) {
+                    const size_t sourceBegin = localStart + shapedCluster.sourceStart;
+                    const size_t sourceEnd = sourceBegin + shapedCluster.sourceLength;
+                    std::vector<size_t> covered;
+                    for (size_t i = begin; i < end; ++i) {
+                        const size_t atomBegin = shapedAtoms[i].runTextStart;
+                        const size_t atomEnd = atomBegin + shapedAtoms[i].textLength;
+                        if (atomBegin < sourceEnd && sourceBegin < atomEnd) {
+                            covered.push_back(i);
+                        }
+                    }
+                    if (covered.empty()) continue;
+                    const float clusterWidth = std::abs(shapedCluster.xEnd
+                                                        - shapedCluster.xStart);
+                    const float share = clusterWidth / static_cast<float>(covered.size());
+                    for (size_t i : covered) shapedAtoms[i].width += share;
+                }
+            }
+            begin = end;
         }
-        begin = end;
-    }
+    };
 
     std::vector<AtomLine> lines;
     AtomLine current;
@@ -259,6 +271,7 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
             continue;
         }
         if (wrap && !current.atoms.empty()
+            && current.atoms.back().analysisIndex != atom.analysisIndex
             && current.width + atom.width > availableWidth) {
             if (_wrapMode == RichTextWrapMode::Word) {
                 size_t breakAfter = std::numeric_limits<size_t>::max();
@@ -291,6 +304,60 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         current.height = std::max(current.height, atom.height);
     }
     if (!current.atoms.empty() || lines.empty()) finishLine(true);
+
+    auto shapeLine = [&](AtomLine& line) {
+        shapeAtomSpan(line.atoms);
+        recomputeLine(line);
+        if (line.height <= 0.0f) {
+            line.height = static_cast<float>(_defaultFontSize) * _lineHeight;
+        }
+    };
+    for (AtomLine& line : lines) shapeLine(line);
+
+    // A final-line shape can be wider than the pre-wrap estimate. Repair only
+    // overflowing lines, preserving word opportunities and never splitting
+    // pieces that belong to the same grapheme cluster.
+    if (wrap) {
+        for (size_t lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+            while (lines[lineIndex].width > availableWidth + 0.001f
+                   && lines[lineIndex].atoms.size() > 1u) {
+                AtomLine& line = lines[lineIndex];
+                size_t split = line.atoms.size() - 1u;
+                const size_t tailCluster = line.atoms[split].analysisIndex;
+                while (split > 0u
+                       && line.atoms[split - 1u].analysisIndex == tailCluster) --split;
+                if (_wrapMode == RichTextWrapMode::Word) {
+                    for (size_t i = split; i > 0u; --i) {
+                        if (line.atoms[i - 1u].softBreakAfter) {
+                            split = i;
+                            break;
+                        }
+                    }
+                }
+                if (split == 0u) break;
+                AtomLine tail;
+                const bool wasParagraphEnd = line.paragraphEnd;
+                tail.atoms.assign(
+                    line.atoms.begin() + static_cast<std::ptrdiff_t>(split),
+                    line.atoms.end());
+                line.atoms.erase(
+                    line.atoms.begin() + static_cast<std::ptrdiff_t>(split),
+                    line.atoms.end());
+                while (!line.atoms.empty() && line.atoms.back().whitespace) {
+                    line.atoms.pop_back();
+                }
+                while (!tail.atoms.empty() && tail.atoms.front().whitespace) {
+                    tail.atoms.erase(tail.atoms.begin());
+                }
+                line.paragraphEnd = false;
+                tail.paragraphEnd = wasParagraphEnd;
+                shapeLine(line);
+                shapeLine(tail);
+                lines.insert(lines.begin()
+                    + static_cast<std::ptrdiff_t>(lineIndex + 1u), std::move(tail));
+            }
+        }
+    }
 
     const size_t allowedLines = _maxLines == 0 ? lines.size()
                                                 : std::min(_maxLines, lines.size());
@@ -338,10 +405,10 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         while (!last.atoms.empty() && wrap
                && last.width + ellipsis.width > availableWidth) {
             last.atoms.pop_back();
-            recomputeLine(last);
+            shapeLine(last);
         }
         last.atoms.push_back(ellipsis);
-        recomputeLine(last);
+        shapeLine(last);
     }
 
     float totalHeight = 0.0f;

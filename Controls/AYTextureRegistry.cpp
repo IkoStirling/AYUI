@@ -20,12 +20,23 @@ void TextureRegistry::registerExternal(const std::string& name,
     }
     auto it = _entries.find(name);
     if (it != _entries.end()) {
-        // Idempotent: only overwrite the texture data when something
-        // changed. Hosts may re-register after a hot-reload.
+        const bool unchanged = it->second.tex.handle == handle
+            && it->second.tex.width == width
+            && it->second.tex.height == height
+            && it->second.tex.format == fmt;
+        if (unchanged) return;
+        // Hot reload is single-threaded: Image::render resolves the new
+        // generation before Widget::render can replay its retained list, so
+        // the old backend resource is no longer reachable after this call.
+        if (_onRelease && it->second.tex.handle != nullptr
+            && it->second.tex.handle != handle) {
+            _onRelease(it->second.tex);
+        }
         it->second.tex.handle = handle;
         it->second.tex.width  = width;
         it->second.tex.height = height;
         it->second.tex.format = fmt;
+        it->second.tex.generation = _nextGeneration++;
         return;
     }
     Entry e;
@@ -34,6 +45,7 @@ void TextureRegistry::registerExternal(const std::string& name,
     e.tex.height = height;
     e.tex.format = fmt;
     e.tex.name   = name;
+    e.tex.generation = _nextGeneration++;
     e.refcount   = 0;
     _entries.emplace(name, std::move(e));
 }
@@ -49,6 +61,7 @@ ImageTextureHandle TextureRegistry::acquire(const std::string& name) {
         // expected to follow with registerExternal() before render.
         Entry e;
         e.tex.name   = name;
+        e.tex.generation = _nextGeneration++;
         e.refcount   = 1;
         _entries.emplace(name, std::move(e));
         out.name = name;
@@ -56,6 +69,14 @@ ImageTextureHandle TextureRegistry::acquire(const std::string& name) {
     }
     ++it->second.refcount;
     out = it->second.tex;   // by-value: caller doesn't hold a map ref
+    return out;
+}
+
+ImageTextureHandle TextureRegistry::lookup(const std::string& name) const {
+    ImageTextureHandle out;
+    out.name = name;
+    const auto it = _entries.find(name);
+    if (it != _entries.end()) out = it->second.tex;
     return out;
 }
 

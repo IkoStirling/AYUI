@@ -1,5 +1,6 @@
 #include "AYUI/Widget.h"
 #include "AYUI/CompoundFocusableWidget.h"
+#include "AYUI/Style.h"
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>
@@ -454,6 +455,14 @@ bool Widget::onTextInput(wchar_t ch) {
     return false;
 }
 
+bool Widget::onTextInputText(const std::wstring& text) {
+    bool handled = false;
+    for (wchar_t ch : text) {
+        handled = onTextInput(ch) || handled;
+    }
+    return handled;
+}
+
 // --- G11: per-widget theme token overrides ---
 void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4& value) {
     if (key.empty()) return;
@@ -576,6 +585,13 @@ void Widget::render(IRenderBackend& renderer) {
         renderer.pushOpacity(_opacity);
     }
     if (_displayListPolicy == DisplayListPolicy::Retained) {
+        // Style/theme swaps invalidate retained paint lazily. This avoids an
+        // O(N) tree walk while guaranteeing that no cached command can replay
+        // colors resolved against an older StyleManager generation.
+        const uint64_t styleVersion = StyleManager::get().getResolveCacheVersion();
+        if (_displayListStyleVersion != styleVersion) {
+            _displayListDirty = true;
+        }
         if (_displayListValid && !_displayListDirty) {
             _displayList.replay(renderer);
         } else {
@@ -585,6 +601,7 @@ void Widget::render(IRenderBackend& renderer) {
             if (recorder.isCacheable()) {
                 _displayList = std::move(candidate);
                 _displayListValid = true;
+                _displayListStyleVersion = styleVersion;
             } else {
                 // The recorder already forwarded this frame. Keep the legacy
                 // path as the next-frame fallback for resource/pass commands
@@ -626,6 +643,7 @@ void Widget::setDisplayListPolicy(DisplayListPolicy policy) {
     _displayList.clear();
     _displayListValid = false;
     _displayListDirty = true;
+    _displayListStyleVersion = 0;
     markDirty();
 }
 

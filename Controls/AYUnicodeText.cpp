@@ -47,6 +47,18 @@ std::vector<CodePoint> decode(const std::wstring& text) {
     return result;
 }
 
+void appendCodePoint(std::wstring& out, uint32_t cp) {
+#if WCHAR_MAX <= 0xffff
+    if (cp > 0xffffu) {
+        cp -= 0x10000u;
+        out.push_back(static_cast<wchar_t>(0xd800u + (cp >> 10)));
+        out.push_back(static_cast<wchar_t>(0xdc00u + (cp & 0x3ffu)));
+        return;
+    }
+#endif
+    out.push_back(static_cast<wchar_t>(cp));
+}
+
 bool inRange(uint32_t cp, uint32_t first, uint32_t last) {
     return cp >= first && cp <= last;
 }
@@ -291,6 +303,118 @@ void augmentWithUniscribe(const std::wstring& text,
 #endif
 
 } // namespace
+
+std::wstring decodeUtf8Text(const std::string& utf8,
+                            std::vector<size_t>* byteToTextOffset) {
+    std::wstring out;
+    out.reserve(utf8.size());
+    if (byteToTextOffset != nullptr) {
+        byteToTextOffset->assign(utf8.size() + 1u, 0u);
+    }
+
+    const auto* bytes = reinterpret_cast<const unsigned char*>(utf8.data());
+    size_t i = 0;
+    while (i < utf8.size()) {
+        const size_t textOffset = out.size();
+        const unsigned char lead = bytes[i];
+        uint32_t cp = 0;
+        size_t count = 0;
+        uint32_t minimum = 0;
+        if (lead <= 0x7fu) {
+            cp = lead;
+            count = 1;
+        } else if (lead >= 0xc2u && lead <= 0xdfu) {
+            cp = lead & 0x1fu;
+            count = 2;
+            minimum = 0x80u;
+        } else if (lead >= 0xe0u && lead <= 0xefu) {
+            cp = lead & 0x0fu;
+            count = 3;
+            minimum = 0x800u;
+        } else if (lead >= 0xf0u && lead <= 0xf4u) {
+            cp = lead & 0x07u;
+            count = 4;
+            minimum = 0x10000u;
+        }
+
+        bool valid = count != 0 && i + count <= utf8.size();
+        if (valid) {
+            for (size_t k = 1; k < count; ++k) {
+                if ((bytes[i + k] & 0xc0u) != 0x80u) {
+                    valid = false;
+                    break;
+                }
+                cp = (cp << 6) | (bytes[i + k] & 0x3fu);
+            }
+        }
+        valid = valid && cp >= minimum && cp <= 0x10ffffu
+            && !(cp >= 0xd800u && cp <= 0xdfffu);
+
+        const size_t consumed = valid ? count : 1u;
+        if (byteToTextOffset != nullptr) {
+            for (size_t k = 0; k < consumed; ++k) {
+                (*byteToTextOffset)[i + k] = textOffset;
+            }
+        }
+        appendCodePoint(out, valid ? cp : 0xfffdu);
+        i += consumed;
+    }
+    if (byteToTextOffset != nullptr) {
+        (*byteToTextOffset)[utf8.size()] = out.size();
+    }
+    return out;
+}
+
+size_t floorGraphemeBoundary(const std::wstring& text, size_t offset) {
+    offset = std::min(offset, text.size());
+    if (offset == 0 || offset == text.size()) return offset;
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    size_t floor = 0;
+    for (const UnicodeTextCluster& cluster : analysis.clusters) {
+        if (cluster.textStart > offset) break;
+        if (cluster.textStart == offset) return offset;
+        const size_t end = cluster.textStart + cluster.textLength;
+        if (offset < end) return cluster.textStart;
+        floor = end;
+    }
+    return floor;
+}
+
+size_t ceilGraphemeBoundary(const std::wstring& text, size_t offset) {
+    offset = std::min(offset, text.size());
+    if (offset == 0 || offset == text.size()) return offset;
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    for (const UnicodeTextCluster& cluster : analysis.clusters) {
+        if (cluster.textStart >= offset) return cluster.textStart;
+        const size_t end = cluster.textStart + cluster.textLength;
+        if (offset < end) return end;
+    }
+    return text.size();
+}
+
+size_t previousGraphemeBoundary(const std::wstring& text, size_t offset) {
+    offset = std::min(offset, text.size());
+    if (offset == 0) return 0;
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    size_t previous = 0;
+    for (const UnicodeTextCluster& cluster : analysis.clusters) {
+        const size_t end = cluster.textStart + cluster.textLength;
+        if (offset <= end) return cluster.textStart;
+        previous = cluster.textStart;
+    }
+    return previous;
+}
+
+size_t nextGraphemeBoundary(const std::wstring& text, size_t offset) {
+    offset = std::min(offset, text.size());
+    if (offset >= text.size()) return text.size();
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
+    for (const UnicodeTextCluster& cluster : analysis.clusters) {
+        const size_t end = cluster.textStart + cluster.textLength;
+        if (offset < end) return end;
+    }
+    return text.size();
+}
 
 UnicodeTextAnalysis analyzeUnicodeText(const std::wstring& text,
                                        TextDirection direction) {

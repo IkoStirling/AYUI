@@ -265,6 +265,11 @@ public:
     virtual bool onKeyDown(int keyCode);
     virtual bool onKeyUp(int keyCode);
     virtual bool onTextInput(wchar_t ch);
+    // Atomic committed-text event. The default preserves compatibility with
+    // existing widgets by dispatching each wchar_t through onTextInput().
+    // Editors override this so a surrogate pair or IME chunk is one edit and
+    // one undo record.
+    virtual bool onTextInputText(const std::wstring& text);
 
     // PR-B3 — wheel routing. Default returns false (no scrollable
     // behaviour). ScrollView / ListView override this and return true
@@ -674,6 +679,7 @@ protected:
     DisplayList _displayList;
     bool _displayListValid = false;
     bool _displayListDirty = true;
+    uint64_t _displayListStyleVersion = 0;
 
     // AYUI-Perf-2026-08-26 (Batch C rebase fix): cached world-bounds
     // result + dirty flag. mutable so the const getWorldBounds() can

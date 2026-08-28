@@ -8,8 +8,10 @@
 #include "AYUI/Widget.h"
 #include "AYUI/Panel.h"
 #include "AYUI/Button.h"
+#include "AYUI/MockRenderer.h"
 
 #include <nlohmann/json.hpp>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -302,6 +304,40 @@ TEST_CASE(thememanager_apply_to_style_manager_swaps_sheet) {
     }
     // Cleanup — leave StyleManager at nullptr so subsequent tests
     // don't see this composed sheet.
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
+TEST_CASE(retained_widget_rebuilds_after_style_generation_changes) {
+    resetG11State();
+    StyleSheet sheet;
+    WidgetStyle first = StyleBuilder::makeButton();
+    first.backgroundColor = FVector4(0.8f, 0.1f, 0.1f, 1.0f);
+    sheet.setStyle("retained_generation", first);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    Button button;
+    button.setStyleId("retained_generation");
+    button.setSize(FVector2(100.0f, 30.0f));
+    MockRenderer renderer;
+    button.render(renderer);
+    CHECK(button.hasCachedDisplayList());
+
+    WidgetStyle second = first;
+    second.backgroundColor = FVector4(0.1f, 0.2f, 0.9f, 1.0f);
+    sheet.setStyle("retained_generation", second);
+    renderer.beginFrame();
+    button.render(renderer);
+
+    bool sawNewColor = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (std::abs(dc.color.x - 0.1f) < 0.01f
+            && std::abs(dc.color.y - 0.2f) < 0.01f
+            && std::abs(dc.color.z - 0.9f) < 0.01f) {
+            sawNewColor = true;
+            break;
+        }
+    }
+    CHECK(sawNewColor);
     StyleManager::get().setStyleSheet(nullptr);
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace ayt::ui {
@@ -36,6 +37,7 @@ struct ImageTextureHandle {
     int                 height = 0;
     TextureFormat       format = TextureFormat::RGBA8;
     std::string         name;        // empty → anonymous
+    uint64_t            generation = 0; // registry resource generation
 
     bool isValid() const { return handle != nullptr; }
     bool isNamed()  const { return !name.empty(); }

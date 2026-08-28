@@ -71,6 +71,7 @@ TEST_CASE(imagetexture_handle_pod_defaults_to_empty) {
     CHECK(h.height == 0);
     CHECK(h.format == TextureFormat::RGBA8);
     CHECK(h.name.empty());
+    CHECK(h.generation == 0u);
     CHECK(!h.isValid());
     CHECK(!h.isNamed());
 }
@@ -155,6 +156,21 @@ TEST_CASE(image_set_named_texture_uses_registry) {
     CHECK(r.refcount("ui/icon_save") == 1);
 }
 
+TEST_CASE(image_setting_same_named_texture_is_idempotent) {
+    resetG10State();
+    TextureRegistry& r = TextureRegistry::get();
+    void* fakePtr = reinterpret_cast<void*>(0xFEED1234ull);
+    r.registerExternal("ui/idempotent", fakePtr, 32, 32, TextureFormat::RGBA8);
+    Image img;
+    img.setTexture(std::string("ui/idempotent"));
+    const uint64_t generation = img.getTexture().generation;
+    img.setTexture(std::string("ui/idempotent"));
+    CHECK(r.refcount("ui/idempotent") == 1u);
+    CHECK(img.getTexture().handle == fakePtr);
+    CHECK(img.getTexture().generation == generation);
+    CHECK(releasedByRegistry().empty());
+}
+
 TEST_CASE(image_dtor_releases_named_texture_via_callback) {
     resetG10State();
     TextureRegistry& r = TextureRegistry::get();
@@ -187,6 +203,20 @@ TEST_CASE(image_dtor_releases_anonymous_texture_via_callback) {
     CHECK(releasedByImage().size() == 1);
     CHECK(releasedByImage()[0].handle == fakePtr);
     CHECK(releasedByImage()[0].name.empty());
+}
+
+TEST_CASE(image_setting_same_anonymous_texture_does_not_release_live_handle) {
+    resetG10State();
+    void* fakePtr = reinterpret_cast<void*>(0x12344321ull);
+    {
+        Image img;
+        img.setTexture(fakePtr);
+        img.setTexture(fakePtr);
+        CHECK(releasedByImage().empty());
+        CHECK(img.getTexture().handle == fakePtr);
+    }
+    CHECK(releasedByImage().size() == 1u);
+    CHECK(releasedByImage()[0].handle == fakePtr);
 }
 
 TEST_CASE(image_factory_and_serializer_round_trip_texture_name) {
@@ -254,6 +284,60 @@ TEST_CASE(image_render_emits_texture_handle_to_backend) {
         CHECK(found->bounds.maxX - found->bounds.minX == 32.0f);
         CHECK(found->bounds.maxY - found->bounds.minY == 32.0f);
     }
+}
+
+TEST_CASE(image_late_registration_rebuilds_retained_texture_command) {
+    resetG10State();
+    TextureRegistry& registry = TextureRegistry::get();
+    Image image;
+    image.setTexture(std::string("late_icon"));
+    image.setSize(FVector2(32.0f, 32.0f));
+    MockRenderer renderer;
+    image.render(renderer);
+    CHECK_FALSE(image.hasTexture());
+
+    void* late = reinterpret_cast<void*>(0x11112222ull);
+    registry.registerExternal("late_icon", late, 32, 32, TextureFormat::RGBA8);
+    renderer.beginFrame();
+    image.render(renderer);
+
+    bool sawLate = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.texture == late) sawLate = true;
+    }
+    CHECK(sawLate);
+    CHECK(image.getTexture().handle == late);
+}
+
+TEST_CASE(image_hot_reload_releases_old_and_submits_new_generation) {
+    resetG10State();
+    TextureRegistry& registry = TextureRegistry::get();
+    void* first = reinterpret_cast<void*>(0x33334444ull);
+    void* second = reinterpret_cast<void*>(0x55556666ull);
+    registry.registerExternal("hot_icon", first, 16, 16, TextureFormat::RGBA8);
+    Image image;
+    image.setTexture(std::string("hot_icon"));
+    image.setSize(FVector2(16.0f, 16.0f));
+    MockRenderer renderer;
+    image.render(renderer);
+    const uint64_t firstGeneration = image.getTexture().generation;
+
+    registry.registerExternal("hot_icon", second, 24, 24, TextureFormat::RGBA8);
+    CHECK(releasedByRegistry().size() == 1u);
+    CHECK(releasedByRegistry()[0].handle == first);
+    renderer.beginFrame();
+    image.render(renderer);
+
+    CHECK(image.getTexture().handle == second);
+    CHECK(image.getTexture().generation > firstGeneration);
+    bool sawSecond = false;
+    bool sawFirst = false;
+    for (const auto& dc : renderer.getDrawCalls()) {
+        if (dc.texture == second) sawSecond = true;
+        if (dc.texture == first) sawFirst = true;
+    }
+    CHECK(sawSecond);
+    CHECK_FALSE(sawFirst);
 }
 
 TEST_SUITE_END

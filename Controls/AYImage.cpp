@@ -53,13 +53,17 @@ void Image::releaseCurrent() {
 }
 
 void Image::setTexture(const std::string& textureName) {
-    markDirty();
     if (textureName.empty()) {
         // Treat empty-string as "clear" so callers don't have to
         // special-case it. Mirrors the prior void* null pattern.
         releaseCurrent();
         return;
     }
+    if (_tex.name == textureName) {
+        syncNamedTexture();
+        return;
+    }
+    markDirty();
     // Release whatever we held before — we don't want to leak the
     // previous refcount when the host swaps textures.
     releaseCurrent();
@@ -67,21 +71,36 @@ void Image::setTexture(const std::string& textureName) {
 }
 
 void Image::setTexture(const ImageTextureHandle& h) {
-    releaseCurrent();
-    markDirty();
     if (!h.name.empty()) {
-        // Caller is asking us to adopt a named handle. The registry
-        // already holds the refcount; just take a copy of the data.
-        _tex = h;
+        TextureRegistry& registry = TextureRegistry::get();
+        if (h.handle != nullptr) {
+            registry.registerExternal(h.name, h.handle, h.width, h.height, h.format);
+        }
+        if (_tex.name == h.name) {
+            syncNamedTexture();
+            return;
+        }
+        releaseCurrent();
+        markDirty();
+        _tex = registry.acquire(h.name);
     } else {
         // Anonymous. We own it directly; ~Image will fire the release
         // callback (if installed).
+        if (_tex.name.empty()
+            && _tex.handle == h.handle
+            && _tex.width == h.width
+            && _tex.height == h.height
+            && _tex.format == h.format) return;
+        releaseCurrent();
+        markDirty();
         _tex = h;
     }
 }
 
 void Image::setTexture(void* rawHandle) {
     // Legacy void* path — anonymous, w/h = 0, no format change.
+    if (_tex.name.empty() && _tex.handle == rawHandle
+        && _tex.width == 0 && _tex.height == 0) return;
     releaseCurrent();
     markDirty();
     _tex.handle = rawHandle;
@@ -105,6 +124,26 @@ void Image::onRender(IRenderBackend& renderer) {
     } else {
         renderer.drawRect(bounds, _color);
     }
+}
+
+void Image::syncNamedTexture() {
+    if (_tex.name.empty()) return;
+    const ImageTextureHandle latest = TextureRegistry::get().lookup(_tex.name);
+    if (latest.generation == _tex.generation
+        && latest.handle == _tex.handle
+        && latest.width == _tex.width
+        && latest.height == _tex.height
+        && latest.format == _tex.format) return;
+    _tex = latest;
+    markDirty();
+}
+
+void Image::render(IRenderBackend& renderer) {
+    // Resolve before Widget::render decides whether its retained commands are
+    // reusable. A late registration or hot reload therefore rebuilds the
+    // textured command in the same frame and never submits the stale handle.
+    syncNamedTexture();
+    Widget::render(renderer);
 }
 
 // --- Static callback plumbing ---

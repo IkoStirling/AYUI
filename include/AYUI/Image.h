@@ -49,9 +49,10 @@ public:
     // to call multiple times: releases the previous name first.
     void setTexture(const std::string& textureName);
 
-    // Set a fully-typed handle (anonymous or named). If `h.name` is
+    // Set a fully-typed descriptor (anonymous or named). If `h.name` is
     // empty, the handle is owned directly by this Image; if non-empty,
-    // the registry holds the refcount and Image is a borrower.
+    // Image registers the descriptor and acquires its own registry reference.
+    // Any reference acquired by the caller remains caller-owned.
     void setTexture(const ImageTextureHandle& h);
 
     // Legacy overload — accepts a raw pointer and creates an anonymous
@@ -70,6 +71,7 @@ public:
     const math::FRectangle& getUV() const { return _uv; }
 
     void onRender(IRenderBackend& renderer) override;
+    void render(IRenderBackend& renderer) override;
 
     // G10 — Global release callback for ANONYMOUS textures. Host
     // installs once at startup; the default is a no-op so unit tests
@@ -90,6 +92,7 @@ private:
     // Release whatever _tex currently holds. Called from ~Image and
     // from setTexture() when replacing an existing handle. Idempotent.
     void releaseCurrent();
+    void syncNamedTexture();
 };
 
 } // namespace ayt::ui
