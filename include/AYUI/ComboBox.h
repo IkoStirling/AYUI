@@ -167,7 +167,7 @@ public:
     // InteractiveWidget) because it hosts the popup ListView as a child —
     // so we maintain a simple enabled flag here rather than inheriting
     // the whole InteractiveWidget state machine.
-    void setEnabled(bool enabled) { _enabled = enabled; }
+    void setEnabled(bool enabled);
     bool isEnabled() const { return _enabled; }
 
     // Data — wraps the inner ListView (popup) + a parallel vector kept

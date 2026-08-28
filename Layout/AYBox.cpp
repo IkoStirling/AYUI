@@ -22,8 +22,31 @@ BoxBase::BoxBase()
 BoxBase::~BoxBase() {
 }
 
+void BoxBase::setSpacing(float spacing) {
+    if (_spacing == spacing) return;
+    _spacing = spacing;
+    invalidateNaturalSizeCache();
+    markBoundsDirty();
+    markDirty();
+}
+
 void BoxBase::setPadding(float left, float top, float right, float bottom) {
-    _padding = math::FVector4(left, top, right, bottom);
+    const math::FVector4 next(left, top, right, bottom);
+    if (_padding.x == next.x && _padding.y == next.y &&
+        _padding.z == next.z && _padding.w == next.w) {
+        return;
+    }
+    _padding = next;
+    invalidateNaturalSizeCache();
+    markBoundsDirty();
+    markDirty();
+}
+
+void BoxBase::setGravity(Gravity gravity) {
+    if (_gravity == gravity) return;
+    _gravity = gravity;
+    markBoundsDirty();
+    markDirty();
 }
 
 void BoxBase::layoutChildren() {
@@ -240,12 +263,8 @@ void BoxBase::render(IRenderBackend& renderer) {
         return;
     }
     // BoxBase owns a slot-ordered child traversal, so it cannot delegate to
-    // Widget::render(). Keep the same paint gate and lifecycle here;
-    // otherwise a clean container can swallow a child's dirty propagation
-    // and prevent the containing ScrollView from repainting.
-    if (!_dirtyThis && !hasDirtyRect()) {
-        return;
-    }
+    // Widget::render(). Like Widget, it must replay every visible child on
+    // every frame because IRenderBackend submissions are frame-local.
 
     const bool fading = _opacity < (1.0f - 1e-5f);
     if (fading) {

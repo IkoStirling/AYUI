@@ -18,6 +18,7 @@
 #include "AYTest.h"
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/WidgetFactory.h"
+#include <cstdio>
 #include <string>
 #include <vector>
 #include <utility>
@@ -151,9 +152,18 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
         // "Widget" instead of `entry.typeName`.
         const std::string serialized =
             WidgetSerializer::serializeWidget(widget);
+        const auto serializedJson =
+            nlohmann::json::parse(serialized, nullptr, false);
         const bool typeOk =
-            serialized.find(std::string("\"type\":\"") + entry.typeName + "\"")
-                != std::string::npos;
+            !serializedJson.is_discarded() &&
+            serializedJson.value("type", std::string()) == entry.typeName;
+        if (!typeOk) {
+            const std::string actualType = serializedJson.is_discarded()
+                ? "<invalid-json>"
+                : serializedJson.value("type", std::string("<missing>"));
+            std::printf("         serializer type mismatch: expected %s, got %s\n",
+                        entry.typeName, actualType.c_str());
+        }
         CHECK(typeOk);
         // (3) serialize and (4) re-deserialize.
         Widget* roundTripped = WidgetSerializer::deserialize(serialized);

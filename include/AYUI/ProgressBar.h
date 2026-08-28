@@ -47,10 +47,7 @@ public:
         if (_indeterminate == v) return;
         _indeterminate = v;
         if (!v) _scanPhase = 0.0f;
-        // AYUI-DirtyRect-2026-08-26 Batch B follow-up: toggling mode
-        // changes which paint path runs (scan segment vs value fill) and
-        // resets the scan phase. Without markDirty(), the dirty-rect
-        // short-circuit in render() would skip the swap frame.
+        // Toggling mode changes which presentation path is cached.
         markDirty();
     }
     bool isIndeterminate() const { return _indeterminate; }

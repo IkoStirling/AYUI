@@ -50,6 +50,17 @@ TEST_CASE(dimmer_render_emits_scrim) {
     CHECK(hits >= 1);
 }
 
+TEST_CASE(dimmer_scrim_color_change_marks_dirty) {
+    Dimmer d;
+    d.setSize(FVector2(100.0f, 100.0f));
+    MockRenderer renderer;
+    d.render(renderer);
+    CHECK_FALSE(d.isDirtyThis());
+
+    d.setScrimColor(FVector4(0.1f, 0.2f, 0.3f, 0.4f));
+    CHECK(d.isDirtyThis());
+}
+
 TEST_CASE(dimmer_hit_test_always_returns_self_within_bounds) {
     Dimmer d;
     d.setSize(FVector2(400.0f, 300.0f));

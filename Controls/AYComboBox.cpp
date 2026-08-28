@@ -45,6 +45,13 @@ ComboBox::~ComboBox() {
     _display = nullptr;
 }
 
+void ComboBox::setEnabled(bool enabled) {
+    if (_enabled == enabled) return;
+    _enabled = enabled;
+    if (!enabled && _popupOpen) closePopup();
+    markDirty();
+}
+
 void ComboBox::setItems(const std::vector<std::wstring>& items) {
     _items = items;
     if (_selectedIndex >= static_cast<int>(_items.size())) {
@@ -218,6 +225,7 @@ math::FRectangle ComboBox::computePopupBounds() const {
 }
 
 void ComboBox::openPopup() {
+    if (!_enabled) return;
     ensurePopupCreated();
     if (_items.empty()) {
         // Nothing to show — refuse to open.

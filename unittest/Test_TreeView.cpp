@@ -158,10 +158,28 @@ TEST_CASE(treeview_flatten_1000_nodes_under_5ms) {
     tv.setTree(big);
     CHECK(tv.getNodeCount() == 1000u);
 
+    TreeNode* firstNodeBefore = nullptr;
+    for (Widget* child : tv.getChildren()) {
+        if (auto* node = dynamic_cast<TreeNode*>(child)) {
+            firstNodeBefore = node;
+            break;
+        }
+    }
+    CHECK(firstNodeBefore != nullptr);
+    tv.setTree(big);
+    TreeNode* firstNodeAfter = nullptr;
+    for (Widget* child : tv.getChildren()) {
+        if (auto* node = dynamic_cast<TreeNode*>(child)) {
+            firstNodeAfter = node;
+            break;
+        }
+    }
+    CHECK(firstNodeAfter == firstNodeBefore);
+
     // Hammer flatten + rebuildNodes 50 times — pre-fix this would
     // total ~50M parentIndex comparisons. Post-fix: ~50K map ops.
-    // 5 ms total is generous (modern CPUs do this in <1 ms); the
-    // bound is loose enough that CI noise won't false-positive.
+    // The loose bound covers debug CI while still catching a return to
+    // rebuilding 50,000 row allocations.
     double start = ayt::test::getTimeMs();
     for (int i = 0; i < 50; ++i) {
         tv.setTree(big);

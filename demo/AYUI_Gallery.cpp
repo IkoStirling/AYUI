@@ -22,6 +22,8 @@
 #include "AYUI.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/Button.h"
+#include "AYUI/Image.h"
+#include "AYUI/TextureRegistry.h"
 #include "AYUI/CheckBox.h"
 #include "AYUI/Slider.h"
 #include "AYUI/Box.h"
@@ -67,6 +69,7 @@ namespace {
 
 constexpr int kWidth  = 1280;
 constexpr int kHeight = 720;
+constexpr const char* kGalleryImageTextureName = "gallery/composition_atlas";
 
 bool fileExists(const std::string& path)
 {
@@ -105,6 +108,11 @@ struct GalleryState {
     std::string layoutPath;
 
     int clickCount = 0;
+    int imageClickCount = 0;
+    // Images page -- one shared procedural atlas, acquired by every
+    // standard Image through TextureRegistry. The Gallery deliberately
+    // tears the named refs down before releasing this backend handle.
+    void* imageTexAtlas = nullptr;
     // Animation page: fade-panel visibility latch (survives reload like
     // the other knobs; lives here, not in a button lambda, so the state
     // is not destroyed with the JSON tree).
@@ -185,7 +193,7 @@ struct GalleryState {
 void showPage(ayt::ui::UIManager& ui, const char* pageId)
 {
     static const char* kPages[] = {
-        "page_basics", "page_input", "page_collections",
+        "page_basics", "page_images", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
         "page_backend", "page_animation",
     };
@@ -215,6 +223,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
         if (ayt::ui::TextLabel* lbl = status->getPanel(0)) {
             std::wstring msg = L"section: ";
             if (std::strcmp(pageId, "page_basics") == 0) msg += L"basics";
+            else if (std::strcmp(pageId, "page_images") == 0) msg += L"images";
             else if (std::strcmp(pageId, "page_input") == 0) msg += L"input";
             else if (std::strcmp(pageId, "page_collections") == 0) msg += L"collections";
             else if (std::strcmp(pageId, "page_overlay") == 0) msg += L"overlay";
@@ -413,6 +422,7 @@ void wireGallery(GalleryState& state)
         }
     };
     bindNav("nav_basics", "page_basics");
+    bindNav("nav_images", "page_images");
     bindNav("nav_input", "page_input");
     bindNav("nav_collections", "page_collections");
     bindNav("nav_overlay", "page_overlay");
@@ -477,7 +487,7 @@ void wireGallery(GalleryState& state)
     // In-UI build stamp (OS title / console are easy to miss). If Layout
     // header doesn't contain this id, the running Gallery is stale.
     if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(ui.findById("layout_hdr"))) {
-        hdr->setText(L"Layout - mini DockArea [DockArea-20260811h-NoWhiteFlash]");
+        hdr->setText(L"Layout - mini DockArea [AYUI-Gallery-20260827-Images]");
     }
 
     // --- Basics ---
@@ -649,12 +659,12 @@ void wireGallery(GalleryState& state)
 
     showPage(ui, "page_basics");
 
-    // Wrap content_host inside ScrollView so all 6 pages are reachable
+    // Wrap content_host inside ScrollView so every page remains reachable
     // when the window is smaller than the page stack's natural height.
     // The JSON puts content_host as a child of content_scroll via
     // addChild ??ScrollView expects setContent, not addChild, so we
     // re-bind explicitly here. removeChild + addChild keeps the widget
-    // tree intact (content_host still owns the 5 page VBoxes).
+    // tree intact (content_host still owns all page VBoxes).
     if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
             ui.findById("content_scroll"))) {
         if (auto* host = dynamic_cast<ayt::ui::Widget*>(
@@ -1270,6 +1280,142 @@ void wireBackendPage(GalleryState& state)
     }
 }
 
+// Images page -- exercises the public Image widget rather than the backend
+// canvas: one named/shared atlas, per-widget UVs, opacity, an Image child
+// layered over a Button, and controls layered over image siblings in a Panel.
+void wireImageCompositionPage(GalleryState& state)
+{
+    if (state.uiBackend == nullptr || !state.uiBackend->isInitialized()) {
+        return;
+    }
+
+    auto findImage = [&state](const char* id) {
+        return dynamic_cast<ayt::ui::Image*>(state.ui->findById(id));
+    };
+    ayt::ui::Image* full = findImage("img_texture_full");
+    ayt::ui::Image* crop = findImage("img_texture_crop");
+    ayt::ui::Image* icon = findImage("img_icon_button_icon");
+    ayt::ui::Image* backdrop = findImage("img_card_backdrop");
+    ayt::ui::Image* wash = findImage("img_card_wash");
+    ayt::ui::Image* badge = findImage("img_card_badge");
+    if (full == nullptr || crop == nullptr || icon == nullptr ||
+        backdrop == nullptr || wash == nullptr || badge == nullptr) {
+        std::fprintf(stderr,
+                     "[AYUI_Gallery] Images page incomplete; texture demo skipped\n");
+        return;
+    }
+
+    constexpr int N = 128;
+    std::vector<uint8_t> px(static_cast<size_t>(N * N * 4), 255u);
+    for (int y = 0; y < N; ++y) {
+        for (int x = 0; x < N; ++x) {
+            const bool right = x >= N / 2;
+            const bool bottom = y >= N / 2;
+            const float u = static_cast<float>(x % (N / 2)) / 63.0f;
+            const float v = static_cast<float>(y % (N / 2)) / 63.0f;
+            uint8_t b = 0, g = 0, r = 0, a = 255;
+            if (!right && !bottom) {
+                // Blue/cyan gradient tile.
+                b = static_cast<uint8_t>((0.55f + 0.40f * u) * 255.0f);
+                g = static_cast<uint8_t>((0.25f + 0.60f * v) * 255.0f);
+                r = static_cast<uint8_t>((0.08f + 0.18f * u) * 255.0f);
+            } else if (right && !bottom) {
+                // Warm checker tile -- makes UV cropping unmistakable.
+                const bool light = ((x / 8) + (y / 8)) % 2 == 0;
+                b = light ? 45u : 28u;
+                g = light ? 154u : 93u;
+                r = light ? 246u : 203u;
+            } else if (!right && bottom) {
+                // Green diagonal stripe tile used as a translucent wash.
+                const bool stripe = ((x + y) / 7) % 2 == 0;
+                b = stripe ? 92u : 50u;
+                g = stripe ? 205u : 142u;
+                r = stripe ? 66u : 28u;
+            } else {
+                // Alpha-backed circular badge tile.
+                const float dx = u - 0.5f;
+                const float dy = v - 0.5f;
+                const float d = std::sqrt(dx * dx + dy * dy);
+                const float cover = std::clamp((0.48f - d) * 24.0f, 0.0f, 1.0f);
+                b = static_cast<uint8_t>((0.72f + 0.20f * v) * 255.0f);
+                g = static_cast<uint8_t>((0.22f + 0.22f * u) * 255.0f);
+                r = static_cast<uint8_t>((0.72f + 0.24f * u) * 255.0f);
+                a = static_cast<uint8_t>(cover * 255.0f + 0.5f);
+            }
+            // createUiTexture consumes BGRA and swizzles for the renderer.
+            uint8_t* p = &px[static_cast<size_t>((y * N + x) * 4)];
+            p[0] = b;
+            p[1] = g;
+            p[2] = r;
+            p[3] = a;
+        }
+    }
+
+    state.imageTexAtlas = state.uiBackend->createUiTexture(N, N, px.data());
+    if (state.imageTexAtlas == nullptr) {
+        std::fprintf(stderr, "[AYUI_Gallery] Images page texture creation failed\n");
+        return;
+    }
+    ayt::ui::TextureRegistry::get().registerExternal(
+        kGalleryImageTextureName, state.imageTexAtlas, N, N,
+        ayt::ui::TextureFormat::RGBA8);
+
+    auto bindTexture = [](ayt::ui::Image* image,
+                          const ayt::math::FRectangle& uv,
+                          float opacity = 1.0f) {
+        image->setTexture(kGalleryImageTextureName);
+        image->setUV(uv);
+        image->setOpacity(opacity);
+    };
+    bindTexture(full,     ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
+    bindTexture(crop,     ayt::math::FRectangle(0.5f, 0.0f, 1.0f, 0.5f));
+    bindTexture(icon,     ayt::math::FRectangle(0.0f, 0.0f, 0.5f, 0.5f));
+    bindTexture(backdrop, ayt::math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
+    bindTexture(wash,     ayt::math::FRectangle(0.0f, 0.5f, 0.5f, 1.0f), 0.28f);
+    bindTexture(badge,    ayt::math::FRectangle(0.5f, 0.5f, 1.0f, 1.0f), 0.90f);
+
+    if (auto* button = dynamic_cast<ayt::ui::Button*>(
+            state.ui->findById("img_icon_button"))) {
+        button->setPadding(48.0f, 4.0f, 10.0f, 4.0f);
+    }
+    auto bindClick = [&state](const char* id) {
+        if (auto* button = dynamic_cast<ayt::ui::Button*>(state.ui->findById(id))) {
+            button->setOnClicked([&state]() {
+                ++state.imageClickCount;
+                if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                        state.ui->findById("img_click_state"))) {
+                    wchar_t text[64];
+                    std::swprintf(text, 64, L"image composition clicks: %d",
+                                  state.imageClickCount);
+                    label->setText(text);
+                }
+            });
+        }
+    };
+    bindClick("img_icon_button");
+    bindClick("img_overlay_button");
+}
+
+// Drop every Image's named registry ref before releasing the one backend
+// texture they share. This runs before loadLayout destroys the old tree and
+// before UIRenderBackend shutdown, keeping hot reload and exit leak-free.
+void teardownImageCompositionPage(GalleryState& state)
+{
+    for (const char* id : {
+             "img_texture_full", "img_texture_crop", "img_icon_button_icon",
+             "img_card_backdrop", "img_card_wash", "img_card_badge"}) {
+        if (auto* image = dynamic_cast<ayt::ui::Image*>(state.ui->findById(id))) {
+            if (image->getTextureName() == kGalleryImageTextureName) {
+                image->setTexture(std::string{});
+            }
+        }
+    }
+    if (state.imageTexAtlas != nullptr) {
+        state.uiBackend->releaseUiTexture(state.imageTexAtlas);
+        state.imageTexAtlas = nullptr;
+    }
+}
+
 // Releases the backend textures and drops the demo pointer. The widget is
 // tree-owned (loadLayout deletes it); the textures are backend-owned and
 // MUST be released here -- before loadLayout on reload, and before
@@ -1324,6 +1470,7 @@ bool loadAndWire(GalleryState& state)
     state.ui->setClientSize(static_cast<float>(state.clientW),
                             static_cast<float>(state.clientH));
     wireGallery(state);
+    wireImageCompositionPage(state);
     wireCapabilities(state);
     wireBackendPage(state);
     bindReload(state);
@@ -1338,7 +1485,7 @@ bool loadAndWire(GalleryState& state)
     // Unmistakable build fingerprint (console can be missed under WIN32).
     // Window title + file next to cwd: if you don't see these, wrong exe.
     constexpr const char* kDockBuildId =
-        "DockArea-20260811h-NoWhiteFlash";
+        "AYUI-Gallery-20260827-Images";
     std::fprintf(stderr, "[AYUI_Gallery] BUILD %s\n", kDockBuildId);
     std::fprintf(stderr, "[AYUI_Gallery] dock trace log: %s\n",
                  ayt::ui::dockTracePath());
@@ -1370,8 +1517,10 @@ void bindReload(GalleryState& state)
             // outlives reload and we leak (overlay root is not owned by
             // the loaded JSON tree).
             teardownCapabilitiesOverlay(state);
+            teardownImageCompositionPage(state);
             teardownBackendPage(state);
             state.clickCount = 0;
+            state.imageClickCount = 0;
             // Use state.layoutPath (lives in GalleryState), not a path
             // captured inside this lambda ??loadLayout destroys this
             // Button / std::function before ifstream::open returns.
@@ -1796,7 +1945,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
     // hunting the AllocConsole window.
-    cfg.window.title = "AYUI Gallery [DockArea-20260811h-NoWhiteFlash]";
+    cfg.window.title = "AYUI Gallery [Images / Composition]";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
     if (!devices.initialize(cfg)) {
@@ -1904,7 +2053,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     std::fprintf(stderr,
                  "[AYUI_Gallery] ready ??UI-only composite (no RenderScene)\n"
-                 "[AYUI_Gallery] sections: Basics / Input / Collections / Overlay / Layout\n");
+                 "[AYUI_Gallery] sections: Basics / Images / Input / Collections / "
+                 "Overlay / Layout / Capabilities / Backend / Animation\n");
 
     LARGE_INTEGER qpcFreq{};
     LARGE_INTEGER qpcPrev{};
@@ -1981,6 +2131,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     // widgets off the overlay AND deletes them here so the overlay's
     // subsequent shutdown sees no children to free.
     teardownCapabilitiesOverlay(state);
+    teardownImageCompositionPage(state);
     // Backend page textures (UIRenderBackend registry) MUST be released
     // before uiBackend.shutdown() -- the registry frees GPU textures in
     // shutdown, double-release is a no-op, but the handles here would

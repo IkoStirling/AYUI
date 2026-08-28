@@ -6,6 +6,7 @@
 #include "AYUI/RadioButton.h"
 #include "AYUI/Slider.h"
 #include "AYUI/ProgressBar.h"
+#include "AYUI/Spinner.h"
 #include "AYUI/TextInput.h"
 #include "AYUI/TextArea.h"
 #include "AYUI/Tooltip.h"
@@ -41,7 +42,23 @@ using namespace ayt::ui;
 using json = nlohmann::json;
 
 static std::wstring toWstring(const std::string& str) {
-    return std::wstring(str.begin(), str.end());
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.from_bytes(str);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.from_bytes(str);
+    }
+}
+
+static std::string toUtf8(const std::wstring& str) {
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.to_bytes(str);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.to_bytes(str);
+    }
 }
 
 std::string WidgetSerializer::serialize(Widget* root, bool pretty) {
@@ -624,7 +641,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     // Type-specific
     if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
         j["type"] = "TextLabel";
-        j["text"] = std::string(label->getText().begin(), label->getText().end());
+        j["text"] = toUtf8(label->getText());
         j["fontSize"] = label->getFontSize();
         switch (label->getHorizontalAlignment()) {
         case TextLabel::HAlignment::Center: j["hAlign"] = "Center"; break;
@@ -641,16 +658,16 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (Button* button = dynamic_cast<Button*>(widget)) {
         j["type"] = "Button";
-        j["text"] = std::string(button->getText().begin(), button->getText().end());
+        j["text"] = toUtf8(button->getText());
     }
     else if (CheckBox* cb = dynamic_cast<CheckBox*>(widget)) {
         j["type"] = "CheckBox";
-        j["text"] = std::string(cb->getText().begin(), cb->getText().end());
+        j["text"] = toUtf8(cb->getText());
         j["checked"] = cb->isChecked();
     }
     else if (RadioButton* rb = dynamic_cast<RadioButton*>(widget)) {
         j["type"] = "RadioButton";
-        j["text"] = std::string(rb->getText().begin(), rb->getText().end());
+        j["text"] = toUtf8(rb->getText());
         j["checked"] = rb->isChecked();
         j["groupId"] = rb->getGroupId();
     }
@@ -666,9 +683,12 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["max"]  = pb->getMax();
         j["value"] = pb->getValue();
     }
+    else if (dynamic_cast<Spinner*>(widget) != nullptr) {
+        j["type"] = "Spinner";
+    }
     else if (TextInput* ti = dynamic_cast<TextInput*>(widget)) {
         j["type"] = "TextInput";
-        j["text"] = std::string(ti->getText().begin(), ti->getText().end());
+        j["text"] = toUtf8(ti->getText());
         j["password"] = ti->isPasswordMode();
         j["readOnly"] = ti->isReadOnly();
         j["maxLength"] = static_cast<int>(ti->getMaxLength());
@@ -678,7 +698,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (TextArea* ta = dynamic_cast<TextArea*>(widget)) {
         j["type"] = "TextArea";
-        j["text"] = std::string(ta->getText().begin(), ta->getText().end());
+        j["text"] = toUtf8(ta->getText());
         j["readOnly"] = ta->isReadOnly();
         j["maxLength"] = static_cast<int>(ta->getMaxLength());
         j["lineHeight"] = ta->getLineHeight();
@@ -695,7 +715,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "ListView";
         j["items"] = json::array();
         for (const auto& s : lv->getItemsRef()) {
-            j["items"].push_back(std::string(s.begin(), s.end()));
+            j["items"].push_back(toUtf8(s));
         }
         j["selectedIndex"] = lv->getSelectedIndex();
         j["itemHeight"] = lv->getItemHeight();
@@ -714,7 +734,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "ComboBox";
         j["items"] = json::array();
         for (const auto& s : cb->getItemsRef()) {
-            j["items"].push_back(std::string(s.begin(), s.end()));
+            j["items"].push_back(toUtf8(s));
         }
         j["selectedIndex"] = cb->getSelectedIndex();
         j["maxPopupItems"] = cb->getMaxPopupItems();
@@ -724,8 +744,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["tabs"] = json::array();
         for (size_t i = 0; i < tc->getTabCount(); ++i) {
             json tabJson;
-            tabJson["label"] = std::string(tc->getTabLabel(i).begin(),
-                                           tc->getTabLabel(i).end());
+            tabJson["label"] = toUtf8(tc->getTabLabel(i));
             Widget* content = tc->getTabContent(i);
             if (content != nullptr) {
                 json contentJson;
@@ -739,7 +758,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";
-        j["title"] = std::string(window->getTitle().begin(), window->getTitle().end());
+        j["title"] = toUtf8(window->getTitle());
         j["titleBarHeight"] = window->getTitleBarHeight();
         j["movable"] = window->isMovable();
         j["resizable"] = window->isResizable();
@@ -772,8 +791,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "DockCard";
         j["id"]   = card->getId();
         if (!card->getTitle().empty()) {
-            j["title"] = std::string(card->getTitle().begin(),
-                                     card->getTitle().end());
+            j["title"] = toUtf8(card->getTitle());
         }
         if (!card->getIcon().empty()) {
             j["icon"] = card->getIcon();
@@ -809,7 +827,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (Tooltip* tip = dynamic_cast<Tooltip*>(widget)) {
         j["type"] = "Tooltip";
-        j["text"] = std::string(tip->getText().begin(), tip->getText().end());
+        j["text"] = toUtf8(tip->getText());
         j["hoverDelay"] = tip->getHoverDelay();
     }
     else if (Separator* sep = dynamic_cast<Separator*>(widget)) {
@@ -839,8 +857,8 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (MenuItem* mi = dynamic_cast<MenuItem*>(widget)) {
         j["type"] = "MenuItem";
-        j["text"] = std::string(mi->getText().begin(), mi->getText().end());
-        j["shortcut"] = std::string(mi->getShortcut().begin(), mi->getShortcut().end());
+        j["text"] = toUtf8(mi->getText());
+        j["shortcut"] = toUtf8(mi->getShortcut());
         j["hasSubmenu"] = mi->hasSubmenu();
     }
     else if (Menu* menu = dynamic_cast<Menu*>(widget)) {
@@ -854,8 +872,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["menus"] = json::array();
         for (size_t i = 0; i < mb->getMenuCount(); ++i) {
             json mj;
-            mj["title"] = std::string(mb->getMenuTitle(i).begin(),
-                                       mb->getMenuTitle(i).end());
+            mj["title"] = toUtf8(mb->getMenuTitle(i));
             j["menus"].push_back(mj);
         }
     }
@@ -870,7 +887,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             TextLabel* p = sb->getPanel(i);
             if (p != nullptr) {
                 json pj;
-                pj["text"] = std::string(p->getText().begin(), p->getText().end());
+                pj["text"] = toUtf8(p->getText());
                 j["panels"].push_back(pj);
             }
         }
@@ -910,8 +927,8 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (TreeNode* tn = dynamic_cast<TreeNode*>(widget)) {
         j["type"] = "TreeNode";
-        j["label"] = std::string(tn->getLabel().begin(), tn->getLabel().end());
-        j["icon"]  = std::string(tn->getIcon().begin(), tn->getIcon().end());
+        j["label"] = toUtf8(tn->getLabel());
+        j["icon"]  = toUtf8(tn->getIcon());
         j["hasChildren"] = tn->hasChildren();
         j["expanded"] = tn->isExpanded();
         j["depth"] = tn->getDepth();
@@ -924,8 +941,8 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         for (size_t i = 0; i < tv->getNodeCount(); ++i) {
             const auto& d = tv->getNodeData(i);
             json nj;
-            nj["label"] = std::string(d.label.begin(), d.label.end());
-            nj["icon"]  = std::string(d.icon.begin(), d.icon.end());
+            nj["label"] = toUtf8(d.label);
+            nj["icon"]  = toUtf8(d.icon);
             nj["hasChildren"] = d.hasChildren;
             nj["expanded"] = d.expanded;
             nj["parentIndex"] = d.parentIndex;
@@ -945,7 +962,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         for (size_t i = 0; i < rt->getRunCount(); ++i) {
             const RichRun& r = rt->getRun(i);
             json rj;
-            rj["text"] = std::string(r.text.begin(), r.text.end());
+            rj["text"] = toUtf8(r.text);
             rj["color"] = {
                 {"r", r.color.x}, {"g", r.color.y},
                 {"b", r.color.z}, {"a", r.color.w} };

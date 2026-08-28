@@ -55,8 +55,8 @@ public:
     // its widget bounds).
     void setContentSize(const math::FVector2& size);
 
-    void setVerticalScrollBarEnabled(bool enabled) { _vbarEnabled = enabled; }
-    void setHorizontalScrollBarEnabled(bool enabled) { _hbarEnabled = enabled; }
+    void setVerticalScrollBarEnabled(bool enabled);
+    void setHorizontalScrollBarEnabled(bool enabled);
 
     // Apply a delta to _scrollOffset. Clamped. Returns true on real
     // change. Re-syncs bar values to the new offset.
@@ -107,12 +107,8 @@ public:
     // the scroll offset while velocity decays.
     void tick(float dt) override;
 
-    // AYUI-DirtyRect-2026-08-26 Batch B test surface: was `protected:` here
-    // but the base Widget::performLayout is `virtual void performLayout()`
-    // (public). Narrowing access on an override trips MSVC C2248 for any
-    // caller that names the derived class directly. Promote to public so
-    // Test_DirtyRect::DirtyRect_ScrollOffsetChangeTriggersRerender can
-    // prime the dirty state explicitly before the first render.
+    // Keep the base Widget::performLayout public contract. Narrowing access
+    // on an override trips MSVC C2248 for callers naming ScrollView directly.
     void performLayout() override;
 
 protected:

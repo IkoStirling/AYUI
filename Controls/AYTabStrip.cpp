@@ -69,9 +69,7 @@ const std::wstring& TabStrip::getTabLabel(int index) const {
 void TabStrip::setSelectedIndex(int index) {
     if (_labels.empty()) {
         _selectedIndex = -1;
-        // AYUI-DirtyRect-2026-08-26 Batch B follow-up: clearing selection
-        // still changes the painted state (indicator hides, active button
-        // swaps) — arm the next render.
+        // Clearing selection changes the cached visual state.
         markDirty();
         return;
     }
@@ -79,10 +77,8 @@ void TabStrip::setSelectedIndex(int index) {
     if (clamped == _selectedIndex) return;
     _selectedIndex = clamped;
     if (_onSelectionChanged) _onSelectionChanged(clamped);
-    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: selection flip should
-    // visibly repaint immediately even if the indicator tween is short /
-    // disabled. Without this, the first post-click frame short-circuits
-    // in render() because nothing else marked dirty yet.
+    // Selection changes invalidate any retained presentation even when the
+    // indicator tween is disabled.
     markDirty();
 }
 
@@ -180,10 +176,8 @@ void TabStrip::tick(float dt) {
     } else if (wasActive) {
         _indicatorRect = _indicatorAnim.to;
     }
-    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: the underline slides
-    // through _indicatorRect without going through a setter, so the
-    // dirty-rect render short-circuit would freeze the slide mid-flight.
-    // Only markDirty when the rect actually moved (idle tween = silent).
+    // The underline moves without going through a setter. Invalidate a
+    // future cached presentation only when it actually moved.
     if (_indicatorRect.x != prevRect.x || _indicatorRect.y != prevRect.y) {
         markDirty();
     }

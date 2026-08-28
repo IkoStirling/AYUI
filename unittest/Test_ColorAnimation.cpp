@@ -289,12 +289,12 @@ TEST_CASE(styled_button_hover_no_transition) {
 }
 
 // Gallery-shaped full-tree scenario: load the REAL gallery.ui.json,
-// switch to page 8, hover anim_btn3 through the manager, and drive the
+// switch to page 9, hover anim_btn3 through the manager, and drive the
 // whole render (ui.render → tree cascade) — the fill draw at the
 // button's world bounds must tween 0.28 → 0.36. This reproduces the
 // Gallery report "hover 无反应" where the widget state WAS hovered
 // (InputTrace hover=1 state=1) but the screen never changed.
-TEST_CASE(gallery_page8_button_hover_via_full_tree) {
+TEST_CASE(gallery_page9_button_hover_via_full_tree) {
     MockRenderer backend;
     UIManager ui;
     ui.initialize(&backend);
@@ -308,7 +308,7 @@ TEST_CASE(gallery_page8_button_hover_via_full_tree) {
 
     // Mirror showPage: only page_animation visible.
     static const char* kPages[] = {
-        "page_basics", "page_input", "page_collections",
+        "page_basics", "page_images", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
         "page_backend", "page_animation",
     };
@@ -322,9 +322,9 @@ TEST_CASE(gallery_page8_button_hover_via_full_tree) {
     Button* btn = dynamic_cast<Button*>(ui.findById("anim_btn3"));
     CHECK_NOT_NULL(btn);
 
-    // MockRenderer's beginFrame is a no-op (IRenderBackend default), so
-    // draw calls accumulate across ui.render() calls — match from the
-    // BACK to always read the LATEST frame.
+    // MockRenderer mirrors the production frame-local command buffer and
+    // clears prior draw calls in beginFrame(). Search from the back to read
+    // the top-most matching fill in the current frame.
     auto fillColorAt = [](const MockRenderer& r, const FRectangle& b) {
         const auto& dcs = r.getDrawCalls();
         for (auto it = dcs.rbegin(); it != dcs.rend(); ++it) {

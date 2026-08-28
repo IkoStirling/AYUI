@@ -73,6 +73,11 @@ public:
     void clear();
     const std::vector<DrawCall>& getDrawCalls() const { return _drawCalls; }
 
+    // Match the production immediate backend: draw submissions and
+    // transient render state are frame-local. Persistent mock resources
+    // survive until clear()/release.
+    void beginFrame() override;
+
     // IRenderBackend implementations - pure virtual (= 0) / 纯虚函数实现
     void drawRect(const math::FRectangle& bounds, const math::FVector4& color) override;
     void drawRect(const math::FRectangle& bounds, void* textureHandle, const math::FRectangle& uv) override;

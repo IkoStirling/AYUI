@@ -71,7 +71,7 @@ TEST_CASE(I18n_LoadFromString_RealParse) {
     CHECK(i18n.resolve("ui.menu.resume") == L"Resume");
 
     i18n.setCurrentLanguage("zh");
-    CHECK(i18n.resolve("ui.menu.resume") == L"\xE7\xBB\xA7\xE7\xBB\xAD");
+    CHECK(i18n.resolve("ui.menu.resume") == L"\u7EE7\u7EED");
 
     i18n.clear();
 }
@@ -95,7 +95,7 @@ TEST_CASE(I18n_LoadFromFile) {
     i18n.setCurrentLanguage("en");
     CHECK(i18n.resolve("ui.menu.resume") == L"Resume");
     i18n.setCurrentLanguage("zh");
-    CHECK(i18n.resolve("ui.menu.resume") == L"\xE7\xBB\xA7\xE7\xBB\xAD");
+    CHECK(i18n.resolve("ui.menu.resume") == L"\u7EE7\u7EED");
 
     i18n.clear();
     std::remove(path.c_str());
@@ -132,7 +132,7 @@ TEST_CASE(I18n_MultiLanguageDispatch) {
     CHECK(i18n.resolve("ui.menu.resume") == L"Resume");
 
     i18n.setCurrentLanguage("zh");
-    CHECK(i18n.resolve("ui.menu.resume") == L"\xE7\xBB\xA7\xE7\xBB\xAD");
+    CHECK(i18n.resolve("ui.menu.resume") == L"\u7EE7\u7EED");
 
     i18n.clear();
 }

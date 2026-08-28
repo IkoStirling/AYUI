@@ -108,6 +108,10 @@ TEST_CASE(test_widget_factory_all_registered_types_create_non_null) {
         "DockArea",
         "DockCard",
         "DockOverlay",
+        "Dimmer",
+        "Modal",
+        "ModalDialog",
+        "TabStrip",
     };
 
     int registeredCount = 0;
@@ -148,7 +152,8 @@ TEST_CASE(test_widget_factory_isRegistered_matches_create) {
         "Separator", "MenuItem", "Menu", "MenuBar", "ToolBar",
         "ToolBarSeparator", "StatusBar", "Image", "Window", "Panel",
         "VBox", "HBox", "SplitterHandle", "GridPanel", "DockArea",
-        "DockCard", "DockOverlay",
+        "DockCard", "DockOverlay", "Dimmer", "Modal", "ModalDialog",
+        "TabStrip",
     };
 
     for (const std::string& typeName : kKnownTypes) {

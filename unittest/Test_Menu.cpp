@@ -106,15 +106,17 @@ TEST_CASE(menu_render_draws_shadow_and_rounded_plate) {
     menu->render(renderer);
 
     CHECK(renderer.getDrawCalls().size() >= 3u);
+    const auto& plate = renderer.getDrawCalls()[1];
     // 1) Drop shadow: first draw call, offset +3y, semi-transparent black.
+    // The menu has a short slide-in animation, so pin the stable relation
+    // between shadow and plate rather than an animation-frame coordinate.
     const auto& shadow = renderer.getDrawCalls()[0];
     CHECK(shadow.type == MockRenderer::DrawCall::Rect);
-    CHECK_FLOAT_EQ(shadow.bounds.minX, 100.0f, 1e-5f);
-    CHECK_FLOAT_EQ(shadow.bounds.minY, 83.0f, 1e-5f);
+    CHECK_FLOAT_EQ(shadow.bounds.minX, plate.bounds.minX, 1e-5f);
+    CHECK_FLOAT_EQ(shadow.bounds.minY, plate.bounds.minY + 3.0f, 1e-5f);
     CHECK(shadow.color.w < 1.0f);
     CHECK(shadow.color.x < 0.05f);
     // 2) Rounded plate rides radius 3.
-    const auto& plate = renderer.getDrawCalls()[1];
     CHECK(plate.type == MockRenderer::DrawCall::Rect);
     CHECK_FLOAT_EQ(plate.floatParam1, 3.0f, 1e-5f);
 
@@ -487,4 +489,3 @@ TEST_CASE(Menu_DetachForHostDestruction) {
 }
 
 TEST_SUITE_END
-

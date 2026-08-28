@@ -78,7 +78,8 @@ public:
     /*
        @name: beginFrame
        @func: 开始帧渲染 - 标记新帧开始，用于初始化渲染状态和清除累积数据
-       @note: 每帧渲染前必须调用，用于重置渲染上下文状态
+       @note: 每帧渲染前必须调用；绘制提交是 frame-local，调用方必须在
+              每帧重放全部可见内容，不能假设上一帧指令或像素仍然有效
     */
     virtual void beginFrame() {}
 

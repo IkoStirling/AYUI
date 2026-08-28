@@ -72,9 +72,19 @@ public:
     }
 
     // Tab strip styling.
-    void setTabHeight(float h) { _tabHeight = h; }
+    void setTabHeight(float h) {
+        if (_tabHeight == h) return;
+        _tabHeight = h;
+        markBoundsDirty();
+        markDirty();
+    }
     float getTabHeight() const { return _tabHeight; }
-    void setSpacing(float s) { _spacing = s; }
+    void setSpacing(float s) {
+        if (_spacing == s) return;
+        _spacing = s;
+        markBoundsDirty();
+        markDirty();
+    }
     float getSpacing() const { return _spacing; }
 
     // Q12 — total preferred width vs current strip width. Hosts that

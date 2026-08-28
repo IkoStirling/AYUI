@@ -25,14 +25,14 @@ public:
     BoxBase();
     virtual ~BoxBase();
 
-    void setSpacing(float spacing) { _spacing = spacing; }
+    void setSpacing(float spacing);
     float getSpacing() const { return _spacing; }
 
     void setPadding(float left, float top, float right, float bottom);
     const math::FVector4& getPadding() const { return _padding; }
 
     enum class Gravity { TopLeft, TopCenter, TopRight, CenterLeft, Center, CenterRight, BottomLeft, BottomCenter, BottomRight };
-    void setGravity(Gravity gravity) { _gravity = gravity; }
+    void setGravity(Gravity gravity);
     Gravity getGravity() const { return _gravity; }
 
     // PR-B3 hotfix — natural content size = sum of visible children's

@@ -125,4 +125,24 @@ TEST_CASE(scrollview_momentum_cleared_by_bar_drag) {
     delete sv;
 }
 
+TEST_CASE(scrollview_runtime_bar_enable_flags_control_visibility) {
+    ScrollView sv;
+    sv.setSize(FVector2(200.0f, 100.0f));
+    sv.setHorizontalScrollBarEnabled(true);
+    sv.setContentSize(FVector2(500.0f, 500.0f));
+    sv.performLayout();
+    CHECK(sv.getVerticalScrollBar()->isVisible());
+    CHECK(sv.getHorizontalScrollBar()->isVisible());
+
+    sv.setVerticalScrollBarEnabled(false);
+    sv.setHorizontalScrollBarEnabled(false);
+    CHECK_FALSE(sv.getVerticalScrollBar()->isVisible());
+    CHECK_FALSE(sv.getHorizontalScrollBar()->isVisible());
+
+    sv.setVerticalScrollBarEnabled(true);
+    sv.setHorizontalScrollBarEnabled(true);
+    CHECK(sv.getVerticalScrollBar()->isVisible());
+    CHECK(sv.getHorizontalScrollBar()->isVisible());
+}
+
 TEST_SUITE_END

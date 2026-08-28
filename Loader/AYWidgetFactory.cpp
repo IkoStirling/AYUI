@@ -33,6 +33,10 @@
 #include "AYUI/DockArea.h"
 #include "AYUI/DockCard.h"
 #include "AYUI/DockOverlay.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/Modal.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/TabStrip.h"
 
 namespace ayt::ui {
 
@@ -61,7 +65,9 @@ void WidgetFactory::unregister(const std::string& typeName) {
     _creators.erase(typeName);
 }
 
-// 自动注册默认控件
+// Register every JSON-creatable built-in in one place. UIManager keeps a
+// defensive registration pass for unusual static-link configurations, but
+// UILayoutLoader must also work correctly without constructing UIManager.
 struct DefaultWidgetRegistrar {
     DefaultWidgetRegistrar() {
         REGISTER_WIDGET("Widget", Widget);
@@ -88,7 +94,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("Menu", createMenuWidget);
         WidgetFactory::get().registerCreator("MenuBar", createMenuBarWidget);
         WidgetFactory::get().registerCreator("ToolBar", createToolBarWidget);
-    WidgetFactory::get().registerCreator("ToolBarSeparator", createToolBarSeparatorWidget);
+        WidgetFactory::get().registerCreator("ToolBarSeparator", createToolBarSeparatorWidget);
         WidgetFactory::get().registerCreator("StatusBar", createStatusBarWidget);
         REGISTER_WIDGET("Image", Image);
         WidgetFactory::get().registerCreator("Window", createWindowWidget);
@@ -100,6 +106,10 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("DockArea", createDockAreaWidget);
         REGISTER_WIDGET("DockCard", DockCard);
         REGISTER_WIDGET("DockOverlay", DockOverlay);
+        REGISTER_WIDGET("Dimmer", Dimmer);
+        REGISTER_WIDGET("Modal", Modal);
+        WidgetFactory::get().registerCreator("ModalDialog", createModalDialogWidget);
+        WidgetFactory::get().registerCreator("TabStrip", createTabStripWidget);
     }
 };
 

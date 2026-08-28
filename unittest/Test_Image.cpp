@@ -1,6 +1,8 @@
 #include "AYTest.h"
+#include "AYUI/Button.h"
 #include "AYUI/Image.h"
 #include "AYUI/LeafWidget.h"
+#include "AYUI/MockRenderer.h"
 #include "AYUI/Widget.h"
 #include <iostream>
 
@@ -91,6 +93,46 @@ TEST_CASE(image_perform_layout_inherited_noop) {
     CHECK(image.getHeight() == 48.0f);
     CHECK(image.getPosition().x == 10.0f);
     CHECK(image.getPosition().y == 20.0f);
+}
+
+// Gallery regression: a non-container interactive control may own a
+// decorative Image child. Widget::render paints children after the control,
+// while Button::hitTest intentionally resolves to the Button itself so the
+// image cannot steal clicks from its host.
+TEST_CASE(image_child_layers_over_button_without_stealing_hit) {
+    MockRenderer renderer;
+    int released = 0;
+    Image::setReleaseCallback([&released](const ImageTextureHandle&) {
+        ++released;
+    });
+
+    {
+        auto* button = new Button();
+        button->setPosition({10.0f, 20.0f});
+        button->setSize({180.0f, 40.0f});
+        button->setText(L"Image button");
+
+        auto* icon = new Image();
+        icon->setPosition({12.0f, 8.0f});
+        icon->setSize({24.0f, 24.0f});
+        void* texture = reinterpret_cast<void*>(0xCAFEu);
+        icon->setTexture(texture);
+        button->addChild(icon);
+
+        button->render(renderer);
+
+        CHECK(button->hitTest({24.0f, 32.0f}) == button);
+        CHECK(!renderer.getDrawCalls().empty());
+        const auto& top = renderer.getDrawCalls().back();
+        CHECK(top.type == MockRenderer::DrawCall::Image);
+        CHECK(top.texture == texture);
+        CHECK(top.bounds.minX == 22.0f);
+        CHECK(top.bounds.minY == 28.0f);
+        destroyWidgetTree(button);
+    }
+
+    CHECK(released == 1);
+    Image::clearReleaseCallback();
 }
 
 TEST_SUITE_END

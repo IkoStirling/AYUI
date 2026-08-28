@@ -16,12 +16,24 @@
 #endif
 
 #include <cmath>
+#include <codecvt>
 #include <cstdio>
 #include <cstdlib>
+#include <locale>
 
 namespace ayt::gallery {
 
 namespace {
+
+std::string wideToUtf8(const std::wstring& text) {
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.to_bytes(text);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.to_bytes(text);
+    }
+}
 
 void clientToScreenCoords(ayt::device::WindowManager& wm, int& x, int& y) {
 #if defined(_WIN32)
@@ -235,7 +247,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     clientToScreenCoords(_wm, x, y);
 
     ayt::device::TopLevelWindowDesc d;
-    d.title  = std::string(title.begin(), title.end());
+    d.title  = wideToUtf8(title);
     d.x      = x;
     d.y      = y;
     d.width  = w;

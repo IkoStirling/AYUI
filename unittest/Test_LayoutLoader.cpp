@@ -1,6 +1,7 @@
 #include "AYTest.h"
 #include "AYMath/MathUtils.h"
 #include "AYUI/LayoutLoader.h"
+#include "AYUI/I18n.h"
 #include "AYUI/Button.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/TextInput.h"
@@ -69,6 +70,37 @@ TEST_CASE(test_layout_loader_button) {
     CHECK(button->getText() == L"Click Me");
 
     destroyWidgetTree(widget);
+}
+
+TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
+    UILayoutLoader loader;
+
+    Widget* directRaw = loader.loadFromString(
+        "{\"type\":\"Button\",\"text\":\"\xE7\xBB\xA7\xE7\xBB\xAD\"}");
+    Button* direct = dynamic_cast<Button*>(directRaw);
+    CHECK(direct != nullptr);
+    if (direct != nullptr) {
+        CHECK(direct->getText() == L"\u7EE7\u7EED");
+    }
+    destroyWidgetTree(directRaw);
+
+    I18n& i18n = I18n::get();
+    i18n.clear();
+    const char* table =
+        "{\"ui.resume\":{\"zh\":\"\xE7\xBB\xA7\xE7\xBB\xAD\"}}";
+    CHECK(i18n.loadFromString(table, std::char_traits<char>::length(table)));
+    i18n.setCurrentLanguage("zh");
+    loader.setI18n(&i18n);
+
+    Widget* translatedRaw = loader.loadFromString(
+        R"({"type":"Button","text":"ui.resume"})");
+    Button* translated = dynamic_cast<Button*>(translatedRaw);
+    CHECK(translated != nullptr);
+    if (translated != nullptr) {
+        CHECK(translated->getText() == L"\u7EE7\u7EED");
+    }
+    destroyWidgetTree(translatedRaw);
+    i18n.clear();
 }
 
 TEST_CASE(test_layout_loader_window) {

@@ -67,7 +67,7 @@ TEST_CASE(container_contract_documented_in_widget_h) {
 #error "AYUI_SOURCE_DIR must be defined by the unittest CMakeLists.txt"
 #endif
     const std::string srcPath =
-        std::string(AYUI_SOURCE_DIR) + "/Controls/AYWidget.h";
+        std::string(AYUI_SOURCE_DIR) + "/include/AYUI/Widget.h";
     std::ifstream f(srcPath);
     CHECK_NOT_NULL((void*)(f.is_open() ? &f : nullptr));
     std::string content((std::istreambuf_iterator<char>(f)),

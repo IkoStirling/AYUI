@@ -460,26 +460,17 @@ public:
     void markDescendantsBoundsDirty();
 
     // =================================================================
-    // AYUI-DirtyRect-2026-08-26: dirty-rect system (per-widget paint gate).
+    // AYUI invalidation/damage tracking.
     // =================================================================
-    // Without this gate, populateFrame() walks the entire tree and every
-    // widget repaints every frame. With 80-400 widgets per frame, that's
-    // 5k-24k item submissions/sec wasted on static TextLabels.
-    //
     // markDirty(invalidRect) marks THIS widget dirty. The default (invalid
-    // rect) means "the whole widget must repaint this frame". Passing a
-    // valid rect unions it into _dirtyRect (used by per-pixel damage
-    // callbacks; v1 typically just passes invalid).
+    // rect) means "the whole widget's cached presentation is invalid".
+    // Passing a valid rect unions it into _dirtyRect for future retained
+    // display-list or render-target caches.
     //
-    // If we were clean, propagate markDirty(invalid) to the parent so
-    // the ancestor render walks this frame — the union of children's
-    // dirty rects doesn't matter to the parent (it walks children
-    // unconditionally), only "did anything change?" matters.
-    //
-    // render() short-circuits when both _dirtyThis is false AND
-    // _dirtyRect is empty (default-constructed == zero area == empty),
-    // so a freshly-marked widget re-renders exactly once and stays clean
-    // until something mutates it again.
+    // Dirty state propagates to ancestors so a future subtree cache can
+    // invalidate the complete composited branch. It does NOT gate
+    // Widget::render(): IRenderBackend::beginFrame clears frame-local draw
+    // submissions, so every visible Widget must replay every frame.
     //
     // NOTE: "invalid" here = FRectangle{0,0,0,0}, which is the default
     // ctor and has zero area. We don't need a separate sentinel; the
@@ -523,8 +514,7 @@ public:
         }
     }
 
-    // Test/debug: which dirty markers does this widget currently hold?
-    // Used by Test_DirtyRect to assert "widget did/did not render".
+    // Test/debug: which cache/damage invalidation markers are pending?
     bool isDirtyThis() const { return _dirtyThis; }
     bool hasDirtyRect() const { return !isDirtyRectEmpty(_dirtyRect); }
 
@@ -601,21 +591,18 @@ protected:
     IRenderBackend* _renderBackend = nullptr;
 
     // =================================================================
-    // AYUI-DirtyRect-2026-08-26: per-widget paint gate.
+    // AYUI invalidation/damage state.
     // =================================================================
-    // _dirtyThis: "the whole widget must repaint this frame". Set true on
-    // ctor (a freshly-added widget MUST paint at least once) and cleared
-    // at the END of render() — so the same widget doesn't re-render until
-    // something marks it dirty again.
+    // _dirtyThis: the whole widget's cached presentation is invalid.
+    // Set true on construction and cleared after the widget is submitted.
     //
     // _dirtyRect: a sub-rectangle union of all damage since the last
     // render. Default-constructed == zero area == empty == clean. Used by
-    // partial-redraw callers (host damage callbacks); for typical
-    // setters, markDirty(invalid) is sufficient and clears _dirtyRect.
+    // partial-redraw/cache callers; for typical setters,
+    // markDirty(invalid) is sufficient and clears _dirtyRect.
     //
-    // render() short-circuits when both _dirtyThis is false AND
-    // _dirtyRect is empty. This is the load-bearing invariant — if a
-    // widget doesn't dirty itself in a setter, it won't repaint.
+    // IMPORTANT: neither field suppresses per-frame submission. The
+    // current renderer owns no persistent display list or UI render target.
     bool _dirtyThis = true;
     math::FRectangle _dirtyRect;
 

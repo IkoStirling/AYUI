@@ -729,5 +729,32 @@ TEST_CASE(vbox_add_widget_invalidates_natural_cache) {
     delete demo;
 }
 
-TEST_SUITE_END
+TEST_CASE(vbox_spacing_and_padding_invalidate_natural_cache) {
+    VBox page;
+    page.setSize(FVector2(200.0f, 80.0f));
+    page.setPadding(0, 0, 0, 0);
+    page.setSpacing(0);
 
+    auto* a = new Widget();
+    auto* b = new Widget();
+    a->setSize(FVector2(200.0f, 20.0f));
+    b->setSize(FVector2(200.0f, 30.0f));
+    page.addWidget(a, 20.0f);
+    page.addWidget(b, 30.0f);
+    page.performLayout();
+    CHECK_FLOAT_EQ(page.getCachedNaturalHeight(), 50.0f, 1e-3f);
+
+    page.setSpacing(7.0f);
+    CHECK(page.getCachedNaturalHeight() < 0.0f);
+    CHECK_FLOAT_EQ(page.getPreferredContentSize().y, 57.0f, 1e-3f);
+
+    page.performLayout();
+    page.setPadding(1.0f, 2.0f, 3.0f, 4.0f);
+    CHECK(page.getCachedNaturalHeight() < 0.0f);
+    CHECK_FLOAT_EQ(page.getPreferredContentSize().y, 63.0f, 1e-3f);
+
+    delete a;
+    delete b;
+}
+
+TEST_SUITE_END

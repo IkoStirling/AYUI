@@ -60,6 +60,26 @@ void ScrollView::setContentSize(const math::FVector2& size) {
     syncBarsToOffset();
 }
 
+void ScrollView::setVerticalScrollBarEnabled(bool enabled) {
+    if (_vbarEnabled == enabled) return;
+    _vbarEnabled = enabled;
+    if (enabled) ensureBarsCreated();
+    if (_vbar != nullptr) _vbar->setVisible(enabled);
+    syncBarsToOffset();
+    markBoundsDirty();
+    markDirty();
+}
+
+void ScrollView::setHorizontalScrollBarEnabled(bool enabled) {
+    if (_hbarEnabled == enabled) return;
+    _hbarEnabled = enabled;
+    if (enabled) ensureBarsCreated();
+    if (_hbar != nullptr) _hbar->setVisible(enabled);
+    syncBarsToOffset();
+    markBoundsDirty();
+    markDirty();
+}
+
 void ScrollView::ensureBarsCreated() {
     if (_vbarEnabled && _vbar == nullptr) {
         _vbar = new ScrollBar();
@@ -166,8 +186,18 @@ void ScrollView::syncBarsToOffset() {
     const math::FVector2 content = _scrollState.getContentSize();
     // PR-SyncVerticalBar: direction-agnostic helper. ScrollView is the
     // only H consumer — passing .x keeps the contract identical.
-    syncVerticalBar(_vbar, content.y, vp.y, _scrollState.getScrollOffset().y);
-    syncVerticalBar(_hbar, content.x, vp.x, _scrollState.getScrollOffset().x);
+    if (_vbarEnabled) {
+        syncVerticalBar(_vbar, content.y, vp.y,
+                        _scrollState.getScrollOffset().y);
+    } else if (_vbar != nullptr) {
+        _vbar->setVisible(false);
+    }
+    if (_hbarEnabled) {
+        syncVerticalBar(_hbar, content.x, vp.x,
+                        _scrollState.getScrollOffset().x);
+    } else if (_hbar != nullptr) {
+        _hbar->setVisible(false);
+    }
     _syncingBars = wasSyncing;
 }
 
@@ -235,7 +265,7 @@ void ScrollView::performLayout() {
         _hbar->setPosition(math::FVector2(
             0.0f, getHeight() - barW));
         _hbar->setSize(math::FVector2(
-            getWidth() - (_vbar ? barW : 0.0f), barW));
+            getWidth() - ((_vbar != nullptr && _vbar->isVisible()) ? barW : 0.0f), barW));
     }
 
     auto clientSize = [this]() -> math::FVector2 {

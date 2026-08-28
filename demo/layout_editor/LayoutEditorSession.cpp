@@ -19,10 +19,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <codecvt>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <locale>
 #include <sstream>
 
 #if defined(_WIN32)
@@ -56,7 +58,13 @@ std::wstring utf8ToWide(const std::string& s) {
                           out.data(), n);
     return out;
 #else
-    return std::wstring(s.begin(), s.end());
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.from_bytes(s);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.from_bytes(s);
+    }
 #endif
 }
 
@@ -76,7 +84,13 @@ std::string wideToUtf8(const std::wstring& s) {
                           out.data(), n, nullptr, nullptr);
     return out;
 #else
-    return std::string(s.begin(), s.end());
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.to_bytes(s);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.to_bytes(s);
+    }
 #endif
 }
 

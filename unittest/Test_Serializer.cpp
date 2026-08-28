@@ -202,4 +202,19 @@ TEST_CASE(test_roundtrip) {
     destroyWidgetTree(restored);
 }
 
+TEST_CASE(test_unicode_text_roundtrip_uses_utf8) {
+    Button button;
+    button.setText(L"\u7EE7\u7EED");
+
+    const std::string json = WidgetSerializer::serialize(&button);
+    Widget* restored = WidgetSerializer::deserialize(json);
+    Button* restoredButton = dynamic_cast<Button*>(restored);
+
+    CHECK(restoredButton != nullptr);
+    if (restoredButton != nullptr) {
+        CHECK(restoredButton->getText() == L"\u7EE7\u7EED");
+    }
+    destroyWidgetTree(restored);
+}
+
 TEST_SUITE_END

@@ -149,7 +149,13 @@ public:
     // Width approximation uses the same 7px-per-char factor as the
     // renderer and selection highlight — R3 best-effort. v1.2 with a
     // real text shaper will tighten this.
-    void setWordWrap(bool w) { _wordWrap = w; syncDocumentSizeToContent(); }
+    void setWordWrap(bool w) {
+        if (_wordWrap == w) return;
+        _wordWrap = w;
+        syncDocumentSizeToContent();
+        markBoundsDirty();
+        markDirty();
+    }
     bool isWordWrap() const { return _wordWrap; }
 
     void setOnTextChanged(std::function<void(const std::wstring&)> cb) {

@@ -63,13 +63,14 @@
           "children": [
             { "type": "TextLabel", "id": "lbl_nav", "text": "Sections", "size": { "w": 160, "h": 22 } },
             { "type": "Button", "id": "nav_basics", "text": "1. Basics", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_input", "text": "2. Input", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_collections", "text": "3. Collections", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_overlay", "text": "4. Overlay", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_layout", "text": "5. Layout", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_capabilities", "text": "6. Capabilities", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_backend", "text": "7. Backend", "size": { "w": 160, "h": 28 } },
-            { "type": "Button", "id": "nav_animation", "text": "8. Animation", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_images", "text": "2. Images", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_input", "text": "3. Input", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_collections", "text": "4. Collections", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_overlay", "text": "5. Overlay", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_layout", "text": "6. Layout", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_capabilities", "text": "7. Capabilities", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_backend", "text": "8. Backend", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_animation", "text": "9. Animation", "size": { "w": 160, "h": 28 } },
             { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
             { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
           ]
@@ -131,6 +132,69 @@
                     { "type": "TextLabel", "id": "lbl_panel", "text": "Panel body (styled background + border)", "size": { "w": 380, "h": 24 } }
                   ]
                 }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_images",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "images_hdr", "text": "Images - texture / UV crop / control composition", "size": { "w": 720, "h": 24 } },
+                { "type": "TextLabel", "id": "images_hint", "text": "A shared procedural atlas is bound to standard Image widgets at runtime.", "size": { "w": 760, "h": 22 } },
+                {
+                  "type": "HBox",
+                  "id": "images_texture_row",
+                  "size": { "h": 142 },
+                  "spacing": 12,
+                  "children": [
+                    {
+                      "type": "Panel",
+                      "id": "image_full_panel",
+                      "size": { "w": 280, "h": 136 },
+                      "slot": { "width": 280 },
+                      "children": [
+                        { "type": "TextLabel", "id": "image_full_label", "text": "Full texture", "position": { "x": 10, "y": 6 }, "size": { "w": 180, "h": 20 } },
+                        { "type": "Image", "id": "img_texture_full", "position": { "x": 10, "y": 30 }, "size": { "w": 260, "h": 96 } }
+                      ]
+                    },
+                    {
+                      "type": "Panel",
+                      "id": "image_crop_panel",
+                      "size": { "w": 280, "h": 136 },
+                      "slot": { "width": 280 },
+                      "children": [
+                        { "type": "TextLabel", "id": "image_crop_label", "text": "UV crop (top-right tile)", "position": { "x": 10, "y": 6 }, "size": { "w": 220, "h": 20 } },
+                        { "type": "Image", "id": "img_texture_crop", "position": { "x": 10, "y": 30 }, "size": { "w": 260, "h": 96 } }
+                      ]
+                    }
+                  ]
+                },
+                { "type": "Separator", "id": "images_sep", "size": { "w": 760, "h": 10 } },
+                { "type": "TextLabel", "id": "images_compose_label", "text": "Image layered into an interactive control", "size": { "w": 420, "h": 22 } },
+                {
+                  "type": "Button",
+                  "id": "img_icon_button",
+                  "text": "Save with image child",
+                  "size": { "w": 240, "h": 42 },
+                  "children": [
+                    { "type": "Image", "id": "img_icon_button_icon", "position": { "x": 12, "y": 9 }, "size": { "w": 24, "h": 24 } }
+                  ]
+                },
+                {
+                  "type": "Panel",
+                  "id": "image_composite_card",
+                  "size": { "w": 760, "h": 190 },
+                  "children": [
+                    { "type": "Image", "id": "img_card_backdrop", "position": { "x": 2, "y": 2 }, "size": { "w": 756, "h": 186 } },
+                    { "type": "Image", "id": "img_card_wash", "position": { "x": 2, "y": 2 }, "size": { "w": 756, "h": 186 } },
+                    { "type": "TextLabel", "id": "img_card_title", "text": "Controls over an image background", "position": { "x": 24, "y": 22 }, "size": { "w": 440, "h": 28 } },
+                    { "type": "TextLabel", "id": "img_card_desc", "text": "Children render in insertion order; the Button is last and remains clickable.", "position": { "x": 24, "y": 54 }, "size": { "w": 620, "h": 24 } },
+                    { "type": "Image", "id": "img_card_badge", "position": { "x": 650, "y": 18 }, "size": { "w": 76, "h": 76 } },
+                    { "type": "Button", "id": "img_overlay_button", "text": "Click overlay control", "position": { "x": 24, "y": 112 }, "size": { "w": 200, "h": 38 } }
+                  ]
+                },
+                { "type": "TextLabel", "id": "img_click_state", "text": "image composition clicks: 0", "size": { "w": 360, "h": 22 } }
               ]
             },
             {

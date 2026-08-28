@@ -41,7 +41,10 @@ public:
     // Color of the scrim. Defaults to (0, 0, 0, 0.5) — 50% black, a common
     // industry value. Hosts that want a lighter or darker overlay can adjust
     // per-modal at open time.
-    void setScrimColor(const math::FVector4& color) { _scrimColor = color; }
+    void setScrimColor(const math::FVector4& color) {
+        _scrimColor = color;
+        markDirty();
+    }
     const math::FVector4& getScrimColor() const { return _scrimColor; }
 
     // Standard Widget overrides. hitTest returns `this` for any point

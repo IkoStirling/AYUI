@@ -343,10 +343,9 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("Modal"))   f.registerCreator("Modal",   []() { return new Modal(); });
     // Phase D (D4) — TabStrip
     if (!f.isRegistered("TabStrip")) f.registerCreator("TabStrip", createTabStripWidget);
-    // Phase D §5.3 — ModalDialog / MessageBox template.
-    // Per Phase D PR-2 decision, Modal itself is NOT registered (kept as a
-    // private detail). ModalDialog IS registered so host JSON can spawn
-    // it directly via the layout loader without writing a creator wrapper.
+    // Phase D §5.3 — ModalDialog / MessageBox template. Modal is also
+    // registered because UILayoutLoader and the serializer expose it as a
+    // public base type; ModalDialog remains the usual JSON-facing choice.
     if (!f.isRegistered("ModalDialog")) f.registerCreator("ModalDialog", createModalDialogWidget);
 }
 
@@ -1001,13 +1000,8 @@ void UIManager::openPopup(Widget* anchor, Widget* popup) {
     _activeDropdownAnchorIsComboBox =
         (dynamic_cast<ComboBox*>(anchor) != nullptr);
 
-    // AYUI-DirtyRect-2026-08-26: a freshly-mounted popup must paint this
-    // frame. Without this, the dirty-rect short-circuit (Widget::render)
-    // skips both the overlay (already clean after the previous frame's
-    // empty-overlay paint) and the popup itself (newly added but no
-    // setter has fired). The popup would be invisible until the user
-    // mouses over it. We markDirty the popup; the parent-propagation
-    // in Widget::markDirty walks up to _overlayRoot automatically.
+    // A newly mounted popup invalidates its overlay branch for any future
+    // retained presentation cache.
     popup->markDirty();
 }
 
@@ -1328,11 +1322,7 @@ void UIManager::openModal(Modal* modal) {
     _activeModal = modal;
     _activeModalRoot = modal;
 
-    // AYUI-DirtyRect-2026-08-26: freshly-mounted modal must paint this
-    // frame (same rationale as openPopup above). markDirty propagates to
-    // _overlayRoot via Widget::markDirty's parent-clean→dirty check, so
-    // the overlay subtree is re-walked and the modal's own onRender
-    // fires for the first time.
+    // A newly mounted modal invalidates its overlay branch.
     modal->markDirty();
 }
 
@@ -1765,9 +1755,7 @@ void UIManager::updateGhostPosition(const math::FVector2& pos) {
     // mouse cursor (small "+12, +8" indirection — matches Qt's default
     // and most editor conventions).
     _dragGhost->setPosition(math::FVector2(pos.x + 12.0f, pos.y + 8.0f));
-    // AYUI-DirtyRect-2026-08-26: ghost moved → paint frame must redraw.
-    // Without this, the dirty-rect short-circuit (Widget::render) skips
-    // the ghost every frame and it appears frozen at the first position.
+    // Ghost movement invalidates any future cached presentation.
     _dragGhost->markDirty();
 }
 
@@ -1830,10 +1818,7 @@ bool UIManager::beginDrag(Widget* source) {
     ensureGhostCreated();
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(true);
-        // AYUI-DirtyRect-2026-08-26: ghost becomes visible → must paint on
-        // the overlay this frame. Without this, the dirty-rect short-circuit
-        // (Widget::render) skips the ghost and it stays invisible until
-        // something else dirties the overlay subtree.
+        // Visibility change invalidates any future cached presentation.
         _dragGhost->markDirty();
         // PR-S5e: start the ghost at the PRESS position (last known
         // cursor), not the source's center. The old code spawned it at
@@ -1902,10 +1887,7 @@ void UIManager::updateDrag(float x, float y) {
         // Leave old target.
         if (_dragSession.currentTarget != nullptr) {
             _dragSession.currentTarget->setCurrentDropTarget(false);
-            // AYUI-DirtyRect-2026-08-26: highlight off → must repaint to
-            // erase the accent border. Without this, the dirty-rect
-            // short-circuit skips the repaint and the border would
-            // linger for one frame after the drag leaves the widget.
+            // Highlight state is part of the widget presentation cache key.
             _dragSession.currentTarget->markDirty();
             if (_dragSession.currentTarget->_onDragLeave) {
                 _dragSession.currentTarget->_onDragLeave();
@@ -1914,10 +1896,7 @@ void UIManager::updateDrag(float x, float y) {
         // Enter new target.
         if (newTarget != nullptr) {
             newTarget->setCurrentDropTarget(true);
-            // AYUI-DirtyRect-2026-08-26: highlight on → must repaint so
-            // the accent border appears immediately (Widget::render only
-            // paints the border when _isCurrentDropTarget; without
-            // markDirty the next frame's render short-circuits).
+            // Highlight state is part of the widget presentation cache key.
             newTarget->markDirty();
             if (newTarget->_onDragEnter) {
                 newTarget->_onDragEnter(_dragSession.payload);
@@ -1942,22 +1921,14 @@ bool UIManager::endDrag(bool accepted) {
 
     if (target != nullptr) {
         target->setCurrentDropTarget(false);
-        // AYUI-DirtyRect-2026-08-26: drop-target highlight went off → must
-        // repaint this frame to erase the accent border (Widget::render
-        // draws the highlight when _isCurrentDropTarget; without markDirty
-        // the dirty-rect short-circuit would skip the repaint and the
-        // border would persist for one extra frame).
+        // Drop-target highlight state changed.
         target->markDirty();
     }
     _dragSession.active        = false;
     _dragSession.currentTarget = nullptr;
     if (_dragGhost != nullptr) {
         _dragGhost->setVisible(false);
-        // AYUI-DirtyRect-2026-08-26: ghost just hid → repaint so the
-        // overlay no longer draws it. markDirty even though render()
-        // short-circuits on !_visible (setVisible(false) is a no-op for
-        // dirty tracking); this guards against a paintable ghost child
-        // when visible=false transitions back to true next drag start.
+        // Preserve invalidation metadata for a later retained cache.
         _dragGhost->markDirty();
     }
 
@@ -2115,10 +2086,7 @@ void UIManager::setFocus(Widget* widget) {
         if (prevAsFw != nullptr) {
             prevAsFw->setFocus(false);
         }
-        // AYUI-DirtyRect-2026-08-26: focus ring on `prev` goes off → must
-        // repaint so the outline disappears. Without markDirty, the
-        // dirty-rect short-circuit skips the repaint and the ring
-        // lingers for one frame after focus moves elsewhere.
+        // Focus ring state changed.
         prev->markDirty();
     }
     if (_focusedWidget != nullptr) {
@@ -2127,8 +2095,7 @@ void UIManager::setFocus(Widget* widget) {
         if (nextAsFw != nullptr) {
             nextAsFw->setFocus(true);
         }
-        // AYUI-DirtyRect-2026-08-26: focus ring on the new focus owner →
-        // must repaint to draw the outline. Symmetric to the prev case.
+        // Focus ring state changed, symmetric to the previous owner.
         _focusedWidget->markDirty();
     }
 

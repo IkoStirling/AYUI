@@ -1,66 +1,152 @@
 # AYUI
 
-Engine UI framework: widget tree, JSON layout loading, i18n, and `IRenderBackend` abstraction.
+AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控件树、布局、输入与焦点、JSON 布局、主题/i18n、弹层、Docking、动画，以及渲染后端抽象。
 
-**Authoritative design:** [`design.md`](design.md) (v1.3, 2026-07)
+- CMake 目标版本：`1.0.0`
+- 当前功能里程碑：v1.5 已实现
+- 最近全模块审计：2026-08-27
+- 权威架构文档：[design.md](design.md)
+- 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
 
-Legacy detail: [`AYUI-v1-Design.md`](AYUI-v1-Design.md) (v1.2)
+## 当前状态
 
----
+AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRenderer 提供 `UIRenderBackend` 实现，AYUI 本身只依赖 `IRenderBackend`。
 
-## Status
+已实现的主要能力：
 
-当前为 v1.5：核心 Widget、数据驱动布局、输入控件、Overlay、Layout、Docking 与 Gallery 均已进入根工程构建。Docking 和 UI Animation 的后续顺序以 [design.md](design.md) 为准。
+- Widget 树、命中测试、事件冒泡、焦点、鼠标捕获、拖放和多窗口 `UIManager`
+- VBox/HBox、GridPanel、ScrollView、Splitter 与约束辅助
+- Button、输入框、列表、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
+- DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
+- JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
+- StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
+- 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
+- Gallery 与独立 Layout Editor
 
-- 公开入口：`AYUI.h`
-- 后端接口：`AYUI/IRenderBackend.h`
-- 控件头：`include/AYUI/`
-- 根工程已启用 `add_subdirectory(AYRuntime/AYUI)`
+2026-08-28 修复逐帧提交契约后的 Windows Debug 基线为 `7405 / 7405` 条断言通过。
 
-## Data-driven (quick start)
+重要渲染契约：AYUI 保留 Widget 状态和树，`UIRenderBackend` 保持即时、逐帧提交。后端在 `beginFrame()` 清空上一帧命令，因此所有可见 Widget 必须每帧 replay；dirty 标记仅用于 presentation/cache invalidation，不能跳过当前帧提交。真正减少静态 UI 的 CPU 构建开销需要 retained display-list 或离屏层缓存。
 
-Layout JSON is loaded with **`UILayoutLoader`** — reuse as-is for v1:
+## 快速接入
+
+常用入口是聚合头 `AYUI.h`：
+
+```cpp
+#include "AYUI.h"
+
+ayt::ui::UIManager ui;
+ui.initialize(renderBackend);       // renderBackend implements IRenderBackend
+ui.setClientSize(1280.0f, 720.0f);
+
+ui.loadLayout("assets/ui/main.ui.json");
+ui.update(deltaSeconds);
+ui.render();
+```
+
+只需要构建 JSON 控件树时，可以直接使用 `UILayoutLoader`：
 
 ```cpp
 #include "AYUI.h"
 
 ayt::ui::UILayoutLoader loader;
-loader.bindEvent("btn_ok", "onClick", [] { /* ... */ });
+loader.bindEvent("btn_ok", "onClick", [] {
+    // Handle the action in host code.
+});
 
 ayt::ui::Widget* root = loader.loadFromFile("menu.ui.json");
-// root->render(mockOrRealBackend);
+// The returned factory-built tree is owned by the caller.
+ayt::ui::destroyWidgetTree(root);
 ```
 
-- Text keys: `"ui.section.key"` → `I18n`
-- Styles: `"style": "id"` → `StyleSheet` (JSON parser U1; `styleId` already set on widget)
-- Do **not** add a second config system for layouts; see [design.md §4](design.md#4-data-driven-layer-reuse-assessment)
+JSON 中的可执行逻辑不会被反序列化；`onClick` 等字段只用于匹配宿主通过 `bindEvent` 注册的回调。
 
----
+## 数据驱动约定
 
-## Tests
+```json
+{
+  "type": "Window",
+  "id": "pause_menu",
+  "position": { "x": 100, "y": 100 },
+  "size": { "w": 420, "h": 280 },
+  "style": "panel.default",
+  "text": "ui.pause.title",
+  "children": [
+    {
+      "type": "VBox",
+      "spacing": 8,
+      "padding": { "left": 12, "top": 12, "right": 12, "bottom": 12 },
+      "children": [
+        {
+          "type": "Button",
+          "id": "btn_resume",
+          "text": "ui.pause.resume",
+          "onClick": "resume_game"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- 布局文件使用 `*.ui.json`。
+- `text` 以 `ui.` 开头且 loader 已设置 `I18n` 时，会按当前语言解析。
+- 所有 JSON 文本均按 UTF-8 处理。
+- `style` 引用 StyleSheet；Theme token 可由控件局部 override。
+- Dock 布局通过 `UILayoutLoader::saveLayout*` 与 `loadFrom*` 持久化。
+
+`WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
+
+## 所有权规则
+
+- `UILayoutLoader` / `WidgetSerializer` 返回的根树由调用方负责，使用 `destroyWidgetTree` 销毁。
+- 普通 `addChild` 将节点纳入 `destroyWidgetTree` 的递归销毁范围；`Widget` 析构本身不删除 children。`addChildExternal` 用于宿主/栈对象持有的外部生命周期场景。
+- Popup 由 `UIManager` 的 overlay 管理；关闭路径可能带淡出动画，关闭后不要继续解引用已销毁的 popup。
+- `DockCard::setContent` 接管 content；`Modal::setDimmerOwned` 接管 dimmer，`setDimmer` 不接管。
+- 模块是 UI 线程模型；不要从后台线程直接修改 Widget 树。
+
+完整不变量见 [design.md](design.md#5-生命周期与所有权)。
+
+## 图片与控件组合
+
+`Image` 支持纯色回退、命名/匿名纹理句柄、UV 裁剪和整体透明度。控件叠图有两种常用结构：把 `Image` 作为 `Button` 的装饰子节点（按钮本身仍接收点击），或在 `Panel` 中先放背景 `Image`、再放文本和交互控件；同级子节点按插入顺序绘制，后加入者位于上层。
+
+`AYUI_Gallery` 的 **Images** 页面提供共享纹理、UV crop、图片按钮、半透明图片层和图片背景上可点击控件的实机示例。示例纹理由 Gallery 运行时生成，不依赖外部图片文件。
+
+## 构建与验证
+
+在已配置的根工程 build 目录中：
 
 ```bat
 cmake --build <build-dir> --target AYUI_UnitTests
-<build-dir>/AYRuntime/AYUI/unittest/AYUI_UnitTests.exe
-```
+<build-dir>\AYRuntime\AYUI\unittest\AYUI_UnitTests.exe
 
-Requires enabling `AYUI` in CMake locally.
-
-## Gallery (visual check)
-
-Standalone UI-only demo — no 3D scene, no Editor shell:
-
-```bat
 cmake --build <build-dir> --target AYUI_Gallery
-<build-dir>/AYRuntime/AYUI/demo/AYUI_Gallery.exe
+cmake --build <build-dir> --target AYUI_LayoutEditor
 ```
 
-Layout: `demo/assets/gallery.ui.json` (copied next to the exe). Sections:
-Basics / Input / Collections / Overlay / Layout. Use **Reload JSON** after editing the layout file.
+测试程序在任一断言失败时返回非零退出码，可直接用于 CI。
 
----
+## 目录
 
-## Related engine docs
+- `include/AYUI/`：公共 API
+- `interface/AYUI/IRenderBackend.h`：渲染后端契约
+- `Controls/`：控件、UIManager、Docking
+- `Layout/`：Box、Grid、Constraint、Splitter
+- `Loader/`：JSON loader、factory、serializer
+- `Style/`：style/theme 与 MockRenderer
+- `i18n/`：语言表
+- `unittest/`：模块回归测试
+- `demo/`：Gallery 与 Layout Editor
 
-- [AYRenderer/README.md](../AYRenderer/README.md) — R4 + engine integration
-- [AYEntity/design.md](../AYEntity/design.md) — ECS / bootstrapModule
+## 已知边界
+
+- Linux/POSIX Clipboard 当前是安全的 no-op 实现；Windows 使用 Win32 clipboard。
+- `WidgetSerializer` 对核心控件和 DockArea 持久化路径有覆盖，但并非所有运行时/内部控件都保证完整语义往返；详见 [design.md](design.md#8-jsonfactoryserializer-契约)。
+- GridPanel 的 cell attachment、部分复合控件内部结构仍有专用加载路径，不能只靠通用 `children` 推断。
+- TabStrip 溢出目前裁剪，不提供水平滚动；RichText 仍是轻量 runs 模型。
+- 3D spatial UI、像素遮罩命中测试和高级特效不在当前范围。
+
+## 相关模块
+
+- [AYRenderer](../AYRenderer/README.md)：`UIRenderBackend` 与 UI pass
+- [AYEntity](../AYEntity/design.md)：引擎子系统和启动流程

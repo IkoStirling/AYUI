@@ -1,28 +1,16 @@
 // =============================================================================
-// AYUI-DirtyRect-2026-08-26: per-widget paint-gate regression tests.
+// AYUI invalidation + per-frame submission regression tests.
 // =============================================================================
 //
-// Before this cut, populateFrame() walked every widget every frame. Static
-// TextLabels ("clicks: 0"), idle Buttons, un-focused TextInputs all repainted
-// 60 times a second. With 80-400 widgets per frame, that was 5k-24k wasted
-// item submissions/sec.
+// UIRenderBackend owns a frame-local command buffer: beginFrame() clears all
+// UiItems and bgfx transient submissions cannot be replayed implicitly. The
+// retained Widget tree must therefore submit every visible widget every
+// frame, even when its cached presentation is clean.
 //
-// The dirty-rect system puts a short-circuit at the top of Widget::render:
-// if both `_dirtyThis` is false AND `_dirtyRect` is empty (default
-// ctor = zero area), the widget skips. Setters / animation ticks call
-// markDirty() to re-arm. The contract:
-//
-//   - New widget: _dirtyThis = true (set by default member init) -> renders
-//     once -> flag clears -> won't re-render until something marks dirty.
-//   - markDirty(r): sets _dirtyThis=true; if r is non-empty, also unions
-//     into _dirtyRect (partial damage, rarely used).
-//   - render(): if !_visible || (!_dirtyThis && _dirtyRect.empty()) return;
-//     at end of paint: _dirtyThis=false; _dirtyRect=empty.
-//
-// Tests assert the OBSERVABLE behavior: the same renderer instance's
-// draw-call count must NOT grow when a static widget is re-rendered. The
-// MockRenderer's getDrawCalls() list is the canonical "did this widget
-// paint?" oracle for these tests.
+// Dirty markers remain useful as cache/damage invalidation metadata: setters
+// mark the affected widget, invalidation propagates to ancestors, and render
+// consumes the markers. They do NOT suppress per-frame submission until AYUI
+// gains a persistent display-list or render-target cache.
 // =============================================================================
 
 #include "AYTest.h"
@@ -31,6 +19,7 @@
 #include "AYUI/Button.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/MockRenderer.h"
+#include "AYUI/UIManager.h"
 
 #include <cstddef>
 
@@ -71,56 +60,76 @@ size_t rectCount(MockRenderer& r) {
 } // namespace
 
 // =============================================================================
-// Core contract: a freshly-added widget renders ONCE on first frame, then
-// stops repainting until something marks it dirty.
+// Core contract: direct render calls always replay visible presentation.
 // =============================================================================
-TEST_CASE(DirtyRect_FreshWidgetRendersOnceThenStops) {
+TEST_CASE(DirtyRect_CleanWidgetStillSubmitsEveryFrame) {
     MockRenderer r;
     PainterWidget w;
     w.setSize(FVector2(100.0f, 50.0f));
 
-    // Frame 1: _dirtyThis=true (from default member init) -> must render.
     w.render(r);
     CHECK(rectCount(r) == 1u);
     CHECK(w.renderCount == 1);
+    CHECK_FALSE(w.isDirtyThis());
 
-    // Frame 2: no mutations -> must short-circuit, zero new draw calls.
+    // The second call is clean but must still append a new submission.
     w.render(r);
-    CHECK(rectCount(r) == 1u);
-    CHECK(w.renderCount == 1);
+    CHECK(rectCount(r) == 2u);
+    CHECK(w.renderCount == 2);
 
-    // Frames 3-5: still clean -- accumulating frames doesn't grow the
-    // draw-call list. This is the load-bearing perf assertion from the
-    // audit: a static label doesn't repaint at 60 fps.
     w.render(r);
     w.render(r);
     w.render(r);
-    CHECK(rectCount(r) == 1u);
-    CHECK(w.renderCount == 1);
+    CHECK(rectCount(r) == 5u);
+    CHECK(w.renderCount == 5);
 }
 
 // =============================================================================
-// Audit brief test #1: build a TextLabel, render once, render again without
-// changes. The widget's _dirtyThis must clear after the first render so
-// the second pass is a no-op.
+// Static labels also replay after their invalidation marker is consumed.
 // =============================================================================
-TEST_CASE(DirtyRect_StaticLabelNoRerender) {
+TEST_CASE(DirtyRect_StaticLabelReplaysWhenClean) {
     TextLabel label;
     label.setText(L"clicks: 0");
     label.setSize(FVector2(100.0f, 20.0f));
 
     MockRenderer r;
-    // Frame 1 -- fresh widget paints the text label.
     label.render(r);
     const size_t after1 = r.getDrawCalls().size();
     CHECK(after1 >= 1u);
-    // _dirtyThis must have been cleared by the first render.
     CHECK_FALSE(label.isDirtyThis());
     CHECK_FALSE(label.hasDirtyRect());
 
-    // Frame 2 -- no changes, must short-circuit (no new draw calls).
     label.render(r);
-    CHECK(r.getDrawCalls().size() == after1);
+    CHECK(r.getDrawCalls().size() > after1);
+}
+
+// =============================================================================
+// Production-shaped regression: UIManager calls beginFrame(), which clears
+// the backend command list. A clean static label must be regenerated into
+// the second frame or it disappears after the back-buffer swap.
+// =============================================================================
+TEST_CASE(DirtyRect_UIManagerStaticLabelSurvivesFrameClear) {
+    MockRenderer r;
+    UIManager ui;
+    ui.initialize(&r);
+    ui.setClientSize(320.0f, 120.0f);
+    CHECK(ui.loadFromString(
+        R"({"type":"VBox","id":"static_root","size":{"w":320,"h":120},"children":[{"type":"TextLabel","id":"static_label","text":"persistent","size":{"w":160,"h":24}}]})"));
+
+    ui.render();
+    TextLabel* label = dynamic_cast<TextLabel*>(ui.findById("static_label"));
+    CHECK_NOT_NULL(label);
+    const size_t frame1 = r.getDrawCalls().size();
+    CHECK(frame1 >= 1u);
+    CHECK_FALSE(label->isDirtyThis());
+
+    ui.render();
+    const size_t frame2 = r.getDrawCalls().size();
+    CHECK(frame2 >= 1u);
+    CHECK(frame2 == frame1);
+    CHECK_FALSE(label->isDirtyThis());
+
+    ui.shutdown();
 }
 
 // =============================================================================
@@ -159,7 +168,7 @@ TEST_CASE(DirtyRect_VisibilityChangeTriggersRerender) {
 
     MockRenderer r;
 
-    // Hide the widget -- the render short-circuit handles hiding for free.
+    // Hidden widgets never submit.
     label.setVisible(false);
     label.render(r);
     const size_t afterHide = r.getDrawCalls().size();
@@ -172,9 +181,9 @@ TEST_CASE(DirtyRect_VisibilityChangeTriggersRerender) {
     CHECK(r.getDrawCalls().size() > afterHide);
     CHECK_FALSE(label.isDirtyThis());
 
-    // Now render again -- clean, no new draws.
+    // A clean visible widget still submits on the next frame/call.
     label.render(r);
-    CHECK(r.getDrawCalls().size() > afterHide); // unchanged from previous frame
+    CHECK(r.getDrawCalls().size() > afterHide);
 }
 
 // =============================================================================
@@ -252,8 +261,8 @@ TEST_CASE(DirtyRect_SetOpacityTriggersRerender) {
 }
 
 // =============================================================================
-// markDirty() propagation -- a child markDirty() must propagate to parent so
-// the ancestor's render short-circuit doesn't block the descendant paint.
+// markDirty() propagation remains the invalidation contract for a future
+// retained subtree cache.
 // =============================================================================
 TEST_CASE(DirtyRect_ChildDirtyPropagatesToParent) {
     auto* parent = new Widget();
@@ -277,10 +286,8 @@ TEST_CASE(DirtyRect_ChildDirtyPropagatesToParent) {
 }
 
 // =============================================================================
-// Union markDirty(rect): passing a valid rect should NOT set _dirtyThis
-// (partial damage only -- the rect alone is enough for the render to
-// fire because hasDirtyRect() will be true). It MUST add the rect to
-// _dirtyRect so the render short-circuit doesn't drop the call.
+// Union markDirty(rect): passing a valid rect should NOT set _dirtyThis.
+// It records partial damage for a future retained cache.
 // =============================================================================
 TEST_CASE(DirtyRect_MarkDirtyWithRectSetsDirtyRect) {
     PainterWidget w;
@@ -293,14 +300,13 @@ TEST_CASE(DirtyRect_MarkDirtyWithRectSetsDirtyRect) {
     CHECK_FALSE(w.hasDirtyRect());
 
     // markDirty with a non-empty rect: _dirtyRect becomes that rect, and
-    // _dirtyThis stays false (per the implementation -- the rect alone is
-    // enough for the render to fire because hasDirtyRect() will be true).
+    // _dirtyThis stays false.
     w.markDirty(FRectangle(5.0f, 5.0f, 20.0f, 20.0f));
     CHECK_FALSE(w.isDirtyThis());
     CHECK_TRUE(w.hasDirtyRect());
 
     w.render(r);
-    // Render fired (because hasDirtyRect was true); now clean again.
+    // Submission consumes the damage marker.
     CHECK_FALSE(w.hasDirtyRect());
 }
 

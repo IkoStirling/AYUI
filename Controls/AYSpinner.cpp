@@ -18,9 +18,8 @@ void Spinner::tick(float dt) {
     Widget::tick(dt);
     _phase += dt / kPeriodSeconds;
     if (_phase > 1.0f) _phase -= 1.0f;
-    // AYUI-DirtyRect-2026-08-26: spinner is animated every frame —
-    // markDirty unconditionally. Without this the render() short-circuit
-    // would freeze the spinner on the first paint.
+    // The phase mutates without a setter; invalidate any future cached
+    // presentation every animation frame.
     markDirty();
 }
 

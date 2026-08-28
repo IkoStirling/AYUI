@@ -122,7 +122,8 @@ public:
 
     // AI-1 (2026-07-20): render() split into populateFrame() + flushFrame()
     // so AYRenderer's RenderPass dispatch can own the per-frame flush
-    // boundary. populateFrame walks the widget tree and accumulates
+    // boundary. populateFrame walks and replays the complete visible widget
+    // tree every frame, then accumulates
     // batches on the backend (beginFrame/beginCanvas + render root +
     // overlay + drag ghost); flushFrame closes the IRenderBackend
     // lifecycle (endCanvas + endFrame). render() remains as the

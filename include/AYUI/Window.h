@@ -34,7 +34,7 @@ public:
     void setMovable(bool movable) { _movable = movable; markDirty(); }
     bool isMovable() const { return _movable; }
 
-    void setResizable(bool resizable) { _resizable = resizable; }
+    void setResizable(bool resizable) { _resizable = resizable; markDirty(); }
     bool isResizable() const { return _resizable; }
 
     void setClosable(bool closable) { _closable = closable; markDirty(); }

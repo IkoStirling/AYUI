@@ -29,6 +29,7 @@
 #include <AYIO/File.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -143,7 +144,9 @@ TEST_CASE(test_save_layout_to_file_round_trips_via_disk) {
     WidgetFactory::get();
     BuiltDock built;
 
-    const std::string path = "D:/tmp/ayui_d4_persist_test.json";
+    const std::string path =
+        (std::filesystem::temp_directory_path() /
+         "ayui_d4_persist_test.json").string();
     ayt::io::File::remove(path);  // start clean
 
     UILayoutLoader saver;

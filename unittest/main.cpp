@@ -4,6 +4,7 @@
 // Test translation units are included below intentionally; keep this file
 // as the rebuild anchor when any included test source changes.
 // The anchor also keeps focused audit probes reproducible after edits.
+// Audit 2026-08-27: final full-suite rebuild anchor.
 
 #include <cstdio>
 
@@ -70,8 +71,8 @@
 #include "Test_LayoutPersistence.cpp"  // D4 (2026-07-26)
 #include "Test_CardPromotion.cpp"      // D5.5 (2026-07-26)
 #include "Test_Leak.cpp"               // code-review 2026-08-02 leak-detection regression
-#include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText 贯�?
-#include "Test_Clipboard.cpp"          // PR-A2 clipboard 抽接�?
+#include "Test_TextAreaMeasure.cpp"    // PR-A1 measureText integration
+#include "Test_Clipboard.cpp"          // PR-A2 clipboard abstraction
 #include "Test_TextInput_Selection.cpp" // PR-A3 selection keyboard + undo
 #include "Test_WindowResize.cpp"        // PR-B1 Window 4-edge + 4-corner resize
 #include "Test_Theme_Gallery.cpp"       // PR-B2 measurePrefixWidth + Theme swap
@@ -92,15 +93,15 @@
 #include "Test_TextStyle_Fields.cpp"       // AYUI-Audit-2026-08-26: TextStyle field recording (MockRenderer drawText(styled))
 #include "Test_CardStyle_Render.cpp"       // AYUI-Audit-2026-08-26: drawCard round-trip (MockRenderer Card recording)
 #include "Test_WidgetSerializer_AllTypes.cpp" // AYUI-Audit-2026-08-26: parameterized round-trip across 29 widget types
-#include "Test_DirtyRect.cpp"                // AYUI-Audit-2026-08-26 Batch B: dirty-rect system (markDirty / render short-circuit)
+#include "Test_DirtyRect.cpp"                // AYUI invalidation + frame-local backend replay contract
 #include "Test_GetWorldBoundsCache.cpp"      // AYUI-Audit-2026-08-26 Batch C: worldBounds cache + markDescendantsBoundsDirty
 #include "Test_TextAreaLifecycle.cpp"        // AYUI-Audit-2026-08-26 Batch A: ~TextArea _document leak regression
 #include "Test_MenuBarLifecycle.cpp"         // AYUI-Audit-2026-08-26 Batch A: ~MenuBar dtor UAF regression
 
-void runTest()
+int runTest()
 {
 	// Run all tests
-	ayt::test::runAllTests("AYUI");
+	return ayt::test::runAllTests("AYUI");
 }
 using namespace ayt::ui;
 using namespace ayt::math;
@@ -112,6 +113,5 @@ int main(int argc, char* argv[]) {
     // when output is redirected to a file.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
-    runTest();
-    return 0;
+    return runTest();
 }

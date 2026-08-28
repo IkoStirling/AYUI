@@ -691,11 +691,8 @@ void TextInput::tick(float dt) {
         _caretBlinkTimer -= kCaretBlinkSeconds;
         _caretVisible = !_caretVisible;
     }
-    // AYUI-DirtyRect-2026-08-26 Batch B follow-up: render short-circuits
-    // when !_dirtyThis && !hasDirtyRect(). The blink toggle changes the
-    // rendered caret bit but never writes a setter, so a focused TextInput
-    // would freeze visually. markDirty() only on the flip — steady-state
-    // blinks are silent.
+    // The caret bit changes without a setter. Invalidate any future cached
+    // presentation only on the flip; steady-state ticks stay silent.
     if (_caretVisible != prevCaret) {
         markDirty();
     }

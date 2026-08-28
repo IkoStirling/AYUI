@@ -102,19 +102,26 @@ void TreeView::flatten() {
 }
 
 void TreeView::rebuildNodes() {
-    // Tear down old node widgets.
-    for (TreeNode* n : _nodes) {
+    // Keep a stable pool of row widgets. setTree() is used by model-driven
+    // views and may run every frame; deleting and reallocating every row made
+    // an otherwise O(N) flatten pass dominated by allocator churn.
+    while (_nodes.size() > _flatData.size()) {
+        TreeNode* n = _nodes.back();
+        _nodes.pop_back();
         if (n == nullptr) continue;
         removeChild(n);
         delete n;
     }
-    _nodes.clear();
+    while (_nodes.size() < _flatData.size()) {
+        TreeNode* node = new TreeNode();
+        addChild(node);
+        _nodes.push_back(node);
+    }
 
     const float barW = (_vbar != nullptr) ? ScrollBar::kDefaultBarWidth : 0.0f;
     const float rowW = std::max(0.0f, getWidth() - barW);
-    _nodes.reserve(_flatData.size());
     for (size_t i = 0; i < _flatData.size(); ++i) {
-        TreeNode* node = new TreeNode();
+        TreeNode* node = _nodes[i];
         node->setLabel(_flatData[i].label);
         node->setIcon(_flatData[i].icon);
         node->setHasChildren(_flatData[i].hasChildren);
@@ -129,8 +136,6 @@ void TreeView::rebuildNodes() {
             toggleExpand(static_cast<int>(i));
         });
         node->setOnClickByNode([this](int idx) { handleNodeClick(idx); });
-        addChild(node);
-        _nodes.push_back(node);
     }
     _pendingDepths.clear();
 

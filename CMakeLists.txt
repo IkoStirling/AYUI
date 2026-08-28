@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(AYUI
     VERSION 1.0.0
-    DESCRIPTION "AYUI — in-game UI framework (C-lane + v1.1 phases + D1-D5 docking + ASAN option)"
+    DESCRIPTION "AYUI — retained-mode engine UI, data-driven layouts, docking, styling and animation"
 )
 
 set(MODULE_NAME AYUI)
@@ -73,7 +73,9 @@ set(SRC_FILES
 set(HEAD_FILES
     AYUI.h
     include/AYUI/Event.h
+    include/AYUI/BoxSlotLimits.h
     include/AYUI/DragDrop.h
+    include/AYUI/DockTrace.h
     include/AYUI/Button.h
     include/AYUI/CheckBox.h
     include/AYUI/RadioButton.h
@@ -82,11 +84,14 @@ set(HEAD_FILES
     include/AYUI/ProgressBar.h
     include/AYUI/FocusableWidget.h
     include/AYUI/TextInput.h
+    include/AYUI/ImeTypes.h
     include/AYUI/TextArea.h
     include/AYUI/ScrollableWidget.h
     include/AYUI/ScrollBar.h
+    include/AYUI/ScrollBarSync.h
     include/AYUI/ScrollView.h
     include/AYUI/Image.h
+    include/AYUI/ImageTexture.h
     include/AYUI/TextureRegistry.h
     include/AYUI/InteractiveWidget.h
     include/AYUI/LeafWidget.h
@@ -119,6 +124,7 @@ set(HEAD_FILES
     include/AYUI/Clipboard.h
     include/AYUI/TabStrip.h
     include/AYUI/Spinner.h
+    include/AYUI/Tween.h
     include/AYUI/DockArea.h
     include/AYUI/DockCard.h
     include/AYUI/DockOverlay.h
@@ -127,6 +133,7 @@ set(HEAD_FILES
     include/AYUI/SplitterHandle.h
     include/AYUI/GridPanel.h
     include/AYUI/Constraint.h
+    include/AYUI/ValueWidget.h
     include/AYUI/LayoutLoader.h
     include/AYUI/WidgetFactory.h
     include/AYUI/WidgetSerializer.h
@@ -177,4 +184,4 @@ enable_testing()
 add_subdirectory(unittest)
 add_subdirectory(demo)
 
-message(STATUS "AYUI v1.0.0 (C-lane ship + D1-D5 docking + G3-G13 tier + ASAN regression tests) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")
+message(STATUS "AYUI v${PROJECT_VERSION} — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

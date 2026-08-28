@@ -25,6 +25,20 @@ void MockRenderer::clear() {
     // PR-Container-Contract-Cut2: also reset the clip stack so a
     // mid-test clear() doesn't leak stack frames into the next render.
     _clipStack.clear();
+    _currentBlend = BlendMode::Normal;
+    _opacityStack.assign(1, 1.0f);
+}
+
+void MockRenderer::beginFrame() {
+    // UIRenderBackend::beginFrame clears its UiItem command buffer. Mirror
+    // that contract so UIManager multi-frame tests cannot accidentally rely
+    // on retained draw calls that do not exist on the production backend.
+    _drawCalls.clear();
+    _triangleCount = 0;
+    _vertexCount = 0;
+    _clipStack.clear();
+    _currentBlend = BlendMode::Normal;
+    _opacityStack.assign(1, 1.0f);
 }
 
 // PR-Container-Contract-Cut2: clip-stack recording overrides. Pre-PR

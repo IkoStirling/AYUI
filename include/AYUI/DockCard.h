@@ -40,7 +40,7 @@ public:
     // the string; the render path that draws the icon lives in D1's
     // header draw and is a no-op when empty.
     const std::string& getIcon() const { return _icon; }
-    void setIcon(const std::string& icon) { _icon = icon; }
+    void setIcon(const std::string& icon) { _icon = icon; markDirty(); }
 
     // Replaces the currently-hosted content. The previous content (if any)
     // is destroyed. Pass nullptr to clear.
@@ -50,7 +50,7 @@ public:
     // Whether the card shows a close ("x") affordance in its header.
     // When true, the header paints an X; a press fires onCloseRequested
     // (host removes the card / closes the promoted child window).
-    void setClosable(bool c) { _closable = c; }
+    void setClosable(bool c) { _closable = c; markDirty(); }
     bool isClosable() const { return _closable; }
 
     using CloseCallback = std::function<void(DockCard* card)>;
@@ -69,7 +69,11 @@ public:
     bool isCollapsed() const { return _collapsed; }
 
     // Header strip height (logical pixels). Default 22px.
-    void setHeaderHeight(float h) { _headerHeight = h; }
+    void setHeaderHeight(float h) {
+        _headerHeight = h;
+        markBoundsDirty();
+        markDirty();
+    }
     float getHeaderHeight() const { return _headerHeight; }
 
     void onRender(IRenderBackend& renderer) override;

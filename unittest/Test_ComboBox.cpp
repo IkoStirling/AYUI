@@ -146,6 +146,24 @@ TEST_CASE(combobox_open_popup_empty_noop) {
     ui.shutdown();
 }
 
+TEST_CASE(combobox_disabled_cannot_open_popup) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    ComboBox cb;
+    cb.setItems({L"a", L"b"});
+    cb.setEnabled(false);
+    cb.openPopup();
+    CHECK_FALSE(cb.isPopupOpen());
+
+    cb.setEnabled(true);
+    cb.openPopup();
+    CHECK(cb.isPopupOpen());
+    cb.closePopup();
+    ui.shutdown();
+}
+
 // C-6: clicking the main ComboBox toggles popup; clicking the popup row
 // updates selection and (in v1) closes the popup.
 TEST_CASE(combobox_click_main_opens_popup) {

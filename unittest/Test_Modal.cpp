@@ -264,35 +264,31 @@ TEST_CASE(modal_dtor_with_open_modal_no_uaf) {
 // =============================================================================
 
 // AYUI-Audit-2026-08-26: Modal_OwnedDimmerDelete — setDimmerOwned transfers
-// ownership; ~Modal deletes the dimmer (cannot observe "deleted" from
-// outside, but we prove it by setting a sentinel on the dimmer and asserting
-// the pointer is no longer in the Modal after destruction).
+// ownership; a tracking subclass proves that ~Modal runs the dimmer dtor.
 TEST_CASE(Modal_OwnedDimmerDelete) {
+    struct TrackingDimmer final : Dimmer {
+        explicit TrackingDimmer(bool& destroyed) : _destroyed(destroyed) {}
+        ~TrackingDimmer() override { _destroyed = true; }
+        bool& _destroyed;
+    };
+
     UIManager um;
     um.initialize(nullptr);
     um.setClientSize(640.0f, 480.0f);
 
+    bool dimmerDestroyed = false;
     Modal* m = new Modal();
     um.root()->addChildExternal(m);
-    m->setDimmerOwned(new Dimmer());
-    Dimmer* dimPtr = m->getDimmer();
-    CHECK(dimPtr != nullptr);
+    m->setDimmerOwned(new TrackingDimmer(dimmerDestroyed));
+    CHECK(m->getDimmer() != nullptr);
 
     m->openModal();
     CHECK(m->isOpen());
 
-    // Destroy the modal. ~Modal must delete the owned dimmer. We
-    // can verify behavior by checking that a fresh Modal's dimmer is
-    // a different pointer (the previous one was freed).
+    // Allocators may immediately reuse a freed address, so pointer
+    // inequality is not a valid ownership assertion.
     delete m;
-    // Give the heap a beat to register the free; the new alloc must
-    // (almost certainly) reuse the slot but we only assert "different
-    // pointer" to avoid timing assumptions.
-    Modal* m2 = new Modal();
-    m2->setDimmerOwned(new Dimmer());
-    CHECK(m2->getDimmer() != nullptr);
-    CHECK(m2->getDimmer() != dimPtr);   // owned dimmer was freed
-    delete m2;
+    CHECK(dimmerDestroyed);
 
     um.shutdown();
 }

@@ -181,7 +181,7 @@ void Widget::addChild(Widget* child) {
     child->_parent = this;
     child->_externallyOwned = false;
     _children.push_back(child);
-    // Re-attaching a child must re-open the parent's paint gate.
+    // Re-attaching a child invalidates the parent's presentation cache.
     markDirty();
 }
 
@@ -498,13 +498,13 @@ void CompoundWidget::onChildRemoved(Widget* child) {
 
 void Widget::render(IRenderBackend& renderer) {
     if (!_visible) return;
-    // AYUI-DirtyRect-2026-08-26 (rebase fix): short-circuit when
-    // nothing in this subtree is dirty. _dirtyThis=true on a fresh
-    // widget so it renders once; setters / animation ticks call
-    // markDirty() to re-arm.
-    if (!_dirtyThis && !hasDirtyRect()) {
-        return;
-    }
+    // UIRenderBackend is an immediate per-frame submission backend:
+    // beginFrame() discards the previous frame's UiItems and bgfx does not
+    // preserve transient submissions across back-buffer frames. Therefore
+    // the retained Widget tree MUST replay its complete visible display
+    // list every frame. Dirty markers describe cache/damage invalidation;
+    // they must never suppress submission unless a persistent display-list
+    // or render-target cache is introduced at this boundary.
     // PR-anim: push the node opacity so the whole subtree (own paints +
     // children) fades as one unit. Fast path when fully opaque — the
     // pre-opacity rendering path is byte-identical.
@@ -528,8 +528,8 @@ void Widget::render(IRenderBackend& renderer) {
     if (fading) {
         renderer.popOpacity();
     }
-    // AYUI-DirtyRect-2026-08-26 (rebase fix): clear the dirty flags so
-    // the next frame short-circuits unless something marks us again.
+    // This frame consumed the pending invalidation. Submission still occurs
+    // next frame because the backend command buffer is frame-local.
     _dirtyThis = false;
     _dirtyRect = math::FRectangle();
 }

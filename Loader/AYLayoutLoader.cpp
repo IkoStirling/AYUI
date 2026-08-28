@@ -29,7 +29,9 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <codecvt>
 #include <cstring>
+#include <locale>
 #include <string>
 #include <vector>
 
@@ -65,6 +67,17 @@ void loaderHeapCheckId(const char* prefix, const char* parentId, const char* chi
 namespace ayt::ui {
 
 namespace {
+
+std::wstring utf8ToWide(const std::string& text)
+{
+    if constexpr (sizeof(wchar_t) == 2) {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        return converter.from_bytes(text);
+    } else {
+        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+        return converter.from_bytes(text);
+    }
+}
 
 BoxSlotLimits parseHBoxSlotLimits(const json& childJson, float& outWidth)
 {
@@ -177,7 +190,7 @@ DockCard* UILayoutLoader::buildDockCardFromJson(const json& cj) {
     }
     if (cj.contains("title")) {
         std::string u8 = cj["title"].get<std::string>();
-        card->setTitle(std::wstring(u8.begin(), u8.end()));
+        card->setTitle(utf8ToWide(u8));
     }
     if (cj.contains("icon")) {
         card->setIcon(cj["icon"].get<std::string>());
@@ -732,14 +745,15 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     }
 
     // Text with i18n support
-    std::string text = j.value("text", "");
+    const std::string text = j.value("text", "");
     if (!text.empty()) {
+        std::wstring wtext;
         if (_i18n && isI18nKey(text)) {
-            std::wstring wtext = _i18n->resolve(text);
-            text = std::string(wtext.begin(), wtext.end());
+            wtext = _i18n->resolve(text);
+        } else {
+            wtext = utf8ToWide(text);
         }
 
-        const std::wstring wtext(text.begin(), text.end());
         if (type == "Button") {
             if (Button* button = dynamic_cast<Button*>(widget)) {
                 button->setText(wtext);
@@ -784,7 +798,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 mi->setText(wtext);
                 if (j.contains("shortcut") && j["shortcut"].is_string()) {
                     const std::string sc = j["shortcut"].get<std::string>();
-                    mi->setShortcut(std::wstring(sc.begin(), sc.end()));
+                    mi->setShortcut(utf8ToWide(sc));
                 }
             }
         } else if (type == "Window") {
@@ -1002,7 +1016,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
         if (j.contains("title")) {
             std::string u8 = j["title"].get<std::string>();
-            card->setTitle(std::wstring(u8.begin(), u8.end()));
+            card->setTitle(utf8ToWide(u8));
         }
         if (j.contains("icon")) {
             card->setIcon(j["icon"].get<std::string>());

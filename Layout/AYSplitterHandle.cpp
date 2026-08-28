@@ -259,7 +259,7 @@ void SplitterHandle::tick(float dt) {
         if (!wasRevealed && isRevealed()) {
             // The reveal transition happens in tick(), after the previous
             // frame may already have consumed this widget's dirty flag.
-            // Re-arm the paint gate so the accent and grab handle appear.
+            // Invalidate the accent/grab-handle presentation state.
             markDirty();
         }
         if (splitterDebugEnabled() && !wasRevealed && isRevealed()) {
