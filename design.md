@@ -6,7 +6,8 @@
 
 **功能里程碑：** v1.5 已实现
 
-**状态：** 根工程集成、AYRenderer 后端、Docking、Layout Editor、动画与完整单测均可构建。
+**状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、AYRenderer
+后端、Docking、Layout Editor、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -103,15 +104,52 @@ Widget
 标准路径是：
 
 1. `IRenderBackend::beginFrame()` 开启帧并丢弃上一帧的临时绘制指令。
-2. `Widget::render()` 每帧重放所有可见 Widget；`onRender()` 绘制本控件，`renderChildren()` 负责后代和裁剪。
-3. setter 改变可见状态时调用 `markDirty()`；改变几何或自然尺寸时同时使 bounds/layout 相关缓存失效。
-4. 完成提交后清理 dirty 状态，但 clean 不能阻止下一帧重放。
+2. `Widget::render()` 每帧遍历所有可见 Widget。dirty 或尚未缓存的 Widget 通过
+   `DisplayListRecorder` 执行一次 `onRender()`；Recorder 在把命令立即转发给本帧后端的同时，
+   生成本控件的候选高层 display-list。
+3. clean Widget 不再执行 `onRender()`，而是把缓存的矩形、文本、图片、clip、blend 等命令
+   replay 给当前后端。bgfx 仍然每帧收到完整提交，不跨帧保留 `UiItem` 或 transient buffer。
+4. 普通 `renderChildren()` 始终独立遍历后代；子控件的实际绘制命令不会被扁平化进父控件的
+   list。ScrollView/ListView/TreeView 等为了 background/content/chrome 顺序而从 `onRender()`
+   直接调用子控件时，父 list 只保留动态子 Widget 调用，子控件仍独立检查 dirty/rebuild。
+   父级 clip、opacity 和子节点插入顺序仍在每帧 replay 中生效。
+5. setter 改变本控件 presentation 时调用 `markDirty()`；后代 dirty 只向父级传播 damage 状态，
+   不会无条件重建父级本地 list。位置或尺寸变化还要失效 bounds cache；由于当前绘制命令使用
+   world-space 坐标，祖先几何变化会级联失效后代 display-list。
+6. 完成提交后清理 dirty 状态；清理只表示本地 list 已同步，不能阻止下一帧 replay。
 
-这是保留模式 Widget 树与即时提交后端之间的硬契约：保留的是 UI 状态和树，不是 bgfx 的临时提交。dirty 当前只表示 presentation/cache invalidation，为未来 display-list 或离屏层缓存保留；在这些持久缓存落地前，不能把 dirty 当作 paint gate。Spinner、Tween 和滚动惯性仍按状态变化标脏，以保证未来缓存能够正确失效。
+这是保留模式 Widget 树与即时提交后端之间的硬契约：display-list 减少静态 Widget 的
+`onRender()`、样式查询和命令构造开销，但不违反 bgfx 的逐帧 submit 规则。Spinner、Tween
+和滚动惯性仍按状态变化标脏，因此动画期间重建本地 list，完成后回到稳定 replay。
+
+通用 Recorder 不跨帧持有可变资源生命周期。控件只要调用 path 构建、粒子更新、字体/动画/
+RenderTarget/Layer 创建释放或显式 pass 控制，当前候选 list 就会失效；Recorder 已经把本帧
+命令转发给真实后端，下一帧继续走旧即时路径。`DisplayListPolicy::Immediate` 可显式保留该路径，
+用于自定义控件兼容、诊断和 A/B 对照。
 
 图片组合遵循同一树顺序：父节点先执行 `onRender()`，子节点再按插入顺序绘制，`bringToFront()` 可把同级节点移到末尾。`Image` 提供纹理句柄、UV 和 opacity；图片按钮使用 `Button -> Image` 装饰子节点，命中仍返回 Button。图片背景上的交互层应使用 `Panel -> [Image, ..., Button]`，Panel 会下降命中并让后加入的 Button 覆盖在图片上。Gallery 的 `Images` 页面是该契约的可视化回归样例。
 
 渲染后端负责矩形、边框、文本、纹理、裁剪、opacity stack 等图元，不负责 Widget 生命周期或布局。`UIRenderBackend` 的 `UiItem`、clip stack 和 transient geometry 都是 frame-local；不得通过跨帧保留 `items` 来模拟 Widget 缓存。
+
+### 4.4 UI Layer / RenderTarget 抽象
+
+`IRenderBackend` 已定义两级持久渲染资源：
+
+- `RenderTargetDesc` / `RenderTargetHandle` 表达物理目标的尺寸、DPI、alpha 和内容保留策略，
+  并提供创建、resize、bind、blit、纹理查询和释放。
+- `LayerDesc` / `LayerHandle` 在 RenderTarget 之上表达逻辑 bounds、DPI、alpha、overlay、
+  clear mode/color；`LayerPaint` 携带局部 damage 和 full-redraw 选择。
+
+Layer 保留的是像素，display-list 保留的是绘制命令，两者不能混为一套缓存。Layer 的逻辑尺寸
+变化或 DPI 变化必须把 backing target resize 为 `ceil(logicalSize * dpiScale)` 并要求重绘；
+dirty Layer 在 `beginLayerPaint()` / `endLayerPaint()` 完成前不能 composite。局部 damage 当前是
+后端可利用的重绘元数据，不授权后端破坏 clip、透明和 painter order。
+
+该 API 是 capability-gated：不支持的后端返回无效 handle 或 `false`，调用方必须继续即时绘制。
+MockRenderer 已实现完整生命周期和可观察事件，用于锁定 resize、DPI、damage、paint/composite
+和 release 契约。AYRenderer 当前明确返回 `supportsRenderTargets() == false`；生产 bgfx FBO、
+纹理生命周期、清除策略和子树选择尚未落地，因此本阶段没有默认把任何 Widget 子树转为像素层。
+overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时也必须由调用点显式 composite。
 
 ## 5. 生命周期与所有权
 
@@ -254,7 +292,8 @@ Modal 打开后，UIManager 只向 active modal 子树路由输入；dimmer 吞�
 - Spinner phase 与 ProgressBar indeterminate
 - ScrollView/ListView 等滚动惯性
 
-`tick()` override 必须先保持基类级联，再推进自身状态。动画中的 Widget 每帧标脏；完成后停止无意义的缓存失效，但可见内容仍按后端契约每帧提交。
+`tick()` override 必须先保持基类级联，再推进自身状态。动画中的 Widget 每帧标脏并重建自己的
+display-list；完成后停止无意义的命令重建，改为稳定 replay，但可见内容仍按后端契约每帧提交。
 
 ## 11. 公共 API 与兼容性
 
@@ -285,21 +324,24 @@ AYUI 静态库公开依赖基础数学、字体、设备接口和公共 headers�
 
 Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend 和 Animation 九页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层和控件/图片叠加。
 
-AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI。MockRenderer 用于无 GPU 单测，不应和生产 backend 行为产生不同的 Widget 语义。
+AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
+display-list 的逐帧 replay，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
+单测，并实现 Layer 生命周期测试面，不应和生产 backend 行为产生不同的 Widget 语义。
 
 ## 13. 测试与审计基线
 
 2026-08-28 全模块审计统计：
 
-- 73 个公共/支持 header
-- 61 个非 demo、非 unittest 的 `.cpp`
-- 89 个 `Test_*.cpp`
-- 963 个 `TEST_CASE`
-- Windows Debug：`4229 / 4229` 条断言通过
+- 74 个公共/支持 header
+- 62 个非 demo、非 unittest 的 `.cpp`
+- 90 个 `Test_*.cpp`
+- 969 个 `TEST_CASE`
+- Windows Debug：`4304 / 4304` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
-数和输入迭代次数均未减少。
+数和输入迭代次数均未减少。Retained display-list 与 Layer 契约测试随后把当前基线增加到
+`4304 / 4304`。
 
 审计覆盖：
 
@@ -307,7 +349,9 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - Factory 注册与 serializer 类型一致性
 - JSON/i18n UTF-8 文本
 - 控件生命周期和拥有/非拥有指针
-- dirty/cache invalidation、frame-local backend replay、world-bounds cache 和容器 clip/hit-test 契约
+- dirty/cache invalidation、retained display-list、即时兜底、frame-local backend replay、
+  world-bounds cache 和容器 clip/hit-test 契约
+- Layer/RenderTarget 的 DPI、resize、damage、paint/composite 和 release 生命周期
 - TreeView 千节点重复建树性能
 - 全部 `for` / `while` / `do` 循环及标准算法回调中的重复断言扫描
 - Docking、布局保存/加载和 popup/modal 行为
@@ -327,6 +371,8 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - 独立 Factory 补齐 Dimmer/Modal/ModalDialog/TabStrip 注册。
 - ScrollView 运行时 scrollbar enable/disable、Box 自然尺寸缓存和多个视觉 setter 的 invalidation。
 - 公共聚合头和 CMake header 清单补齐。
+- Widget-local retained display-list、复杂控件 replay 顺序、祖先几何级联失效与显式即时兜底。
+- RenderTarget/UI Layer 接口及 MockRenderer 契约；AYRenderer 未实现 FBO 时明确关闭 capability。
 
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
 
@@ -341,10 +387,13 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 1. 为 Modal/ModalDialog/TabStrip/DockOverlay 定义明确的独立 serializer wire contract，或继续声明它们只由专用宿主路径持久化。
 2. 完成 GridPanel cell attachment 的 serializer round-trip 保证。
-3. 设计 retained display-list：dirty Widget 只重建自己的本地绘制指令，但所有缓存指令仍每帧按 z-order replay；若进一步采用离屏层缓存，需要同时定义透明、clip、resize/DPI 和 overlay 的失效规则。
+3. 为 AYRenderer 实现生产 bgfx RenderTarget/Layer：FBO 与纹理回收、clear/preserve、局部 damage、
+   resize/DPI、overlay 合成顺序和显存预算；在此之前保持 capability 关闭。
 4. POSIX Clipboard 从 no-op 升级为平台实现。
 5. TabStrip overflow 增加滚动/压缩策略；RichText 增加更完整的排版能力。
-6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
+6. 将目前自动即时兜底的 path、粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
+   句柄生命周期的操作继续保留为排序/缓存屏障。
+7. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 
 这些限制不阻塞当前 v1.5 功能，但实现新特性时不得继续扩大重复路径。
 
@@ -352,12 +401,14 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 后续扩展按依赖关系和收益排序，不以增加控件数量为优先目标：
 
-1. **Retained display-list**：dirty Widget 只重建自己的本地绘制指令；缓存指令仍需每帧按
-   z-order replay 给即时提交后端。第一阶段不得缓存 bgfx transient buffer 或跨帧保留
-   `UiItem`，并保留当前完整 Widget replay 作为运行时兜底和 A/B 基线。
-2. **UI Layer / RenderTarget 抽象**：在 display-list 契约稳定后再引入子树离屏缓存、滤镜、
-   背景模糊和多 viewport。必须先定义透明、clip、resize、DPI、overlay 以及纹理失效规则；
-   该层也是未来 `UIPlane` / 世界空间 UI 的前置依赖。
+1. **Retained display-list（第一阶段完成）**：dirty Widget 只重建自己的本地高层绘制指令，
+   clean Widget 每帧按 z-order replay；不缓存 bgfx transient buffer 或跨帧 `UiItem`。旧即时路径
+   保留为显式策略和不安全命令的自动兜底。下一步是降低 `std::function` 存储开销、增加缓存
+   内存统计/预算，并逐类扩展 typed command，而不是复制第二套 Widget 渲染器。
+2. **UI Layer / RenderTarget（契约与 Mock 完成）**：接口已经定义透明、clear/preserve、damage、
+   resize、DPI 和 overlay 元数据，MockRenderer 已锁定生命周期。下一步在 AYRenderer 实现 bgfx
+   FBO/纹理池和显存回收，再选择高收益稳定子树 opt-in；滤镜、背景模糊、多 viewport 以及未来
+   `UIPlane` / 世界空间 UI 均建立在该能力之上。
 3. **Serializer 完整化**：补齐 GridPanel cell attachment，并为 Modal、ModalDialog、TabStrip、
    DockOverlay 明确独立 wire contract 或正式声明专用宿主持久化边界。
 4. **高级裁剪和矢量路径**：增加 path tessellation 与 stencil/mask clip。不能跨越的 stencil、
@@ -376,7 +427,8 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | UI 模式 | 保留模式 Widget tree |
 | 数据格式 | 复用 JSON UILayoutLoader，不引入第二套配置系统 |
 | 渲染解耦 | `IRenderBackend`，AYRenderer 提供实现 |
-| 帧提交 | 可见 Widget 每帧完整 replay；dirty 只做缓存失效，不是 paint gate |
+| 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
+| 像素层缓存 | Layer/RenderTarget 契约与 Mock 已完成；AYRenderer capability 暂时关闭 |
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |
 | Popup | UIManager overlay 集中管理 |

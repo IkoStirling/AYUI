@@ -259,6 +259,9 @@ void BoxBase::performLayout() {
 }
 
 void BoxBase::render(IRenderBackend& renderer) {
+    if (recordNestedRenderIfNeeded(renderer)) {
+        return;
+    }
     if (!_visible) {
         return;
     }

@@ -21,12 +21,23 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
+- 默认启用 Widget-local retained display-list，保留即时绘制兜底
+- `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
 - Gallery 与独立 Layout Editor
 
-2026-08-28 Windows Debug 基线为 `4229 / 4229` 条断言通过。旧基线中的循环内重复
+2026-08-28 Windows Debug 基线为 `4304 / 4304` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
-重要渲染契约：AYUI 保留 Widget 状态和树，`UIRenderBackend` 保持即时、逐帧提交。后端在 `beginFrame()` 清空上一帧命令，因此所有可见 Widget 必须每帧 replay；dirty 标记仅用于 presentation/cache invalidation，不能跳过当前帧提交。真正减少静态 UI 的 CPU 构建开销需要 retained display-list 或离屏层缓存。
+重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
+`onRender()` 重建本地命令；clean Widget 不再重跑控件绘制逻辑，而是按原 painter order 每帧向
+即时后端 replay。这里保留的是矩形、文本、图片、clip 等后端无关命令，不是 bgfx 的
+`UiItem`、transient buffer 或上一帧提交，因此 `UIRenderBackend::beginFrame()` 仍可安全清空
+frame-local 数据，bgfx 也仍然每帧收到完整可见 UI。
+
+子控件不进入父控件的 display-list，各自独立失效和 replay；父级 clip/opacity 在 replay 时应用。
+使用 path、粒子、资源创建/释放或 RenderTarget pass 等不能安全跨帧保留的操作时，Recorder 会
+自动放弃候选缓存并沿用旧即时路径。自定义控件也可显式调用
+`setDisplayListPolicy(DisplayListPolicy::Immediate)` 作为诊断或兼容兜底。
 
 ## 快速接入
 
@@ -154,6 +165,11 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 
 ## 已知边界
 
+- UI Layer / RenderTarget 契约和 MockRenderer 生命周期已经落地；AYRenderer 暂时报告不支持，
+  生产 bgfx FBO、纹理回收及子树离屏缓存仍是下一阶段，因此当前优化减少的是 CPU 侧控件
+  命令构建，不会把静态 UI 变成只提交一次。
+- path、粒子、后端资源生命周期和显式 pass 控制尚未进入通用 display-list，相关 Widget 会
+  自动使用即时兜底；普通矩形、渐变、文字、图片、nine-patch、clip/blend/opacity 已覆盖。
 - Linux/POSIX Clipboard 当前是安全的 no-op 实现；Windows 使用 Win32 clipboard。
 - `WidgetSerializer` 对核心控件和 DockArea 持久化路径有覆盖，但并非所有运行时/内部控件都保证完整语义往返；详见 [design.md](design.md#8-jsonfactoryserializer-契约)。
 - GridPanel 的 cell attachment、部分复合控件内部结构仍有专用加载路径，不能只靠通用 `children` 推断。

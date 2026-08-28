@@ -1,6 +1,18 @@
 #include "AYUI/MockRenderer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+
 namespace ayt::ui {
+
+namespace {
+
+bool mockRectEmpty(const math::FRectangle& rect) {
+    return rect.maxX <= rect.minX || rect.maxY <= rect.minY;
+}
+
+} // namespace
 
 MockRenderer::MockRenderer() {
     clear();
@@ -22,11 +34,17 @@ void MockRenderer::clear() {
     _nextAnimId = 1;
     _nextFontId = 1;
     _nextTargetId = 1;
+    _nextLayerId = 1;
     // PR-Container-Contract-Cut2: also reset the clip stack so a
     // mid-test clear() doesn't leak stack frames into the next render.
     _clipStack.clear();
     _currentBlend = BlendMode::Normal;
     _opacityStack.assign(1, 1.0f);
+    _renderTargets.clear();
+    _layers.clear();
+    _layerEvents.clear();
+    _boundRenderTarget = RenderTargetHandle{-1};
+    _activeLayer = LayerHandle{-1};
 }
 
 void MockRenderer::beginFrame() {
@@ -39,6 +57,9 @@ void MockRenderer::beginFrame() {
     _clipStack.clear();
     _currentBlend = BlendMode::Normal;
     _opacityStack.assign(1, 1.0f);
+    _layerEvents.clear();
+    _boundRenderTarget = RenderTargetHandle{-1};
+    _activeLayer = LayerHandle{-1};
 }
 
 // PR-Container-Contract-Cut2: clip-stack recording overrides. Pre-PR
@@ -419,30 +440,231 @@ void MockRenderer::drawParticleSystem(ParticleHandle system) {
 
 // Render target methods / 渲染目标方法
 IRenderBackend::RenderTargetHandle MockRenderer::createRenderTarget(int width, int height, bool hasAlpha) {
-    AYUNREFERENCED_PARAM(width);
-    AYUNREFERENCED_PARAM(height);
-    AYUNREFERENCED_PARAM(hasAlpha);
+    RenderTargetDesc desc;
+    desc.width = width;
+    desc.height = height;
+    desc.hasAlpha = hasAlpha;
+    return createRenderTarget(desc);
+}
+
+IRenderBackend::RenderTargetHandle MockRenderer::createRenderTarget(const RenderTargetDesc& desc) {
+    if (desc.width <= 0 || desc.height <= 0 || desc.dpiScale <= 0.0f) {
+        return RenderTargetHandle{-1};
+    }
     RenderTargetHandle handle;
     handle.id = _nextTargetId++;
+    _renderTargets.emplace(handle.id, RenderTargetData{desc});
     return handle;
 }
 
+bool MockRenderer::resizeRenderTarget(RenderTargetHandle target, const RenderTargetDesc& desc) {
+    auto it = _renderTargets.find(target.id);
+    if (it == _renderTargets.end() || desc.width <= 0 || desc.height <= 0
+        || desc.dpiScale <= 0.0f) {
+        return false;
+    }
+    it->second.desc = desc;
+    return true;
+}
+
 void MockRenderer::releaseRenderTarget(RenderTargetHandle target) {
-    AYUNREFERENCED_PARAM(target);
+    _renderTargets.erase(target.id);
+    if (_boundRenderTarget.id == target.id) {
+        _boundRenderTarget = RenderTargetHandle{-1};
+    }
 }
 
 void MockRenderer::bindRenderTarget(RenderTargetHandle target) {
-    AYUNREFERENCED_PARAM(target);
+    if (!target.isValid() || _renderTargets.find(target.id) != _renderTargets.end()) {
+        _boundRenderTarget = target;
+    }
 }
 
 void* MockRenderer::getRenderTargetTexture(RenderTargetHandle target) {
-    AYUNREFERENCED_PARAM(target);
-    return nullptr;
+    if (_renderTargets.find(target.id) == _renderTargets.end()) {
+        return nullptr;
+    }
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(target.id) + 1u);
 }
 
 void MockRenderer::blitRenderTarget(RenderTargetHandle source, const math::FRectangle& destBounds) {
-    AYUNREFERENCED_PARAM(source);
-    AYUNREFERENCED_PARAM(destBounds);
+    if (_renderTargets.find(source.id) == _renderTargets.end()) {
+        return;
+    }
+    DrawCall dc;
+    dc.type = DrawCall::Image;
+    dc.bounds = destBounds;
+    dc.texture = getRenderTargetTexture(source);
+    dc.color = math::FVector4(1, 1, 1, _opacityStack.back());
+    dc.blendMode = _currentBlend;
+    _drawCalls.push_back(dc);
+    _triangleCount += 2;
+    _vertexCount += 6;
+}
+
+IRenderBackend::LayerHandle MockRenderer::createLayer(const LayerDesc& desc) {
+    const float width = desc.logicalBounds.maxX - desc.logicalBounds.minX;
+    const float height = desc.logicalBounds.maxY - desc.logicalBounds.minY;
+    if (width <= 0.0f || height <= 0.0f || desc.dpiScale <= 0.0f) {
+        return LayerHandle{-1};
+    }
+
+    RenderTargetDesc targetDesc;
+    targetDesc.width = std::max(1, static_cast<int>(std::ceil(width * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::ceil(height * desc.dpiScale)));
+    targetDesc.dpiScale = desc.dpiScale;
+    targetDesc.hasAlpha = desc.hasAlpha;
+    targetDesc.preserveContents = desc.clearMode == LayerClearMode::Preserve;
+    const RenderTargetHandle target = createRenderTarget(targetDesc);
+    if (!target.isValid()) {
+        return LayerHandle{-1};
+    }
+
+    LayerHandle handle{_nextLayerId++};
+    LayerData data;
+    data.desc = desc;
+    data.target = target;
+    data.dirty = true;
+    _layers.emplace(handle.id, data);
+    _layerEvents.push_back({LayerEvent::Created, handle, desc.logicalBounds,
+                            math::FRectangle(), 1.0f, true, desc.overlay});
+    return handle;
+}
+
+void MockRenderer::releaseLayer(LayerHandle layer) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end()) {
+        return;
+    }
+    const LayerDesc desc = it->second.desc;
+    releaseRenderTarget(it->second.target);
+    _layers.erase(it);
+    if (_activeLayer.id == layer.id) {
+        _activeLayer = LayerHandle{-1};
+    }
+    _layerEvents.push_back({LayerEvent::Released, layer, desc.logicalBounds,
+                            math::FRectangle(), 1.0f, false, desc.overlay});
+}
+
+bool MockRenderer::updateLayer(LayerHandle layer, const LayerDesc& desc) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end()) {
+        return false;
+    }
+    const float width = desc.logicalBounds.maxX - desc.logicalBounds.minX;
+    const float height = desc.logicalBounds.maxY - desc.logicalBounds.minY;
+    if (width <= 0.0f || height <= 0.0f || desc.dpiScale <= 0.0f) {
+        return false;
+    }
+    RenderTargetDesc targetDesc;
+    targetDesc.width = std::max(1, static_cast<int>(std::ceil(width * desc.dpiScale)));
+    targetDesc.height = std::max(1, static_cast<int>(std::ceil(height * desc.dpiScale)));
+    targetDesc.dpiScale = desc.dpiScale;
+    targetDesc.hasAlpha = desc.hasAlpha;
+    targetDesc.preserveContents = desc.clearMode == LayerClearMode::Preserve;
+    if (!resizeRenderTarget(it->second.target, targetDesc)) {
+        return false;
+    }
+    it->second.desc = desc;
+    it->second.dirty = true;
+    it->second.damage = math::FRectangle();
+    _layerEvents.push_back({LayerEvent::Updated, layer, desc.logicalBounds,
+                            math::FRectangle(), 1.0f, true, desc.overlay});
+    return true;
+}
+
+bool MockRenderer::beginLayerPaint(LayerHandle layer, const LayerPaint& paint) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end() || _activeLayer.isValid()) {
+        return false;
+    }
+    it->second.painting = true;
+    _activeLayer = layer;
+    bindRenderTarget(it->second.target);
+    _layerEvents.push_back({LayerEvent::PaintBegan, layer,
+                            it->second.desc.logicalBounds, paint.damage,
+                            1.0f, paint.fullRedraw, it->second.desc.overlay});
+    return true;
+}
+
+void MockRenderer::endLayerPaint(LayerHandle layer) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end() || _activeLayer.id != layer.id) {
+        return;
+    }
+    it->second.painting = false;
+    it->second.dirty = false;
+    it->second.damage = math::FRectangle();
+    _activeLayer = LayerHandle{-1};
+    bindRenderTarget(RenderTargetHandle{-1});
+    _layerEvents.push_back({LayerEvent::PaintEnded, layer,
+                            it->second.desc.logicalBounds, math::FRectangle(),
+                            1.0f, false, it->second.desc.overlay});
+}
+
+void MockRenderer::compositeLayer(LayerHandle layer,
+                                  const math::FRectangle& destBounds,
+                                  float opacity) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end() || it->second.dirty || it->second.painting) {
+        return;
+    }
+    const float alpha = std::clamp(opacity, 0.0f, 1.0f);
+    DrawCall dc;
+    dc.type = DrawCall::Layer;
+    dc.bounds = destBounds;
+    dc.color = math::FVector4(1, 1, 1, alpha * _opacityStack.back());
+    dc.texture = getRenderTargetTexture(it->second.target);
+    dc.blendMode = _currentBlend;
+    _drawCalls.push_back(dc);
+    _triangleCount += 2;
+    _vertexCount += 6;
+    _layerEvents.push_back({LayerEvent::Composited, layer, destBounds,
+                            math::FRectangle(), alpha, false,
+                            it->second.desc.overlay});
+}
+
+void MockRenderer::invalidateLayer(LayerHandle layer,
+                                   const math::FRectangle& damage) {
+    auto it = _layers.find(layer.id);
+    if (it == _layers.end()) {
+        return;
+    }
+    it->second.dirty = true;
+    if (!mockRectEmpty(damage)) {
+        if (mockRectEmpty(it->second.damage)) {
+            it->second.damage = damage;
+        } else {
+            it->second.damage = math::FRectangle::fromMinMax(
+                math::FVector2(std::min(it->second.damage.minX, damage.minX),
+                               std::min(it->second.damage.minY, damage.minY)),
+                math::FVector2(std::max(it->second.damage.maxX, damage.maxX),
+                               std::max(it->second.damage.maxY, damage.maxY)));
+        }
+    } else {
+        it->second.damage = math::FRectangle();
+    }
+    _layerEvents.push_back({LayerEvent::Invalidated, layer,
+                            it->second.desc.logicalBounds, damage,
+                            1.0f, mockRectEmpty(damage),
+                            it->second.desc.overlay});
+}
+
+bool MockRenderer::isLayerDirty(LayerHandle layer) const {
+    const auto it = _layers.find(layer.id);
+    return it == _layers.end() || it->second.dirty;
+}
+
+IRenderBackend::RenderTargetDesc MockRenderer::getRenderTargetDesc(
+    RenderTargetHandle target) const {
+    const auto it = _renderTargets.find(target.id);
+    return it == _renderTargets.end() ? RenderTargetDesc{} : it->second.desc;
+}
+
+IRenderBackend::RenderTargetHandle MockRenderer::getLayerRenderTarget(
+    LayerHandle layer) const {
+    const auto it = _layers.find(layer.id);
+    return it == _layers.end() ? RenderTargetHandle{-1} : it->second.target;
 }
 
 // Animation methods / 动画方法

@@ -3,6 +3,7 @@
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/DisplayList.h"
 #include "AYUI/DragDrop.h"
 #include "AYUI/Tween.h"
 
@@ -433,6 +434,17 @@ public:
     virtual void render(IRenderBackend& renderer);
     virtual void renderChildren(IRenderBackend& renderer);
 
+    // Retained is the default: onRender is recorded only when this widget's
+    // local presentation is invalid, then the cached high-level commands are
+    // replayed every frame. Immediate preserves the pre-display-list path for
+    // diagnostics and custom widgets. Unsupported resource/pass operations
+    // automatically fall back to Immediate for that widget without changing
+    // the configured policy.
+    void setDisplayListPolicy(DisplayListPolicy policy);
+    DisplayListPolicy getDisplayListPolicy() const { return _displayListPolicy; }
+    bool hasCachedDisplayList() const { return _displayListValid; }
+    size_t getCachedDisplayCommandCount() const { return _displayList.size(); }
+
     void markBoundsDirty() {
         // Phase UI-PERF-1: lazy-propagate. Previously this recursed through
         // every descendant (O(N) per call), and VBox/HBox layout calls
@@ -449,6 +461,7 @@ public:
         // parent chain has changed but the cached rect still reflects
         // the old world origin).
         _boundsCacheDirty = true;
+        _displayListDirty = true;
     }
 
     // AYUI-Perf-2026-08-26 (Batch C rebase fix): walk children
@@ -505,12 +518,13 @@ public:
             _dirtyThis = true;
             _dirtyRect = math::FRectangle();
         }
+        _displayListDirty = true;
         // Propagate only if we just transitioned clean → dirty. Once
         // dirty, the parent is already dirty too — no need to chain
         // again (avoid O(N) blow-up on deep trees where every widget
         // is dirty).
         if (!wasDirty && _parent != nullptr) {
-            _parent->markDirty();
+            _parent->markDirtyFromDescendant();
         }
     }
 
@@ -606,6 +620,15 @@ protected:
     bool _dirtyThis = true;
     math::FRectangle _dirtyRect;
 
+    // Local retained presentation. Child invalidation marks ancestors dirty
+    // for subtree/damage bookkeeping but does not rebuild their local list.
+    // Geometry changes cascade _displayListDirty through descendants because
+    // current drawing commands use world-space coordinates.
+    DisplayListPolicy _displayListPolicy = DisplayListPolicy::Retained;
+    DisplayList _displayList;
+    bool _displayListValid = false;
+    bool _displayListDirty = true;
+
     // AYUI-Perf-2026-08-26 (Batch C rebase fix): cached world-bounds
     // result + dirty flag. mutable so the const getWorldBounds() can
     // update the cache after a recompute without breaking the const
@@ -630,6 +653,8 @@ protected:
 
     void updateWorldBounds();
     math::FVector2 getWorldPosition() const;
+    void markDirtyFromDescendant();
+    bool recordNestedRenderIfNeeded(IRenderBackend& renderer);
 };
 
 class CompoundWidget : public Widget {

@@ -4,13 +4,13 @@
 //
 // UIRenderBackend owns a frame-local command buffer: beginFrame() clears all
 // UiItems and bgfx transient submissions cannot be replayed implicitly. The
-// retained Widget tree must therefore submit every visible widget every
-// frame, even when its cached presentation is clean.
+// retained Widget display list must therefore replay every visible widget's
+// high-level commands every frame, even when onRender itself is skipped.
 //
 // Dirty markers remain useful as cache/damage invalidation metadata: setters
 // mark the affected widget, invalidation propagates to ancestors, and render
 // consumes the markers. They do NOT suppress per-frame submission until AYUI
-// gains a persistent display-list or render-target cache.
+// invalidate Widget-local display lists and future render-target layers.
 // =============================================================================
 
 #include "AYTest.h"
@@ -60,9 +60,9 @@ size_t rectCount(MockRenderer& r) {
 } // namespace
 
 // =============================================================================
-// Core contract: direct render calls always replay visible presentation.
+// Core contract: direct render calls replay cached visible presentation.
 // =============================================================================
-TEST_CASE(DirtyRect_CleanWidgetStillSubmitsEveryFrame) {
+TEST_CASE(DirtyRect_CleanWidgetReplaysDisplayListEveryFrame) {
     MockRenderer r;
     PainterWidget w;
     w.setSize(FVector2(100.0f, 50.0f));
@@ -72,20 +72,23 @@ TEST_CASE(DirtyRect_CleanWidgetStillSubmitsEveryFrame) {
     CHECK(w.renderCount == 1);
     CHECK_FALSE(w.isDirtyThis());
 
-    // The second call is clean but must still append a new submission.
+    // The second call is clean and appends a replayed submission without
+    // rerunning authored Widget code.
     w.render(r);
     CHECK(rectCount(r) == 2u);
-    CHECK(w.renderCount == 2);
+    CHECK(w.renderCount == 1);
 
     w.render(r);
     w.render(r);
     w.render(r);
     CHECK(rectCount(r) == 5u);
-    CHECK(w.renderCount == 5);
+    CHECK(w.renderCount == 1);
+    CHECK_TRUE(w.hasCachedDisplayList());
+    CHECK(w.getCachedDisplayCommandCount() == 1u);
 }
 
 // =============================================================================
-// Static labels also replay after their invalidation marker is consumed.
+// Static labels replay their retained commands after invalidation is consumed.
 // =============================================================================
 TEST_CASE(DirtyRect_StaticLabelReplaysWhenClean) {
     TextLabel label;

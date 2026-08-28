@@ -4,6 +4,7 @@
 #include "AYMath/MathUtils.h"
 #include "AYFont.h"
 #include <algorithm>
+#include <cstdint>
 #include <string>
 
 namespace ayt::ui {
@@ -761,7 +762,25 @@ public:
        @name: RenderTargetHandle
        @func: 渲染目标句柄 - 引用离屏渲染缓冲区
     */
-    struct RenderTargetHandle { int id = -1; };
+    struct RenderTargetHandle {
+        int id = -1;
+        bool isValid() const { return id >= 0; }
+    };
+
+    // Stable description used by UI layers. width/height are physical
+    // pixels; logical coordinates remain in AYUI's screen-space units and
+    // are related through dpiScale. preserveContents is a capability hint:
+    // a backend may return false from resizeRenderTarget when it cannot keep
+    // the old pixels and the caller must repaint the layer in full.
+    struct RenderTargetDesc {
+        int width = 0;
+        int height = 0;
+        float dpiScale = 1.0f;
+        bool hasAlpha = true;
+        bool preserveContents = false;
+    };
+
+    virtual bool supportsRenderTargets() const { return false; }
 
     /*
        @name: createRenderTarget
@@ -773,6 +792,18 @@ public:
        @note: 渲染目标可用于实现多窗口、后期处理等
     */
     virtual RenderTargetHandle createRenderTarget(int width, int height, bool hasAlpha = true) { return RenderTargetHandle{-1}; }
+
+    virtual RenderTargetHandle createRenderTarget(const RenderTargetDesc& desc) {
+        return createRenderTarget(desc.width, desc.height, desc.hasAlpha);
+    }
+
+    // Returns true when the target now matches desc. Returning false leaves
+    // the old target valid and asks the caller to release/recreate it.
+    virtual bool resizeRenderTarget(RenderTargetHandle target, const RenderTargetDesc& desc) {
+        AYUNREFERENCED_PARAM(target);
+        AYUNREFERENCED_PARAM(desc);
+        return false;
+    }
 
     /*
        @name: releaseRenderTarget
@@ -807,6 +838,83 @@ public:
        @note: 可用于实现渲染目标的缩放显示
     */
     virtual void blitRenderTarget(RenderTargetHandle source, const math::FRectangle& destBounds) {}
+
+    // ---------------------------------------------------------------------
+    // UI Layer abstraction
+    // ---------------------------------------------------------------------
+    // A layer owns backend render-target state and can retain pixels across
+    // frames. It is deliberately separate from Widget/display-list caching:
+    // display lists retain commands and replay every frame; layers retain
+    // pixels and repaint only after invalidation. Backends that do not
+    // support layers return an invalid handle, and callers must use the
+    // existing immediate path.
+    struct LayerHandle {
+        int id = -1;
+        bool isValid() const { return id >= 0; }
+    };
+
+    enum class LayerClearMode : uint8_t {
+        Preserve,
+        Transparent,
+        Color
+    };
+
+    struct LayerDesc {
+        math::FRectangle logicalBounds;
+        float dpiScale = 1.0f;
+        bool hasAlpha = true;
+        // Overlay layers must remain above normal tree content. The flag is
+        // metadata for backends/schedulers; AYUI still controls painter order
+        // by where compositeLayer is called.
+        bool overlay = false;
+        LayerClearMode clearMode = LayerClearMode::Transparent;
+        math::FVector4 clearColor = math::FVector4(0, 0, 0, 0);
+    };
+
+    struct LayerPaint {
+        // Empty damage with fullRedraw=false means there is no repaint work.
+        math::FRectangle damage;
+        bool fullRedraw = true;
+    };
+
+    virtual LayerHandle createLayer(const LayerDesc& desc) {
+        AYUNREFERENCED_PARAM(desc);
+        return LayerHandle{-1};
+    }
+    virtual void releaseLayer(LayerHandle layer) {
+        AYUNREFERENCED_PARAM(layer);
+    }
+    // Resize/DPI/bounds changes may invalidate retained pixels. true means
+    // the layer remains usable; callers should inspect their own change and
+    // schedule a full repaint when logical content changed.
+    virtual bool updateLayer(LayerHandle layer, const LayerDesc& desc) {
+        AYUNREFERENCED_PARAM(layer);
+        AYUNREFERENCED_PARAM(desc);
+        return false;
+    }
+    // beginLayerPaint returns false when this backend cannot enter an
+    // offscreen pass. In that case callers paint directly and must not call
+    // endLayerPaint/compositeLayer for this attempt.
+    virtual bool beginLayerPaint(LayerHandle layer, const LayerPaint& paint) {
+        AYUNREFERENCED_PARAM(layer);
+        AYUNREFERENCED_PARAM(paint);
+        return false;
+    }
+    virtual void endLayerPaint(LayerHandle layer) {
+        AYUNREFERENCED_PARAM(layer);
+    }
+    virtual void compositeLayer(LayerHandle layer,
+                                const math::FRectangle& destBounds,
+                                float opacity = 1.0f) {
+        AYUNREFERENCED_PARAM(layer);
+        AYUNREFERENCED_PARAM(destBounds);
+        AYUNREFERENCED_PARAM(opacity);
+    }
+    virtual void invalidateLayer(LayerHandle layer,
+                                 const math::FRectangle& damage = math::FRectangle()) {
+        AYUNREFERENCED_PARAM(layer);
+        AYUNREFERENCED_PARAM(damage);
+    }
 
     // =============================================================================
     // Category 15: Animation System / 动画系统

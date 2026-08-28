@@ -15,7 +15,7 @@ public:
         // round-trip assertions. Card rides the same enum so existing
         // aggregate-free initializers continue to compile (Card is
         // appended after Blur, not inserted in the middle).
-        enum Type { Rect, Text, Image, Path, Particle, Blur, Card };
+        enum Type { Rect, Text, Image, Path, Particle, Blur, Card, Layer };
         Type type;
         math::FRectangle bounds;
         math::FVector4 color;
@@ -136,11 +136,42 @@ public:
     void drawParticleSystem(ParticleHandle system) override;
 
     // Render target methods / 渲染目标方法
+    bool supportsRenderTargets() const override { return true; }
     RenderTargetHandle createRenderTarget(int width, int height, bool hasAlpha = true) override;
+    RenderTargetHandle createRenderTarget(const RenderTargetDesc& desc) override;
+    bool resizeRenderTarget(RenderTargetHandle target, const RenderTargetDesc& desc) override;
     void releaseRenderTarget(RenderTargetHandle target) override;
     void bindRenderTarget(RenderTargetHandle target) override;
     void* getRenderTargetTexture(RenderTargetHandle target) override;
     void blitRenderTarget(RenderTargetHandle source, const math::FRectangle& destBounds) override;
+
+    // UI layer lifecycle + observability. Mock layers retain dirty state and
+    // a backing RenderTargetDesc so unit tests can lock resize/DPI/overlay
+    // semantics without a GPU.
+    LayerHandle createLayer(const LayerDesc& desc) override;
+    void releaseLayer(LayerHandle layer) override;
+    bool updateLayer(LayerHandle layer, const LayerDesc& desc) override;
+    bool beginLayerPaint(LayerHandle layer, const LayerPaint& paint) override;
+    void endLayerPaint(LayerHandle layer) override;
+    void compositeLayer(LayerHandle layer, const math::FRectangle& destBounds,
+                        float opacity = 1.0f) override;
+    void invalidateLayer(LayerHandle layer,
+                         const math::FRectangle& damage = math::FRectangle()) override;
+
+    struct LayerEvent {
+        enum Type { Created, Updated, PaintBegan, PaintEnded, Composited, Invalidated, Released };
+        Type type = Created;
+        LayerHandle layer;
+        math::FRectangle bounds;
+        math::FRectangle damage;
+        float opacity = 1.0f;
+        bool fullRedraw = false;
+        bool overlay = false;
+    };
+    const std::vector<LayerEvent>& getLayerEvents() const { return _layerEvents; }
+    bool isLayerDirty(LayerHandle layer) const;
+    RenderTargetDesc getRenderTargetDesc(RenderTargetHandle target) const;
+    RenderTargetHandle getLayerRenderTarget(LayerHandle layer) const;
 
     // Animation methods / 动画方法
     AnimationHandle createAnimation(float from, float to, float duration, AnimationCurve curve = AnimationCurve::EaseOut) override;
@@ -201,6 +232,7 @@ private:
     int _nextAnimId = 1;
     int _nextFontId = 1;
     int _nextTargetId = 1;
+    int _nextLayerId = 1;
 
     // PR-anim: stacked opacity (LIFO, same shape as the clip stack).
     // Every color-emitting draw multiplies its alpha by the top frame;
@@ -233,6 +265,23 @@ private:
         math::FVector4 vec4From, vec4To, vec4Current;
     };
     std::unordered_map<int, AnimationData> _animations;
+
+    struct RenderTargetData {
+        RenderTargetDesc desc;
+    };
+    std::unordered_map<int, RenderTargetData> _renderTargets;
+    RenderTargetHandle _boundRenderTarget;
+
+    struct LayerData {
+        LayerDesc desc;
+        RenderTargetHandle target;
+        math::FRectangle damage;
+        bool dirty = true;
+        bool painting = false;
+    };
+    std::unordered_map<int, LayerData> _layers;
+    LayerHandle _activeLayer;
+    std::vector<LayerEvent> _layerEvents;
 
     // PR-Container-Contract-Cut2: clip stack frames (bounds per push).
     std::vector<ClipEvent> _clipStack;

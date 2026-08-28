@@ -291,6 +291,9 @@ UiCursorHint DockTabGroup::getCursorHint() const {
 }
 
 void DockTabGroup::render(IRenderBackend& renderer) {
+    if (recordNestedRenderIfNeeded(renderer)) {
+        return;
+    }
     if (!isVisible()) {
         return;
     }

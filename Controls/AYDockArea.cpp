@@ -1309,6 +1309,9 @@ void DockArea::paintDropGuide(IRenderBackend& renderer) {
 }
 
 void DockArea::render(IRenderBackend& renderer) {
+    if (recordNestedRenderIfNeeded(renderer)) {
+        return;
+    }
     if (!isVisible()) {
         return;
     }

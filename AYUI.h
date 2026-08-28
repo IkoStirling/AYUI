@@ -3,6 +3,7 @@
 // AYUI - ayt::ui namespace
 
 #include "AYUI/Widget.h"
+#include "AYUI/DisplayList.h"
 #include "AYUI/Button.h"
 #include "AYUI/CheckBox.h"
 #include "AYUI/RadioButton.h"

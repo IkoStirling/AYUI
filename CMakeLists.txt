@@ -43,6 +43,7 @@ set(SRC_FILES
     Controls/AYTreeView.cpp
     Controls/AYRichText.cpp
     Controls/AYWidget.cpp
+    Controls/AYDisplayList.cpp
     Controls/AYWindow.cpp
     Controls/AYModal.cpp
     Controls/AYModalDialog.cpp
@@ -116,6 +117,7 @@ set(HEAD_FILES
     include/AYUI/TreeView.h
     include/AYUI/RichText.h
     include/AYUI/Widget.h
+    include/AYUI/DisplayList.h
     include/AYUI/UIManager.h
     include/AYUI/Window.h
     include/AYUI/Modal.h

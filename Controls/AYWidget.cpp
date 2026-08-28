@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace ayt::ui {
 
@@ -289,7 +290,19 @@ void Widget::markDescendantsBoundsDirty() {
     for (Widget* child : _children) {
         if (child == nullptr) continue;
         child->_boundsCacheDirty = true;
+        child->_displayListDirty = true;
+        child->_dirtyThis = true;
+        child->_dirtyRect = math::FRectangle();
         child->markDescendantsBoundsDirty();
+    }
+}
+
+void Widget::markDirtyFromDescendant() {
+    const bool wasDirty = _dirtyThis || !isDirtyRectEmpty(_dirtyRect);
+    _dirtyThis = true;
+    _dirtyRect = math::FRectangle();
+    if (!wasDirty && _parent != nullptr) {
+        _parent->markDirtyFromDescendant();
     }
 }
 
@@ -496,15 +509,34 @@ void CompoundWidget::onChildRemoved(Widget* child) {
     AYUNREFERENCED_PARAM(child);
 }
 
+bool Widget::recordNestedRenderIfNeeded(IRenderBackend& renderer) {
+    // Complex containers such as ScrollView/ListView/TreeView render selected
+    // children from onRender so their border can be painted afterwards. When
+    // that happens under a parent's recorder, retain a dynamic child call,
+    // then execute the child against the real backend. Flattening the child's
+    // current commands into the parent would make later child-only dirty
+    // updates replay stale content.
+    if (auto* recorder = dynamic_cast<DisplayListRecorder*>(&renderer)) {
+        Widget* nested = this;
+        recorder->recordAndForwardNested([nested](IRenderBackend& backend) {
+            nested->render(backend);
+        });
+        return true;
+    }
+    return false;
+}
+
 void Widget::render(IRenderBackend& renderer) {
+    // Record even a currently hidden nested widget. Its visibility is
+    // evaluated by the dynamic command on every replay, so showing it later
+    // cannot leave it permanently absent from a container's cached order.
+    if (recordNestedRenderIfNeeded(renderer)) return;
     if (!_visible) return;
-    // UIRenderBackend is an immediate per-frame submission backend:
-    // beginFrame() discards the previous frame's UiItems and bgfx does not
-    // preserve transient submissions across back-buffer frames. Therefore
-    // the retained Widget tree MUST replay its complete visible display
-    // list every frame. Dirty markers describe cache/damage invalidation;
-    // they must never suppress submission unless a persistent display-list
-    // or render-target cache is introduced at this boundary.
+    // UIRenderBackend remains an immediate per-frame submission backend:
+    // beginFrame() discards prior UiItems and bgfx transient submissions.
+    // The Widget-local display list below retains high-level commands only;
+    // it still replays every frame, preserving painter order while skipping
+    // stable onRender/style/layout command construction.
     // PR-anim: push the node opacity so the whole subtree (own paints +
     // children) fades as one unit. Fast path when fully opaque — the
     // pre-opacity rendering path is byte-identical.
@@ -512,7 +544,27 @@ void Widget::render(IRenderBackend& renderer) {
     if (fading) {
         renderer.pushOpacity(_opacity);
     }
-    onRender(renderer);
+    if (_displayListPolicy == DisplayListPolicy::Retained) {
+        if (_displayListValid && !_displayListDirty) {
+            _displayList.replay(renderer);
+        } else {
+            DisplayList candidate;
+            DisplayListRecorder recorder(renderer, candidate);
+            onRender(recorder);
+            if (recorder.isCacheable()) {
+                _displayList = std::move(candidate);
+                _displayListValid = true;
+            } else {
+                // The recorder already forwarded this frame. Keep the legacy
+                // path as the next-frame fallback for resource/pass commands
+                // whose handles cannot safely live in a generic list.
+                _displayList.clear();
+                _displayListValid = false;
+            }
+        }
+    } else {
+        onRender(renderer);
+    }
     renderChildren(renderer);
     // G12 — drop-target highlight. When this widget is the active drop
     // target during a drag session, paint a 1px accent border (matches
@@ -532,6 +584,18 @@ void Widget::render(IRenderBackend& renderer) {
     // next frame because the backend command buffer is frame-local.
     _dirtyThis = false;
     _dirtyRect = math::FRectangle();
+    _displayListDirty = false;
+}
+
+void Widget::setDisplayListPolicy(DisplayListPolicy policy) {
+    if (_displayListPolicy == policy) {
+        return;
+    }
+    _displayListPolicy = policy;
+    _displayList.clear();
+    _displayListValid = false;
+    _displayListDirty = true;
+    markDirty();
 }
 
 void Widget::tick(float dt) {
