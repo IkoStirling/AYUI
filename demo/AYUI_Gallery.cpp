@@ -58,6 +58,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 #include <memory>
@@ -70,6 +71,50 @@ namespace {
 constexpr int kWidth  = 1280;
 constexpr int kHeight = 720;
 constexpr const char* kGalleryImageTextureName = "gallery/composition_atlas";
+
+struct VisualCaptureConfig {
+    bool enabled = false;
+    ayt::render::UIRenderBackend::BatchMode batchMode =
+        ayt::render::UIRenderBackend::BatchMode::OverlapAware;
+    std::string pageId = "page_backend";
+    std::string action;
+    std::string outputBase;
+    float scrollY = 0.0f;
+    int captureFrame = 12;
+    int exitFrame = 14;
+};
+
+VisualCaptureConfig visualCaptureConfig()
+{
+    VisualCaptureConfig config;
+
+    if (const char* base = std::getenv("AY_UI_GALLERY_CAPTURE_BASE");
+        base != nullptr && base[0] != '\0') {
+        config.enabled = true;
+        config.outputBase = base;
+    }
+    if (const char* page = std::getenv("AY_UI_GALLERY_CAPTURE_PAGE");
+        page != nullptr && page[0] != '\0') {
+        config.pageId = page;
+    }
+    if (const char* mode = std::getenv("AY_UI_GALLERY_BATCH_MODE");
+        mode != nullptr && std::strcmp(mode, "ordered") == 0) {
+        config.batchMode = ayt::render::UIRenderBackend::BatchMode::OrderedRuns;
+    }
+    if (const char* action = std::getenv("AY_UI_GALLERY_CAPTURE_ACTION");
+        action != nullptr && action[0] != '\0') {
+        config.action = action;
+    }
+    if (const char* scroll = std::getenv("AY_UI_GALLERY_CAPTURE_SCROLL_Y");
+        scroll != nullptr && scroll[0] != '\0') {
+        char* end = nullptr;
+        const float parsed = std::strtof(scroll, &end);
+        if (end != scroll && parsed > 0.0f) {
+            config.scrollY = parsed;
+        }
+    }
+    return config;
+}
 
 bool fileExists(const std::string& path)
 {
@@ -1941,6 +1986,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     freopen_s(&dummy, "CONOUT$", "w", stdout);
     freopen_s(&dummy, "CONOUT$", "w", stderr);
 
+    const VisualCaptureConfig capture = visualCaptureConfig();
+
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
@@ -1974,7 +2021,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     init.windowHandle = hwnd;
     init.width = kWidth;
     init.height = kHeight;
-    init.vsync = true;
+    init.vsync = !capture.enabled;
     init.msaa = 0; // UI-only: crisp edges, no need for MSAA
     if (!renderer.initialize(init)) {
         std::fprintf(stderr, "[AYUI_Gallery] Renderer initialize failed\n");
@@ -1991,6 +2038,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
     uiBackend.setFramebufferSize(static_cast<uint16_t>(kWidth),
                                  static_cast<uint16_t>(kHeight));
+    uiBackend.setBatchMode(capture.batchMode);
 
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
@@ -2043,6 +2091,33 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.shutdown();
         return 1;
     }
+    if (capture.enabled) {
+        showPage(ui, capture.pageId.c_str());
+        if (capture.scrollY > 0.0f) {
+            if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
+                    ui.findById("content_scroll"))) {
+                scroll->setScrollOffset(ayt::math::FVector2(0.0f, capture.scrollY));
+            }
+        }
+        if (capture.action == "open_modal") {
+            if (ayt::ui::Widget* trigger = ui.findById("btn_modal")) {
+                const ayt::math::FRectangle bounds = trigger->getWorldBounds();
+                const float x = (bounds.minX + bounds.maxX) * 0.5f;
+                const float y = (bounds.minY + bounds.maxY) * 0.5f;
+                ui.onMouseButtonDown(x, y, 0);
+                ui.onMouseButtonUp(x, y, 0);
+                ui.layout();
+            }
+        }
+        std::fprintf(stderr,
+                     "[AYUI_Gallery] visual capture: page=%s mode=%s scrollY=%.1f "
+                     "action=%s output=%s\n",
+                     capture.pageId.c_str(),
+                     capture.batchMode == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
+                         ? "ordered" : "overlap",
+                     capture.scrollY, capture.action.c_str(),
+                     capture.outputBase.c_str());
+    }
 
     window.setWindowCloseCallback([&state]() { state.running = false; });
     window.setWindowMessageCallback(
@@ -2060,6 +2135,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     LARGE_INTEGER qpcPrev{};
     ::QueryPerformanceFrequency(&qpcFreq);
     ::QueryPerformanceCounter(&qpcPrev);
+    int visualFrame = 0;
+    bool captureQueued = false;
 
     while (state.running && window.isWindowValid()) {
         state.wheelHandledThisFrame = false;
@@ -2092,6 +2169,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         qpcPrev = qpcNow;
         if (dt < 0.0f) dt = 0.0f;
         if (dt > 0.1f) dt = 0.1f; // clamp hitch spikes
+        if (capture.enabled) dt = 1.0f / 60.0f; // deterministic visual regression step
 
         ayt::render::ClearDesc clear;
         clear.r = 0.10f;
@@ -2110,6 +2188,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         state.childWindows->tickAll(dt);
         ui.update(dt); // caret blink, hover revalidate, hot-reload
         ui.layout();
+        if (capture.enabled && capture.scrollY > 0.0f) {
+            if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
+                    ui.findById("content_scroll"))) {
+                // Apply after layout has established contentSize; applying
+                // only during bootstrap would clamp against the initial 0.
+                scroll->setScrollOffset(ayt::math::FVector2(0.0f, capture.scrollY));
+            }
+        }
         // Drop guides paint inside DockArea::render (after its children).
         // Do NOT call paintDropGuide again here ??that stacked a second
         // copy of the Phase-3 join/split preview on top of the first.
@@ -2118,7 +2204,39 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         ui.populateFrame();
         ui.flushFrame();
 
+        ++visualFrame;
+        if (capture.enabled && visualFrame == capture.captureFrame) {
+            captureQueued = renderer.captureScreenshot(capture.outputBase);
+            const std::string metricsPath = capture.outputBase + ".metrics.txt";
+            FILE* metrics = nullptr;
+            if (fopen_s(&metrics, metricsPath.c_str(), "wb") == 0 && metrics != nullptr) {
+                std::fprintf(metrics,
+                             "page=%s\nmode=%s\nframe=%d\ndrawCalls=%d\n"
+                             "scrollY=%.1f\naction=%s\nqueued=%s\n",
+                             capture.pageId.c_str(),
+                             capture.batchMode
+                                     == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
+                                 ? "ordered" : "overlap",
+                             visualFrame, uiBackend.getDrawCallCount(),
+                             capture.scrollY, capture.action.c_str(),
+                             captureQueued ? "yes" : "no");
+                std::fclose(metrics);
+            }
+            std::fprintf(stderr,
+                         "[AYUI_Gallery] capture frame=%d drawCalls=%d queued=%s\n",
+                         visualFrame, uiBackend.getDrawCallCount(),
+                         captureQueued ? "yes" : "no");
+        }
+
         renderer.endFrame();
+
+        if (capture.enabled && visualFrame >= capture.exitFrame) {
+            state.running = false;
+        }
+    }
+
+    if (capture.enabled && !captureQueued) {
+        std::fprintf(stderr, "[AYUI_Gallery] visual capture failed to queue\n");
     }
 
     state.modal.reset();

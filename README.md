@@ -126,6 +126,19 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 
 测试程序在任一断言失败时返回非零退出码，可直接用于 CI。
 
+需要验证生产 GPU 后端的 UI 合批绘制顺序时，可让 Gallery 在固定帧分别使用保守的
+`OrderedRuns` 和默认的 `OverlapAware` 路径截图，并进行逐字节比较：
+
+```powershell
+& .\demo\RunBatchVisualRegression.ps1 `
+    -GalleryExe <build-dir>\AYRuntime\AYUI\demo\AYUI_Gallery.exe `
+    -OutputDir <output-dir>
+```
+
+脚本覆盖九条 Gallery 路径（包括图片叠加、输入、列表、布局、渐变、动画以及带 dimmer
+的 modal），要求两种模式的 1280×720 GPU 输出完全一致，同时要求优化路径的 draw call
+不高于保守路径。截图和指标写入指定输出目录，不进入源码树。
+
 ## 目录
 
 - `include/AYUI/`：公共 API

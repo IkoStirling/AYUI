@@ -306,6 +306,7 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - dirty/cache invalidation、frame-local backend replay、world-bounds cache 和容器 clip/hit-test 契约
 - TreeView 千节点重复建树性能
 - Docking、布局保存/加载和 popup/modal 行为
+- 生产 GPU 后端的 `OrderedRuns` / `OverlapAware` 九路径逐像素对照
 - README/design 与当前实现偏差
 
 本轮修复包括：
@@ -319,6 +320,11 @@ AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass �
 - 公共聚合头和 CMake header 清单补齐。
 
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
+
+合批视觉回归由 `demo/RunBatchVisualRegression.ps1` 驱动。它固定 Gallery 的时间步、页面、
+交互动作和截图帧，在独立隐藏进程中运行两种 batch mode；当前九条路径均为字节级一致，
+draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定的是当前 Gallery 复杂控件路径，
+不应被解释为所有未来自定义控件都会得到相同降幅。
 
 ## 14. 已知限制与后续工作
 
