@@ -2,6 +2,7 @@
 #include "AYUI/Style.h"
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 namespace ayt::ui {
@@ -75,6 +76,7 @@ bool Theme::loadFromJson(const std::string& jsonStr) {
         _colorTokens.clear();
         _floatTokens.clear();
         _sheetFragments.clear();
+        _parentThemeName = j.value("extends", std::string());
 
         if (j.contains("tokens") && j["tokens"].is_object()) {
             const auto& toks = j["tokens"];
@@ -140,15 +142,26 @@ void Theme::setColorToken(const std::string& key, const math::FVector4& v) {
 }
 
 math::FVector4 Theme::getColorToken(const std::string& key) const {
-    auto it = _colorTokens.find(key);
-    if (it == _colorTokens.end()) {
-        return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);   // sentinel
+    std::unordered_set<const Theme*> visited;
+    const Theme* current = this;
+    while (current != nullptr && visited.insert(current).second) {
+        auto it = current->_colorTokens.find(key);
+        if (it != current->_colorTokens.end()) return it->second;
+        current = current->_parentThemeName.empty()
+            ? nullptr : ThemeManager::get().getTheme(current->_parentThemeName);
     }
-    return it->second;
+    return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 bool Theme::hasColorToken(const std::string& key) const {
-    return _colorTokens.find(key) != _colorTokens.end();
+    std::unordered_set<const Theme*> visited;
+    const Theme* current = this;
+    while (current != nullptr && visited.insert(current).second) {
+        if (current->_colorTokens.find(key) != current->_colorTokens.end()) return true;
+        current = current->_parentThemeName.empty()
+            ? nullptr : ThemeManager::get().getTheme(current->_parentThemeName);
+    }
+    return false;
 }
 
 void Theme::setFloatToken(const std::string& key, float v) {
@@ -157,15 +170,26 @@ void Theme::setFloatToken(const std::string& key, float v) {
 }
 
 float Theme::getFloatToken(const std::string& key) const {
-    auto it = _floatTokens.find(key);
-    if (it == _floatTokens.end()) {
-        return 0.0f;
+    std::unordered_set<const Theme*> visited;
+    const Theme* current = this;
+    while (current != nullptr && visited.insert(current).second) {
+        auto it = current->_floatTokens.find(key);
+        if (it != current->_floatTokens.end()) return it->second;
+        current = current->_parentThemeName.empty()
+            ? nullptr : ThemeManager::get().getTheme(current->_parentThemeName);
     }
-    return it->second;
+    return 0.0f;
 }
 
 bool Theme::hasFloatToken(const std::string& key) const {
-    return _floatTokens.find(key) != _floatTokens.end();
+    std::unordered_set<const Theme*> visited;
+    const Theme* current = this;
+    while (current != nullptr && visited.insert(current).second) {
+        if (current->_floatTokens.find(key) != current->_floatTokens.end()) return true;
+        current = current->_parentThemeName.empty()
+            ? nullptr : ThemeManager::get().getTheme(current->_parentThemeName);
+    }
+    return false;
 }
 
 void Theme::addSheetFragment(const std::string& fragmentName,
@@ -175,7 +199,15 @@ void Theme::addSheetFragment(const std::string& fragmentName,
 }
 
 bool Theme::hasSheetFragment(const std::string& fragmentName) const {
-    return _sheetFragments.find(fragmentName) != _sheetFragments.end();
+    std::unordered_set<const Theme*> visited;
+    const Theme* current = this;
+    while (current != nullptr && visited.insert(current).second) {
+        if (current->_sheetFragments.find(fragmentName)
+            != current->_sheetFragments.end()) return true;
+        current = current->_parentThemeName.empty()
+            ? nullptr : ThemeManager::get().getTheme(current->_parentThemeName);
+    }
+    return false;
 }
 
 StyleSheet* Theme::buildComposedSheet() const {
@@ -185,11 +217,19 @@ StyleSheet* Theme::buildComposedSheet() const {
     StyleSheet* out = new StyleSheet();
     // Pre-seed with the default preset so callers don't have to.
     // StyleSheet's ctor already does this; nothing extra to do here.
-    for (const auto& kv : _sheetFragments) {
-        for (const auto& styleKv : kv.second.getAllStylesForCompose()) {
-            out->setStyle(styleKv.first, styleKv.second);
+    std::unordered_set<const Theme*> visited;
+    std::function<void(const Theme*)> append = [&](const Theme* theme) {
+        if (theme == nullptr || !visited.insert(theme).second) return;
+        if (!theme->_parentThemeName.empty()) {
+            append(ThemeManager::get().getTheme(theme->_parentThemeName));
         }
-    }
+        for (const auto& kv : theme->_sheetFragments) {
+            for (const auto& styleKv : kv.second.getAllStylesForCompose()) {
+                out->setStyle(styleKv.first, styleKv.second);
+            }
+        }
+    };
+    append(this);
     return out;
 }
 
@@ -225,9 +265,7 @@ math::FVector4 Theme::resolveColor(
         auto oit = overrides->find(key);
         if (oit != overrides->end()) return oit->second;
     }
-    auto it = _colorTokens.find(key);
-    if (it != _colorTokens.end()) return it->second;
-    return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+    return getColorToken(key);
 }
 
 // --- ThemeManager ---

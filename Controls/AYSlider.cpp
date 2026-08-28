@@ -207,7 +207,7 @@ void Slider::onRender(IRenderBackend& renderer) {
 
     // Track background — resolveStyle() pattern. Disabled fallback is
     // a flat darker grey.
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 trackBg = math::FVector4(0.18f, 0.18f, 0.20f, 1.0f);
     math::FVector4 trackBorder = math::FVector4(0.45f, 0.45f, 0.5f, 1.0f);
     float trackBorderWidth = 1.0f;

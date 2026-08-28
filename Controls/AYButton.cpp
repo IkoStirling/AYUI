@@ -54,7 +54,7 @@ math::FVector2 Button::getPreferredSize() const {
 void Button::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
 
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
 
     if (style.hasStyle) {
         // B1: rounded fill matches the rounded border — a plain drawRect

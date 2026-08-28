@@ -102,7 +102,7 @@ void ProgressBar::onRender(IRenderBackend& renderer) {
     const math::FRectangle filled = getFilledRect();
 
     // resolveStyle() pattern — same theme hooks as the rest of AYUI.
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 unfilledBg = math::FVector4(0.18f, 0.18f, 0.20f, 1.0f);
     math::FVector4 unfilledBorder = math::FVector4(0.4f, 0.4f, 0.45f, 1.0f);
     float unfilledBorderWidth = 1.0f;

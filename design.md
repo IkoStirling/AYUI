@@ -7,7 +7,8 @@
 **功能里程碑：** v1.5 已实现
 
 **状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、Serializer
-完整化、AYRenderer 合批与 vector-path/stencil clip、Docking、Layout Editor、动画与完整单测均可构建。
+完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
+Tab/RichText 产品化、POSIX Clipboard、Docking、Layout Editor、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -92,6 +93,12 @@ Widget
 
 ### 4.2 坐标和布局
 
+- Widget 几何统一是逻辑 DIP；`setClientSize()` 输入物理 framebuffer 像素，逻辑视口等于
+  `physicalSize / (dpiScale * uiScale)`。两种 scale 都为 1 时保持历史行为。
+- 窗口事件坐标在 UIManager 分发入口从物理像素换算为 DIP；命中、布局、display-list、
+  accessibility bounds 和 damage 均只保存逻辑坐标。
+- `UIRenderBackend` 在最终顶点、SDF 半径/描边/阴影和字体 raster size 处应用有效 scale；
+  测量结果再除以 scale 返回 DIP，布局不会因为高 DPI 字体位图变大而漂移。
 - `position` 相对父 Widget；`getWorldBounds()` 计算并缓存世界矩形。
 - 位置或尺寸变化必须调用 `markBoundsDirty()`，并使后代世界坐标缓存失效。
 - VBox/HBox 维护与 children 对应的 slot；slot 可以是固定尺寸或 fill，并带 min/max 限制。
@@ -153,6 +160,29 @@ MockRenderer 已实现完整生命周期和可观察事件，用于锁定 resize
 纹理生命周期、清除策略和子树选择尚未落地，因此本阶段没有默认把任何 Widget 子树转为像素层。
 overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时也必须由调用点显式 composite。
 
+### 4.5 产品化呈现契约
+
+1. **DPI 与 UI scale**：DPI 来自窗口所在显示器，UI scale 来自用户偏好，二者相乘但生命周期
+   分离。宿主在 DPI change 和 framebuffer resize 时分别更新对应值；Gallery 已处理
+   `WM_DPICHANGED`，自动化截图固定 scale=1 以保持可复现。
+2. **无障碍语义**：每个 Widget 在运行期获得稳定 ID。`buildAccessibilityTree()` 对内置控件推断
+   role、label、value、state 和 actions，显式 accessibility 元数据具有更高优先级；隐藏节点和
+   不可见子树不进入快照。原生 UIA/AT-SPI/NSAccessibility adapter 消费快照，并通过
+   `performAccessibilityAction()` 把动作路由回当前 Widget。
+3. **Theme 继承**：Theme 通过名字延迟解析 `extends`，token 和 sheet 均按 parent-first、
+   child-wins 合成；visited set 使缺失父级或继承环安全终止。控件树上的 token override 从祖先
+   向后代级联，最近节点胜出，修改祖先 override 会标脏整个 style 子树。
+4. **TabStrip overflow**：Scroll 是默认策略，维护 logical offset/max offset、滚轮滚动和选中项
+   自动可见；Compress 从配置的 `minTabWidth` 向 24 DIP 交互硬下限按可用宽度分配；Clip 保留旧固定宽度行为。
+   三种模式均裁剪 child paint，不允许 tab 越过 strip 覆盖相邻控件。
+5. **RichText 段落布局**：run 保存字号、颜色、bold/italic、下划线、删除线、字距和基线偏移；
+   paragraph layout 支持显式换行、word/character wrap、left/center/right/justify、垂直对齐、
+   行高/行距、最大行数、clip/ellipsis，并输出 fragments/lines/contentSize 供测量、命中与 caret。
+   justified whitespace 必须成为独立 advance，不能合并后丢失额外间距。
+6. **Clipboard**：Win32 使用系统 API；macOS 使用 pbcopy/pbpaste；Linux 优先 Wayland
+   wl-clipboard，再尝试 X11 xclip/xsel。所有 POSIX payload 都按 UTF-8 转换并设置 16 MiB 读取上限；
+   helper 不存在、session 不可用或编码非法时返回 false，不创建进程内伪剪贴板。
+
 ## 5. 生命周期与所有权
 
 以下规则是模块的负载不变量：
@@ -190,11 +220,11 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
 ### 7.1 样式
 
 - `StyleSheet` 从 JSON 加载命名 style。
-- `Theme` 提供 token，如 surface、border、accent 和文本颜色。
-- Widget 的 `styleId` 选择命名样式；控件级 token override 优先于主题默认值。
+- `Theme` 提供 token，如 surface、border、accent 和文本颜色；`extends` 通过 ThemeManager 名字
+  延迟解析，父 token/sheet 先合成，子 theme 覆盖同名项。
+- Widget 的 `styleId` 选择命名样式；控件级 token override 沿父树继承，最近 override 优先于
+  远祖和主题默认值。
 - Style/Theme 变化必须触发受影响控件重绘。
-
-当前主题继承是扁平模型；嵌套 parent theme 尚未实现。
 
 ### 7.2 文本与国际化
 
@@ -203,6 +233,8 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
 - loader 和 serializer 必须进行真实 UTF-8 ↔ wide conversion，禁止用 iterator 逐字节窄化/拓宽。
 - `I18n` 表格式为 `{ key: { language: translation } }`；缺少当前语言时回退到 `en`，再缺失时返回 key/default。
 - `ui.` 前缀由 `isI18nKey` 识别，loader 只有在设置了 I18n 时才解析。
+- RichText paragraph layout 以 run 为样式边界，输出 line/fragment 几何；实际 glyph shaping 和
+  rasterization 仍委托 IRenderBackend，避免控件层持有字体或 GPU 资源。
 
 ## 8. JSON、Factory、Serializer 契约
 
@@ -221,6 +253,8 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
   "styleOverrides": {
     "color.accent": [0.2, 0.5, 0.9, 1.0]
   },
+  "accessibilityRole": "button",
+  "accessibilityLabel": "Confirm changes",
   "text": "ui.common.ok",
   "onClick": "confirm"
 }
@@ -241,13 +275,15 @@ Factory 是唯一的 `type` → constructor 注册表。默认注册覆盖普通
 Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证分层：
 
 - 40 个公共注册类型都具有明确 type 决策和往返测试；通用位置、尺寸、可见性、style、opacity、
-  layout-managed flags 与 style override 可往返。
+  layout-managed flags、style override 与 accessibility 元数据可往返。
 - 核心叶控件、列表/树、Box、Panel、Window、Spinner 的视觉和行为字段有类型覆盖。
 - UTF-8 文本必须无损往返。
 - GridPanel 使用 row/column definitions、padding、spacing 和 `cells[]`，每个 cell 显式保存
   row/column/span/alignment/content；通用 `children` 只作为旧格式读取兼容，不与 cells 重复导出。
 - ScrollView、Menu/MenuItem/MenuBar、StatusBar、TabControl/TabStrip、Modal/ModalDialog、
   DockCard/DockOverlay/DockArea 使用专用结构化内容，内部实现子树不作为通用 children 重复序列化。
+- TabStrip overflow/min width 与 RichText paragraph/run 样式属于持久数据；scroll offset、layout
+  fragments、semantic runtime ID 等派生/瞬态状态不写入 wire format。
 - DockCard content、DockArea slot/floating/weight/min size 和 Modal 的 owned content 在反序列化后
   恢复明确所有权。
 
@@ -329,7 +365,10 @@ AYUI 静态库公开依赖基础数学、字体、设备接口和公共 headers�
 - `AYUI_LayoutEditor`
 - `AYUI_LayoutEditor_RoundTrip`
 
-Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend 和 Animation 九页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层和控件/图片叠加。
+Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend、
+Animation 和 Productization 十页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层
+和控件/图片叠加，Productization 页可交互验证 UI scale、语义快照、父主题、Tab overflow、
+RichText 和 Clipboard。
 
 AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
 display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill/clip，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
@@ -339,16 +378,16 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 
 2026-08-28 全模块审计统计：
 
-- 74 个公共/支持 header
-- 62 个非 demo、非 unittest 的 `.cpp`
-- 91 个 `Test_*.cpp`
-- 974 个 `TEST_CASE`
-- Windows Debug：`4372 / 4372` 条断言通过
+- 76 个公共/支持 header
+- 64 个非 demo、非 unittest 的 `.cpp`
+- 92 个 `Test_*.cpp`
+- 988 个 `TEST_CASE`
+- Windows Debug：`4436 / 4436` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
-数和输入迭代次数均未减少。Retained display-list 与 Layer 契约测试随后把当前基线增加到
-`4372 / 4372`。
+数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
+能力测试随后把当前基线增加到 `4436 / 4436`。
 
 审计覆盖：
 
@@ -359,10 +398,12 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 - dirty/cache invalidation、retained display-list、即时兜底、frame-local backend replay、
   world-bounds cache 和容器 clip/hit-test 契约
 - Layer/RenderTarget 的 DPI、resize、damage、paint/composite 和 release 生命周期
+- DPI/UI scale 的逻辑布局、物理输入换算、语义树/动作、主题继承与控件级联、Tab overflow、
+  RichText wrap/justify/ellipsis/decoration/命中和 Serializer 往返
 - TreeView 千节点重复建树性能
 - 全部 `for` / `while` / `do` 循环及标准算法回调中的重复断言扫描
 - Docking、布局保存/加载和 popup/modal 行为
-- 生产 GPU 后端的 `OrderedRuns` / `OverlapAware` 九路径逐像素对照
+- 生产 GPU 后端的 `OrderedRuns` / `OverlapAware` 十路径逐像素对照
 - README/design 与当前实现偏差
 
 本轮修复包括：
@@ -383,11 +424,13 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 - 40 个注册 Widget 的 serializer type/字段往返，Grid cell 和复合控件结构化 payload。
 - backend-independent retained path recipe；AYRenderer 凹多边形/曲线 tessellation、winding 孔洞、
   miter stroke、嵌套 stencil path clip 和排序屏障。
+- 逻辑 DIP/物理 framebuffer 分离、无障碍语义 snapshot/action、Theme 与 Widget token 继承、
+  TabStrip 三种 overflow、RichText paragraph layout 和 POSIX Clipboard helper backend。
 
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
 
 合批视觉回归由 `demo/RunBatchVisualRegression.ps1` 驱动。它固定 Gallery 的时间步、页面、
-交互动作和截图帧，在独立隐藏进程中运行两种 batch mode；当前九条路径均为字节级一致，
+交互动作和截图帧，在独立隐藏进程中运行两种 batch mode；当前十条路径均为字节级一致，
 draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定的是当前 Gallery 复杂控件路径，
 不应被解释为所有未来自定义控件都会得到相同降幅。
 
@@ -399,8 +442,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    resize/DPI、overlay 合成顺序和显存预算；在此之前保持 capability 关闭。
 2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
    支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
-3. POSIX Clipboard 从 no-op 升级为平台实现。
-4. TabStrip overflow 增加滚动/压缩策略；RichText 增加更完整的排版能力。
+3. 为 UI Automation、AT-SPI 与 NSAccessibility 提供宿主 adapter、原生事件发布和增量语义树；
+   AYUI 核心继续只维护平台无关 snapshot/action 契约。
+4. RichText 的下一层是 Unicode grapheme/bidi/UAX #14、内联对象和字体 family/weight face 选择；
+   当前 paragraph layout 已覆盖产品常用 wrap/alignment/ellipsis/decorations/measure/hit/caret。
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
@@ -425,8 +470,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、stroke、winding hole 与嵌套
    stencil clip。path fill/clip 是显式排序屏障，两种 batch mode 不复制实现。下一阶段是 SVG 级
    fill-rule/boolean/join-cap 和 AA fringe。
-5. **产品化能力**：补充 DPI/UI scale、无障碍语义、主题继承、TabStrip overflow、完整
-   RichText 排版和 POSIX Clipboard。
+5. **产品化能力（第一阶段完成）**：Widget 使用逻辑 DIP，DPI/UI scale 在输入和最终 raster
+   边界闭环；无障碍 snapshot/action、Theme/Widget 两级继承、TabStrip Scroll/Compress/Clip、
+   RichText paragraph layout 和 Win32/macOS/Wayland/X11 Clipboard 均有 API、Serializer、Gallery
+   或单测覆盖。下一阶段仅扩展原生 accessibility adapter、Unicode 编辑与字体 face，不复制核心路径。
 
 `OrderedRuns` 与 `OverlapAware` 只允许在提交顺序规划上分叉；图元记录、合批兼容键、
 顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明
@@ -442,6 +489,11 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
 | 像素层缓存 | Layer/RenderTarget 契约与 Mock 已完成；AYRenderer capability 暂时关闭 |
 | 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
+| DPI/UI scale | Widget/damage/accessibility 使用 DIP；宿主输入与 framebuffer 使用物理像素；后端最终缩放 |
+| 无障碍 | AYUI 输出平台无关 snapshot/action；原生 UIA/AT-SPI/NSAccessibility 由宿主 adapter 发布 |
+| 主题 | 命名 parent theme + 控件树 token override 级联，parent-first / nearest-wins |
+| Tab/RichText | Tab 三种 overflow；RichText 输出 paragraph line/fragment 几何并委托 backend shaping |
+| Clipboard | Win32 原生；macOS/Wayland/X11 helper backend，UTF-8、失败显式返回 |
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |
 | Popup | UIManager overlay 集中管理 |

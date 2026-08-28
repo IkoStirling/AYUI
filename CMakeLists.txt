@@ -50,6 +50,7 @@ set(SRC_FILES
     Controls/AYDimmer.cpp
     Controls/AYClipboard.cpp
     Controls/AYClipboard_Win32.cpp
+    Controls/AYClipboard_Posix.cpp
     Controls/AYTabStrip.cpp
     Controls/AYSpinner.cpp
     Controls/AYDockArea.cpp
@@ -57,6 +58,7 @@ set(SRC_FILES
     Controls/AYDockOverlay.cpp
     Controls/AYDockTabGroup.cpp
     Controls/AYUIManager.cpp
+    Controls/AYAccessibility.cpp
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
     Layout/AYGridPanel.cpp
@@ -74,6 +76,7 @@ set(SRC_FILES
 set(HEAD_FILES
     AYUI.h
     include/AYUI/Event.h
+    include/AYUI/Accessibility.h
     include/AYUI/BoxSlotLimits.h
     include/AYUI/DragDrop.h
     include/AYUI/DockTrace.h

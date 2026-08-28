@@ -722,7 +722,7 @@ void TextInput::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
 
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 bg;
     math::FVector4 borderColor;
     float borderWidth;

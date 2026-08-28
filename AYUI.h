@@ -2,6 +2,8 @@
 
 // AYUI - ayt::ui namespace
 
+#include "AYUI/Accessibility.h"
+
 #include "AYUI/Widget.h"
 #include "AYUI/DisplayList.h"
 #include "AYUI/Button.h"

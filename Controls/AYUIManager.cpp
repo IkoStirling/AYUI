@@ -40,6 +40,7 @@
 #include "AYUI/WidgetFactory.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <typeinfo>
@@ -358,6 +359,8 @@ void UIManager::initialize(IRenderBackend* backend) {
     // first render — that matches the documented flow.
     _clientWidth = 0.0f;
     _clientHeight = 0.0f;
+    _physicalClientWidth = 0.0f;
+    _physicalClientHeight = 0.0f;
     _shutdown = false;
 
     // Canvas root for hosts/tests that attach widgets without loadFromString.
@@ -714,11 +717,13 @@ void UIManager::bindEvent(const std::string& widgetId, const std::string& eventT
 }
 
 void UIManager::setClientSize(float width, float height) {
-    _clientWidth = width;
-    _clientHeight = height;
+    _physicalClientWidth = std::isfinite(width) ? std::max(0.0f, width) : 0.0f;
+    _physicalClientHeight = std::isfinite(height) ? std::max(0.0f, height) : 0.0f;
+    _clientWidth = _physicalClientWidth / _effectiveScale;
+    _clientHeight = _physicalClientHeight / _effectiveScale;
     if (_root) {
         _root->setPosition(math::FVector2(0.0f, 0.0f));
-        _root->setSize(math::FVector2(width, height));
+        _root->setSize(math::FVector2(_clientWidth, _clientHeight));
         // Force the next layout() to actually run — we just resized the
         // root, which means children need a fresh performLayout pass.
         _lastLayoutWidth = -1.0f;
@@ -728,8 +733,32 @@ void UIManager::setClientSize(float width, float height) {
     // coords map 1:1 to screen.
     if (_overlayRoot != nullptr) {
         _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
-        _overlayRoot->setSize(math::FVector2(width, height));
+        _overlayRoot->setSize(math::FVector2(_clientWidth, _clientHeight));
     }
+}
+
+void UIManager::setDpiScale(float scale) {
+    const float clamped = std::isfinite(scale) ? std::clamp(scale, 0.5f, 8.0f) : 1.0f;
+    if (_dpiScale == clamped) return;
+    _dpiScale = clamped;
+    _effectiveScale = _dpiScale * _uiScale;
+    setClientSize(_physicalClientWidth, _physicalClientHeight);
+}
+
+void UIManager::setUiScale(float scale) {
+    const float clamped = std::isfinite(scale) ? std::clamp(scale, 0.5f, 4.0f) : 1.0f;
+    if (_uiScale == clamped) return;
+    _uiScale = clamped;
+    _effectiveScale = _dpiScale * _uiScale;
+    setClientSize(_physicalClientWidth, _physicalClientHeight);
+}
+
+math::FVector2 UIManager::physicalToLogical(const math::FVector2& point) const {
+    return math::FVector2(point.x / _effectiveScale, point.y / _effectiveScale);
+}
+
+math::FVector2 UIManager::logicalToPhysical(const math::FVector2& point) const {
+    return math::FVector2(point.x * _effectiveScale, point.y * _effectiveScale);
 }
 
 void UIManager::update(float dt) {
@@ -763,7 +792,7 @@ void UIManager::update(float dt) {
         _root = reloaded;
         _lastLayoutWidth = -1.0f;
         _lastLayoutHeight = -1.0f;
-        setClientSize(_clientWidth, _clientHeight);
+        setClientSize(_physicalClientWidth, _physicalClientHeight);
         layout();
     }
 
@@ -890,7 +919,9 @@ void UIManager::populateFrame() {
     const ActiveScope selfGuard(this);
 
     _backend->beginFrame();
-    math::FRectangle viewport(0.0f, 0.0f, _clientWidth, _clientHeight);
+    _backend->setUiScale(_effectiveScale);
+    math::FRectangle viewport(0.0f, 0.0f,
+                              _physicalClientWidth, _physicalClientHeight);
     _backend->beginCanvas(viewport);
     _root->render(*_backend);
     // Phase A: render overlay AFTER the main tree so popups paint on top.
@@ -1431,6 +1462,9 @@ bool UIManager::onMouseMove(float x, float y) {
     // the phantom session via the drag-active short-circuit below).
     const ActiveScope selfGuard(this);
 
+    const math::FVector2 logical = physicalToLogical(math::FVector2(x, y));
+    x = logical.x;
+    y = logical.y;
     _lastMouseX = x;
     _lastMouseY = y;
     _hasLastMouse = true;
@@ -1529,7 +1563,7 @@ bool UIManager::onMouseWheel(float x, float y, float deltaY) {
     }
     // D5 self-active — see the onMouseMove guard comment.
     const ActiveScope selfGuard(this);
-    const math::FVector2 pos(x, y);
+    const math::FVector2 pos = physicalToLogical(math::FVector2(x, y));
     Widget* hit = pickTopmostWidget(pos);
     if (hit == nullptr) {
         return false;
@@ -1551,6 +1585,9 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
     }
     // D5 self-active — see the onMouseMove guard comment.
     const ActiveScope selfGuard(this);
+    const math::FVector2 logical = physicalToLogical(math::FVector2(x, y));
+    x = logical.x;
+    y = logical.y;
 
     // G12 — drag-active short-circuit. If a drag is in progress and the
     // user presses a button, treat it as an explicit end-of-drag (e.g.
@@ -1655,6 +1692,9 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
 bool UIManager::onMouseButtonUp(float x, float y, int button) {
     // D5 self-active — see the onMouseMove guard comment.
     const ActiveScope selfGuard(this);
+    const math::FVector2 logical = physicalToLogical(math::FVector2(x, y));
+    x = logical.x;
+    y = logical.y;
     // Phase A (A2): the click-outside detector already fired in
     // onMouseButtonDown; we only need to deliver the up to whatever was
     // captured (or whatever's under the cursor). When _root is null we

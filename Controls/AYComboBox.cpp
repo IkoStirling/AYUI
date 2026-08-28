@@ -541,7 +541,7 @@ void ComboBox::onRender(IRenderBackend& renderer) {
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
 
     // Background — main ComboBox area only; popup renders itself.
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 bg = style.hasStyle
         ? style.backgroundColor
         : math::FVector4(0.16f, 0.16f, 0.18f, 1.0f);

@@ -400,23 +400,22 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget)
     const bool hasAnyToken = !s->bgToken.empty() ||
                              !s->borderColorToken.empty() ||
                              !s->textColorToken.empty();
-    if (!hasAnyToken &&
-        (widget == nullptr || widget->getStyleTokenOverrides().empty())) {
+    if (!hasAnyToken) {
         // No tokens captured AND no overrides → the literal s-> values
         // are the final answer. Skip the theme lookup entirely.
         return out;
     }
     const Theme* theme = ThemeManager::get().getActiveTheme();
-    if (theme == nullptr) {
-        return out;
-    }
     auto apply = [&](const std::string& tok,
                      math::FVector4& slot) {
         if (tok.empty()) return;
-        math::FVector4 v = theme->resolveColor(
-            std::string("$") + tok,
-            widget ? &widget->getStyleTokenOverrides() : nullptr);
-        slot = v;
+        math::FVector4 inherited;
+        if (widget != nullptr
+            && widget->findInheritedStyleTokenOverride(tok, inherited)) {
+            slot = inherited;
+        } else if (theme != nullptr) {
+            slot = theme->resolveColor(std::string("$") + tok);
+        }
     };
     apply(s->bgToken, out.backgroundColor);
     apply(s->borderColorToken, out.borderColor);

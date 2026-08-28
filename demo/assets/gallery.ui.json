@@ -71,6 +71,7 @@
             { "type": "Button", "id": "nav_capabilities", "text": "7. Capabilities", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_backend", "text": "8. Backend", "size": { "w": 160, "h": 28 } },
             { "type": "Button", "id": "nav_animation", "text": "9. Animation", "size": { "w": 160, "h": 28 } },
+            { "type": "Button", "id": "nav_productization", "text": "10. Product", "size": { "w": 160, "h": 28 } },
             { "type": "Separator", "id": "nav_sep", "size": { "w": 160, "h": 8 } },
             { "type": "TextLabel", "id": "lbl_hint", "text": "Click a section.", "size": { "w": 160, "h": 22 } }
           ]
@@ -409,6 +410,75 @@
 
                 { "type": "Separator", "id": "anim_sep_ts", "size": { "w": 900, "h": 6 } },
                 { "type": "TextLabel", "id": "anim_ts_hint", "text": "TabStrip indicator slides (120ms) - tabs below are cpp-built", "size": { "w": 900, "h": 20 } }
+              ]
+            },
+            {
+              "type": "VBox",
+              "id": "page_productization",
+              "spacing": 9,
+              "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
+              "children": [
+                { "type": "TextLabel", "id": "product_hdr", "text": "Productization - DPI / accessibility / inherited themes / overflow / rich layout / POSIX clipboard", "size": { "w": 920, "h": 24 } },
+                { "type": "Separator", "id": "product_sep_scale", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "product_scale_hint", "text": "Logical DIP stays stable while the physical framebuffer and font raster size follow DPI × UI scale.", "size": { "w": 900, "h": 20 } },
+                {
+                  "type": "HBox",
+                  "id": "product_scale_row",
+                  "size": { "w": 620, "h": 30 },
+                  "spacing": 8,
+                  "children": [
+                    { "type": "Button", "id": "product_scale_100", "text": "UI 100%", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+                    { "type": "Button", "id": "product_scale_125", "text": "UI 125%", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } },
+                    { "type": "Button", "id": "product_scale_150", "text": "UI 150%", "size": { "w": 100, "h": 28 }, "slot": { "width": 100 } }
+                  ]
+                },
+                { "type": "TextLabel", "id": "product_scale_state", "text": "scale state", "size": { "w": 900, "h": 20 } },
+
+                { "type": "Separator", "id": "product_sep_semantics", "size": { "w": 900, "h": 6 } },
+                { "type": "Button", "id": "product_semantics", "text": "Inspect semantic tree", "size": { "w": 220, "h": 28 }, "accessibilityRole": "button", "accessibilityLabel": "Inspect Gallery accessibility semantics", "accessibilityDescription": "Builds the platform-neutral semantic snapshot and reports actionable nodes." },
+                { "type": "TextLabel", "id": "product_semantics_state", "text": "semantic snapshot: inferred roles plus explicit labels are ready for UIA, AT-SPI or NSAccessibility", "size": { "w": 900, "h": 20 } },
+
+                { "type": "Separator", "id": "product_sep_theme", "size": { "w": 900, "h": 6 } },
+                {
+                  "type": "HBox",
+                  "id": "product_theme_row",
+                  "size": { "w": 620, "h": 30 },
+                  "spacing": 8,
+                  "children": [
+                    { "type": "Button", "id": "product_theme_inherited", "text": "Inherited accent", "size": { "w": 150, "h": 28 }, "slot": { "width": 150 } },
+                    { "type": "Button", "id": "product_theme_dark", "text": "Base dark", "size": { "w": 120, "h": 28 }, "slot": { "width": 120 } }
+                  ]
+                },
+                { "type": "TextLabel", "id": "product_theme_state", "text": "theme: gallery-product extends dark and overrides one token", "size": { "w": 900, "h": 20 } },
+
+                { "type": "Separator", "id": "product_sep_tabs", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "product_tabs_hint", "text": "TabStrip Scroll overflow: wheel horizontally; selecting an off-screen tab keeps it visible.", "size": { "w": 900, "h": 20 } },
+                { "type": "TabStrip", "id": "product_tabs", "size": { "w": 430, "h": 28 }, "tabs": ["Overview", "Typography", "Accessibility", "Input", "Storage", "Diagnostics", "Advanced"], "selectedIndex": 0, "overflowMode": 0, "minTabWidth": 96 },
+
+                { "type": "Separator", "id": "product_sep_rich", "size": { "w": 900, "h": 6 } },
+                {
+                  "type": "RichText",
+                  "id": "product_richtext",
+                  "size": { "w": 620, "h": 78 },
+                  "wrapWidth": 620,
+                  "wrapMode": 1,
+                  "alignment": 3,
+                  "verticalAlignment": 1,
+                  "overflow": 1,
+                  "lineHeight": 1.25,
+                  "lineSpacing": 2,
+                  "maxLines": 3,
+                  "runs": [
+                    { "text": "RichText ", "fontSize": 17, "bold": true, "color": { "r": 0.40, "g": 0.72, "b": 1.0, "a": 1.0 } },
+                    { "text": "supports word/character wrapping, explicit paragraphs, left/center/right/justify alignment, vertical alignment, ellipsis, baseline shift, letter spacing, ", "fontSize": 14, "color": { "r": 0.90, "g": 0.90, "b": 0.94, "a": 1.0 } },
+                    { "text": "underline", "fontSize": 14, "underline": true, "color": { "r": 0.72, "g": 0.90, "b": 0.48, "a": 1.0 } },
+                    { "text": " and strike-through.", "fontSize": 14, "strikethrough": true, "color": { "r": 0.96, "g": 0.58, "b": 0.42, "a": 1.0 } }
+                  ]
+                },
+
+                { "type": "Separator", "id": "product_sep_clipboard", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "product_clipboard_hint", "text": "Clipboard: Ctrl+C/X/V uses Win32, macOS pbcopy/pbpaste, Wayland wl-clipboard, then X11 xclip/xsel.", "size": { "w": 900, "h": 20 } },
+                { "type": "TextInput", "id": "product_clipboard_input", "text": "Copy and paste UTF-8 text here: AYUI 产品化", "size": { "w": 520, "h": 28 }, "accessibilityLabel": "Clipboard interoperability test input" }
               ]
             }
               ]

@@ -74,7 +74,7 @@ void CheckBox::onRender(IRenderBackend& renderer) {
     // Box background — follows resolveStyle() pattern (R-5). When style is
     // wired AND its bg is not the makeDefault sentinel, use it; otherwise
     // a state-aware hardcoded fallback wins.
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 boxBg;
     math::FVector4 boxBorderColor;
     float boxBorderWidth;

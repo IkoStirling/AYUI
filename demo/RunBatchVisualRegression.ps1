@@ -22,6 +22,7 @@ $cases = @(
     @{ Name = "capabilities";  Page = "page_capabilities"; Action = "" },
     @{ Name = "backend";       Page = "page_backend";      Action = "" },
     @{ Name = "animation";     Page = "page_animation";    Action = "" },
+    @{ Name = "product";       Page = "page_productization"; Action = "" },
     @{ Name = "overlay_modal"; Page = "page_overlay";      Action = "open_modal" }
 )
 

@@ -46,6 +46,8 @@ public:
     // Range / value mirroring the host ScrollView's exposed API.
     void  setRange(float minV, float maxV);
     void  setValue(float v);
+    float getMin() const { return _min; }
+    float getMax() const { return _max; }
     float getValue() const { return _value; }
 
     // Visible viewport size — bar computes thumb ratio from this vs

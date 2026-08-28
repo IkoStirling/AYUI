@@ -4,6 +4,7 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYUI/DragDrop.h"
+#include "AYUI/Accessibility.h"
 
 #include <functional>
 #include <memory>
@@ -113,7 +114,17 @@ public:
     void bindEvent(const std::string& widgetId, const std::string& eventType,
                    std::function<void()> handler);
 
+    // width/height are physical framebuffer pixels. Widget geometry and
+    // input dispatch use logical DIP: logical = physical / (DPI * UI scale).
+    // Existing hosts are unchanged while both scales stay at 1.
     void setClientSize(float width, float height);
+    void setDpiScale(float scale);
+    float getDpiScale() const { return _dpiScale; }
+    void setUiScale(float scale);
+    float getUiScale() const { return _uiScale; }
+    float getEffectiveScale() const { return _effectiveScale; }
+    math::FVector2 physicalToLogical(const math::FVector2& point) const;
+    math::FVector2 logicalToPhysical(const math::FVector2& point) const;
     void update(float dt);
     void layout();
     // Invalidate the layout cache so the next layout() re-runs performLayout
@@ -163,6 +174,16 @@ public:
     math::FVector2 getClientSize() const {
         return math::FVector2(_clientWidth, _clientHeight);
     }
+    math::FVector2 getPhysicalClientSize() const {
+        return math::FVector2(_physicalClientWidth, _physicalClientHeight);
+    }
+
+    // Build a platform-neutral semantic snapshot. Native hosts translate
+    // this tree to UI Automation, AT-SPI or NSAccessibility. Actions are
+    // routed back by the stable node id.
+    AccessibilityNode buildAccessibilityTree() const;
+    bool performAccessibilityAction(uint64_t nodeId,
+                                    AccessibilityAction action);
 
     // =====================================================================
     // Phase A — DropdownManager (S2): PopupLayer API.
@@ -468,6 +489,11 @@ private:
     UILayoutLoader _loader;
     float _clientWidth = 1280.0f;
     float _clientHeight = 720.0f;
+    float _physicalClientWidth = 1280.0f;
+    float _physicalClientHeight = 720.0f;
+    float _dpiScale = 1.0f;
+    float _uiScale = 1.0f;
+    float _effectiveScale = 1.0f;
     Widget* _capturedWidget = nullptr;
     Widget* _hoverWidget = nullptr;
     Widget* _focusedWidget = nullptr;

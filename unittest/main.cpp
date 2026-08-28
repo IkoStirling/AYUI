@@ -99,6 +99,7 @@
 #include "Test_GetWorldBoundsCache.cpp"      // AYUI-Audit-2026-08-26 Batch C: worldBounds cache + markDescendantsBoundsDirty
 #include "Test_TextAreaLifecycle.cpp"        // AYUI-Audit-2026-08-26 Batch A: ~TextArea _document leak regression
 #include "Test_MenuBarLifecycle.cpp"         // AYUI-Audit-2026-08-26 Batch A: ~MenuBar dtor UAF regression
+#include "Test_Productization.cpp"            // DPI, semantics, theme cascade, overflow, rich layout
 
 int runTest()
 {

@@ -310,7 +310,7 @@ TEST_CASE(gallery_page9_button_hover_via_full_tree) {
     static const char* kPages[] = {
         "page_basics", "page_images", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
-        "page_backend", "page_animation",
+        "page_backend", "page_animation", "page_productization",
     };
     for (const char* id : kPages) {
         if (Widget* w = ui.findById(id)) {

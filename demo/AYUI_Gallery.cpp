@@ -29,6 +29,7 @@
 #include "AYUI/Box.h"
 #include "AYUI/ProgressBar.h"
 #include "AYUI/TextLabel.h"
+#include "AYUI/RichText.h"
 #include "AYDevice/TextInput.h"
 #include "AYUI/TabStrip.h"
 #include "AYUI/Spinner.h"
@@ -61,6 +62,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -146,6 +148,8 @@ struct GalleryState {
     ayt::device::DeviceManager* devices = nullptr;
     int clientW = kWidth;
     int clientH = kHeight;
+    float dpiScale = 1.0f;
+    float uiScale = 1.0f;
     bool running = true;
     // Durable path for Reload JSON ??must NOT live only inside the
     // button's onClicked lambda: loadLayout destroys that button (and
@@ -241,7 +245,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
     static const char* kPages[] = {
         "page_basics", "page_images", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
-        "page_backend", "page_animation",
+        "page_backend", "page_animation", "page_productization",
     };
     for (const char* id : kPages) {
         if (ayt::ui::Widget* w = ui.findById(id)) {
@@ -277,9 +281,92 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
             else if (std::strcmp(pageId, "page_capabilities") == 0) msg += L"capabilities";
             else if (std::strcmp(pageId, "page_backend") == 0) msg += L"backend";
             else if (std::strcmp(pageId, "page_animation") == 0) msg += L"animation";
+            else if (std::strcmp(pageId, "page_productization") == 0) msg += L"productization";
             lbl->setText(msg);
         }
     }
+}
+
+void updateProductScaleLabel(GalleryState& state)
+{
+    if (state.ui == nullptr) return;
+    if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+            state.ui->findById("product_scale_state"))) {
+        wchar_t text[160];
+        const ayt::math::FVector2 logical = state.ui->getClientSize();
+        std::swprintf(text, std::size(text),
+                      L"DPI %.2fx × UI %.2fx = %.2fx; logical viewport %.0f × %.0f DIP",
+                      state.dpiScale, state.uiScale,
+                      state.ui->getEffectiveScale(), logical.x, logical.y);
+        label->setText(text);
+    }
+}
+
+void wireProductizationPage(GalleryState& state)
+{
+    ayt::ui::UIManager& ui = *state.ui;
+    auto bindScale = [&state, &ui](const char* id, float scale) {
+        if (auto* button = dynamic_cast<ayt::ui::Button*>(ui.findById(id))) {
+            button->setOnClicked([&state, scale]() {
+                state.uiScale = scale;
+                state.ui->setUiScale(scale);
+                updateProductScaleLabel(state);
+            });
+        }
+    };
+    bindScale("product_scale_100", 1.0f);
+    bindScale("product_scale_125", 1.25f);
+    bindScale("product_scale_150", 1.5f);
+
+    ayt::ui::Theme inherited;
+    inherited.setParentThemeName("dark");
+    inherited.setColorToken("color.accent",
+                            ayt::math::FVector4(0.72f, 0.34f, 0.96f, 1.0f));
+    ayt::ui::ThemeManager::get().registerTheme("gallery-product", inherited);
+    if (auto* button = dynamic_cast<ayt::ui::Button*>(ui.findById("product_theme_inherited"))) {
+        button->setOnClicked([&state]() {
+            state.activeThemeName = "gallery-product";
+            ayt::ui::ThemeManager::get().setActiveTheme(state.activeThemeName);
+            if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                    state.ui->findById("product_theme_state"))) {
+                label->setText(L"theme: gallery-product extends dark; only accent is overridden");
+            }
+        });
+    }
+    if (auto* button = dynamic_cast<ayt::ui::Button*>(ui.findById("product_theme_dark"))) {
+        button->setOnClicked([&state]() {
+            state.activeThemeName = "dark";
+            ayt::ui::ThemeManager::get().setActiveTheme("dark");
+            if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                    state.ui->findById("product_theme_state"))) {
+                label->setText(L"theme: dark (base theme)");
+            }
+        });
+    }
+
+    if (auto* button = dynamic_cast<ayt::ui::Button*>(ui.findById("product_semantics"))) {
+        button->setOnClicked([&ui]() {
+            const ayt::ui::AccessibilityNode root = ui.buildAccessibilityTree();
+            size_t nodes = 0;
+            size_t actionable = 0;
+            std::function<void(const ayt::ui::AccessibilityNode&)> visit =
+                [&](const ayt::ui::AccessibilityNode& node) {
+                    ++nodes;
+                    if (node.actions != 0) ++actionable;
+                    for (const auto& child : node.children) visit(child);
+                };
+            visit(root);
+            if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                    ui.findById("product_semantics_state"))) {
+                wchar_t text[128];
+                std::swprintf(text, std::size(text),
+                              L"semantic snapshot: %zu nodes, %zu actionable; native bridge consumes stable IDs",
+                              nodes, actionable);
+                label->setText(text);
+            }
+        });
+    }
+    updateProductScaleLabel(state);
 }
 
 // Backend page -- host-drawn demo canvas. A plain Widget whose onRender
@@ -550,6 +637,9 @@ void wireGallery(GalleryState& state)
     bindNav("nav_capabilities", "page_capabilities");
     bindNav("nav_backend", "page_backend");
     bindNav("nav_animation", "page_animation");
+    bindNav("nav_productization", "page_productization");
+
+    wireProductizationPage(state);
 
     // --- Animation (UI animation lane, cut 1) ---
     // Demo-only loud hover (accent blue). Global Button fallback stays a
@@ -581,7 +671,8 @@ void wireGallery(GalleryState& state)
             }
         });
     }
-    // TabStrip is cpp-built (not factory-registered): four tabs whose
+    // TabStrip is cpp-built here to demonstrate a programmatic sibling of
+    // the JSON/factory-built productization example: four tabs whose
     // underline indicator slides between tabs on a 120ms tween.
     if (auto* page = ui.findById("page_animation")) {
         auto* strip = new ayt::ui::TabStrip();
@@ -1778,6 +1869,24 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
     constexpr float kTouchDragThresholdPx = 6.0f;
 
     switch (msg) {
+    case WM_DPICHANGED: {
+        const UINT dpi = LOWORD(wParam);
+        state->dpiScale = std::max(0.5f, static_cast<float>(dpi) / 96.0f);
+        state->ui->setDpiScale(state->dpiScale);
+        updateProductScaleLabel(*state);
+        if (state->devices != nullptr && lParam != 0) {
+            HWND hwnd = static_cast<HWND>(state->devices->window().getWindowHandle());
+            const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+            if (hwnd != nullptr && suggested != nullptr) {
+                ::SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
+                               suggested->right - suggested->left,
+                               suggested->bottom - suggested->top,
+                               SWP_NOACTIVATE | SWP_NOZORDER);
+            }
+        }
+        handled = true;
+        return 0;
+    }
     case WM_SIZE: {
         state->clientW = LOWORD(lParam);
         state->clientH = HIWORD(lParam);
@@ -2132,6 +2241,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     state.devices = &devices;
     state.clientW = kWidth;
     state.clientH = kHeight;
+    if (!capture.enabled) {
+        state.dpiScale = std::max(0.5f,
+            static_cast<float>(::GetDpiForWindow(hwnd)) / 96.0f);
+        ui.setDpiScale(state.dpiScale);
+    }
 
     // TextInput focus gate + Device?UI text/IME bridge.
     ui.onTextEditingFocusChanged = [&devices](bool editing) {
@@ -2204,7 +2318,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     std::fprintf(stderr,
                  "[AYUI_Gallery] ready ??UI-only composite (no RenderScene)\n"
                  "[AYUI_Gallery] sections: Basics / Images / Input / Collections / "
-                 "Overlay / Layout / Capabilities / Backend / Animation\n");
+                 "Overlay / Layout / Capabilities / Backend / Animation / Productization\n");
 
     LARGE_INTEGER qpcFreq{};
     LARGE_INTEGER qpcPrev{};

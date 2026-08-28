@@ -77,6 +77,8 @@ public:
     // transient render state are frame-local. Persistent mock resources
     // survive until clear()/release.
     void beginFrame() override;
+    void setUiScale(float scale) override { _uiScale = scale > 0.0f ? scale : 1.0f; }
+    float getUiScale() const override { return _uiScale; }
 
     // IRenderBackend implementations - pure virtual (= 0) / 纯虚函数实现
     void drawRect(const math::FRectangle& bounds, const math::FVector4& color) override;
@@ -224,6 +226,7 @@ public:
 
 private:
     std::vector<DrawCall> _drawCalls;
+    float _uiScale = 1.0f;
     BlendMode _currentBlend = BlendMode::Normal;
     int _triangleCount = 0;
     int _vertexCount = 0;

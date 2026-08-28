@@ -33,7 +33,7 @@ void Panel::onRender(IRenderBackend& renderer) {
     // hardcoded neutral grey fallback wins. Without a wired StyleSheet the
     // StyleManager lookup returns nullptr and resolveStyle reports hasStyle
     // = false — same contract Button uses.
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
 
     math::FVector4 bg;
     math::FVector4 borderColor;

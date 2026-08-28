@@ -44,18 +44,14 @@ public:
 };
 
 // Returns the currently-active clipboard impl. The first call lazily
-// initialises a platform-default impl (Win32 on Windows, no-op stub
-// elsewhere). Tests / hosts can swap with setClipboardImpl.
+// initialises a platform-default impl (Win32, macOS pbcopy/pbpaste,
+// Wayland wl-clipboard, or X11 xclip/xsel).
 IClipboard& getClipboard();
 
 // Replaces the active impl. Pass nullptr to clear back to the lazy
 // default (next getClipboard() call will re-create a default impl).
-// `setClipboardImpl` does NOT take ownership of the pointer unless
-// the host explicitly deletes it later — the previous impl is leaked
-// unless the host captures it before calling. Convention: tests
-// stack-allocate or hold a unique_ptr and call this with &mock before
-// each case + setClipboardImpl(nullptr) in teardown to drop the
-// reference without leaking.
+// Ownership transfers to AYUI. Pass a heap object; setClipboardImpl(nullptr)
+// destroys it and restores lazy platform selection on the next access.
 void setClipboardImpl(IClipboard* impl);
 
 }  // namespace ayt::ui

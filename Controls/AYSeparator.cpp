@@ -20,7 +20,7 @@ void Separator::onRender(IRenderBackend& renderer) {
     // the stored _color wins (so ToolBarSeparator's pre-styled palette
     // and host-setColor() overrides both keep working — they only get
     // overridden when a styleId is set AND the style has a real color).
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 lineColor = _color;
     if (style.hasStyle) {
         lineColor = style.borderColor;

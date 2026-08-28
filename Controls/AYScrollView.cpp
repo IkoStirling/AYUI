@@ -383,7 +383,7 @@ void ScrollView::onRender(IRenderBackend& renderer) {
     if (bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY) return;
 
     // Background (resolveStyle pattern).
-    const ResolvedStyle style = resolveStyle(getStyleId());
+    const ResolvedStyle style = resolveStyle(getStyleId(), this);
     math::FVector4 bg = math::FVector4(0.12f, 0.12f, 0.13f, 1.0f);
     if (style.hasStyle) bg = style.backgroundColor;
     // B3: rounded fill matches the 2px rounded border (drawn last).

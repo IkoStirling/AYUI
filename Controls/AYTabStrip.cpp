@@ -58,6 +58,10 @@ void TabStrip::clearTabs() {
     destroyAllButtons();
     _labels.clear();
     _selectedIndex = -1;
+    _scrollOffset = 0.0f;
+    _maxScrollOffset = 0.0f;
+    markBoundsDirty();
+    markDirty();
 }
 
 const std::wstring& TabStrip::getTabLabel(int index) const {
@@ -76,6 +80,7 @@ void TabStrip::setSelectedIndex(int index) {
     int clamped = std::clamp(index, 0, static_cast<int>(_labels.size()) - 1);
     if (clamped == _selectedIndex) return;
     _selectedIndex = clamped;
+    ensureSelectedVisible();
     if (_onSelectionChanged) _onSelectionChanged(clamped);
     // Selection changes invalidate any retained presentation even when the
     // indicator tween is disabled.
@@ -86,7 +91,7 @@ bool TabStrip::isOverflown() const {
     float totalW = 0.0f;
     for (Button* b : _tabButtons) {
         if (b == nullptr) continue;
-        totalW += b->getPreferredSize().x;
+        totalW += std::max(_minTabWidth, b->getPreferredSize().x + 24.0f);
     }
     if (_tabButtons.size() > 1) {
         totalW += _spacing * static_cast<float>(_tabButtons.size() - 1);
@@ -100,24 +105,73 @@ void TabStrip::performLayout() {
 }
 
 void TabStrip::layoutChildren() {
+    layoutChildrenWithSelectionPolicy(true);
+}
+
+void TabStrip::layoutChildrenWithSelectionPolicy(bool ensureSelection) {
     const float w = getWidth();
     const float h = getHeight();
     if (_tabButtons.empty()) return;
 
-    // Q12 — v1 clips overflow. Lay out left-to-right starting at x=0 with
-    // the configured spacing; tabs that exceed the strip width draw past
-    // the right edge without scrolling. v1.1 wraps with ScrollView.
-    constexpr float kMinTabWidth = 80.0f;
     constexpr float kPaddingX = 12.0f;
-
-    float x = 0.0f;
+    std::vector<float> widths;
+    widths.reserve(_tabButtons.size());
+    float totalWidth = 0.0f;
     for (Button* btn : _tabButtons) {
+        const float tabWidth = btn == nullptr ? 0.0f
+            : std::max(_minTabWidth, btn->getPreferredSize().x + kPaddingX * 2.0f);
+        widths.push_back(tabWidth);
+        totalWidth += tabWidth;
+    }
+    if (widths.size() > 1) totalWidth += _spacing * static_cast<float>(widths.size() - 1);
+
+    if (_overflowMode == OverflowMode::Compress && totalWidth > w && !widths.empty()) {
+        const float available = std::max(0.0f,
+            w - _spacing * static_cast<float>(widths.size() - 1));
+        const float compressed = available / static_cast<float>(widths.size());
+        for (float& width : widths) width = std::max(24.0f, compressed);
+        totalWidth = 0.0f;
+        for (float width : widths) totalWidth += width;
+        if (widths.size() > 1) totalWidth += _spacing * static_cast<float>(widths.size() - 1);
+    }
+
+    _maxScrollOffset = (_overflowMode == OverflowMode::Scroll)
+        ? std::max(0.0f, totalWidth - w) : 0.0f;
+    _scrollOffset = std::clamp(_scrollOffset, 0.0f, _maxScrollOffset);
+    float x = _overflowMode == OverflowMode::Scroll ? -_scrollOffset : 0.0f;
+    for (size_t i = 0; i < _tabButtons.size(); ++i) {
+        Button* btn = _tabButtons[i];
         if (btn == nullptr) continue;
-        const float tabW = std::max(kMinTabWidth, btn->getPreferredSize().x + kPaddingX * 2.0f);
+        const float tabW = widths[i];
         btn->setSize(math::FVector2(tabW, h));
         btn->setPosition(math::FVector2(x, 0.0f));
         x += tabW + _spacing;
     }
+    // Selection can be restored from JSON before the first real layout,
+    // when every freshly-created button still sits at (0,0). Re-check after
+    // positions are known; setScrollOffset performs at most one relayout.
+    if (_overflowMode == OverflowMode::Scroll && ensureSelection) ensureSelectedVisible();
+}
+
+void TabStrip::setScrollOffset(float offset) {
+    const float clamped = std::clamp(offset, 0.0f, _maxScrollOffset);
+    if (_scrollOffset == clamped) return;
+    _scrollOffset = clamped;
+    // User-driven scrolling must not be undone by the selected-tab visibility
+    // policy. External layout and selection changes still request that policy.
+    layoutChildrenWithSelectionPolicy(false);
+    markDirty();
+}
+
+void TabStrip::ensureSelectedVisible() {
+    if (_overflowMode != OverflowMode::Scroll || _selectedIndex < 0
+        || _selectedIndex >= static_cast<int>(_tabButtons.size())) return;
+    Button* selected = _tabButtons[static_cast<size_t>(_selectedIndex)];
+    if (selected == nullptr) return;
+    const float left = selected->getPosition().x;
+    const float right = left + selected->getWidth();
+    if (left < 0.0f) setScrollOffset(_scrollOffset + left);
+    else if (right > getWidth()) setScrollOffset(_scrollOffset + right - getWidth());
 }
 
 // UI-anim cut 2: target underline geometry = (x, width) of the active
@@ -130,9 +184,9 @@ math::FVector2 TabStrip::indicatorTargetRect() const {
     Button* active = _tabButtons[_selectedIndex];
     if (active == nullptr) return _indicatorRect;
     constexpr float kInsetX = 2.0f;
-    const math::FVector2 pos = active->getPosition();
-    const math::FVector2 sz  = active->getSize();
-    return math::FVector2(pos.x + kInsetX, sz.x - 2.0f * kInsetX);
+    const math::FRectangle bounds = active->getWorldBounds();
+    return math::FVector2(bounds.minX + kInsetX,
+                          bounds.maxX - bounds.minX - 2.0f * kInsetX);
 }
 
 // Render-driven retarget — mirror of InteractiveWidget::resolveTransitionColor:
@@ -195,7 +249,7 @@ void TabStrip::onRender(IRenderBackend& renderer) {
     if (active == nullptr) return;
     const math::FVector2 r = resolveIndicatorRect(indicatorTargetRect());
     const float thickness = 2.0f;
-    const float bottom = active->getPosition().y + active->getSize().y;
+    const float bottom = active->getWorldBounds().maxY;
     renderer.drawRect(
         math::FRectangle(r.x,
                          bottom - thickness,
@@ -222,6 +276,22 @@ bool TabStrip::onKeyDown(int keyCode) {
     }
     setSelectedIndex(next);
     return true;
+}
+
+bool TabStrip::onMouseWheel(const UIMouseWheelEvent& e) {
+    AYUNREFERENCED_PARAM(e.mousePos);
+    if (_overflowMode != OverflowMode::Scroll || _maxScrollOffset <= 0.0f) return false;
+    const float before = _scrollOffset;
+    scrollBy(e.deltaY * 32.0f);
+    return before != _scrollOffset;
+}
+
+void TabStrip::renderChildren(IRenderBackend& renderer) {
+    renderer.pushClip(getWorldBounds());
+    for (Widget* child : getChildren()) {
+        if (child != nullptr && child->isVisible()) child->render(renderer);
+    }
+    renderer.popClip();
 }
 
 void TabStrip::ensureButtonsCreated() {

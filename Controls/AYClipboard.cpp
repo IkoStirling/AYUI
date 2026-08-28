@@ -1,6 +1,7 @@
 // AYClipboard.cpp — interface + active-impl dispatch
-// Implementation lives in AYClipboard_Win32.cpp (out-of-line <Windows.h>).
-// POSIX / Linux stub lives in this file so callers always link.
+// Platform implementations live in AYClipboard_Win32.cpp and
+// AYClipboard_Posix.cpp. Keeping dispatch here avoids leaking platform
+// headers into widgets that only consume IClipboard.
 
 #include "AYUI/Clipboard.h"
 
@@ -30,18 +31,8 @@ IClipboard& getClipboard() {
         extern IClipboard* createWin32Clipboard();
         g_clipboard.reset(createWin32Clipboard());
 #else
-        // POSIX stub — getText returns false, setText returns false.
-        // Pre-PR TextInput on Linux had the same behaviour via the
-        // #else branch in AYTextInput.cpp's anonymous namespace.
-        class StubClipboard : public IClipboard {
-        public:
-            bool setText(const std::wstring&) override { return false; }
-            bool getText(std::wstring& out) override {
-                out.clear();
-                return false;
-            }
-        };
-        g_clipboard.reset(new StubClipboard());
+        extern IClipboard* createPosixClipboard();
+        g_clipboard.reset(createPosixClipboard());
 #endif
     }
     return *g_clipboard;

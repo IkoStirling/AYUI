@@ -3,10 +3,15 @@
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <utility>
 
 namespace ayt::ui {
+
+namespace {
+std::atomic<uint64_t> g_nextAccessibilityId{1};
+}
 
 // =============================================================================
 // Phase B (S3): shared compound-descent helpers. Both CompoundWidget and
@@ -135,6 +140,7 @@ Widget::Widget()
     , _parent(nullptr)
     , _visible(true)
 {
+    _accessibilityId = g_nextAccessibilityId.fetch_add(1, std::memory_order_relaxed);
 }
 
 Widget::~Widget() {
@@ -306,6 +312,16 @@ void Widget::markDirtyFromDescendant() {
     }
 }
 
+void Widget::markStyleSubtreeDirty() {
+    _displayListDirty = true;
+    _dirtyThis = true;
+    _dirtyRect = math::FRectangle();
+    for (Widget* child : _children) {
+        if (child != nullptr) child->markStyleSubtreeDirty();
+    }
+    if (_parent != nullptr) _parent->markDirtyFromDescendant();
+}
+
 math::FRectangle Widget::getWorldBounds() const {
     // AYUI-Perf-2026-08-26: cache fast path. Previously this method walked
     // the parent chain on every call (O(depth)) and re-checked the
@@ -447,7 +463,7 @@ void Widget::setStyleTokenOverride(const std::string& key, const math::FVector4&
     _tokenOverrides[norm] = value;
     // AYUI-DirtyRect-2026-08-26 (rebase fix): token override change
     // re-tints the resolved style; onRender must re-run.
-    markDirty();
+    markStyleSubtreeDirty();
 }
 
 void Widget::clearStyleTokenOverrides() {
@@ -455,13 +471,28 @@ void Widget::clearStyleTokenOverrides() {
         return;
     }
     _tokenOverrides.clear();
-    markDirty();
+    markStyleSubtreeDirty();
 }
 
 bool Widget::hasStyleTokenOverride(const std::string& key) const {
     if (key.empty()) return false;
     const std::string norm = (key[0] == '$') ? key.substr(1) : key;
     return _tokenOverrides.find(norm) != _tokenOverrides.end();
+}
+
+bool Widget::findInheritedStyleTokenOverride(const std::string& key,
+                                             math::FVector4& outValue) const {
+    if (key.empty()) return false;
+    const std::string norm = (key[0] == '$') ? key.substr(1) : key;
+    for (const Widget* current = this; current != nullptr;
+         current = current->_parent) {
+        const auto it = current->_tokenOverrides.find(norm);
+        if (it != current->_tokenOverrides.end()) {
+            outValue = it->second;
+            return true;
+        }
+    }
+    return false;
 }
 
 CompoundWidget::CompoundWidget() {

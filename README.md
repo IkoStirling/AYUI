@@ -21,13 +21,18 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
 - 40 个注册类型的 Serializer wire contract，含 Grid cell、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
+- 逻辑 DIP 坐标、独立 DPI/UI scale、物理输入换算与按缩放倍率栅格化字体
+- 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断及 Serializer 元数据
+- Theme 命名父级继承和控件树 token override 级联
+- TabStrip Scroll/Compress/Clip overflow 与 RichText 多段落完整布局
+- Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
 - 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
 - `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
 - Gallery 与独立 Layout Editor
 
-2026-08-28 Windows Debug 基线为 `4372 / 4372` 条断言通过。旧基线中的循环内重复
+2026-08-28 Windows Debug 基线为 `4436 / 4436` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
@@ -50,7 +55,9 @@ path 以创建操作和绘制时快照保留，replay 时创建短生命周期�
 
 ayt::ui::UIManager ui;
 ui.initialize(renderBackend);       // renderBackend implements IRenderBackend
-ui.setClientSize(1280.0f, 720.0f);
+ui.setClientSize(1280.0f, 720.0f);  // physical framebuffer pixels
+ui.setDpiScale(windowDpi / 96.0f);  // OS monitor scale
+ui.setUiScale(userPreference);      // independent in-app zoom
 
 ui.loadLayout("assets/ui/main.ui.json");
 ui.update(deltaSeconds);
@@ -106,9 +113,29 @@ JSON 中的可执行逻辑不会被反序列化；`onClick` 等字段只用于�
 - `text` 以 `ui.` 开头且 loader 已设置 `I18n` 时，会按当前语言解析。
 - 所有 JSON 文本均按 UTF-8 处理。
 - `style` 引用 StyleSheet；Theme token 可由控件局部 override。
+- Theme JSON 可用 `"extends": "base-theme"` 继承 token 和 sheet；Widget 的 token override
+  从父控件向后代级联，最近的 override 胜出。
+- `accessibilityRole/Label/Description/Value/Hidden` 可覆盖自动推断语义，并随布局序列化。
 - Dock 布局通过 `UILayoutLoader::saveLayout*` 与 `loadFrom*` 持久化。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
+
+## 产品化接口
+
+AYUI 的 Widget 几何统一使用 DIP。`setClientSize()` 接收物理像素，逻辑视口为
+`physical / (dpiScale * uiScale)`；鼠标、滚轮和触摸入口同样接收物理坐标并在分发前换算。
+宿主应在窗口跨屏或收到 DPI change 时更新 `setDpiScale()`，用户缩放偏好只更新
+`setUiScale()`。`UIRenderBackend` 在最终顶点、SDF 参数和字体栅格尺寸处应用有效倍率，
+scale=1 与旧行为一致。
+
+`buildAccessibilityTree()` 返回可映射到 UI Automation、AT-SPI 或 NSAccessibility 的快照，
+`performAccessibilityAction()` 用节点 ID 把 Press/Toggle/Select/Increment 等动作路由回 Widget。
+AYUI 不直接链接某个桌面无障碍框架，原生宿主桥负责发布快照和转发动作。
+
+`TabStrip` 默认使用水平 Scroll overflow，滚轮可移动视口且选中项自动进入可见区；
+Compress 会从 `minTabWidth` 向 24 DIP 的交互硬下限压缩，Clip 保留旧策略。`RichText` 支持 Word/Character
+换行、显式段落、四种水平对齐、三种垂直对齐、行高/行距、最大行数与省略号、run 字号/
+颜色/bold/italic/underline/strike/letter-spacing/baseline-shift，以及测量、命中和 caret 几何。
 
 ## 所有权规则
 
@@ -149,7 +176,7 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
     -OutputDir <output-dir>
 ```
 
-脚本覆盖九条 Gallery 路径（包括图片叠加、输入、列表、布局、渐变、动画以及带 dimmer
+脚本覆盖十条 Gallery 路径（包括图片叠加、输入、列表、布局、渐变、动画、产品化页以及带 dimmer
 的 modal），要求两种模式的 1280×720 GPU 输出完全一致，同时要求优化路径的 draw call
 不高于保守路径。截图和指标写入指定输出目录，不进入源码树。
 
@@ -173,11 +200,15 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 - vector path 已进入通用 display-list；AYRenderer 支持简单凹多边形、圆角矩形、椭圆、圆弧、
   cubic Bezier、miter stroke、显式 winding 孔洞和嵌套 stencil path clip。自相交路径、布尔运算、
   fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。
-- Linux/POSIX Clipboard 当前是安全的 no-op 实现；Windows 使用 Win32 clipboard。
+- POSIX Clipboard 按 macOS `pbcopy/pbpaste`、Wayland `wl-copy/wl-paste`、X11 `xclip/xsel`
+  的顺序选择可用后端；无可用 helper 或 headless session 时返回 `false`，不会阻塞或回退到私有剪贴板。
 - `WidgetSerializer` 已覆盖全部 40 个公共注册类型；Grid、ScrollView、Menu、StatusBar、Tab、
   Modal 和 Dock 使用各自的结构化 payload。回调、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时
   临时状态不属于持久化格式。
-- TabStrip 溢出目前裁剪，不提供水平滚动；RichText 仍是轻量 runs 模型。
+- 无障碍语义和动作层已经稳定，UI Automation/AT-SPI/NSAccessibility 的事件发布、增量树同步与
+  平台生命周期仍由宿主 adapter 实现。
+- RichText 的段落布局已完整落地；Unicode 字素簇级 caret/断行、双向段落编辑、内联图片和
+  AYRenderer 字体家族的真实粗体/斜体 face 选择仍属于后续字体系统工作。
 - 3D spatial UI、像素遮罩命中测试和高级特效不在当前范围。
 
 ## 相关模块

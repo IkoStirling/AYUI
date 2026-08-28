@@ -91,6 +91,13 @@ public:
     */
     virtual void endFrame() {}
 
+    // Logical-DIP to framebuffer-pixel ratio for the current canvas.
+    // Backends that rasterize directly in logical coordinates may keep the
+    // default no-op. Production pixel backends should scale geometry and
+    // font rasterization while keeping measureText results in logical DIP.
+    virtual void setUiScale(float scale) { AYUNREFERENCED_PARAM(scale); }
+    virtual float getUiScale() const { return 1.0f; }
+
     /*
        @name: beginCanvas
        @func: 开始画布渲染 - 设置视口区域，开始一个新的渲染目标
@@ -228,6 +235,8 @@ public:
         float shadowBlurRadius = 0;                         // 阴影模糊半径 / Shadow blur radius
         int letterSpacing = 0;                              // 字间距调整 / Letter spacing adjustment
         int lineSpacing = 0;                                // 行间距调整 / Line spacing adjustment
+        bool bold = false;                                  // 字重语义 / Bold semantic
+        bool italic = false;                                // 斜体语义 / Italic semantic
         // 多行换行 / Multi-line wrapping: when true the styled drawText
         // wraps text to the bounds width (greedy word wrap, same rules as
         // measureText) and lays lines out at lineHeight + lineSpacing;

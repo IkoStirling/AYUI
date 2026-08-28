@@ -41,6 +41,12 @@ public:
     // editor must keep going on partial JSON).
     bool loadFromJson(const std::string& json);
 
+    // Named inheritance. The parent is resolved lazily through
+    // ThemeManager, so registry copies/replacements cannot leave dangling
+    // pointers. Child tokens and sheet fragments override parent values.
+    void setParentThemeName(const std::string& name) { _parentThemeName = name; }
+    const std::string& getParentThemeName() const { return _parentThemeName; }
+
     // Color tokens.
     void setColorToken(const std::string& key, const math::FVector4& value);
     math::FVector4 getColorToken(const std::string& key) const;
@@ -54,8 +60,8 @@ public:
     size_t floatTokenCount() const { return _floatTokens.size(); }
 
     // Sheet fragments — keyed by fragment name. Multiple fragments can
-    // be added; on apply, the composed StyleSheet is the union of all
-    // (last-add wins on style-id clash).
+    // be added; on apply, the composed StyleSheet is the parent-first union
+    // (child wins on style-id clash). hasSheetFragment follows inheritance.
     void addSheetFragment(const std::string& fragmentName, const StyleSheet& fragment);
     bool hasSheetFragment(const std::string& fragmentName) const;
     size_t sheetFragmentCount() const { return _sheetFragments.size(); }
@@ -79,6 +85,7 @@ private:
     std::unordered_map<std::string, math::FVector4> _colorTokens;
     std::unordered_map<std::string, float>          _floatTokens;
     std::unordered_map<std::string, StyleSheet>     _sheetFragments;
+    std::string _parentThemeName;
 };
 
 // G11 — ThemeManager. Singleton registry of named themes + the "active"

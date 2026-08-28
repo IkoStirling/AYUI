@@ -136,6 +136,23 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         widget->setOpacity(j.value("opacity", 1.0f));
         widget->setLayoutPositionManaged(j.value("layoutPositionManaged", true));
         widget->setLayoutSizeManaged(j.value("layoutSizeManaged", true));
+        widget->setAccessibilityHidden(j.value("accessibilityHidden", false));
+        if (j.contains("accessibilityRole") && j["accessibilityRole"].is_string()) {
+            AccessibilityRole role;
+            if (accessibilityRoleFromName(j["accessibilityRole"].get<std::string>(), role)) {
+                widget->setAccessibilityRole(role);
+            }
+        }
+        if (j.contains("accessibilityLabel")) {
+            widget->setAccessibilityLabel(toWstring(j["accessibilityLabel"].get<std::string>()));
+        }
+        if (j.contains("accessibilityDescription")) {
+            widget->setAccessibilityDescription(
+                toWstring(j["accessibilityDescription"].get<std::string>()));
+        }
+        if (j.contains("accessibilityValue")) {
+            widget->setAccessibilityValue(toWstring(j["accessibilityValue"].get<std::string>()));
+        }
 
         // G11 — per-widget theme token overrides. JSON shape:
         //   "styleOverrides": {
@@ -711,9 +728,32 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("wrapWidth")) {
                 rt->setWrapWidth(j["wrapWidth"].get<float>());
             }
+            if (j.contains("wrapMode")) {
+                const int value = j["wrapMode"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(RichTextWrapMode::Character))
+                    rt->setWrapMode(static_cast<RichTextWrapMode>(value));
+            }
+            if (j.contains("alignment")) {
+                const int value = j["alignment"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(RichTextAlignment::Justify))
+                    rt->setAlignment(static_cast<RichTextAlignment>(value));
+            }
+            if (j.contains("verticalAlignment")) {
+                const int value = j["verticalAlignment"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(RichTextVerticalAlignment::Bottom))
+                    rt->setVerticalAlignment(static_cast<RichTextVerticalAlignment>(value));
+            }
+            if (j.contains("overflow")) {
+                const int value = j["overflow"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(RichTextOverflow::Ellipsis))
+                    rt->setOverflow(static_cast<RichTextOverflow>(value));
+            }
+            if (j.contains("lineHeight")) rt->setLineHeight(j["lineHeight"].get<float>());
+            if (j.contains("lineSpacing")) rt->setLineSpacing(j["lineSpacing"].get<float>());
+            if (j.contains("maxLines")) rt->setMaxLines(j["maxLines"].get<size_t>());
             if (j.contains("runs") && j["runs"].is_array()) {
                 for (const auto& r : j["runs"]) {
-                    math::FVector4 col = math::FVector4(1, 1, 1, 1);
+                    math::FVector4 col = rt->getDefaultColor();
                     int size = rt->getDefaultFontSize();
                     if (r.contains("color") && r["color"].is_object()) {
                         col = math::FVector4(
@@ -726,9 +766,17 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                         size = r["fontSize"].get<int>();
                     }
                     if (r.contains("text")) {
-                        rt->addRun(
-                            toWstring(r["text"].get<std::string>()),
-                            col, size);
+                        RichRun run;
+                        run.text = toWstring(r["text"].get<std::string>());
+                        run.color = col;
+                        run.fontSize = size;
+                        run.bold = r.value("bold", false);
+                        run.italic = r.value("italic", false);
+                        run.underline = r.value("underline", false);
+                        run.strikethrough = r.value("strikethrough", false);
+                        run.letterSpacing = r.value("letterSpacing", 0.0f);
+                        run.baselineShift = r.value("baselineShift", 0.0f);
+                        rt->addRun(run);
                     }
                 }
             }
@@ -932,6 +980,13 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("indicatorTweenMs")) {
                 strip->setIndicatorTweenMs(j["indicatorTweenMs"].get<float>());
             }
+            if (j.contains("overflowMode")) {
+                const int value = j["overflowMode"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(TabStrip::OverflowMode::Clip)) {
+                    strip->setOverflowMode(static_cast<TabStrip::OverflowMode>(value));
+                }
+            }
+            if (j.contains("minTabWidth")) strip->setMinTabWidth(j["minTabWidth"].get<float>());
         }
 
         if (!hasStructuredChildPayload(widget)
@@ -986,6 +1041,19 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     j["opacity"] = widget->getOpacity();
     j["layoutPositionManaged"] = widget->isLayoutPositionManaged();
     j["layoutSizeManaged"] = widget->isLayoutSizeManaged();
+    if (widget->hasExplicitAccessibilityRole()) {
+        j["accessibilityRole"] = accessibilityRoleName(widget->getAccessibilityRole());
+    }
+    if (!widget->getAccessibilityLabel().empty()) {
+        j["accessibilityLabel"] = toUtf8(widget->getAccessibilityLabel());
+    }
+    if (!widget->getAccessibilityDescription().empty()) {
+        j["accessibilityDescription"] = toUtf8(widget->getAccessibilityDescription());
+    }
+    if (!widget->getAccessibilityValue().empty()) {
+        j["accessibilityValue"] = toUtf8(widget->getAccessibilityValue());
+    }
+    if (widget->isAccessibilityHidden()) j["accessibilityHidden"] = true;
 
     // G11 — emit per-widget token overrides (when any are set) so the
     // round-trip via deserialize restores them. Empty map = omit the
@@ -1139,6 +1207,8 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["tabHeight"] = strip->getTabHeight();
         j["spacing"] = strip->getSpacing();
         j["indicatorTweenMs"] = strip->getIndicatorTweenMs();
+        j["overflowMode"] = static_cast<int>(strip->getOverflowMode());
+        j["minTabWidth"] = strip->getMinTabWidth();
     }
     else if (ModalDialog* dialog = dynamic_cast<ModalDialog*>(widget)) {
         j["type"] = "ModalDialog";
@@ -1467,6 +1537,13 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             {"r", dc.x}, {"g", dc.y}, {"b", dc.z}, {"a", dc.w} };
         j["defaultFontSize"] = rt->getDefaultFontSize();
         j["wrapWidth"] = rt->getWrapWidth();
+        j["wrapMode"] = static_cast<int>(rt->getWrapMode());
+        j["alignment"] = static_cast<int>(rt->getAlignment());
+        j["verticalAlignment"] = static_cast<int>(rt->getVerticalAlignment());
+        j["overflow"] = static_cast<int>(rt->getOverflow());
+        j["lineHeight"] = rt->getLineHeight();
+        j["lineSpacing"] = rt->getLineSpacing();
+        j["maxLines"] = rt->getMaxLines();
         j["runs"] = json::array();
         for (size_t i = 0; i < rt->getRunCount(); ++i) {
             const RichRun& r = rt->getRun(i);
@@ -1476,6 +1553,12 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                 {"r", r.color.x}, {"g", r.color.y},
                 {"b", r.color.z}, {"a", r.color.w} };
             rj["fontSize"] = r.fontSize;
+            rj["bold"] = r.bold;
+            rj["italic"] = r.italic;
+            rj["underline"] = r.underline;
+            rj["strikethrough"] = r.strikethrough;
+            rj["letterSpacing"] = r.letterSpacing;
+            rj["baselineShift"] = r.baselineShift;
             j["runs"].push_back(rj);
         }
     }

@@ -3,6 +3,7 @@
 #include "AYUI/CompoundFocusableWidget.h"
 #include "AYUI/Button.h"
 
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
@@ -32,9 +33,10 @@ namespace ayt::ui {
 //
 // Q11: No close × button on tabs (DECISION 5 of original, still deferred).
 //
-// Q12: v1 clips overflow — tabs longer than TabStrip width draw past the
-// right edge without scrolling. v1.1 wraps the whole strip in a
-// ScrollView (shared future work with D3 ToolBar overflow).
+// Product overflow policy: Scroll (default) clips and wheel-scrolls a
+// logical horizontal viewport while keeping selection visible; Compress
+// distributes available width down to minTabWidth; Clip preserves the
+// legacy fixed-width behavior. Children never paint outside the strip.
 //
 // Caller-owned content (mirror original DECISION 2): the strip only owns
 // its labels and the Button children. Body content is owned by the host
@@ -42,6 +44,7 @@ namespace ayt::ui {
 // =============================================================================
 class TabStrip : public CompoundFocusableWidget {
 public:
+    enum class OverflowMode { Scroll, Compress, Clip };
     // Default row height in logical pixels — same convention as
     // ListView::kDefaultRowHeight (24.0f). TabStrip uses a slightly taller
     // 28.0f default to leave room for the accent underline without
@@ -61,8 +64,8 @@ public:
     const std::wstring&       getTabLabel(int index) const;
     size_t                    getLabelCount() const { return _labels.size(); }
 
-    // Selection. -1 = no tab. setSelectedIndex is idempotent + clamps
-    // out-of-range to -1 (matches original TabControl behavior).
+    // Selection. -1 only while empty. With tabs present setSelectedIndex is
+    // idempotent and clamps to the nearest valid tab (TabControl behavior).
     int  getSelectedIndex() const { return _selectedIndex; }
     void setSelectedIndex(int index);
     const std::wstring& getSelectedLabel() const { return getTabLabel(_selectedIndex); }
@@ -87,9 +90,30 @@ public:
     }
     float getSpacing() const { return _spacing; }
 
-    // Q12 — total preferred width vs current strip width. Hosts that
-    // want to detect overflow before v1.1 ScrollView wrap can poll this.
+    // Total preferred width vs current strip width. Hosts can use this for
+    // a supplementary overflow affordance even when Scroll handles input.
     bool isOverflown() const;
+    void setOverflowMode(OverflowMode mode) {
+        if (_overflowMode == mode) return;
+        _overflowMode = mode;
+        _scrollOffset = 0.0f;
+        markBoundsDirty();
+        markDirty();
+    }
+    OverflowMode getOverflowMode() const { return _overflowMode; }
+    // Preferred floor for natural/scroll layout. Compress may go below it
+    // to fit the viewport, but never below the 24-DIP interactive hard floor.
+    void setMinTabWidth(float width) {
+        _minTabWidth = std::max(24.0f, width);
+        markBoundsDirty();
+        markDirty();
+    }
+    float getMinTabWidth() const { return _minTabWidth; }
+    void setScrollOffset(float offset);
+    float getScrollOffset() const { return _scrollOffset; }
+    float getMaxScrollOffset() const { return _maxScrollOffset; }
+    void scrollBy(float delta) { setScrollOffset(_scrollOffset + delta); }
+    void ensureSelectedVisible();
 
     // Layout & render.
     void performLayout() override;
@@ -111,9 +135,12 @@ public:
     // strip for keyboard cycling (a Tab traversal host typically lands
     // focus inside the body content, not the strip, so this is rare).
     bool onKeyDown(int keyCode) override;
+    bool onMouseWheel(const UIMouseWheelEvent& e) override;
+    void renderChildren(IRenderBackend& renderer) override;
 
 protected:
     void layoutChildren() override;
+    void layoutChildrenWithSelectionPolicy(bool ensureSelection);
     void onRender(IRenderBackend& renderer) override;
 
 private:
@@ -133,6 +160,10 @@ private:
     float  _tabHeight = kDefaultTabHeight;
     float  _spacing = 0.0f;   // default 0 → tabs touch for the
                               //            "tabs-with-underline" look
+    OverflowMode _overflowMode = OverflowMode::Scroll;
+    float _minTabWidth = 80.0f;
+    float _scrollOffset = 0.0f;
+    float _maxScrollOffset = 0.0f;
 
     std::function<void(int)> _onSelectionChanged;
 

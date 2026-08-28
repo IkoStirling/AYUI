@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AYUI/Accessibility.h"
+
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
 #include "AYUI/IRenderBackend.h"
@@ -349,6 +351,41 @@ public:
         return _tokenOverrides;
     }
     bool hasStyleTokenOverride(const std::string& key) const;
+    // Resolve a token through this widget and its ancestors. The closest
+    // declaration wins, matching CSS custom-property inheritance.
+    bool findInheritedStyleTokenOverride(const std::string& key,
+                                         math::FVector4& outValue) const;
+
+    // Accessibility metadata. Roles/labels left at their defaults are
+    // inferred from concrete control types when UIManager snapshots the
+    // semantic tree. Explicit metadata always wins over inference.
+    uint64_t getAccessibilityId() const { return _accessibilityId; }
+    void setAccessibilityRole(AccessibilityRole role) {
+        _accessibilityRole = role;
+        _accessibilityRoleExplicit = true;
+    }
+    AccessibilityRole getAccessibilityRole() const { return _accessibilityRole; }
+    bool hasExplicitAccessibilityRole() const { return _accessibilityRoleExplicit; }
+    void clearAccessibilityRole() {
+        _accessibilityRole = AccessibilityRole::Generic;
+        _accessibilityRoleExplicit = false;
+    }
+    void setAccessibilityLabel(const std::wstring& label) { _accessibilityLabel = label; }
+    const std::wstring& getAccessibilityLabel() const { return _accessibilityLabel; }
+    void setAccessibilityDescription(const std::wstring& description) {
+        _accessibilityDescription = description;
+    }
+    const std::wstring& getAccessibilityDescription() const {
+        return _accessibilityDescription;
+    }
+    void setAccessibilityValue(const std::wstring& value) { _accessibilityValue = value; }
+    const std::wstring& getAccessibilityValue() const { return _accessibilityValue; }
+    void setAccessibilityHidden(bool hidden) { _accessibilityHidden = hidden; }
+    bool isAccessibilityHidden() const { return _accessibilityHidden; }
+    void setAccessibilityActionHandler(
+        std::function<bool(AccessibilityAction)> handler) {
+        _accessibilityActionHandler = std::move(handler);
+    }
 
     // =================================================================
     // G12 — Drag & Drop API.
@@ -571,6 +608,15 @@ protected:
     // AND a programmatic setStyleTokenOverride() both flow through.
     std::unordered_map<std::string, math::FVector4> _tokenOverrides;
 
+    uint64_t _accessibilityId = 0;
+    AccessibilityRole _accessibilityRole = AccessibilityRole::Generic;
+    bool _accessibilityRoleExplicit = false;
+    bool _accessibilityHidden = false;
+    std::wstring _accessibilityLabel;
+    std::wstring _accessibilityDescription;
+    std::wstring _accessibilityValue;
+    std::function<bool(AccessibilityAction)> _accessibilityActionHandler;
+
     // G12 — Drag & Drop state. Empty std::function defaults pay no
     // runtime cost; only widgets that opt in (setDraggable / setAcceptDrops
     // + a callback) allocate the closure capture. The "horizontal feature"
@@ -654,6 +700,7 @@ protected:
     void updateWorldBounds();
     math::FVector2 getWorldPosition() const;
     void markDirtyFromDescendant();
+    void markStyleSubtreeDirty();
     bool recordNestedRenderIfNeeded(IRenderBackend& renderer);
 };
 
