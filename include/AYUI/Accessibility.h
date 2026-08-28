@@ -83,6 +83,13 @@ struct AccessibilityNode {
     math::FRectangle bounds;
     uint32_t states = AccessibilityState_None;
     uint32_t actions = 0;
+    bool hasNumericRange = false;
+    bool numericReadOnly = false;
+    double numericValue = 0.0;
+    double numericMinimum = 0.0;
+    double numericMaximum = 0.0;
+    double numericSmallChange = 0.0;
+    double numericLargeChange = 0.0;
     std::vector<AccessibilityNode> children;
 };
 

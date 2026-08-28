@@ -59,6 +59,8 @@ set(SRC_FILES
     Controls/AYDockTabGroup.cpp
     Controls/AYUIManager.cpp
     Controls/AYAccessibility.cpp
+    Controls/AYAccessibilityAdapter.cpp
+    Controls/AYUnicodeText.cpp
     Layout/AYBox.cpp
     Layout/AYSplitterHandle.cpp
     Layout/AYGridPanel.cpp
@@ -77,6 +79,8 @@ set(HEAD_FILES
     AYUI.h
     include/AYUI/Event.h
     include/AYUI/Accessibility.h
+    include/AYUI/AccessibilityAdapter.h
+    include/AYUI/UnicodeText.h
     include/AYUI/BoxSlotLimits.h
     include/AYUI/DragDrop.h
     include/AYUI/DockTrace.h
@@ -184,6 +188,11 @@ endif()
 # Windows, inotify on POSIX). Linked PRIVATE — FileWatcher is not exposed in
 # AYUI's public surface.
 target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
+
+if(WIN32)
+    # Native Unicode itemization, bidi levels and UAX #14 line-break data.
+    target_link_libraries(${MODULE_NAME} PRIVATE usp10 uiautomationcore oleaut32)
+endif()
 
 enable_testing()
 add_subdirectory(unittest)

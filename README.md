@@ -3,7 +3,7 @@
 AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控件树、布局、输入与焦点、JSON 布局、主题/i18n、弹层、Docking、动画，以及渲染后端抽象。
 
 - CMake 目标版本：`1.0.0`
-- 当前功能里程碑：v1.5 已实现
+- 当前功能里程碑：v1.6 已实现
 - 最近全模块审计：2026-08-28
 - 权威架构文档：[design.md](design.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
@@ -22,9 +22,11 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 40 个注册类型的 Serializer wire contract，含 Grid cell、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 逻辑 DIP 坐标、独立 DPI/UI scale、物理输入换算与按缩放倍率栅格化字体
-- 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断及 Serializer 元数据
+- 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断、增量 diff 及 Serializer 元数据
+- Windows UI Automation 原生 Fragment provider，覆盖 Invoke/Toggle/RangeValue/ExpandCollapse/SelectionItem
 - Theme 命名父级继承和控件树 token override 级联
-- TabStrip Scroll/Compress/Clip overflow 与 RichText 多段落完整布局
+- TabStrip Scroll/Compress/Clip overflow；RichText 字素簇、双向文本、Unicode 断行和真实字体 shaping
+- RichText run 级 font family/weight/italic/language，以及 AYRenderer 多 face、多 atlas 一致测量/绘制
 - Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
@@ -32,7 +34,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
 - Gallery 与独立 Layout Editor
 
-2026-08-28 Windows Debug 基线为 `4436 / 4436` 条断言通过。旧基线中的循环内重复
+2026-08-28 Windows Debug 基线为 `4498 / 4498` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
@@ -128,14 +130,32 @@ AYUI 的 Widget 几何统一使用 DIP。`setClientSize()` 接收物理像素，
 `setUiScale()`。`UIRenderBackend` 在最终顶点、SDF 参数和字体栅格尺寸处应用有效倍率，
 scale=1 与旧行为一致。
 
-`buildAccessibilityTree()` 返回可映射到 UI Automation、AT-SPI 或 NSAccessibility 的快照，
-`performAccessibilityAction()` 用节点 ID 把 Press/Toggle/Select/Increment 等动作路由回 Widget。
-AYUI 不直接链接某个桌面无障碍框架，原生宿主桥负责发布快照和转发动作。
+`buildAccessibilityTree()` 返回平台无关快照，`performAccessibilityAction()` 用节点 ID 把
+Press/Toggle/Select/Expand/RangeValue 等动作路由回 Widget。Windows 宿主可直接创建随模块提供的
+UI Automation adapter；它发布 Fragment tree、屏幕 bounds、焦点/结构/属性事件，并把 UIA 工作线程
+发起的动作封送回窗口 UI 线程：
+
+```cpp
+auto accessibility = ayt::ui::createNativeAccessibilityAdapter(ui, hwnd);
+
+// WndProc 中应先交给 adapter；handled 时直接返回 result。
+intptr_t result = 0;
+if (accessibility->handleNativeMessage(message, wParam, lParam, result))
+    return static_cast<LRESULT>(result);
+
+// 每帧 update/layout 之后同步一次语义增量。
+accessibility->update();
+```
+
+adapter 必须在 `UIManager::shutdown()` 前销毁。非 Windows 构建仍可使用同一对象取得 snapshot/diff；
+AT-SPI 与 NSAccessibility 的原生发布端尚未接入。
 
 `TabStrip` 默认使用水平 Scroll overflow，滚轮可移动视口且选中项自动进入可见区；
 Compress 会从 `minTabWidth` 向 24 DIP 的交互硬下限压缩，Clip 保留旧策略。`RichText` 支持 Word/Character
-换行、显式段落、四种水平对齐、三种垂直对齐、行高/行距、最大行数与省略号、run 字号/
-颜色/bold/italic/underline/strike/letter-spacing/baseline-shift，以及测量、命中和 caret 几何。
+换行、显式段落、四种水平对齐、三种垂直对齐、行高/行距、最大行数与省略号；Unicode 分析把扩展
+字素簇作为最小 caret/换行单元，按双向 level 重排每行，并把 run 的 family/weight/italic/language/
+direction 连同颜色、装饰、字距和 baseline shift 交给后端。AYRenderer 使用 HarfBuzz 的同一结果完成
+测量、cluster 几何和绘制，字距只在 shaping cluster 结束处应用一次。
 
 ## 所有权规则
 
@@ -205,10 +225,12 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 - `WidgetSerializer` 已覆盖全部 40 个公共注册类型；Grid、ScrollView、Menu、StatusBar、Tab、
   Modal 和 Dock 使用各自的结构化 payload。回调、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时
   临时状态不属于持久化格式。
-- 无障碍语义和动作层已经稳定，UI Automation/AT-SPI/NSAccessibility 的事件发布、增量树同步与
-  平台生命周期仍由宿主 adapter 实现。
-- RichText 的段落布局已完整落地；Unicode 字素簇级 caret/断行、双向段落编辑、内联图片和
-  AYRenderer 字体家族的真实粗体/斜体 face 选择仍属于后续字体系统工作。
+- Windows UI Automation adapter 已实现 Fragment tree、常用 control pattern、跨线程动作封送和
+  增量事件；AT-SPI/NSAccessibility 原生 provider 仍待实现。TextInput/TextArea 的 UIA TextPattern、
+  原生 selection range 和 live-region 事件也尚未进入本阶段。
+- RichText 已实现扩展字素 caret、双向可视顺序、Unicode 断行和 HarfBuzz shaping，并支持 Windows
+  已登记 family 的 regular/bold/italic/bold-italic face。内联对象、跨字体 glyph fallback、可变字体、
+  彩色 emoji、完整编辑 selection 和非 Windows 字体发现仍属于后续字体系统工作。
 - 3D spatial UI、像素遮罩命中测试和高级特效不在当前范围。
 
 ## 相关模块

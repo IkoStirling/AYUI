@@ -3,9 +3,11 @@
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathUtils.h"
 #include "AYFont.h"
+#include "AYUI/UnicodeText.h"
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace ayt::ui {
 
@@ -237,6 +239,10 @@ public:
         int lineSpacing = 0;                                // 行间距调整 / Line spacing adjustment
         bool bold = false;                                  // 字重语义 / Bold semantic
         bool italic = false;                                // 斜体语义 / Italic semantic
+        std::wstring fontFamily;                            // 空 = 后端默认字体 / backend default
+        int fontWeight = 400;                               // CSS/OpenType 100..900
+        TextDirection direction = TextDirection::Auto;      // shaping / visual direction
+        std::string language;                               // optional BCP-47 shaping hint
         // 多行换行 / Multi-line wrapping: when true the styled drawText
         // wraps text to the bounds width (greedy word wrap, same rules as
         // measureText) and lays lines out at lineHeight + lineSpacing;
@@ -1192,6 +1198,23 @@ public:
         float descent;
     };
 
+    // Cluster positions from the same shaping path used for rendering.
+    // xStart/xEnd are logical-DIP visual coordinates relative to the shaped
+    // run origin; source offsets address std::wstring code units.
+    struct ShapedTextCluster {
+        size_t sourceStart = 0;
+        size_t sourceLength = 0;
+        float xStart = 0.0f;
+        float xEnd = 0.0f;
+        uint8_t bidiLevel = 0;
+    };
+
+    struct ShapedText {
+        TextMetrics metrics{0, 0, 0, 0};
+        std::vector<ShapedTextCluster> clusters;
+        bool rightToLeft = false;
+    };
+
     /*
        @name: measureText
        @func: 度量文字 - 计算文字渲染后的实际尺寸
@@ -1208,6 +1231,16 @@ public:
         AYUNREFERENCED_PARAM(maxWidth);
         return TextMetrics{0, 0, 0, 0};
     }
+
+    virtual TextMetrics measureText(const std::wstring& text, int fontSize,
+                                    const TextStyle& style,
+                                    float maxWidth = 0.0f) const {
+        AYUNREFERENCED_PARAM(style);
+        return measureText(text, fontSize, maxWidth);
+    }
+
+    virtual ShapedText shapeText(const std::wstring& text, int fontSize,
+                                 const TextStyle& style) const;
 
     /*
        @name: getFontMetrics
@@ -1250,6 +1283,33 @@ public:
 
 inline void IRenderBackend::drawText(const math::FRectangle& bounds, const std::wstring& text, int fontSize, const TextStyle& style) {
     drawText(bounds, text, fontSize, style.color);
+}
+
+inline IRenderBackend::ShapedText IRenderBackend::shapeText(
+    const std::wstring& text, int fontSize, const TextStyle& style) const {
+    ShapedText out;
+    out.metrics = measureText(text, fontSize, style);
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(text, style.direction);
+    out.rightToLeft = analysis.baseRightToLeft;
+    const std::vector<size_t> visual = reorderUnicodeClusters(
+        analysis, 0, analysis.clusters.size());
+    TextStyle clusterStyle = style;
+    clusterStyle.letterSpacing = 0;
+    float x = 0.0f;
+    out.clusters.reserve(visual.size());
+    for (size_t index : visual) {
+        const UnicodeTextCluster& source = analysis.clusters[index];
+        const std::wstring clusterText = text.substr(source.textStart,
+                                                     source.textLength);
+        const float width = measureText(clusterText, fontSize, clusterStyle).width
+            + static_cast<float>(style.letterSpacing);
+        out.clusters.push_back({source.textStart, source.textLength,
+                                x, x + std::max(0.0f, width),
+                                source.bidiLevel});
+        x += std::max(0.0f, width);
+    }
+    out.metrics.width = x;
+    return out;
 }
 
 inline void IRenderBackend::drawGradientRect(const math::FRectangle& bounds,

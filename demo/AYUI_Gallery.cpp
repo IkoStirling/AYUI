@@ -238,6 +238,7 @@ struct GalleryState {
     // pointer); reset() before ui.shutdown() so child windows die
     // before the primary UI (K-INV-D5-6).
     std::unique_ptr<ayt::gallery::GalleryChildWindows> childWindows;
+    std::unique_ptr<ayt::ui::AccessibilityAdapter> accessibility;
 };
 
 void showPage(ayt::ui::UIManager& ui, const char* pageId)
@@ -1834,6 +1835,15 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         return 0;
     }
 
+    if (state->accessibility != nullptr) {
+        std::intptr_t nativeResult = 0;
+        if (state->accessibility->handleNativeMessage(
+                msg, wParam, lParam, nativeResult)) {
+            handled = true;
+            return nativeResult;
+        }
+    }
+
     // ---- Touch tracking (touchscreen laptops w/o mouse emulation) ----
     // WM_TOUCH is delivered when RegisterTouchWindow was called on the
     // hwnd. We map the primary touch into onMouseMove / onMouseButtonDown
@@ -2280,6 +2290,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.shutdown();
         return 1;
     }
+    state.accessibility = ayt::ui::createNativeAccessibilityAdapter(ui, hwnd);
     if (capture.enabled) {
         showPage(ui, capture.pageId.c_str());
         if (capture.scrollY > 0.0f) {
@@ -2377,6 +2388,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         state.childWindows->tickAll(dt);
         ui.update(dt); // caret blink, hover revalidate, hot-reload
         ui.layout();
+        state.accessibility->update();
         if (capture.enabled && capture.scrollY > 0.0f) {
             if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
                     ui.findById("content_scroll"))) {
@@ -2449,6 +2461,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     // in their roots) free here; the primary's shutdown then finds a
     // clean tree.
     state.childWindows.reset();
+    state.accessibility.reset();
     ui.shutdown();
     uiBackend.shutdown();
     renderer.shutdown();

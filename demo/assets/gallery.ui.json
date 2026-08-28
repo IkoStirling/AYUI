@@ -418,7 +418,7 @@
               "spacing": 9,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
-                { "type": "TextLabel", "id": "product_hdr", "text": "Productization - DPI / accessibility / inherited themes / overflow / rich layout / POSIX clipboard", "size": { "w": 920, "h": 24 } },
+                { "type": "TextLabel", "id": "product_hdr", "text": "Productization - DPI / native UIA / themes / overflow / Unicode rich layout / clipboard", "size": { "w": 920, "h": 24 } },
                 { "type": "Separator", "id": "product_sep_scale", "size": { "w": 900, "h": 6 } },
                 { "type": "TextLabel", "id": "product_scale_hint", "text": "Logical DIP stays stable while the physical framebuffer and font raster size follow DPI × UI scale.", "size": { "w": 900, "h": 20 } },
                 {
@@ -436,7 +436,7 @@
 
                 { "type": "Separator", "id": "product_sep_semantics", "size": { "w": 900, "h": 6 } },
                 { "type": "Button", "id": "product_semantics", "text": "Inspect semantic tree", "size": { "w": 220, "h": 28 }, "accessibilityRole": "button", "accessibilityLabel": "Inspect Gallery accessibility semantics", "accessibilityDescription": "Builds the platform-neutral semantic snapshot and reports actionable nodes." },
-                { "type": "TextLabel", "id": "product_semantics_state", "text": "semantic snapshot: inferred roles plus explicit labels are ready for UIA, AT-SPI or NSAccessibility", "size": { "w": 900, "h": 20 } },
+                { "type": "TextLabel", "id": "product_semantics_state", "text": "Windows exposes this tree through UI Automation; other platforms retain the portable snapshot/action adapter.", "size": { "w": 900, "h": 20 } },
 
                 { "type": "Separator", "id": "product_sep_theme", "size": { "w": 900, "h": 6 } },
                 {
@@ -468,11 +468,14 @@
                   "lineHeight": 1.25,
                   "lineSpacing": 2,
                   "maxLines": 3,
+                  "textDirection": 0,
                   "runs": [
-                    { "text": "RichText ", "fontSize": 17, "bold": true, "color": { "r": 0.40, "g": 0.72, "b": 1.0, "a": 1.0 } },
-                    { "text": "supports word/character wrapping, explicit paragraphs, left/center/right/justify alignment, vertical alignment, ellipsis, baseline shift, letter spacing, ", "fontSize": 14, "color": { "r": 0.90, "g": 0.90, "b": 0.94, "a": 1.0 } },
-                    { "text": "underline", "fontSize": 14, "underline": true, "color": { "r": 0.72, "g": 0.90, "b": 0.48, "a": 1.0 } },
-                    { "text": " and strike-through.", "fontSize": 14, "strikethrough": true, "color": { "r": 0.96, "g": 0.58, "b": 0.42, "a": 1.0 } }
+                    { "text": "Unicode RichText ", "fontFamily": "Segoe UI", "fontWeight": 700, "fontSize": 17, "bold": true, "language": "en", "color": { "r": 0.40, "g": 0.72, "b": 1.0, "a": 1.0 } },
+                    { "text": "keeps é grapheme carets, ", "fontFamily": "Segoe UI", "fontSize": 14, "language": "en", "color": { "r": 0.90, "g": 0.90, "b": 0.94, "a": 1.0 } },
+                    { "text": "مرحبا بالعالم", "fontFamily": "Segoe UI", "fontSize": 15, "language": "ar", "color": { "r": 0.72, "g": 0.90, "b": 0.48, "a": 1.0 } },
+                    { "text": " and ", "fontFamily": "Segoe UI", "fontSize": 14, "language": "en", "color": { "r": 0.90, "g": 0.90, "b": 0.94, "a": 1.0 } },
+                    { "text": "多语言排版", "fontFamily": "Microsoft YaHei", "fontWeight": 700, "fontSize": 15, "language": "zh-CN", "underline": true, "color": { "r": 0.96, "g": 0.58, "b": 0.42, "a": 1.0 } },
+                    { "text": ". Bidi, UAX line breaks and shaping share the render path.", "fontFamily": "Segoe UI", "fontSize": 14, "language": "en", "color": { "r": 0.90, "g": 0.90, "b": 0.94, "a": 1.0 } }
                   ]
                 },
 

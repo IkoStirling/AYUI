@@ -3,6 +3,8 @@
 // AYUI - ayt::ui namespace
 
 #include "AYUI/Accessibility.h"
+#include "AYUI/AccessibilityAdapter.h"
+#include "AYUI/UnicodeText.h"
 
 #include "AYUI/Widget.h"
 #include "AYUI/DisplayList.h"

@@ -1,8 +1,11 @@
 #include "AYTest.h"
 #include "AYUI/Accessibility.h"
+#include "AYUI/AccessibilityAdapter.h"
 #include "AYUI/Button.h"
 #include "AYUI/CheckBox.h"
+#include "AYUI/ComboBox.h"
 #include "AYUI/MockRenderer.h"
+#include "AYUI/RadioButton.h"
 #include "AYUI/RichText.h"
 #include "AYUI/ScrollBar.h"
 #include "AYUI/Style.h"
@@ -108,12 +111,16 @@ TEST_CASE(accessibility_tree_infers_roles_labels_states_and_actions) {
     const AccessibilityNode tree = ui.buildAccessibilityTree();
     const AccessibilityNode* buttonNode = findSemanticNode(tree, button.getAccessibilityId());
     const AccessibilityNode* checkNode = findSemanticNode(tree, check.getAccessibilityId());
+    const AccessibilityNode* scrollNode = findSemanticNode(tree, scroll.getAccessibilityId());
     CHECK_NOT_NULL(buttonNode);
     CHECK_NOT_NULL(checkNode);
+    CHECK_NOT_NULL(scrollNode);
     CHECK(buttonNode->role == AccessibilityRole::Button);
     CHECK(buttonNode->label == L"Save");
     CHECK((buttonNode->actions & accessibilityActionMask(AccessibilityAction::Press)) != 0);
     CHECK(checkNode->role == AccessibilityRole::CheckBox);
+    CHECK(scrollNode->hasNumericRange);
+    CHECK_FLOAT_EQ(static_cast<float>(scrollNode->numericValue), 50.0f, 1e-5f);
 
     CHECK(ui.performAccessibilityAction(button.getAccessibilityId(), AccessibilityAction::Press));
     CHECK(pressed);
@@ -121,6 +128,108 @@ TEST_CASE(accessibility_tree_infers_roles_labels_states_and_actions) {
     CHECK(check.isChecked());
     CHECK(ui.performAccessibilityAction(scroll.getAccessibilityId(), AccessibilityAction::Increment));
     CHECK(scroll.getValue() > 50.0f);
+    CHECK(ui.setAccessibilityNumericValue(scroll.getAccessibilityId(), 37.5));
+    CHECK_FLOAT_EQ(scroll.getValue(), 37.5f, 1e-5f);
+    ui.shutdown();
+}
+
+TEST_CASE(accessibility_adapter_tracks_semantic_diffs_without_a_native_window) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(320, 180);
+    Button button;
+    button.setText(L"Before");
+    button.setSize(FVector2(80, 24));
+    ui.root()->addChildExternal(&button);
+
+    auto adapter = createNativeAccessibilityAdapter(ui, nullptr);
+    CHECK_NOT_NULL(adapter.get());
+    adapter->update();
+    CHECK(adapter->changes().empty());
+
+    button.setText(L"After");
+    adapter->update();
+    size_t nameChangeCount = 0;
+    size_t unrelatedChangeCount = 0;
+    for (const AccessibilityChange& change : adapter->changes()) {
+        if (change.nodeId == button.getAccessibilityId()
+            && change.kind == AccessibilityChangeKind::Name) {
+            ++nameChangeCount;
+        } else if (change.nodeId == button.getAccessibilityId()) {
+            ++unrelatedChangeCount;
+        }
+    }
+    const AccessibilityNode* node = findSemanticNode(
+        adapter->snapshot(), button.getAccessibilityId());
+    CHECK(nameChangeCount == 1u);
+    CHECK(unrelatedChangeCount == 0u);
+    CHECK_NOT_NULL(node);
+    CHECK(node->label == L"After");
+    adapter.reset();
+    ui.shutdown();
+}
+
+TEST_CASE(accessibility_selection_and_expand_actions_match_native_patterns) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(640, 320);
+
+    RadioButton radio;
+    radio.setText(L"Preferred");
+    radio.setSize(FVector2(120, 24));
+    ComboBox combo;
+    combo.setItems({L"First", L"Second"});
+    combo.setSelectedIndex(0);
+    combo.setPosition(FVector2(0, 40));
+    combo.setSize(FVector2(160, 28));
+    TabStrip tabs;
+    tabs.addTab(L"Overview");
+    tabs.addTab(L"Details");
+    tabs.setPosition(FVector2(0, 90));
+    tabs.setSize(FVector2(240, 28));
+    tabs.performLayout();
+    ui.root()->addChildExternal(&radio);
+    ui.root()->addChildExternal(&combo);
+    ui.root()->addChildExternal(&tabs);
+
+    AccessibilityNode tree = ui.buildAccessibilityTree();
+    const AccessibilityNode* radioNode = findSemanticNode(tree, radio.getAccessibilityId());
+    const AccessibilityNode* comboNode = findSemanticNode(tree, combo.getAccessibilityId());
+    CHECK_NOT_NULL(radioNode);
+    CHECK_NOT_NULL(comboNode);
+    CHECK((radioNode->actions & accessibilityActionMask(AccessibilityAction::Select)) != 0);
+    CHECK((comboNode->actions & accessibilityActionMask(AccessibilityAction::Expand)) != 0);
+    CHECK((comboNode->actions & accessibilityActionMask(AccessibilityAction::Collapse)) != 0);
+
+    CHECK(ui.performAccessibilityAction(radio.getAccessibilityId(), AccessibilityAction::Select));
+    CHECK(radio.isChecked());
+    CHECK(ui.performAccessibilityAction(combo.getAccessibilityId(), AccessibilityAction::Expand));
+    CHECK(combo.isPopupOpen());
+    CHECK(ui.performAccessibilityAction(combo.getAccessibilityId(), AccessibilityAction::Collapse));
+    CHECK(!combo.isPopupOpen());
+
+    const auto& tabButtons = tabs.getChildren();
+    CHECK(tabButtons.size() == 2u);
+    if (tabButtons.size() == 2u) {
+        tree = ui.buildAccessibilityTree();
+        const AccessibilityNode* firstTab = findSemanticNode(
+            tree, tabButtons[0]->getAccessibilityId());
+        const AccessibilityNode* secondTab = findSemanticNode(
+            tree, tabButtons[1]->getAccessibilityId());
+        CHECK_NOT_NULL(firstTab);
+        CHECK_NOT_NULL(secondTab);
+        if (firstTab != nullptr && secondTab != nullptr) {
+            CHECK((firstTab->states & AccessibilityState_Selected) != 0);
+            CHECK((secondTab->states & AccessibilityState_Selected) == 0);
+            CHECK((secondTab->actions
+                & accessibilityActionMask(AccessibilityAction::Select)) != 0);
+        }
+        CHECK(ui.performAccessibilityAction(
+            tabButtons[1]->getAccessibilityId(), AccessibilityAction::Select));
+        CHECK(tabs.getSelectedIndex() == 1);
+    }
     ui.shutdown();
 }
 
@@ -313,6 +422,67 @@ TEST_CASE(richtext_max_lines_ellipsis_and_run_decoration_render) {
     CHECK(textCalls >= 1);
     CHECK(decorationCalls >= 2);
     CHECK(stylePreserved);
+}
+
+TEST_CASE(richtext_caret_stops_never_split_extended_graphemes) {
+    RichText text;
+    text.setSize(FVector2(160, 40));
+    text.addRun(L"e\u0301x", FVector4(1, 1, 1, 1), 14);
+    MockRenderer renderer;
+    const RichTextLayout layout = text.layout(renderer);
+    size_t illegalCaretStopCount = 0;
+    size_t legalCaretStopCount = 0;
+    for (const RichTextFragment& fragment : layout.fragments) {
+        for (size_t index : fragment.caretTextIndices) {
+            if (index == 1u) ++illegalCaretStopCount;
+            if (index == 0u || index == 2u || index == 3u) ++legalCaretStopCount;
+        }
+    }
+    CHECK(illegalCaretStopCount == 0u);
+    CHECK(legalCaretStopCount >= 3u);
+    CHECK(text.hitTestTextIndex(renderer, FVector2(1, 5)) != 1u);
+}
+
+TEST_CASE(richtext_rtl_fragment_exposes_descending_logical_caret_order) {
+    RichText text;
+    text.setSize(FVector2(240, 50));
+    text.addRun(L"abc \u05E9\u05DC\u05D5\u05DD 12", FVector4(1, 1, 1, 1), 14);
+    MockRenderer renderer;
+    const RichTextLayout layout = text.layout(renderer);
+    size_t rtlFragmentCount = 0;
+    size_t rtlCaretOrderViolationCount = 0;
+    for (const RichTextFragment& fragment : layout.fragments) {
+        if (!fragment.rightToLeft) continue;
+        ++rtlFragmentCount;
+        for (size_t i = 1; i < fragment.caretTextIndices.size(); ++i) {
+            if (fragment.caretTextIndices[i - 1] < fragment.caretTextIndices[i]) {
+                ++rtlCaretOrderViolationCount;
+            }
+        }
+    }
+    CHECK(rtlFragmentCount >= 1u);
+    CHECK(rtlCaretOrderViolationCount == 0u);
+}
+
+TEST_CASE(richtext_serializer_round_trips_shaping_style) {
+    RichText original;
+    original.setTextDirection(TextDirection::RightToLeft);
+    RichRun run;
+    run.text = L"\u0645\u0631\u062D\u0628\u0627";
+    run.fontFamily = L"Segoe UI";
+    run.fontWeight = 700;
+    run.language = "ar";
+    original.addRun(run);
+    const std::string json = WidgetSerializer::serializeWidget(&original);
+    Widget* restoredWidget = WidgetSerializer::deserialize(json);
+    auto* restored = dynamic_cast<RichText*>(restoredWidget);
+    CHECK_NOT_NULL(restored);
+    CHECK(restored->getTextDirection() == TextDirection::RightToLeft);
+    CHECK(restored->getRunCount() == 1u);
+    CHECK(restored->getRun(0).fontFamily == L"Segoe UI");
+    CHECK(restored->getRun(0).fontWeight == 700);
+    CHECK(restored->getRun(0).language == "ar");
+    destroyWidgetTree(restoredWidget);
 }
 
 TEST_SUITE_END

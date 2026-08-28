@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYUI/LeafWidget.h"
+#include "AYUI/UnicodeText.h"
 
 #include <cstddef>
 #include <string>
@@ -17,6 +18,9 @@ struct RichRun {
     std::wstring text;
     math::FVector4 color = math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
     int fontSize = 14;
+    std::wstring fontFamily;
+    int fontWeight = 400;
+    std::string language;
     bool bold = false;
     bool italic = false;
     bool underline = false;
@@ -32,7 +36,13 @@ struct RichTextFragment {
     size_t textLength = 0;
     size_t documentTextStart = 0;
     size_t lineIndex = 0;
+    uint8_t bidiLevel = 0;
+    bool rightToLeft = false;
     math::FRectangle bounds;
+    // Visual caret stops. Text indices are document std::wstring offsets;
+    // x values are world-space and never split an extended grapheme cluster.
+    std::vector<size_t> caretTextIndices;
+    std::vector<float> caretX;
 };
 
 struct RichTextLine {
@@ -87,6 +97,8 @@ public:
     float getLineSpacing() const { return _lineSpacing; }
     void setMaxLines(size_t lines) { _maxLines = lines; markDirty(); }
     size_t getMaxLines() const { return _maxLines; }
+    void setTextDirection(TextDirection direction) { _textDirection = direction; markDirty(); }
+    TextDirection getTextDirection() const { return _textDirection; }
 
     RichTextLayout layout(IRenderBackend& renderer) const;
     math::FVector2 measureContent(IRenderBackend& renderer) const;
@@ -99,7 +111,7 @@ protected:
 
 private:
     float measureTextWidth(IRenderBackend& renderer, const std::wstring& text,
-                           int fontSize) const;
+                           const RichRun& run, TextDirection direction) const;
 
     std::vector<RichRun> _runs;
     math::FVector4 _defaultColor = math::FVector4(1, 1, 1, 1);
@@ -112,6 +124,7 @@ private:
     float _lineHeight = 1.2f;
     float _lineSpacing = 0.0f;
     size_t _maxLines = 0;
+    TextDirection _textDirection = TextDirection::Auto;
 };
 
 Widget* createRichTextWidget();

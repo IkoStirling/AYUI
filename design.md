@@ -4,11 +4,12 @@
 
 **CMake 目标版本：** 1.0.0
 
-**功能里程碑：** v1.5 已实现
+**功能里程碑：** v1.6 已实现
 
 **状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、Serializer
 完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
-Tab/RichText 产品化、POSIX Clipboard、Docking、Layout Editor、动画与完整单测均可构建。
+Tab/RichText 产品化、Unicode shaping、Windows UI Automation adapter、POSIX Clipboard、Docking、
+Layout Editor、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -165,19 +166,27 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
 1. **DPI 与 UI scale**：DPI 来自窗口所在显示器，UI scale 来自用户偏好，二者相乘但生命周期
    分离。宿主在 DPI change 和 framebuffer resize 时分别更新对应值；Gallery 已处理
    `WM_DPICHANGED`，自动化截图固定 scale=1 以保持可复现。
-2. **无障碍语义**：每个 Widget 在运行期获得稳定 ID。`buildAccessibilityTree()` 对内置控件推断
-   role、label、value、state 和 actions，显式 accessibility 元数据具有更高优先级；隐藏节点和
-   不可见子树不进入快照。原生 UIA/AT-SPI/NSAccessibility adapter 消费快照，并通过
-   `performAccessibilityAction()` 把动作路由回当前 Widget。
+2. **无障碍语义与原生桥**：每个 Widget 在运行期获得稳定 ID。`buildAccessibilityTree()` 对内置
+   控件推断 role、label、value、range、state 和 actions，显式 accessibility 元数据具有更高优先级；
+   隐藏节点和不可见子树不进入快照。`AccessibilityAdapter` 扁平化并比较相邻快照。Windows 实现
+   `IRawElementProviderSimple/Fragment/FragmentRoot`，支持 Invoke、Toggle、RangeValue、
+   ExpandCollapse 和 SelectionItem pattern，处理 `WM_GETOBJECT`，发布结构/属性/焦点事件；UIA
+   工作线程上的动作通过私有窗口消息同步封送回 UI 线程。adapter 每帧在 layout 后更新，并必须在
+   UIManager shutdown 前销毁。非 Windows 当前只保留 snapshot/diff，AT-SPI/NSAccessibility 是同一
+   平台无关状态机的后续 provider，不得复制 Widget 语义推断。
 3. **Theme 继承**：Theme 通过名字延迟解析 `extends`，token 和 sheet 均按 parent-first、
    child-wins 合成；visited set 使缺失父级或继承环安全终止。控件树上的 token override 从祖先
    向后代级联，最近节点胜出，修改祖先 override 会标脏整个 style 子树。
 4. **TabStrip overflow**：Scroll 是默认策略，维护 logical offset/max offset、滚轮滚动和选中项
    自动可见；Compress 从配置的 `minTabWidth` 向 24 DIP 交互硬下限按可用宽度分配；Clip 保留旧固定宽度行为。
    三种模式均裁剪 child paint，不允许 tab 越过 strip 覆盖相邻控件。
-5. **RichText 段落布局**：run 保存字号、颜色、bold/italic、下划线、删除线、字距和基线偏移；
-   paragraph layout 支持显式换行、word/character wrap、left/center/right/justify、垂直对齐、
-   行高/行距、最大行数、clip/ellipsis，并输出 fragments/lines/contentSize 供测量、命中与 caret。
+5. **RichText Unicode 段落布局**：run 保存字号、颜色、family、weight、bold/italic、language、
+   下划线、删除线、字距和基线偏移；paragraph layout 支持显式换行、word/character wrap、
+   left/center/right/justify、垂直对齐、行高/行距、最大行数、clip/ellipsis，并输出
+   fragments/lines/contentSize/caret stops。`UnicodeText` 先按扩展字素簇切分，再计算 UAX #14 兼容
+   soft break 与 bidi level；Windows 使用 Uniscribe 的系统 Unicode 表增强 itemize/break，portable
+   路径提供确定性子集。每一行按 UAX #9 L2 进行可视重排。后端 `shapeText()` 返回与实际 draw path
+   相同的 source cluster/advance；一个 shaping cluster 内不可换行，letter spacing 只应用一次。
    justified whitespace 必须成为独立 advance，不能合并后丢失额外间距。
 6. **Clipboard**：Win32 使用系统 API；macOS 使用 pbcopy/pbpaste；Linux 优先 Wayland
    wl-clipboard，再尝试 X11 xclip/xsel。所有 POSIX payload 都按 UTF-8 转换并设置 16 MiB 读取上限；
@@ -233,8 +242,14 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
 - loader 和 serializer 必须进行真实 UTF-8 ↔ wide conversion，禁止用 iterator 逐字节窄化/拓宽。
 - `I18n` 表格式为 `{ key: { language: translation } }`；缺少当前语言时回退到 `en`，再缺失时返回 key/default。
 - `ui.` 前缀由 `isI18nKey` 识别，loader 只有在设置了 I18n 时才解析。
-- RichText paragraph layout 以 run 为样式边界，输出 line/fragment 几何；实际 glyph shaping 和
-  rasterization 仍委托 IRenderBackend，避免控件层持有字体或 GPU 资源。
+- RichText paragraph layout 以 Unicode grapheme、bidi level 和 run 样式为边界，输出 line/fragment/
+  caret 几何；实际 glyph shaping 和 rasterization 仍委托 `IRenderBackend::shapeText/drawText`，避免
+  控件层持有字体或 GPU 资源。
+- AYFont HarfBuzz 输入在 Windows 使用 UTF-16，在其他 `wchar_t==4` 平台使用 UTF-32；direction、
+  language 和 monotone grapheme cluster 均显式设置，不能把 UTF-16 low surrogate 暴露为 source start。
+- AYRenderer 按 `(family, rasterSize, weight, italic)` 缓存 face，每个 face 持有独立 GPU atlas；测量、
+  cluster geometry 和 draw 必须选择同一 face、direction、language。不同 atlas 是合法合批边界，
+  同 atlas/状态的连续 glyph 仍合为一个 draw call。
 
 ## 8. JSON、Factory、Serializer 契约
 
@@ -367,8 +382,8 @@ AYUI 静态库公开依赖基础数学、字体、设备接口和公共 headers�
 
 Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend、
 Animation 和 Productization 十页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层
-和控件/图片叠加，Productization 页可交互验证 UI scale、语义快照、父主题、Tab overflow、
-RichText 和 Clipboard。
+和控件/图片叠加，Productization 页可交互验证 UI scale、Windows UIA 语义、父主题、Tab overflow、
+Unicode/Bidi 多字体 RichText 和 Clipboard。
 
 AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
 display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill/clip，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
@@ -378,16 +393,16 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 
 2026-08-28 全模块审计统计：
 
-- 76 个公共/支持 header
-- 64 个非 demo、非 unittest 的 `.cpp`
-- 92 个 `Test_*.cpp`
-- 988 个 `TEST_CASE`
-- Windows Debug：`4436 / 4436` 条断言通过
+- 78 个公共/支持 header
+- 66 个非 demo、非 unittest 的 `.cpp`
+- 93 个 `Test_*.cpp`
+- 1000 个 `TEST_CASE`
+- Windows Debug：`4498 / 4498` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
-能力测试随后把当前基线增加到 `4436 / 4436`。
+能力测试随后把当前基线增加到 `4498 / 4498`。
 
 审计覆盖：
 
@@ -398,8 +413,8 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 - dirty/cache invalidation、retained display-list、即时兜底、frame-local backend replay、
   world-bounds cache 和容器 clip/hit-test 契约
 - Layer/RenderTarget 的 DPI、resize、damage、paint/composite 和 release 生命周期
-- DPI/UI scale 的逻辑布局、物理输入换算、语义树/动作、主题继承与控件级联、Tab overflow、
-  RichText wrap/justify/ellipsis/decoration/命中和 Serializer 往返
+- DPI/UI scale 的逻辑布局、物理输入换算、语义树/动作/diff、主题继承与控件级联、Tab overflow、
+  RichText wrap/justify/ellipsis/decoration/Unicode grapheme/Bidi/命中和 Serializer 往返
 - TreeView 千节点重复建树性能
 - 全部 `for` / `while` / `do` 循环及标准算法回调中的重复断言扫描
 - Docking、布局保存/加载和 popup/modal 行为
@@ -426,6 +441,10 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
   miter stroke、嵌套 stencil path clip 和排序屏障。
 - 逻辑 DIP/物理 framebuffer 分离、无障碍语义 snapshot/action、Theme 与 Widget token 继承、
   TabStrip 三种 overflow、RichText paragraph layout 和 POSIX Clipboard helper backend。
+- Unicode grapheme/UAX #14-compatible break/Bidi line reorder，AYFont UTF-16/UTF-32 HarfBuzz direction
+  与 language，AYRenderer family/weight/italic face、多 atlas 及 shaping-cluster 一致测量/断行/绘制。
+- Windows UI Automation Fragment provider、常用 control pattern、增量事件与跨线程动作封送；Gallery
+  在 `WM_GETOBJECT`、layout 后 update 和 shutdown 顺序上提供生产接入样例。
 
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
 
@@ -442,15 +461,16 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    resize/DPI、overlay 合成顺序和显存预算；在此之前保持 capability 关闭。
 2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
    支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
-3. 为 UI Automation、AT-SPI 与 NSAccessibility 提供宿主 adapter、原生事件发布和增量语义树；
-   AYUI 核心继续只维护平台无关 snapshot/action 契约。
-4. RichText 的下一层是 Unicode grapheme/bidi/UAX #14、内联对象和字体 family/weight face 选择；
-   当前 paragraph layout 已覆盖产品常用 wrap/alignment/ellipsis/decorations/measure/hit/caret。
+3. Windows UI Automation provider 已完成第一阶段；后续补 TextPattern/selection range/live region，
+   并以同一 snapshot/action/diff 状态机实现 AT-SPI 与 NSAccessibility，不能在平台层重新推断控件语义。
+4. RichText 的 grapheme/bidi/UAX #14-compatible break、family/weight face 与真实 shaping 已完成第一阶段；
+   下一层是内联对象、跨字体 glyph fallback、可变/彩色字体、完整 selection/editing，以及非 Windows
+   字体发现。portable line-break fallback 是确定性子集，完整 Unicode 表应由平台或生成数据提供。
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 
-这些限制不阻塞当前 v1.5 功能，但实现新特性时不得继续扩大重复路径。
+这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 
 ### 14.1 高价值扩展顺序
 
@@ -470,10 +490,12 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、stroke、winding hole 与嵌套
    stencil clip。path fill/clip 是显式排序屏障，两种 batch mode 不复制实现。下一阶段是 SVG 级
    fill-rule/boolean/join-cap 和 AA fringe。
-5. **产品化能力（第一阶段完成）**：Widget 使用逻辑 DIP，DPI/UI scale 在输入和最终 raster
+5. **产品化能力（第二阶段完成）**：Widget 使用逻辑 DIP，DPI/UI scale 在输入和最终 raster
    边界闭环；无障碍 snapshot/action、Theme/Widget 两级继承、TabStrip Scroll/Compress/Clip、
    RichText paragraph layout 和 Win32/macOS/Wayland/X11 Clipboard 均有 API、Serializer、Gallery
-   或单测覆盖。下一阶段仅扩展原生 accessibility adapter、Unicode 编辑与字体 face，不复制核心路径。
+   或单测覆盖；本阶段新增 Windows UIA provider、Unicode grapheme/Bidi/断行、HarfBuzz direction/
+   language 与 family/weight 多 face atlas。下一阶段沿现有 adapter/text/backend 契约补平台 provider、
+   TextPattern、字体 fallback 和 inline object，不复制核心路径。
 
 `OrderedRuns` 与 `OverlapAware` 只允许在提交顺序规划上分叉；图元记录、合批兼容键、
 顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明
@@ -490,9 +512,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 像素层缓存 | Layer/RenderTarget 契约与 Mock 已完成；AYRenderer capability 暂时关闭 |
 | 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
 | DPI/UI scale | Widget/damage/accessibility 使用 DIP；宿主输入与 framebuffer 使用物理像素；后端最终缩放 |
-| 无障碍 | AYUI 输出平台无关 snapshot/action；原生 UIA/AT-SPI/NSAccessibility 由宿主 adapter 发布 |
+| 无障碍 | AYUI 输出 snapshot/action/diff；Windows adapter 发布原生 UIA，AT-SPI/NSAccessibility 待接入 |
 | 主题 | 命名 parent theme + 控件树 token override 级联，parent-first / nearest-wins |
-| Tab/RichText | Tab 三种 overflow；RichText 输出 paragraph line/fragment 几何并委托 backend shaping |
+| Tab/RichText | Tab 三种 overflow；RichText 按 grapheme/Bidi/UAX break 排版并复用 backend shaping cluster |
 | Clipboard | Win32 原生；macOS/Wayland/X11 helper backend，UTF-8、失败显式返回 |
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |

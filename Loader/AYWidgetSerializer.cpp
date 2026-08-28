@@ -751,6 +751,12 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("lineHeight")) rt->setLineHeight(j["lineHeight"].get<float>());
             if (j.contains("lineSpacing")) rt->setLineSpacing(j["lineSpacing"].get<float>());
             if (j.contains("maxLines")) rt->setMaxLines(j["maxLines"].get<size_t>());
+            if (j.contains("textDirection")) {
+                const int value = j["textDirection"].get<int>();
+                if (value >= 0 && value <= static_cast<int>(TextDirection::RightToLeft)) {
+                    rt->setTextDirection(static_cast<TextDirection>(value));
+                }
+            }
             if (j.contains("runs") && j["runs"].is_array()) {
                 for (const auto& r : j["runs"]) {
                     math::FVector4 col = rt->getDefaultColor();
@@ -770,6 +776,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                         run.text = toWstring(r["text"].get<std::string>());
                         run.color = col;
                         run.fontSize = size;
+                        if (r.contains("fontFamily")) {
+                            run.fontFamily = toWstring(r["fontFamily"].get<std::string>());
+                        }
+                        run.fontWeight = std::clamp(r.value("fontWeight", 400), 100, 900);
+                        run.language = r.value("language", std::string{});
                         run.bold = r.value("bold", false);
                         run.italic = r.value("italic", false);
                         run.underline = r.value("underline", false);
@@ -1544,6 +1555,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["lineHeight"] = rt->getLineHeight();
         j["lineSpacing"] = rt->getLineSpacing();
         j["maxLines"] = rt->getMaxLines();
+        j["textDirection"] = static_cast<int>(rt->getTextDirection());
         j["runs"] = json::array();
         for (size_t i = 0; i < rt->getRunCount(); ++i) {
             const RichRun& r = rt->getRun(i);
@@ -1553,6 +1565,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                 {"r", r.color.x}, {"g", r.color.y},
                 {"b", r.color.z}, {"a", r.color.w} };
             rj["fontSize"] = r.fontSize;
+            rj["fontFamily"] = toUtf8(r.fontFamily);
+            rj["fontWeight"] = r.fontWeight;
+            rj["language"] = r.language;
             rj["bold"] = r.bold;
             rj["italic"] = r.italic;
             rj["underline"] = r.underline;

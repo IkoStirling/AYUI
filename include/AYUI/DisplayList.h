@@ -198,6 +198,11 @@ public:
                                       int baseSize) override;
     TextMetrics measureText(const std::wstring& text, int fontSize,
                             float maxWidth = 0.0f) const override;
+    TextMetrics measureText(const std::wstring& text, int fontSize,
+                            const TextStyle& style,
+                            float maxWidth = 0.0f) const override;
+    ShapedText shapeText(const std::wstring& text, int fontSize,
+                         const TextStyle& style) const override;
     ayt::font::FontMetrics getFontMetrics(FontHandle font) const override;
     size_t getAvailableVideoMemory() const override;
     std::string getDriverVersion() const override;

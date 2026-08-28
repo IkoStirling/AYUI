@@ -2,7 +2,6 @@
 #include "AYUI/IRenderBackend.h"
 
 #include <algorithm>
-#include <climits>
 #include <cmath>
 #include <limits>
 
@@ -10,15 +9,21 @@ namespace ayt::ui {
 namespace {
 
 struct LayoutAtom {
+    size_t analysisIndex = 0;
     size_t runIndex = 0;
     size_t runTextStart = 0;
     size_t documentTextStart = 0;
-    size_t textLength = 1;
+    size_t textLength = 0;
     std::wstring text;
     float width = 0.0f;
     float height = 0.0f;
+    uint8_t bidiLevel = 0;
     bool whitespace = false;
     bool newline = false;
+    bool softBreakAfter = false;
+    bool synthetic = false;
+
+    bool rightToLeft() const { return (bidiLevel & 1u) != 0u; }
 };
 
 struct AtomLine {
@@ -28,7 +33,62 @@ struct AtomLine {
     bool paragraphEnd = false;
 };
 
-bool isBreakSpace(wchar_t ch) { return ch == L' ' || ch == L'\t'; }
+IRenderBackend::TextStyle makeTextStyle(const RichRun& run,
+                                         TextDirection direction) {
+    IRenderBackend::TextStyle style;
+    style.color = run.color;
+    style.bold = run.bold;
+    style.italic = run.italic;
+    style.fontFamily = run.fontFamily;
+    style.fontWeight = std::clamp(run.bold && run.fontWeight < 600
+        ? 700 : run.fontWeight, 100, 900);
+    style.direction = direction;
+    style.language = run.language;
+    style.letterSpacing = static_cast<int>(std::lround(run.letterSpacing));
+    style.valign = IRenderBackend::TextStyle::VAlign::Top;
+    return style;
+}
+
+void recomputeLine(AtomLine& line) {
+    line.width = 0.0f;
+    line.height = 0.0f;
+    for (const LayoutAtom& atom : line.atoms) {
+        line.width += atom.width;
+        line.height = std::max(line.height, atom.height);
+    }
+}
+
+std::vector<size_t> visualOrder(const AtomLine& line) {
+    std::vector<size_t> order(line.atoms.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    if (order.empty()) return order;
+    uint8_t maxLevel = 0;
+    uint8_t minOdd = std::numeric_limits<uint8_t>::max();
+    for (const LayoutAtom& atom : line.atoms) {
+        maxLevel = std::max(maxLevel, atom.bidiLevel);
+        if (atom.rightToLeft()) minOdd = std::min(minOdd, atom.bidiLevel);
+    }
+    if (minOdd == std::numeric_limits<uint8_t>::max()) return order;
+    for (int level = static_cast<int>(maxLevel); level >= static_cast<int>(minOdd); --level) {
+        size_t i = 0;
+        while (i < order.size()) {
+            while (i < order.size() && line.atoms[order[i]].bidiLevel < level) ++i;
+            const size_t begin = i;
+            while (i < order.size() && line.atoms[order[i]].bidiLevel >= level) ++i;
+            std::reverse(order.begin() + static_cast<std::ptrdiff_t>(begin),
+                         order.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+    }
+    return order;
+}
+
+void appendCaretStop(RichTextFragment& fragment, size_t textIndex, float x) {
+    if (!fragment.caretTextIndices.empty()
+        && fragment.caretTextIndices.back() == textIndex
+        && std::abs(fragment.caretX.back() - x) < 0.001f) return;
+    fragment.caretTextIndices.push_back(textIndex);
+    fragment.caretX.push_back(x);
+}
 
 } // namespace
 
@@ -47,6 +107,7 @@ void RichText::addRun(const std::wstring& text, const math::FVector4& color,
 void RichText::addRun(const RichRun& run) {
     RichRun normalized = run;
     if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
+    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
     _runs.push_back(std::move(normalized));
     markBoundsDirty();
     markDirty();
@@ -74,11 +135,14 @@ void RichText::setWrapWidth(float width) {
 
 float RichText::measureTextWidth(IRenderBackend& renderer,
                                  const std::wstring& text,
-                                 int fontSize) const {
+                                 const RichRun& run,
+                                 TextDirection direction) const {
     if (text.empty()) return 0.0f;
-    const auto metrics = renderer.measureText(text, fontSize);
+    const auto metrics = renderer.measureText(text, run.fontSize,
+                                              makeTextStyle(run, direction));
     if (metrics.width > 0.0f) return metrics.width;
-    return static_cast<float>(text.size()) * 0.5f * static_cast<float>(fontSize);
+    return static_cast<float>(text.size()) * 0.5f
+        * static_cast<float>(run.fontSize);
 }
 
 RichTextLayout RichText::layout(IRenderBackend& renderer) const {
@@ -89,52 +153,98 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
     if (_wrapWidth > 0.0f) availableWidth = std::min(availableWidth, _wrapWidth);
     const bool wrap = _wrapMode != RichTextWrapMode::NoWrap && availableWidth > 0.0f;
 
+    const std::wstring plainText = getPlainText();
+    const UnicodeTextAnalysis analysis = analyzeUnicodeText(plainText, _textDirection);
+    std::vector<size_t> runDocumentStarts(_runs.size() + 1u, 0u);
+    for (size_t i = 0; i < _runs.size(); ++i) {
+        runDocumentStarts[i + 1] = runDocumentStarts[i] + _runs[i].text.size();
+    }
+
     std::vector<LayoutAtom> atoms;
-    size_t documentIndex = 0;
-    for (size_t runIndex = 0; runIndex < _runs.size(); ++runIndex) {
-        const RichRun& run = _runs[runIndex];
-        for (size_t i = 0; i < run.text.size();) {
+    for (size_t clusterIndex = 0; clusterIndex < analysis.clusters.size(); ++clusterIndex) {
+        const UnicodeTextCluster& cluster = analysis.clusters[clusterIndex];
+        size_t position = cluster.textStart;
+        size_t remaining = cluster.textLength;
+        while (remaining > 0 && !_runs.empty()) {
+            auto upper = std::upper_bound(runDocumentStarts.begin(),
+                                          runDocumentStarts.end(), position);
+            size_t runIndex = upper == runDocumentStarts.begin() ? 0u
+                : static_cast<size_t>((upper - runDocumentStarts.begin()) - 1);
+            if (runIndex >= _runs.size()) runIndex = _runs.size() - 1u;
+            const size_t runEnd = runDocumentStarts[runIndex + 1u];
+            const size_t partLength = std::min(remaining, runEnd - position);
+            if (partLength == 0) break;
+            const RichRun& run = _runs[runIndex];
             LayoutAtom atom;
+            atom.analysisIndex = clusterIndex;
             atom.runIndex = runIndex;
-            atom.runTextStart = i;
-            atom.documentTextStart = documentIndex;
-            const wchar_t first = run.text[i];
-#if WCHAR_MAX <= 0xffff
-            if (first >= 0xd800 && first <= 0xdbff && i + 1 < run.text.size()
-                && run.text[i + 1] >= 0xdc00 && run.text[i + 1] <= 0xdfff) {
-                atom.textLength = 2;
-            }
-#endif
-            atom.text = run.text.substr(i, atom.textLength);
-            atom.newline = first == L'\n' || first == L'\r';
-            if (first == L'\r' && i + 1 < run.text.size() && run.text[i + 1] == L'\n') {
-                atom.textLength = 2;
-                atom.text = L"\r\n";
-            }
-            atom.whitespace = isBreakSpace(first);
-            atom.height = std::max(1.0f, static_cast<float>(run.fontSize) * _lineHeight);
+            atom.runTextStart = position - runDocumentStarts[runIndex];
+            atom.documentTextStart = position;
+            atom.textLength = partLength;
+            atom.text = plainText.substr(position, partLength);
+            atom.height = std::max(1.0f,
+                static_cast<float>(run.fontSize) * _lineHeight);
+            atom.bidiLevel = cluster.bidiLevel;
+            atom.whitespace = cluster.whitespace;
+            atom.newline = cluster.hardBreak;
+            // A style run may split a Unicode cluster. The cluster's line
+            // break opportunity belongs only to its final piece; exposing it
+            // on an earlier piece would permit wrapping inside a grapheme.
+            atom.softBreakAfter = cluster.softBreakAfter && partLength == remaining;
             if (!atom.newline) {
-                atom.width = measureTextWidth(renderer, atom.text, run.fontSize)
-                           + std::max(0.0f, run.letterSpacing);
+                const TextDirection atomDirection = atom.rightToLeft()
+                    ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+                atom.width = measureTextWidth(renderer, atom.text, run, atomDirection);
             }
-            atoms.push_back(atom);
-            i += atom.textLength;
-            documentIndex += atom.textLength;
+            atoms.push_back(std::move(atom));
+            position += partLength;
+            remaining -= partLength;
         }
+    }
+
+    // Use the same backend shaping path as drawText. This prevents ligatures
+    // and Arabic joining from producing different advances during layout.
+    for (size_t begin = 0; begin < atoms.size();) {
+        if (atoms[begin].newline) { ++begin; continue; }
+        size_t end = begin + 1u;
+        while (end < atoms.size() && !atoms[end].newline
+            && atoms[end].runIndex == atoms[begin].runIndex
+            && atoms[end].rightToLeft() == atoms[begin].rightToLeft()
+            && atoms[end - 1].runTextStart + atoms[end - 1].textLength
+                == atoms[end].runTextStart) ++end;
+        const RichRun& run = _runs[atoms[begin].runIndex];
+        const size_t localStart = atoms[begin].runTextStart;
+        const size_t localEnd = atoms[end - 1].runTextStart + atoms[end - 1].textLength;
+        const std::wstring span = run.text.substr(localStart, localEnd - localStart);
+        const TextDirection spanDirection = atoms[begin].rightToLeft()
+            ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+        const auto shaped = renderer.shapeText(span, run.fontSize,
+                                               makeTextStyle(run, spanDirection));
+        if (!shaped.clusters.empty()) {
+            for (size_t i = begin; i < end; ++i) atoms[i].width = 0.0f;
+            for (const auto& shapedCluster : shaped.clusters) {
+                const size_t sourceBegin = localStart + shapedCluster.sourceStart;
+                const size_t sourceEnd = sourceBegin + shapedCluster.sourceLength;
+                std::vector<size_t> covered;
+                for (size_t i = begin; i < end; ++i) {
+                    const size_t atomBegin = atoms[i].runTextStart;
+                    const size_t atomEnd = atomBegin + atoms[i].textLength;
+                    if (atomBegin < sourceEnd && sourceBegin < atomEnd) covered.push_back(i);
+                }
+                if (covered.empty()) continue;
+                const float clusterWidth = std::abs(shapedCluster.xEnd
+                                                    - shapedCluster.xStart);
+                const float share = clusterWidth / static_cast<float>(covered.size());
+                for (size_t i : covered) atoms[i].width += share;
+            }
+        }
+        begin = end;
     }
 
     std::vector<AtomLine> lines;
     AtomLine current;
-    const auto recompute = [](AtomLine& line) {
-        line.width = 0.0f;
-        line.height = 0.0f;
-        for (const LayoutAtom& atom : line.atoms) {
-            line.width += atom.width;
-            line.height = std::max(line.height, atom.height);
-        }
-    };
     auto finishLine = [&](bool paragraphEnd) {
-        recompute(current);
+        recomputeLine(current);
         if (current.height <= 0.0f) {
             current.height = static_cast<float>(_defaultFontSize) * _lineHeight;
         }
@@ -151,20 +261,24 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         if (wrap && !current.atoms.empty()
             && current.width + atom.width > availableWidth) {
             if (_wrapMode == RichTextWrapMode::Word) {
-                size_t breakIndex = current.atoms.size();
-                while (breakIndex > 0 && !current.atoms[breakIndex - 1].whitespace) {
-                    --breakIndex;
+                size_t breakAfter = std::numeric_limits<size_t>::max();
+                for (size_t i = 0; i < current.atoms.size(); ++i) {
+                    if (current.atoms[i].softBreakAfter) breakAfter = i;
                 }
-                if (breakIndex > 0 && breakIndex < current.atoms.size()) {
-                    std::vector<LayoutAtom> tail(current.atoms.begin() + breakIndex,
-                                                 current.atoms.end());
+                if (breakAfter != std::numeric_limits<size_t>::max()) {
+                    std::vector<LayoutAtom> tail(
+                        current.atoms.begin() + static_cast<std::ptrdiff_t>(breakAfter + 1u),
+                        current.atoms.end());
+                    current.atoms.erase(
+                        current.atoms.begin() + static_cast<std::ptrdiff_t>(breakAfter + 1u),
+                        current.atoms.end());
                     while (!current.atoms.empty() && current.atoms.back().whitespace) {
                         current.atoms.pop_back();
                     }
                     finishLine(false);
                     while (!tail.empty() && tail.front().whitespace) tail.erase(tail.begin());
                     current.atoms = std::move(tail);
-                    recompute(current);
+                    recomputeLine(current);
                 } else {
                     finishLine(false);
                 }
@@ -191,11 +305,7 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         for (; verticalLines < lines.size(); ++verticalLines) {
             const float next = lines[verticalLines].height
                 + (verticalLines == 0 ? 0.0f : _lineSpacing);
-            // Keep the first line even when its glyph box is taller than the
-            // viewport; rendering clips it. Dropping it entirely made a
-            // short RichText widget appear blank instead of partially visible.
-            if (verticalLines > 0
-                && occupied + next > boundsHeight + 0.001f) break;
+            if (verticalLines > 0 && occupied + next > boundsHeight + 0.001f) break;
             occupied += next;
         }
         if (verticalLines < lines.size()) {
@@ -207,23 +317,31 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
     if (result.truncated && _overflow == RichTextOverflow::Ellipsis
         && !lines.empty() && !_runs.empty()) {
         AtomLine& last = lines.back();
-        const size_t styleIndex = last.atoms.empty() ? _runs.size() - 1
+        const size_t styleIndex = last.atoms.empty() ? _runs.size() - 1u
                                                      : last.atoms.back().runIndex;
         const RichRun& styleRun = _runs[styleIndex];
         LayoutAtom ellipsis;
+        ellipsis.analysisIndex = std::numeric_limits<size_t>::max();
         ellipsis.runIndex = styleIndex;
         ellipsis.runTextStart = std::numeric_limits<size_t>::max();
-        ellipsis.documentTextStart = documentIndex;
+        ellipsis.documentTextStart = plainText.size();
         ellipsis.text = L"\x2026";
-        ellipsis.width = measureTextWidth(renderer, ellipsis.text, styleRun.fontSize);
-        ellipsis.height = std::max(1.0f, static_cast<float>(styleRun.fontSize) * _lineHeight);
+        ellipsis.synthetic = true;
+        ellipsis.bidiLevel = last.atoms.empty()
+            ? (analysis.baseRightToLeft ? 1u : 0u) : last.atoms.back().bidiLevel;
+        const TextDirection ellipsisDirection = ellipsis.rightToLeft()
+            ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+        ellipsis.width = measureTextWidth(renderer, ellipsis.text, styleRun,
+                                          ellipsisDirection);
+        ellipsis.height = std::max(1.0f,
+            static_cast<float>(styleRun.fontSize) * _lineHeight);
         while (!last.atoms.empty() && wrap
                && last.width + ellipsis.width > availableWidth) {
             last.atoms.pop_back();
-            recompute(last);
+            recomputeLine(last);
         }
         last.atoms.push_back(ellipsis);
-        recompute(last);
+        recomputeLine(last);
     }
 
     float totalHeight = 0.0f;
@@ -261,37 +379,57 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
         line.width = gapCount > 0 ? availableWidth : source.width;
         line.height = source.height;
         line.y = y;
-        for (const LayoutAtom& atom : source.atoms) {
+        const std::vector<size_t> order = visualOrder(source);
+        for (size_t atomIndex : order) {
+            const LayoutAtom& atom = source.atoms[atomIndex];
             const RichRun& run = _runs[atom.runIndex];
             const float atomWidth = atom.width + (atom.whitespace ? gapExtra : 0.0f);
             const float top = y - run.baselineShift;
-            // A justified whitespace atom owns extra advance that drawText()
-            // cannot encode inside a merged string. Keep justified atoms as
-            // separate fragments so the next glyph starts after that advance.
+            const bool rtl = atom.rightToLeft();
+            const bool logicalAdjacent = !result.fragments.empty() && !atom.synthetic
+                && (rtl
+                    ? atom.runTextStart + atom.textLength
+                        == result.fragments.back().runTextStart
+                    : result.fragments.back().runTextStart
+                        + result.fragments.back().textLength == atom.runTextStart);
             const bool canMerge = !result.fragments.empty()
                 && gapExtra <= 0.0001f
                 && result.fragments.back().lineIndex == lineIndex
                 && result.fragments.back().runIndex == atom.runIndex
-                && atom.runTextStart != std::numeric_limits<size_t>::max()
-                && result.fragments.back().runTextStart
-                     + result.fragments.back().textLength == atom.runTextStart;
+                && result.fragments.back().rightToLeft == rtl
+                && logicalAdjacent;
+            RichTextFragment* fragment = nullptr;
             if (canMerge) {
-                RichTextFragment& fragment = result.fragments.back();
-                fragment.textLength += atom.textLength;
-                fragment.bounds.maxX = x + atomWidth;
-                fragment.bounds.minY = std::min(fragment.bounds.minY, top);
-                fragment.bounds.maxY = std::max(fragment.bounds.maxY, top + source.height);
+                fragment = &result.fragments.back();
+                fragment->textLength += atom.textLength;
+                if (rtl) {
+                    fragment->runTextStart = atom.runTextStart;
+                    fragment->documentTextStart = atom.documentTextStart;
+                }
+                fragment->bounds.maxX = x + atomWidth;
+                fragment->bounds.minY = std::min(fragment->bounds.minY, top);
+                fragment->bounds.maxY = std::max(fragment->bounds.maxY,
+                                                  top + source.height);
             } else {
-                RichTextFragment fragment;
-                fragment.runIndex = atom.runIndex;
-                fragment.runTextStart = atom.runTextStart;
-                fragment.textLength = atom.textLength;
-                fragment.documentTextStart = atom.documentTextStart;
-                fragment.lineIndex = lineIndex;
-                fragment.bounds = math::FRectangle(x, top, x + atomWidth,
+                RichTextFragment created;
+                created.runIndex = atom.runIndex;
+                created.runTextStart = atom.runTextStart;
+                created.textLength = atom.textLength;
+                created.documentTextStart = atom.documentTextStart;
+                created.lineIndex = lineIndex;
+                created.bidiLevel = atom.bidiLevel;
+                created.rightToLeft = rtl;
+                created.bounds = math::FRectangle(x, top, x + atomWidth,
                                                    top + source.height);
-                result.fragments.push_back(fragment);
+                result.fragments.push_back(std::move(created));
+                fragment = &result.fragments.back();
             }
+            const size_t leftTextIndex = rtl
+                ? atom.documentTextStart + atom.textLength : atom.documentTextStart;
+            const size_t rightTextIndex = rtl
+                ? atom.documentTextStart : atom.documentTextStart + atom.textLength;
+            appendCaretStop(*fragment, leftTextIndex, x);
+            appendCaretStop(*fragment, rightTextIndex, x + atomWidth);
             x += atomWidth;
         }
         line.fragmentCount = result.fragments.size() - line.firstFragment;
@@ -319,31 +457,43 @@ size_t RichText::hitTestTextIndex(IRenderBackend& renderer,
             : (point.y > fragment.bounds.maxY ? point.y - fragment.bounds.maxY : 0.0f);
         if (dx + dy < best) { best = dx + dy; closest = &fragment; }
     }
-    const float width = closest->bounds.maxX - closest->bounds.minX;
-    const float fraction = width > 0.0f
-        ? std::clamp((point.x - closest->bounds.minX) / width, 0.0f, 1.0f) : 0.0f;
-    return closest->documentTextStart
-        + static_cast<size_t>(std::lround(fraction * closest->textLength));
+    if (closest->caretX.empty()) return closest->documentTextStart;
+    size_t bestStop = 0;
+    float bestDistance = std::numeric_limits<float>::max();
+    for (size_t i = 0; i < closest->caretX.size(); ++i) {
+        const float distance = std::abs(point.x - closest->caretX[i]);
+        if (distance < bestDistance) { bestDistance = distance; bestStop = i; }
+    }
+    return closest->caretTextIndices[bestStop];
 }
 
 math::FRectangle RichText::getCaretRect(IRenderBackend& renderer,
                                          size_t textIndex) const {
     const RichTextLayout result = layout(renderer);
+    const RichTextFragment* nearest = nullptr;
+    size_t nearestStop = 0;
+    size_t nearestDistance = std::numeric_limits<size_t>::max();
     for (const RichTextFragment& fragment : result.fragments) {
-        const size_t end = fragment.documentTextStart + fragment.textLength;
-        if (textIndex >= fragment.documentTextStart && textIndex <= end) {
-            const float t = fragment.textLength > 0
-                ? static_cast<float>(textIndex - fragment.documentTextStart)
-                    / static_cast<float>(fragment.textLength) : 0.0f;
-            const float x = fragment.bounds.minX
-                + (fragment.bounds.maxX - fragment.bounds.minX) * t;
-            return math::FRectangle(x, fragment.bounds.minY, x + 1.0f,
-                                    fragment.bounds.maxY);
+        for (size_t i = 0; i < fragment.caretTextIndices.size(); ++i) {
+            const size_t candidate = fragment.caretTextIndices[i];
+            if (candidate == textIndex) {
+                const float x = fragment.caretX[i];
+                return math::FRectangle(x, fragment.bounds.minY, x + 1.0f,
+                                        fragment.bounds.maxY);
+            }
+            const size_t distance = candidate > textIndex ? candidate - textIndex
+                                                          : textIndex - candidate;
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = &fragment;
+                nearestStop = i;
+            }
         }
     }
-    if (!result.fragments.empty()) {
-        const auto& last = result.fragments.back().bounds;
-        return math::FRectangle(last.maxX, last.minY, last.maxX + 1.0f, last.maxY);
+    if (nearest != nullptr) {
+        const float x = nearest->caretX[nearestStop];
+        return math::FRectangle(x, nearest->bounds.minY, x + 1.0f,
+                                nearest->bounds.maxY);
     }
     const auto b = getWorldBounds();
     return math::FRectangle(b.minX, b.minY, b.minX + 1.0f,
@@ -360,12 +510,9 @@ void RichText::onRender(IRenderBackend& renderer) {
         const std::wstring text = fragment.runTextStart == std::numeric_limits<size_t>::max()
             ? std::wstring(L"\x2026")
             : run.text.substr(fragment.runTextStart, fragment.textLength);
-        IRenderBackend::TextStyle style;
-        style.color = run.color;
-        style.bold = run.bold;
-        style.italic = run.italic;
-        style.letterSpacing = static_cast<int>(std::lround(run.letterSpacing));
-        style.valign = IRenderBackend::TextStyle::VAlign::Top;
+        const TextDirection direction = fragment.rightToLeft
+            ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+        IRenderBackend::TextStyle style = makeTextStyle(run, direction);
         renderer.drawText(fragment.bounds, text, run.fontSize, style);
         if (run.underline || run.strikethrough) {
             const float thickness = std::max(1.0f, run.fontSize / 14.0f);

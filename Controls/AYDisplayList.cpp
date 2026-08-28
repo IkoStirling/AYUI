@@ -599,6 +599,19 @@ IRenderBackend::TextMetrics DisplayListRecorder::measureText(
 {
     return _target.measureText(text, fontSize, maxWidth);
 }
+
+IRenderBackend::TextMetrics DisplayListRecorder::measureText(
+    const std::wstring& text, int fontSize, const TextStyle& style,
+    float maxWidth) const
+{
+    return _target.measureText(text, fontSize, style, maxWidth);
+}
+
+IRenderBackend::ShapedText DisplayListRecorder::shapeText(
+    const std::wstring& text, int fontSize, const TextStyle& style) const
+{
+    return _target.shapeText(text, fontSize, style);
+}
 ayt::font::FontMetrics DisplayListRecorder::getFontMetrics(FontHandle font) const
 {
     return _target.getFontMetrics(font);

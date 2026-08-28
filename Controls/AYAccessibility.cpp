@@ -130,6 +130,14 @@ uint32_t inferStates(const Widget* widget, const UIManager& manager) {
         selectable && selectable->isSelected()) {
         states |= AccessibilityState_Selected;
     }
+    if (const auto* strip = dynamic_cast<const TabStrip*>(widget->getParent())) {
+        const auto& tabs = strip->getChildren();
+        const auto found = std::find(tabs.begin(), tabs.end(), widget);
+        if (found != tabs.end()
+            && static_cast<int>(std::distance(tabs.begin(), found)) == strip->getSelectedIndex()) {
+            states |= AccessibilityState_Selected;
+        }
+    }
     if (const auto* node = dynamic_cast<const TreeNode*>(widget); node && node->isExpanded()) {
         states |= AccessibilityState_Expanded;
     }
@@ -162,7 +170,9 @@ uint32_t inferActions(const Widget* widget) {
     if (dynamic_cast<const CheckBox*>(widget) || dynamic_cast<const RadioButton*>(widget)) {
         actions |= accessibilityActionMask(AccessibilityAction::Toggle);
     }
-    if (dynamic_cast<const SelectableWidget*>(widget)) {
+    if (dynamic_cast<const SelectableWidget*>(widget)
+        || dynamic_cast<const RadioButton*>(widget)
+        || dynamic_cast<const TabStrip*>(widget->getParent())) {
         actions |= accessibilityActionMask(AccessibilityAction::Select);
     }
     if (dynamic_cast<const Slider*>(widget) || dynamic_cast<const ScrollBar*>(widget)
@@ -174,7 +184,35 @@ uint32_t inferActions(const Widget* widget) {
         actions |= accessibilityActionMask(AccessibilityAction::Expand)
                  | accessibilityActionMask(AccessibilityAction::Collapse);
     }
+    if (dynamic_cast<const ComboBox*>(widget)) {
+        actions |= accessibilityActionMask(AccessibilityAction::Expand)
+                 | accessibilityActionMask(AccessibilityAction::Collapse);
+    }
     return actions;
+}
+
+void inferNumericRange(const Widget* widget, AccessibilityNode& node) {
+    if (const auto* slider = dynamic_cast<const Slider*>(widget)) {
+        node.hasNumericRange = true;
+        node.numericValue = slider->getValue();
+        node.numericMinimum = slider->getMin();
+        node.numericMaximum = slider->getMax();
+    } else if (const auto* scroll = dynamic_cast<const ScrollBar*>(widget)) {
+        node.hasNumericRange = true;
+        node.numericValue = scroll->getValue();
+        node.numericMinimum = scroll->getMin();
+        node.numericMaximum = scroll->getMax();
+    } else if (const auto* progress = dynamic_cast<const ProgressBar*>(widget)) {
+        node.hasNumericRange = true;
+        node.numericReadOnly = true;
+        node.numericValue = progress->getValue();
+        node.numericMinimum = progress->getMin();
+        node.numericMaximum = progress->getMax();
+    }
+    if (!node.hasNumericRange) return;
+    const double span = std::max(0.0, node.numericMaximum - node.numericMinimum);
+    node.numericSmallChange = std::max(span / 100.0, 0.001);
+    node.numericLargeChange = std::max(span / 10.0, node.numericSmallChange);
 }
 
 bool appendNode(const Widget* widget, const UIManager& manager,
@@ -189,6 +227,7 @@ bool appendNode(const Widget* widget, const UIManager& manager,
     node.bounds = widget->getWorldBounds();
     node.states = inferStates(widget, manager);
     node.actions = inferActions(widget);
+    inferNumericRange(widget, node);
     for (const Widget* child : widget->getChildren()) appendNode(child, manager, node);
     parent.children.push_back(std::move(node));
     return true;
@@ -297,6 +336,16 @@ bool UIManager::performAccessibilityAction(uint64_t nodeId,
             static_cast<int>(combo->getItemCount()) - 1));
         return true;
     }
+    if (auto* combo = dynamic_cast<ComboBox*>(widget)) {
+        if (action == AccessibilityAction::Expand) {
+            combo->openPopup();
+            return combo->isPopupOpen();
+        }
+        if (action == AccessibilityAction::Collapse) {
+            combo->closePopup();
+            return !combo->isPopupOpen();
+        }
+    }
     if (auto* node = dynamic_cast<TreeNode*>(widget)) {
         if (action == AccessibilityAction::Expand && node->hasChildren()) {
             node->setExpanded(true);
@@ -314,6 +363,23 @@ bool UIManager::performAccessibilityAction(uint64_t nodeId,
         const bool down = widget->onMouseButtonDown(UIMouseEvent(center, 0));
         const bool up = widget->onMouseButtonUp(UIMouseEvent(center, 0));
         return down || up;
+    }
+    return false;
+}
+
+bool UIManager::setAccessibilityNumericValue(uint64_t nodeId, double value) {
+    Widget* widget = findNode(_root, nodeId);
+    if (widget == nullptr) widget = findNode(_overlayRoot, nodeId);
+    if (widget == nullptr || !widget->isVisible() || widget->isAccessibilityHidden()) {
+        return false;
+    }
+    if (auto* slider = dynamic_cast<Slider*>(widget)) {
+        slider->setValue(static_cast<float>(value));
+        return true;
+    }
+    if (auto* scroll = dynamic_cast<ScrollBar*>(widget)) {
+        scroll->setValue(static_cast<float>(value));
+        return true;
     }
     return false;
 }
