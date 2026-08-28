@@ -47,6 +47,8 @@ public:
     // height so hit-testing / fill layout match the clip. Horizontal
     // overflow hosts size their strip themselves.
     void setContent(Widget* content);
+    // Owning counterpart for serializer/factory-created content trees.
+    void setContentOwned(Widget* content);
     Widget* getContent() const { return _content; }
 
     // Set the virtual content size explicitly. Required when the
@@ -57,6 +59,11 @@ public:
 
     void setVerticalScrollBarEnabled(bool enabled);
     void setHorizontalScrollBarEnabled(bool enabled);
+    bool isVerticalScrollBarEnabled() const { return _vbarEnabled; }
+    bool isHorizontalScrollBarEnabled() const { return _hbarEnabled; }
+    const math::FVector2& getContentSize() const {
+        return _scrollState.getContentSize();
+    }
 
     // Apply a delta to _scrollOffset. Clamped. Returns true on real
     // change. Re-syncs bar values to the new offset.
@@ -119,6 +126,7 @@ protected:
     void renderChildren(IRenderBackend& renderer) override;
 
 private:
+    void setContentImpl(Widget* content, bool owned);
     void ensureBarsCreated();
     void syncBarsToOffset();
     // Keep content local pos at -scrollOffset so paint and hitTest agree.

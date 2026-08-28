@@ -99,6 +99,7 @@ public:
                               int& outKey);
 
     bool hasSubmenu() const { return _submenu != nullptr; }
+    Menu* getSubmenu() const { return _submenu; }
     // AYUI-DirtyRect-2026-08-26: submenu toggle shows/hides the chevron
     // arrow on the row → must repaint.
     void setSubmenu(Menu* m) {

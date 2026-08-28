@@ -31,6 +31,7 @@
 #include "Test_WidgetFactory.cpp"
 #include "Test_LayoutLoader.cpp"
 #include "Test_Serializer.cpp"
+#include "Test_SerializerCompleteness.cpp"
 #include "Test_UIManager.cpp"
 #include "Test_R6_CompoundWidget.cpp"
 #include "Test_R9_NamespaceEnum.cpp"

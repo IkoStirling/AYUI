@@ -6,8 +6,8 @@
 
 **功能里程碑：** v1.5 已实现
 
-**状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、AYRenderer
-后端、Docking、Layout Editor、动画与完整单测均可构建。
+**状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、Serializer
+完整化、AYRenderer 合批与 vector-path/stencil clip、Docking、Layout Editor、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -107,7 +107,7 @@ Widget
 2. `Widget::render()` 每帧遍历所有可见 Widget。dirty 或尚未缓存的 Widget 通过
    `DisplayListRecorder` 执行一次 `onRender()`；Recorder 在把命令立即转发给本帧后端的同时，
    生成本控件的候选高层 display-list。
-3. clean Widget 不再执行 `onRender()`，而是把缓存的矩形、文本、图片、clip、blend 等命令
+3. clean Widget 不再执行 `onRender()`，而是把缓存的矩形、文本、图片、clip、blend 和 path recipe 等命令
    replay 给当前后端。bgfx 仍然每帧收到完整提交，不跨帧保留 `UiItem` 或 transient buffer。
 4. 普通 `renderChildren()` 始终独立遍历后代；子控件的实际绘制命令不会被扁平化进父控件的
    list。ScrollView/ListView/TreeView 等为了 background/content/chrome 顺序而从 `onRender()`
@@ -122,9 +122,11 @@ Widget
 `onRender()`、样式查询和命令构造开销，但不违反 bgfx 的逐帧 submit 规则。Spinner、Tween
 和滚动惯性仍按状态变化标脏，因此动画期间重建本地 list，完成后回到稳定 replay。
 
-通用 Recorder 不跨帧持有可变资源生命周期。控件只要调用 path 构建、粒子更新、字体/动画/
-RenderTarget/Layer 创建释放或显式 pass 控制，当前候选 list 就会失效；Recorder 已经把本帧
-命令转发给真实后端，下一帧继续走旧即时路径。`DisplayListPolicy::Immediate` 可显式保留该路径，
+通用 Recorder 不跨帧持有后端资源句柄。vector path 以 backend-independent construction recipe
+记录；每条 draw/clip 命令捕获当时的 immutable operation snapshot，replay 时临时创建后端路径、
+重建、提交并释放，因此 releasePath 和后续 path mutation 不会改变已缓存命令。粒子更新、字体/
+动画资源创建、RenderTarget/Layer 生命周期或显式 pass 控制仍使候选 list 失效；Recorder 已把
+本帧命令转发给真实后端，下一帧继续旧即时路径。`DisplayListPolicy::Immediate` 可显式保留该路径，
 用于自定义控件兼容、诊断和 A/B 对照。
 
 图片组合遵循同一树顺序：父节点先执行 `onRender()`，子节点再按插入顺序绘制，`bringToFront()` 可把同级节点移到末尾。`Image` 提供纹理句柄、UV 和 opacity；图片按钮使用 `Button -> Image` 装饰子节点，命中仍返回 Button。图片背景上的交互层应使用 `Panel -> [Image, ..., Button]`，Panel 会下降命中并让后加入的 Button 覆盖在图片上。Gallery 的 `Images` 页面是该契约的可视化回归样例。
@@ -162,8 +164,10 @@ overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时
 5. Popup 关闭可异步淡出；请求关闭后，不应假定原指针仍然有效。
 6. `DockCard::setContent` 接管 content。替换 content 时旧树会销毁。
 7. `Modal::setDimmerOwned` 接管 dimmer；`setDimmer` 是非拥有引用。
-8. 关闭/热重载/销毁树之前，UIManager 必须清理 focus、hover、capture、active modal 和 drag 状态。
-9. 回调中可能触发当前控件关闭；事件路径在回调返回后不得再次读取可能已释放的控件。
+8. `ScrollView::setContentOwned`、`Modal::setContentOwned`、`ModalDialog::setBodyContentOwned` 和
+   `TabControl::addTabOwned` 明确接管结构化内容；非 owned API 只建立外部引用。两种销毁入口都必须避免重复释放。
+9. 关闭/热重载/销毁树之前，UIManager 必须清理 focus、hover、capture、active modal 和 drag 状态。
+10. 回调中可能触发当前控件关闭；事件路径在回调返回后不得再次读取可能已释放的控件。
 
 所有权 API 的命名应直接表达语义；不要通过“新地址是否不同”判断对象是否已析构，测试应使用析构哨兵。
 
@@ -236,16 +240,19 @@ Factory 是唯一的 `type` → constructor 注册表。默认注册覆盖普通
 
 Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证分层：
 
-- 通用 Widget 字段可往返。
-- 核心叶控件、列表/树/菜单、Box、Window、Spinner 和 DockArea 持久化路径有类型/字段覆盖。
+- 40 个公共注册类型都具有明确 type 决策和往返测试；通用位置、尺寸、可见性、style、opacity、
+  layout-managed flags 与 style override 可往返。
+- 核心叶控件、列表/树、Box、Panel、Window、Spinner 的视觉和行为字段有类型覆盖。
 - UTF-8 文本必须无损往返。
-- DockCard content、DockArea slot/floating/weight 使用专用结构。
+- GridPanel 使用 row/column definitions、padding、spacing 和 `cells[]`，每个 cell 显式保存
+  row/column/span/alignment/content；通用 `children` 只作为旧格式读取兼容，不与 cells 重复导出。
+- ScrollView、Menu/MenuItem/MenuBar、StatusBar、TabControl/TabStrip、Modal/ModalDialog、
+  DockCard/DockOverlay/DockArea 使用专用结构化内容，内部实现子树不作为通用 children 重复序列化。
+- DockCard content、DockArea slot/floating/weight/min size 和 Modal 的 owned content 在反序列化后
+  恢复明确所有权。
 
-当前不承诺所有运行时控件都能通过通用 serializer 完整重建内部语义：
-
-- GridPanel 的 cell attachment 仍需专用 payload；只写 children 会丢 row/col/span。
-- Modal/ModalDialog、TabStrip、DockOverlay 的运行时内部子树不应盲目按通用 children 导出。
-- DockTabGroup 属于内部实现，不是独立持久化边界。
+持久化边界不包含回调函数、焦点/hover/capture、动画瞬时值、拖拽会话、纹理后端句柄等运行时状态。
+`DockTabGroup` 属于 DockArea 内部实现，不是独立注册或持久化根类型。
 
 新增可 JSON 创建的公共控件时，至少要同时提供 factory 测试和 serializer/loader 决策；若不支持完整往返，必须在这里明确记录。
 
@@ -325,7 +332,7 @@ AYUI 静态库公开依赖基础数学、字体、设备接口和公共 headers�
 Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend 和 Animation 九页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层和控件/图片叠加。
 
 AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
-display-list 的逐帧 replay，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
+display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill/clip，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
 单测，并实现 Layer 生命周期测试面，不应和生产 backend 行为产生不同的 Widget 语义。
 
 ## 13. 测试与审计基线
@@ -334,14 +341,14 @@ display-list 的逐帧 replay，但生产 RenderTarget/Layer 能力尚未启用�
 
 - 74 个公共/支持 header
 - 62 个非 demo、非 unittest 的 `.cpp`
-- 90 个 `Test_*.cpp`
-- 969 个 `TEST_CASE`
-- Windows Debug：`4304 / 4304` 条断言通过
+- 91 个 `Test_*.cpp`
+- 974 个 `TEST_CASE`
+- Windows Debug：`4372 / 4372` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list 与 Layer 契约测试随后把当前基线增加到
-`4304 / 4304`。
+`4372 / 4372`。
 
 审计覆盖：
 
@@ -373,6 +380,9 @@ display-list 的逐帧 replay，但生产 RenderTarget/Layer 能力尚未启用�
 - 公共聚合头和 CMake header 清单补齐。
 - Widget-local retained display-list、复杂控件 replay 顺序、祖先几何级联失效与显式即时兜底。
 - RenderTarget/UI Layer 接口及 MockRenderer 契约；AYRenderer 未实现 FBO 时明确关闭 capability。
+- 40 个注册 Widget 的 serializer type/字段往返，Grid cell 和复合控件结构化 payload。
+- backend-independent retained path recipe；AYRenderer 凹多边形/曲线 tessellation、winding 孔洞、
+  miter stroke、嵌套 stencil path clip 和排序屏障。
 
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
 
@@ -385,15 +395,15 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 按优先级记录剩余边界：
 
-1. 为 Modal/ModalDialog/TabStrip/DockOverlay 定义明确的独立 serializer wire contract，或继续声明它们只由专用宿主路径持久化。
-2. 完成 GridPanel cell attachment 的 serializer round-trip 保证。
-3. 为 AYRenderer 实现生产 bgfx RenderTarget/Layer：FBO 与纹理回收、clear/preserve、局部 damage、
+1. 为 AYRenderer 实现生产 bgfx RenderTarget/Layer：FBO 与纹理回收、clear/preserve、局部 damage、
    resize/DPI、overlay 合成顺序和显存预算；在此之前保持 capability 关闭。
-4. POSIX Clipboard 从 no-op 升级为平台实现。
-5. TabStrip overflow 增加滚动/压缩策略；RichText 增加更完整的排版能力。
-6. 将目前自动即时兜底的 path、粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
+2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
+   支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
+3. POSIX Clipboard 从 no-op 升级为平台实现。
+4. TabStrip overflow 增加滚动/压缩策略；RichText 增加更完整的排版能力。
+5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
-7. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
+6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 
 这些限制不阻塞当前 v1.5 功能，但实现新特性时不得继续扩大重复路径。
 
@@ -409,10 +419,12 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    resize、DPI 和 overlay 元数据，MockRenderer 已锁定生命周期。下一步在 AYRenderer 实现 bgfx
    FBO/纹理池和显存回收，再选择高收益稳定子树 opt-in；滤镜、背景模糊、多 viewport 以及未来
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
-3. **Serializer 完整化**：补齐 GridPanel cell attachment，并为 Modal、ModalDialog、TabStrip、
-   DockOverlay 明确独立 wire contract 或正式声明专用宿主持久化边界。
-4. **高级裁剪和矢量路径**：增加 path tessellation 与 stencil/mask clip。不能跨越的 stencil、
-   render-target 或特殊混合操作必须记录为合批排序屏障，不能复制第二套绘制后端。
+3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
+   Menu/StatusBar、Tab、Modal 和 Dock 复合结构具有专用 wire contract 与往返测试。运行时瞬态明确排除。
+4. **高级裁剪和矢量路径（第一阶段完成）**：DisplayList 保留 backend-independent path recipe；
+   AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、stroke、winding hole 与嵌套
+   stencil clip。path fill/clip 是显式排序屏障，两种 batch mode 不复制实现。下一阶段是 SVG 级
+   fill-rule/boolean/join-cap 和 AA fringe。
 5. **产品化能力**：补充 DPI/UI scale、无障碍语义、主题继承、TabStrip overflow、完整
    RichText 排版和 POSIX Clipboard。
 
@@ -429,6 +441,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 渲染解耦 | `IRenderBackend`，AYRenderer 提供实现 |
 | 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
 | 像素层缓存 | Layer/RenderTarget 契约与 Mock 已完成；AYRenderer capability 暂时关闭 |
+| 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |
 | Popup | UIManager overlay 集中管理 |

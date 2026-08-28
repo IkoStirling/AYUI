@@ -22,46 +22,56 @@ constexpr int kDefaultCols = 0;
 
 void GridPanel::setRowCount(int n) {
     if (n < 0) n = 0;
-    if (static_cast<int>(_rowDefs.size()) == n) return;
+    const int oldRows = static_cast<int>(_rowDefs.size());
+    if (oldRows == n) return;
+    const int cols = static_cast<int>(_colDefs.size());
+    std::vector<CellInfo> rebuilt(static_cast<size_t>(n) * static_cast<size_t>(cols));
+    const int rowsToCopy = std::min(oldRows, n);
+    for (int row = 0; row < rowsToCopy; ++row) {
+        for (int col = 0; col < cols; ++col) {
+            rebuilt[static_cast<size_t>(row * cols + col)] =
+                _cells[static_cast<size_t>(row * cols + col)];
+        }
+    }
     _rowDefs.resize(static_cast<size_t>(n), RowDef{SizePolicy::Stretch, 1.0f});
-    // Resize cell flat-vector to match new dimensions.
-    int cols = static_cast<int>(_colDefs.size());
-    _cells.resize(static_cast<size_t>(n) * static_cast<size_t>(std::max(cols, 1)),
-                  CellInfo{});
+    _cells = std::move(rebuilt);
+    markBoundsDirty();
+    markDirty();
 }
 
 void GridPanel::setColumnCount(int n) {
     if (n < 0) n = 0;
     if (static_cast<int>(_colDefs.size()) == n) return;
-    int oldCols = static_cast<int>(_colDefs.size());
-    _colDefs.resize(static_cast<size_t>(n), ColDef{SizePolicy::Stretch, 1.0f});
-    int rows = static_cast<int>(_rowDefs.size());
-    // Rebuild cells so (row, col) index stays correct. Existing widgets
-    // are migrated by row*oldCols + col → row*newCols + col, but only
-    // when new cols >= old cols. Simpler: drop all cells when col count
-    // shrinks (rare in practice — setColumnCount is normally called once
-    // before adding cells). Hosts needing preservation should re-add.
-    if (n < oldCols) {
-        std::vector<CellInfo> rebuilt(_cells.size(), CellInfo{});
-        for (int r = 0; r < rows; ++r) {
-            for (int c = 0; c < n; ++c) {
-                rebuilt[r * n + c] = _cells[r * oldCols + c];
-            }
+    const int oldCols = static_cast<int>(_colDefs.size());
+    const int rows = static_cast<int>(_rowDefs.size());
+    std::vector<CellInfo> rebuilt(static_cast<size_t>(rows) * static_cast<size_t>(n));
+    const int colsToCopy = std::min(oldCols, n);
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < colsToCopy; ++col) {
+            rebuilt[static_cast<size_t>(row * n + col)] =
+                _cells[static_cast<size_t>(row * oldCols + col)];
         }
-        _cells = std::move(rebuilt);
-    } else if (n > oldCols) {
-        _cells.resize(static_cast<size_t>(rows) * static_cast<size_t>(n), CellInfo{});
     }
+    _colDefs.resize(static_cast<size_t>(n), ColDef{SizePolicy::Stretch, 1.0f});
+    _cells = std::move(rebuilt);
+    markBoundsDirty();
+    markDirty();
 }
 
 void GridPanel::setRowDef(int row, const RowDef& def) {
     if (row < 0 || row >= static_cast<int>(_rowDefs.size())) return;
+    if (_rowDefs[row].policy == def.policy && _rowDefs[row].value == def.value) return;
     _rowDefs[row] = def;
+    markBoundsDirty();
+    markDirty();
 }
 
 void GridPanel::setColumnDef(int col, const ColDef& def) {
     if (col < 0 || col >= static_cast<int>(_colDefs.size())) return;
+    if (_colDefs[col].policy == def.policy && _colDefs[col].value == def.value) return;
     _colDefs[col] = def;
+    markBoundsDirty();
+    markDirty();
 }
 
 const GridPanel::RowDef& GridPanel::getRowDef(int row) const {
@@ -125,6 +135,8 @@ void GridPanel::setCell(int row, int col, Widget* widget,
     info.colSpan = colSpan;
     info.hAlign = hAlign;
     info.vAlign = vAlign;
+    markBoundsDirty();
+    markDirty();
 }
 
 void GridPanel::clearCell(int row, int col) {
@@ -138,6 +150,8 @@ void GridPanel::clearCell(int row, int col) {
         removeChild(info.widget);
     }
     info = CellInfo{};
+    markBoundsDirty();
+    markDirty();
 }
 
 Widget* GridPanel::getCell(int row, int col) const {
@@ -159,12 +173,21 @@ const GridPanel::CellInfo* GridPanel::findCell(int row, int col) const {
 // ----------------------------------------------------------------------------
 
 void GridPanel::setPadding(float left, float top, float right, float bottom) {
-    _padding = math::FVector4(left, top, right, bottom);
+    const math::FVector4 next(left, top, right, bottom);
+    if (_padding == next) return;
+    _padding = next;
+    markBoundsDirty();
+    markDirty();
 }
 
 void GridPanel::setSpacing(float h, float v) {
-    _spacingH = std::max(0.0f, h);
-    _spacingV = std::max(0.0f, v);
+    const float nextH = std::max(0.0f, h);
+    const float nextV = std::max(0.0f, v);
+    if (_spacingH == nextH && _spacingV == nextV) return;
+    _spacingH = nextH;
+    _spacingV = nextV;
+    markBoundsDirty();
+    markDirty();
 }
 
 // ----------------------------------------------------------------------------

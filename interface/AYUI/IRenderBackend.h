@@ -524,7 +524,7 @@ public:
 
     /*
        @name: PathHandle
-       @func: 路径句柄 - 用于引用GPU路径对象
+       @func: 路径句柄 - 用于引用后端路径资源；实现可以采用 CPU tessellation 或 GPU path
     */
     struct PathHandle { int id = -1; };
 

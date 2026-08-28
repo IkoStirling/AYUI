@@ -1,7 +1,7 @@
 // AYUI-Audit-2026-08-26: WidgetSerializer parameterized round-trip.
 //
-// The serializer has 29 widget branches (the `else if` chain in
-// AYWidgetSerializer.cpp). Only ~5 are covered by tests today. This
+// Every registered built-in must survive deserialize -> serialize ->
+// deserialize without changing its concrete type. This
 // file parametrizes the same round-trip (deserialize -> serialize -> re-
 // parse -> assert type matches) over every registered type so coverage
 // is reported in one place.
@@ -11,10 +11,7 @@
 // type accepts empty defaults). For types whose JSON contract requires
 // nested payloads (DockArea cards[] + slot weights, TabControl tabs[]
 // recursive content, GridPanel row/column + children, Window minSize,
-// etc.) we provide the smallest valid payload needed. For types that
-// cannot round-trip cleanly in a parameterized test (DockArea, DockCard,
-// DockOverlay, GridPanel + TabControl with content), we leave a `TODO`
-// marker so future audit passes have a checklist.
+// etc.) we provide the smallest valid payload needed.
 #include "AYTest.h"
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/WidgetFactory.h"
@@ -36,11 +33,6 @@ namespace {
 struct TypePayload {
     const char* typeName;
     const char* json;
-    // True if the parameterized round-trip should succeed. False
-    // entries still verify that deserialize() returns non-null for the
-    // type (factory lookup succeeds), but the serialize step is
-    // deliberately skipped because the contract is too rich for a
-    // parametric test (see TODOs).
     bool canRoundTrip;
 };
 
@@ -61,6 +53,7 @@ static const std::vector<TypePayload> kPayloads = {
     {"ToolBarSeparator", R"({"type":"ToolBarSeparator","orientation":"horizontal","thickness":1.0,"inset":2.0})", true},
     {"MenuItem",       R"({"type":"MenuItem","text":"Item","shortcut":"Ctrl+I","hasSubmenu":false})", true},
     {"Image",          R"({"type":"Image"})",          true},
+    {"VBox",           R"({"type":"VBox","spacing":3,"gravity":"BottomRight"})", true},
     {"HBox",           R"({"type":"HBox","spacing":4,"padding":{"left":1,"top":2,"right":3,"bottom":4}})", true},
     {"SplitterHandle", R"({"type":"SplitterHandle"})", true},
     // Containers that accept no payload.
@@ -89,33 +82,15 @@ static const std::vector<TypePayload> kPayloads = {
     {"TreeView",       R"({"type":"TreeView","tree":[{"label":"root","icon":"","hasChildren":false,"expanded":false,"parentIndex":-1}],"selectedIndex":0,"itemHeight":24.0})", true},
     // RichText: defaultColor + defaultFontSize + wrapWidth + runs[].
     {"RichText",       R"({"type":"RichText","defaultColor":{"r":1,"g":1,"b":1,"a":1},"defaultFontSize":14,"wrapWidth":200.0,"runs":[{"text":"hi","color":{"r":1,"g":1,"b":1,"a":1},"fontSize":14}]})", true},
-
-    // TODO: needs richer payload
-    // TabControl requires a recursive content widget under each tab to
-    // round-trip; the parameterized test would have to construct that
-    // separately. Left for a future audit pass.
-    // {"TabControl",    R"({"type":"TabControl","tabs":[],"selectedIndex":0,"headerHeight":24.0})", false},
-
-    // TODO: needs richer payload
-    // GridPanel needs row/column count + a children[] list whose size
-    // matches rowCount*columnCount; parameterized loop would require
-    // synthetic children. Left for a future audit pass.
-    // {"GridPanel",     R"({"type":"GridPanel","rowCount":1,"columnCount":1,"children":[]})", false},
-
-    // TODO: needs richer payload
-    // DockArea: cards[] per slot, slotWeights/slotMinSizes objects,
-    // and optional floating[] overlay cards. Too rich for parametric.
-    // {"DockArea", ...},
-
-    // TODO: needs richer payload
-    // DockCard: optional content subtree (recursive deserialize).
-    // {"DockCard", ...},
-
-    // DockOverlay: registered but no deserializer branch — fall-through
-    // to base Widget. Marked no-round-trip because the serialize
-    // branch will produce {"type":"Widget"} for an unhandled DockOverlay
-    // (which would fail re-deserialize as DockOverlay).
-    // {"DockOverlay", ...},
+    {"TabControl",     R"({"type":"TabControl","tabs":[{"label":"A","content":{"type":"TextLabel","text":"body"}}],"selectedIndex":0,"headerHeight":26})", true},
+    {"GridPanel",      R"({"type":"GridPanel","rowCount":1,"columnCount":1,"cells":[{"row":0,"col":0,"content":{"type":"Button","text":"cell"}}]})", true},
+    {"DockCard",       R"({"type":"DockCard","id":"card","title":"Card","content":{"type":"TextLabel","text":"body"}})", true},
+    {"DockOverlay",    R"({"type":"DockOverlay","floating":[{"type":"DockCard","id":"float","x":4,"y":5,"w":200,"h":120}]})", true},
+    {"DockArea",       R"({"type":"DockArea","slotWeights":{"Left":0.2,"Center":0.8},"cards":[{"type":"DockCard","id":"dock","slot":"Center"}],"floating":[{"type":"DockCard","id":"float","x":8,"y":9,"w":210,"h":140}]})", true},
+    {"Dimmer",         R"({"type":"Dimmer","scrimColor":{"r":0.1,"g":0.2,"b":0.3,"a":0.4}})", true},
+    {"Modal",          R"({"type":"Modal","dismissOnDimmerClick":false,"content":{"type":"TextLabel","text":"modal"}})", true},
+    {"ModalDialog",    R"({"type":"ModalDialog","acceptText":"Apply","rejectText":"Back","bodyContent":{"type":"TextLabel","text":"dialog"}})", true},
+    {"TabStrip",       R"({"type":"TabStrip","tabs":["One","Two"],"selectedIndex":1,"tabHeight":30,"spacing":6,"indicatorTweenMs":0})", true},
 };
 
 } // namespace
@@ -169,15 +144,14 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
         Widget* roundTripped = WidgetSerializer::deserialize(serialized);
         if (roundTripped != nullptr) {
             ++passed;
-            delete roundTripped;
+            destroyWidgetTree(roundTripped);
         } else {
             ++roundTripFailureCount;
         }
-        delete widget;
+        destroyWidgetTree(widget);
     }
-    // Sanity: we must have processed at least 25 of the 29 branches.
-    // Anything below that means the kPayloads list silently lost rows.
-    CHECK(covered >= 25);
+    // Pin the current factory surface: the table covers all 40 built-ins.
+    CHECK(covered == 40);
     CHECK(deserializeFailureCount == 0);
     CHECK(typeMismatchCount == 0);
     CHECK(roundTripFailureCount == 0);

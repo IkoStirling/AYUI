@@ -61,6 +61,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <sys/stat.h>
@@ -283,7 +284,8 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
 
 // Backend page -- host-drawn demo canvas. A plain Widget whose onRender
 // paints straight through IRenderBackend every frame: P1 gradients + blend
-// modes, P2 SDF borders/shadows, P3 texture stretch + 9-patch. It lives in
+// modes, P2 SDF borders/shadows, P3 texture stretch + 9-patch, and P4
+// tessellated vector paths + stencil clips. It lives in
 // page_backend's VBox (fixed-height slot), so it scrolls and hides with the
 // page. Textures come from UIRenderBackend::createUiTexture (backend
 // specific, not part of the AYUI interface -- the interface only passes
@@ -443,6 +445,79 @@ protected:
                             FRectangle(0.0f, 0.0f, 1.0f, 1.0f), padStyle);
             endRow(60.0f);
         }
+
+        // ---- P4: vector paths + stencil clipping -------------------------
+        section(L"P4 - Vector paths: concave fill/stroke, hole winding, Bezier, path clip");
+        {
+            const FRectangle cell = rect(120.0f, 104.0f);
+            const FVector2 star[] = {
+                {cell.minX + 60.0f, cell.minY + 4.0f},
+                {cell.minX + 75.0f, cell.minY + 38.0f},
+                {cell.minX + 114.0f, cell.minY + 40.0f},
+                {cell.minX + 84.0f, cell.minY + 64.0f},
+                {cell.minX + 94.0f, cell.minY + 100.0f},
+                {cell.minX + 60.0f, cell.minY + 79.0f},
+                {cell.minX + 26.0f, cell.minY + 100.0f},
+                {cell.minX + 36.0f, cell.minY + 64.0f},
+                {cell.minX + 6.0f, cell.minY + 40.0f},
+                {cell.minX + 45.0f, cell.minY + 38.0f},
+            };
+            auto path = r.createPath();
+            r.addPathPolygon(path, star, static_cast<int>(std::size(star)));
+            r.setPathFillColor(path, FVector4(0.18f, 0.62f, 0.96f, 0.90f));
+            r.setPathStrokeColor(path, FVector4(0.82f, 0.94f, 1.0f, 1.0f));
+            r.setPathStrokeWidth(path, 3.0f);
+            r.drawPath(path, ayt::ui::PathFillMode::FillAndStroke);
+            r.releasePath(path); // queued commands own an immutable snapshot
+        }
+        {
+            const FRectangle cell = rect(126.0f, 104.0f);
+            auto path = r.createPath();
+            r.addPathRoundedRect(path,
+                FRectangle(cell.minX + 3.0f, cell.minY + 6.0f,
+                           cell.maxX - 3.0f, cell.maxY - 6.0f),
+                22.0f, ayt::ui::PathWinding::CounterClockwise);
+            r.addPathEllipse(path,
+                FVector2((cell.minX + cell.maxX) * 0.5f,
+                         (cell.minY + cell.maxY) * 0.5f),
+                24.0f, 19.0f, ayt::ui::PathWinding::Clockwise);
+            r.setPathFillColor(path, FVector4(0.92f, 0.48f, 0.18f, 0.95f));
+            r.drawPath(path, ayt::ui::PathFillMode::Fill);
+            r.releasePath(path);
+        }
+        {
+            const FRectangle cell = rect(180.0f, 104.0f);
+            auto path = r.createPath();
+            r.addPathBezier(path,
+                FVector2(cell.minX + 4.0f, cell.maxY - 10.0f),
+                FVector2(cell.minX + 42.0f, cell.minY - 14.0f),
+                FVector2(cell.maxX - 42.0f, cell.maxY + 14.0f),
+                FVector2(cell.maxX - 4.0f, cell.minY + 10.0f));
+            r.setPathStrokeColor(path, FVector4(0.62f, 0.94f, 0.42f, 1.0f));
+            r.setPathStrokeWidth(path, 5.0f);
+            r.drawPath(path, ayt::ui::PathFillMode::Stroke);
+            r.releasePath(path);
+        }
+        {
+            const FRectangle cell = rect(190.0f, 104.0f);
+            auto clip = r.createPath();
+            r.addPathRoundedRect(clip,
+                FRectangle(cell.minX + 2.0f, cell.minY + 5.0f,
+                           cell.maxX - 2.0f, cell.maxY - 5.0f),
+                28.0f, ayt::ui::PathWinding::CounterClockwise);
+            r.addPathEllipse(clip,
+                FVector2(cell.minX + 95.0f, cell.minY + 52.0f),
+                22.0f, 22.0f, ayt::ui::PathWinding::Clockwise);
+            r.pushPathClip(clip);
+            r.releasePath(clip);
+            r.drawGradientRect(cell,
+                FVector4(0.92f, 0.20f, 0.58f, 1.0f),
+                FVector4(0.16f, 0.72f, 0.96f, 1.0f),
+                FVector4(0.96f, 0.72f, 0.18f, 1.0f),
+                FVector4(0.32f, 0.18f, 0.76f, 1.0f));
+            r.popClip();
+        }
+        endRow(104.0f);
     }
 
 private:
@@ -1315,13 +1390,13 @@ void wireBackendPage(GalleryState& state)
 
     // 20 header + 13*26 + spacing/padding ≈ 380
     page->addWidget(panel, 380.0f);
-    page->addWidget(demo, 900.0f);
+    page->addWidget(demo, 1060.0f);
     state.backendDemo = demo;
 
     if (auto* hdr = dynamic_cast<ayt::ui::TextLabel*>(
             state.ui->findById("backend_hdr"))) {
         hdr->setText(
-            L"Backend - UIRenderBackend [SdfClipShape-20260812k]");
+            L"Backend - UIRenderBackend [vector path + stencil clip]");
     }
 }
 

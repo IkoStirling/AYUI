@@ -42,33 +42,32 @@ ModalDialog::~ModalDialog() {
     //   (3) delete each button (the freed pointers become null for the
     //       sanitizer — they don't need to be cleared because the dtor
     //       itself is unwinding).
-    if (_okButton != nullptr) {
+    const auto isDirectChild = [this](const Widget* child) {
+        return child != nullptr
+            && std::find(getChildren().begin(), getChildren().end(), child)
+                != getChildren().end();
+    };
+    if (isDirectChild(_okButton)) {
         _okButton->setOnClicked(nullptr);
-        if (_okButton->getParent() == this) {
-            removeChild(_okButton);
-        }
-        delete _okButton;
+        destroyWidgetTree(_okButton);
     }
-    if (_cancelButton != nullptr) {
+    if (isDirectChild(_cancelButton)) {
         _cancelButton->setOnClicked(nullptr);
-        if (_cancelButton->getParent() == this) {
-            removeChild(_cancelButton);
-        }
-        delete _cancelButton;
+        destroyWidgetTree(_cancelButton);
     }
     _okButton = nullptr;
     _cancelButton = nullptr;
-    // _bodyPanel is a child of `this`; ~CompoundFocusableWidget /
-    // ~CompoundWidget / ~Widget do not delete children, but the
-    // _bodyContent (host-owned Widget*) reparented onto _bodyPanel
-    // would also survive this dtor unless we explicitly detach it. We
-    // do NOT free _bodyContent (DECISION 2 mirror — host owns it).
-    // We DO detach so the host's Widget doesn't hold a parent pointer
-    // into a freed tree.
-    if (_bodyPanel != nullptr && _bodyContent != nullptr
-        && _bodyContent->getParent() == _bodyPanel) {
-        _bodyPanel->removeChild(_bodyContent);
+
+    // The body panel is an owning child. Its body edge records whether the
+    // host or the dialog owns the body, so destroyWidgetTree detaches an
+    // external body and destroys a serializer-owned one. If an outer tree
+    // teardown already visited the panel, it is no longer a direct child and
+    // the stale aliases are never dereferenced.
+    if (isDirectChild(_bodyPanel)) {
+        destroyWidgetTree(_bodyPanel);
     }
+    _bodyPanel = nullptr;
+    _bodyContent = nullptr;
 }
 
 // ----------------------------------------------------------------------------
@@ -76,26 +75,39 @@ ModalDialog::~ModalDialog() {
 // ----------------------------------------------------------------------------
 
 void ModalDialog::setBodyContent(Widget* content) {
-    if (_bodyContent == content) return;
-    // Detach the previous body from the internal panel so the host can
-    // still re-use the old widget (or destroyWidgetTree it themselves).
-    if (_bodyContent != nullptr && _bodyContent->getParent() == _bodyPanel) {
-        if (_bodyPanel != nullptr) {
+    setBodyContentImpl(content, false);
+}
+
+void ModalDialog::setBodyContentOwned(Widget* content) {
+    setBodyContentImpl(content, true);
+}
+
+void ModalDialog::setBodyContentImpl(Widget* content, bool owned) {
+    ensurePanelsCreated();
+    if (_bodyPanel == nullptr) return;
+
+    const auto& bodyChildren = _bodyPanel->getChildren();
+    const auto oldIt = std::find(bodyChildren.begin(), bodyChildren.end(),
+                                 _bodyContent);
+    if (_bodyContent != nullptr && oldIt != bodyChildren.end()) {
+        if (_bodyContent == content || _bodyContent->isExternallyOwned()) {
             _bodyPanel->removeChild(_bodyContent);
+        } else {
+            destroyWidgetTree(_bodyContent);
         }
     }
-    _bodyContent = content;
-    if (_bodyContent != nullptr) {
-        // Defensive: if the host hands us a content widget that's
-        // already under a different parent, detach first. Mirror
-        // Modal::setContent's defensive pattern.
-        if (_bodyContent->getParent() != nullptr) {
-            _bodyContent->getParent()->removeChild(_bodyContent);
+    _bodyContent = nullptr;
+
+    if (content != nullptr) {
+        if (content->getParent() != nullptr) {
+            content->detachFromParent();
         }
-        ensurePanelsCreated();
-        if (_bodyPanel != nullptr) {
-            _bodyPanel->addChildExternal(_bodyContent);
+        if (owned) {
+            _bodyPanel->addChild(content);
+        } else {
+            _bodyPanel->addChildExternal(content);
         }
+        _bodyContent = content;
     }
     performLayout();   // re-run layout so the new body fits the body panel
 }
@@ -149,19 +161,19 @@ void ModalDialog::ensurePanelsCreated() {
         _bodyPanel = new Panel();
         _bodyPanel->setBorderEnabled(false);
         _bodyPanel->setBackgroundEnabled(false);
-        addChildExternal(_bodyPanel);
+        addChild(_bodyPanel);
     }
     if (_okButton == nullptr) {
         _okButton = new Button();
         _okButton->setText(_acceptText);
         _okButton->setOnClicked([this]() { onAcceptClicked(); });
-        addChildExternal(_okButton);
+        addChild(_okButton);
     }
     if (_cancelButton == nullptr) {
         _cancelButton = new Button();
         _cancelButton->setText(_rejectText);
         _cancelButton->setOnClicked([this]() { onRejectClicked(); });
-        addChildExternal(_cancelButton);
+        addChild(_cancelButton);
     }
 }
 

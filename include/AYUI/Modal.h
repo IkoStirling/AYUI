@@ -99,6 +99,10 @@ public:
     // lifetime; Modal does NOT destroy content on close (mirror DECISION 2
     // for ComboBox popup).
     void setContent(Widget* content);
+    // Owning counterpart used by loaders/serializers that allocate the
+    // content subtree. Replacing or destroying the Modal also destroys this
+    // content unless destroyWidgetTree already visited it first.
+    void setContentOwned(Widget* content);
     Widget* getContent() const { return _content; }
 
     // Lifecycle. openModal reparents the Modal onto _overlayRoot (delegates
@@ -147,6 +151,7 @@ public:
 
 private:
     void onDimmerClicked();   // sink bound to _dimmer->_onDismiss
+    void setContentImpl(Widget* content, bool owned);
 
     Dimmer* _dimmer = nullptr;
     // Code-review 2026-08-02 #12: tracks whether ~Modal should delete

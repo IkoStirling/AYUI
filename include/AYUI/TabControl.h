@@ -49,13 +49,11 @@ namespace ayt::ui {
 //   selected-accent underline drawn by TabStrip::onRender.
 //
 // DECISION 2: Body is a Panel, NOT a slot-stack of pre-loaded contents.
-//   Why: TabControl does not own the lifetime of tab content — hosts create
-//   their content widgets (often from JSON via WidgetFactory) and pass them
-//   in. addTab(label, content*) keeps a raw pointer; on selection change we
-//   detach the previous content from _body and reparent the new one. We do
-//   NOT free the previous content. This matches CompoundWidget's "parent
-//   never deletes children" contract.
-//   Consequence: if a host wants to destroy a tab's content it must call
+//   Host-created content passed to addTab(label, content*) remains external;
+//   on selection change we detach the previous content from _body and mount
+//   the new one. Factory/serializer content uses addTabOwned() so the same
+//   component can release generated subtrees without leaking inactive tabs.
+//   Consequence: for addTab(), if a host wants to destroy content it must call
 //   removeTab(index) first, then destroyWidgetTree on its content. See
 //   destroyWidgetTree usage in Test_TabControl for the canonical pattern.
 //
@@ -92,6 +90,9 @@ public:
     // does NOT delete it. Callers must keep the content alive and free it
     // via destroyWidgetTree after removing the tab.
     void addTab(const std::wstring& label, Widget* content);
+    // Owning counterpart for loader/serializer-created tab contents.
+    // removeTab(), clearTabs(), and destruction release owned content.
+    void addTabOwned(const std::wstring& label, Widget* content);
     void removeTab(int index);
     void clearTabs();
     size_t getTabCount() const { return _tabs.size(); }
@@ -138,9 +139,11 @@ protected:
 private:
     struct TabEntry {
         std::wstring label;
-        Widget* content = nullptr;   // not owned
+        Widget* content = nullptr;
+        bool owned = false;
     };
 
+    void addTabImpl(const std::wstring& label, Widget* content, bool owned);
     void ensureStripAndBodyCreated();
     void handleStripSelectionChanged(int stripIndex);
     void remountBodyContent(int newIndex);

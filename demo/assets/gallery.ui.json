@@ -370,8 +370,8 @@
               "spacing": 10,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
-                { "type": "TextLabel", "id": "backend_hdr", "text": "Backend - UIRenderBackend: gradient / blend modes / SDF border + shadow / texture + 9-patch", "size": { "w": 920, "h": 24 } },
-                { "type": "TextLabel", "id": "backend_hint", "text": "The canvas below is host-drawn every frame (BackendDemoWidget::onRender) straight through the render backend.", "size": { "w": 900, "h": 20 } }
+                { "type": "TextLabel", "id": "backend_hdr", "text": "Backend - UIRenderBackend: gradient / SDF / texture / vector path / stencil clip", "size": { "w": 920, "h": 24 } },
+                { "type": "TextLabel", "id": "backend_hint", "text": "The canvas covers concave fill, stroke, holes, curves and arbitrary-shape clipping through the production backend.", "size": { "w": 900, "h": 20 } }
               ]
             },
             {

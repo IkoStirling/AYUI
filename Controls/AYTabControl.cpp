@@ -15,10 +15,33 @@ TabControl::TabControl() {
 }
 
 TabControl::~TabControl() {
-    // We do NOT delete tab contents here — see DECISION 2 in the header.
-    // _tabStrip and _body are CompoundFocusableWidget / CompoundWidget
-    // children and will be released by the base destructor without freeing
-    // (the factory / caller owns them).
+    // Never dereference external tab aliases here: legacy hosts may have
+    // already destroyed them after detaching from the body. Owned contents
+    // have the stronger hand-off contract and are released exactly once.
+    for (auto& tab : _tabs) {
+        if (tab.owned && tab.content != nullptr) {
+            destroyWidgetTree(tab.content);
+        }
+    }
+    _tabs.clear();
+    _selectedIndex = -1;
+
+    // These implementation widgets are allocated by TabControl itself. An
+    // outer destroyWidgetTree() detaches external children before entering
+    // this destructor but deliberately does not delete them, so both direct
+    // delete and recursive tree teardown converge here exactly once.
+    if (_tabStrip != nullptr) {
+        _tabStrip->setOnSelectionChanged(nullptr);
+        _tabStrip->clearTabs();
+        _tabStrip->detachFromParent();
+        delete _tabStrip;
+        _tabStrip = nullptr;
+    }
+    if (_body != nullptr) {
+        _body->detachFromParent();
+        delete _body;
+        _body = nullptr;
+    }
 }
 
 void TabControl::setHeaderHeight(float h) {
@@ -53,7 +76,15 @@ void TabControl::ensureStripAndBodyCreated() {
 // ----------------------------------------------------------------------------
 
 void TabControl::addTab(const std::wstring& label, Widget* content) {
-    _tabs.push_back(TabEntry{label, content});
+    addTabImpl(label, content, false);
+}
+
+void TabControl::addTabOwned(const std::wstring& label, Widget* content) {
+    addTabImpl(label, content, true);
+}
+
+void TabControl::addTabImpl(const std::wstring& label, Widget* content, bool owned) {
+    _tabs.push_back(TabEntry{label, content, owned});
     if (_tabStrip != nullptr) {
         _tabStrip->addTab(label);
     }
@@ -67,6 +98,7 @@ void TabControl::removeTab(int index) {
     if (index < 0 || static_cast<size_t>(index) >= _tabs.size()) return;
 
     Widget* removedContent = _tabs[index].content;
+    const bool removedOwned = _tabs[index].owned;
     // If the removed tab is the active one, detach its content from _body
     // FIRST so the body doesn't end up pointing at a destroyed widget.
     if (index == _selectedIndex && _body != nullptr && removedContent != nullptr) {
@@ -74,6 +106,10 @@ void TabControl::removeTab(int index) {
     }
 
     _tabs.erase(_tabs.begin() + index);
+    if (removedOwned) {
+        destroyWidgetTree(removedContent);
+        removedContent = nullptr;
+    }
     if (_tabStrip != nullptr) {
         _tabStrip->removeTab(index);
     }
@@ -102,11 +138,11 @@ void TabControl::removeTab(int index) {
 }
 
 void TabControl::clearTabs() {
-    // Detach every content from _body so no dangling parents remain.
-    if (_body != nullptr) {
-        for (auto& t : _tabs) {
-            if (t.content != nullptr) _body->removeChild(t.content);
-        }
+    // Detach host-owned contents and release serializer-owned contents.
+    for (auto& tab : _tabs) {
+        if (tab.content == nullptr) continue;
+        tab.content->detachFromParent();
+        if (tab.owned) destroyWidgetTree(tab.content);
     }
     _tabs.clear();
     _selectedIndex = -1;
@@ -171,7 +207,8 @@ void TabControl::remountBodyContent(int newIndex) {
     if (newIndex < 0 || static_cast<size_t>(newIndex) >= _tabs.size()) return;
     Widget* content = _tabs[newIndex].content;
     if (content != nullptr) {
-        _body->addChildExternal(content);
+        if (_tabs[newIndex].owned) _body->addChild(content);
+        else _body->addChildExternal(content);
     }
 }
 

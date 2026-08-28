@@ -248,10 +248,12 @@ private:
 
     struct PathData {
         math::FRectangle bounds;
+        bool hasBounds = false;
         math::FVector4 fillColor;
         math::FVector4 strokeColor;
         float strokeWidth = 1.0f;
     };
+    static void includePathBounds(PathData& path, const math::FRectangle& bounds);
     std::unordered_map<int, PathData> _paths;
 
     struct AnimationData {

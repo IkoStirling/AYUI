@@ -283,6 +283,19 @@ void MockRenderer::drawCard(const math::FRectangle& bounds, const CardStyle& sty
 }
 
 // Path methods / 路径方法
+void MockRenderer::includePathBounds(PathData& path,
+                                     const math::FRectangle& bounds) {
+    if (!path.hasBounds) {
+        path.bounds = bounds;
+        path.hasBounds = true;
+        return;
+    }
+    path.bounds.minX = std::min(path.bounds.minX, bounds.minX);
+    path.bounds.minY = std::min(path.bounds.minY, bounds.minY);
+    path.bounds.maxX = std::max(path.bounds.maxX, bounds.maxX);
+    path.bounds.maxY = std::max(path.bounds.maxY, bounds.maxY);
+}
+
 IRenderBackend::PathHandle MockRenderer::createPath() {
     PathHandle handle;
     handle.id = _nextPathId++;
@@ -298,7 +311,7 @@ void MockRenderer::addPathRect(PathHandle path, const math::FRectangle& bounds, 
     AYUNREFERENCED_PARAM(winding);
     auto it = _paths.find(path.id);
     if (it != _paths.end()) {
-        it->second.bounds = bounds;
+        includePathBounds(it->second, bounds);
     }
 }
 
@@ -311,40 +324,57 @@ void MockRenderer::addPathEllipse(PathHandle path, const math::FVector2& center,
     AYUNREFERENCED_PARAM(winding);
     auto it = _paths.find(path.id);
     if (it != _paths.end()) {
-        it->second.bounds = math::FRectangle(
+        includePathBounds(it->second, math::FRectangle(
             center.x - radiusX, center.y - radiusY,
             center.x + radiusX, center.y + radiusY
-        );
+        ));
     }
 }
 
 void MockRenderer::addPathLine(PathHandle path, const math::FVector2& start, const math::FVector2& end) {
-    AYUNREFERENCED_PARAM(path);
-    AYUNREFERENCED_PARAM(start);
-    AYUNREFERENCED_PARAM(end);
+    auto it = _paths.find(path.id);
+    if (it != _paths.end()) {
+        includePathBounds(it->second, math::FRectangle(
+            std::min(start.x, end.x), std::min(start.y, end.y),
+            std::max(start.x, end.x), std::max(start.y, end.y)));
+    }
 }
 
 void MockRenderer::addPathBezier(PathHandle path, const math::FVector2& start, const math::FVector2& control1, const math::FVector2& control2, const math::FVector2& end) {
-    AYUNREFERENCED_PARAM(path);
-    AYUNREFERENCED_PARAM(start);
-    AYUNREFERENCED_PARAM(control1);
-    AYUNREFERENCED_PARAM(control2);
-    AYUNREFERENCED_PARAM(end);
+    auto it = _paths.find(path.id);
+    if (it != _paths.end()) {
+        includePathBounds(it->second, math::FRectangle(
+            std::min({start.x, control1.x, control2.x, end.x}),
+            std::min({start.y, control1.y, control2.y, end.y}),
+            std::max({start.x, control1.x, control2.x, end.x}),
+            std::max({start.y, control1.y, control2.y, end.y})));
+    }
 }
 
 void MockRenderer::addPathArc(PathHandle path, const math::FVector2& center, float radius, float startAngle, float endAngle, PathWinding winding) {
-    AYUNREFERENCED_PARAM(path);
-    AYUNREFERENCED_PARAM(center);
-    AYUNREFERENCED_PARAM(radius);
+    auto it = _paths.find(path.id);
+    if (it != _paths.end()) {
+        includePathBounds(it->second, math::FRectangle(
+            center.x - radius, center.y - radius,
+            center.x + radius, center.y + radius));
+    }
     AYUNREFERENCED_PARAM(startAngle);
     AYUNREFERENCED_PARAM(endAngle);
     AYUNREFERENCED_PARAM(winding);
 }
 
 void MockRenderer::addPathPolygon(PathHandle path, const math::FVector2* points, int count, PathWinding winding) {
-    AYUNREFERENCED_PARAM(path);
-    AYUNREFERENCED_PARAM(points);
-    AYUNREFERENCED_PARAM(count);
+    auto it = _paths.find(path.id);
+    if (it != _paths.end() && points != nullptr && count > 0) {
+        math::FRectangle bounds(points[0].x, points[0].y, points[0].x, points[0].y);
+        for (int i = 1; i < count; ++i) {
+            bounds.minX = std::min(bounds.minX, points[i].x);
+            bounds.minY = std::min(bounds.minY, points[i].y);
+            bounds.maxX = std::max(bounds.maxX, points[i].x);
+            bounds.maxY = std::max(bounds.maxY, points[i].y);
+        }
+        includePathBounds(it->second, bounds);
+    }
     AYUNREFERENCED_PARAM(winding);
 }
 
@@ -370,13 +400,15 @@ void MockRenderer::setPathStrokeWidth(PathHandle path, float width) {
 }
 
 void MockRenderer::drawPath(PathHandle path, PathFillMode mode) {
-    AYUNREFERENCED_PARAM(mode);
     auto it = _paths.find(path.id);
     if (it != _paths.end()) {
         DrawCall dc;
         dc.type = DrawCall::Path;
         dc.bounds = it->second.bounds;
-        dc.color = it->second.fillColor;
+        dc.color = mode == PathFillMode::Stroke
+            ? it->second.strokeColor : it->second.fillColor;
+        dc.floatParam1 = it->second.strokeWidth;
+        dc.intParam1 = static_cast<int>(mode);
         dc.pathHandle = path;
         _drawCalls.push_back(dc);
     }

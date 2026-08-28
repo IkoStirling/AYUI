@@ -30,15 +30,19 @@ struct ClipContainer : Widget {
     }
 };
 
-struct UnsupportedPathPainter : Widget {
+struct RetainedPathPainter : Widget {
     int paintCount = 0;
 
     void onRender(IRenderBackend& renderer) override {
         ++paintCount;
         const auto path = renderer.createPath();
         renderer.addPathRect(path, getWorldBounds());
-        renderer.releasePath(path);
+        renderer.setPathFillColor(path, FVector4(0, 1, 0, 1));
+        renderer.drawPath(path, PathFillMode::Fill);
+        renderer.pushPathClip(path);
         renderer.drawRect(getWorldBounds(), FVector4(1, 0, 0, 1));
+        renderer.popClip();
+        renderer.releasePath(path);
     }
 };
 
@@ -195,19 +199,22 @@ TEST_CASE(DisplayList_NestedChildRenderStaysDynamicInsideCachedParentOrder) {
     CHECK(renderer.getDrawCalls()[1].color == child.color);
 }
 
-TEST_CASE(DisplayList_UnsupportedResourceCommandsFallBackAutomatically) {
-    UnsupportedPathPainter painter;
+TEST_CASE(DisplayList_VectorPathsReplayFromBackendIndependentRecipes) {
+    RetainedPathPainter painter;
     MockRenderer renderer;
 
     painter.render(renderer);
     CHECK(painter.paintCount == 1);
-    CHECK_FALSE(painter.hasCachedDisplayList());
+    CHECK(painter.hasCachedDisplayList());
+    CHECK(painter.getCachedDisplayCommandCount() == 4u);
+    CHECK(renderer.getDrawCalls().size() == 2u);
 
     renderer.beginFrame();
     painter.render(renderer);
-    CHECK(painter.paintCount == 2);
-    CHECK_FALSE(painter.hasCachedDisplayList());
-    CHECK(renderer.getDrawCalls().size() == 1u);
+    CHECK(painter.paintCount == 1);
+    CHECK(painter.hasCachedDisplayList());
+    CHECK(renderer.getDrawCalls().size() == 2u);
+    CHECK(renderer.isClipStackBalanced());
 }
 
 TEST_CASE(DisplayList_ReplayPreservesOptimizedHighLevelCommands) {

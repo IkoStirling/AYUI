@@ -19,24 +19,26 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - Button、输入框、列表、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
 - DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
+- 40 个注册类型的 Serializer wire contract，含 Grid cell、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
+- 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
 - `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
 - Gallery 与独立 Layout Editor
 
-2026-08-28 Windows Debug 基线为 `4304 / 4304` 条断言通过。旧基线中的循环内重复
+2026-08-28 Windows Debug 基线为 `4372 / 4372` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
 `onRender()` 重建本地命令；clean Widget 不再重跑控件绘制逻辑，而是按原 painter order 每帧向
-即时后端 replay。这里保留的是矩形、文本、图片、clip 等后端无关命令，不是 bgfx 的
+即时后端 replay。这里保留的是矩形、文本、图片、clip 和 vector-path recipe 等后端无关命令，不是 bgfx 的
 `UiItem`、transient buffer 或上一帧提交，因此 `UIRenderBackend::beginFrame()` 仍可安全清空
 frame-local 数据，bgfx 也仍然每帧收到完整可见 UI。
 
 子控件不进入父控件的 display-list，各自独立失效和 replay；父级 clip/opacity 在 replay 时应用。
-使用 path、粒子、资源创建/释放或 RenderTarget pass 等不能安全跨帧保留的操作时，Recorder 会
-自动放弃候选缓存并沿用旧即时路径。自定义控件也可显式调用
+path 以创建操作和绘制时快照保留，replay 时创建短生命周期后端路径，不缓存后端句柄。使用粒子、
+后端资源创建/释放或 RenderTarget pass 等不能安全跨帧保留的操作时，Recorder 会自动放弃候选缓存并沿用旧即时路径。自定义控件也可显式调用
 `setDisplayListPolicy(DisplayListPolicy::Immediate)` 作为诊断或兼容兜底。
 
 ## 快速接入
@@ -122,7 +124,7 @@ JSON 中的可执行逻辑不会被反序列化；`onClick` 等字段只用于�
 
 `Image` 支持纯色回退、命名/匿名纹理句柄、UV 裁剪和整体透明度。控件叠图有两种常用结构：把 `Image` 作为 `Button` 的装饰子节点（按钮本身仍接收点击），或在 `Panel` 中先放背景 `Image`、再放文本和交互控件；同级子节点按插入顺序绘制，后加入者位于上层。
 
-`AYUI_Gallery` 的 **Images** 页面提供共享纹理、UV crop、图片按钮、半透明图片层和图片背景上可点击控件的实机示例。示例纹理由 Gallery 运行时生成，不依赖外部图片文件。
+`AYUI_Gallery` 的 **Images** 页面提供共享纹理、UV crop、图片按钮、半透明图片层和图片背景上可点击控件的实机示例。**Backend** 页面还覆盖凹路径、描边、顺/逆时针孔洞、Bezier 和带孔 stencil 裁剪。示例纹理由 Gallery 运行时生成，不依赖外部图片文件。
 
 ## 构建与验证
 
@@ -168,11 +170,13 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 - UI Layer / RenderTarget 契约和 MockRenderer 生命周期已经落地；AYRenderer 暂时报告不支持，
   生产 bgfx FBO、纹理回收及子树离屏缓存仍是下一阶段，因此当前优化减少的是 CPU 侧控件
   命令构建，不会把静态 UI 变成只提交一次。
-- path、粒子、后端资源生命周期和显式 pass 控制尚未进入通用 display-list，相关 Widget 会
-  自动使用即时兜底；普通矩形、渐变、文字、图片、nine-patch、clip/blend/opacity 已覆盖。
+- vector path 已进入通用 display-list；AYRenderer 支持简单凹多边形、圆角矩形、椭圆、圆弧、
+  cubic Bezier、miter stroke、显式 winding 孔洞和嵌套 stencil path clip。自相交路径、布尔运算、
+  fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。
 - Linux/POSIX Clipboard 当前是安全的 no-op 实现；Windows 使用 Win32 clipboard。
-- `WidgetSerializer` 对核心控件和 DockArea 持久化路径有覆盖，但并非所有运行时/内部控件都保证完整语义往返；详见 [design.md](design.md#8-jsonfactoryserializer-契约)。
-- GridPanel 的 cell attachment、部分复合控件内部结构仍有专用加载路径，不能只靠通用 `children` 推断。
+- `WidgetSerializer` 已覆盖全部 40 个公共注册类型；Grid、ScrollView、Menu、StatusBar、Tab、
+  Modal 和 Dock 使用各自的结构化 payload。回调、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时
+  临时状态不属于持久化格式。
 - TabStrip 溢出目前裁剪，不提供水平滚动；RichText 仍是轻量 runs 模型。
 - 3D spatial UI、像素遮罩命中测试和高级特效不在当前范围。
 

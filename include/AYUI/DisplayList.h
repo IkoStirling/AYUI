@@ -3,7 +3,9 @@
 #include "AYUI/IRenderBackend.h"
 
 #include <functional>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::ui {
@@ -32,9 +34,9 @@ private:
 
 // Records one Widget::onRender call while forwarding it to the real backend,
 // so the rebuild frame has exactly the same output as the immediate path.
-// Resource mutation and backend-pass control are intentionally not retained;
-// encountering either marks the candidate list uncacheable and Widget keeps
-// using its legacy immediate fallback.
+// Path construction is retained as a backend-independent recipe. Other
+// resource mutation and backend-pass control stay uncacheable; encountering
+// either keeps the Widget on its legacy immediate fallback.
 class DisplayListRecorder final : public IRenderBackend {
 public:
     DisplayListRecorder(IRenderBackend& target, DisplayList& output);
@@ -98,9 +100,9 @@ public:
     void drawRectBlur(const math::FRectangle& bounds, float blurRadius,
                       BlurType type = BlurType::Gaussian) override;
 
-    // Backend/resource commands below are forwarded for the rebuild frame,
-    // but make this candidate uncacheable because their handles or lifetime
-    // cannot be copied safely into a backend-independent list yet.
+    // Paths are retained as backend-independent construction recipes. Each
+    // replay creates a temporary backend path, applies the recipe, draws or
+    // pushes the clip, then releases it; no backend handle enters the list.
     PathHandle createPath() override;
     void releasePath(PathHandle path) override;
     void addPathRect(PathHandle path, const math::FRectangle& bounds,
@@ -202,12 +204,16 @@ public:
     std::string getBackendName() const override;
 
 private:
+    struct RecordedPath;
     void append(DisplayList::Command command);
     void disableCaching() { _cacheable = false; }
+    std::shared_ptr<RecordedPath> findRecordedPath(PathHandle path) const;
 
     IRenderBackend& _target;
     DisplayList& _output;
     bool _cacheable = true;
+    int _nextRecordedPathId = 1;
+    std::unordered_map<int, std::shared_ptr<RecordedPath>> _recordedPaths;
 };
 
 } // namespace ayt::ui

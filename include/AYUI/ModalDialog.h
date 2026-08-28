@@ -79,6 +79,8 @@ public:
     // widget is reparented onto the internal body panel (NOT directly onto
     // `this`), so layout math belongs to ModalDialog. Pass nullptr to clear.
     void setBodyContent(Widget* content);
+    // Owning counterpart for factory/serializer-created body subtrees.
+    void setBodyContentOwned(Widget* content);
     Widget* getBodyContent() const { return _bodyContent; }
 
     // Q3 — Result callback fires on user accept/reject. Argument is one
@@ -125,6 +127,7 @@ public:
 
 private:
     void ensurePanelsCreated();
+    void setBodyContentImpl(Widget* content, bool owned);
 
     Panel*       _bodyPanel    = nullptr;   // child of `this`
     Button*      _okButton     = nullptr;   // owned, deleted in dtor

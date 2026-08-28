@@ -22,6 +22,17 @@ ScrollView::~ScrollView() {
     //
     // _content is host-owned (caller passes a Widget* whose lifetime it
     // manages), so do NOT free it here.
+    const auto contentIt = std::find(getChildren().begin(), getChildren().end(),
+                                     _content);
+    if (_content != nullptr && contentIt != getChildren().end()) {
+        if (_content->isExternallyOwned()) {
+            removeChild(_content);
+        } else {
+            destroyWidgetTree(_content);
+        }
+    }
+    _content = nullptr;
+
     if (_vbar != nullptr) {
         if (_vbar->getParent() == this) {
             removeChild(_vbar);
@@ -39,13 +50,31 @@ ScrollView::~ScrollView() {
 }
 
 void ScrollView::setContent(Widget* content) {
-    if (_content == content) return;
-    if (_content != nullptr) {
-        removeChild(_content);
+    setContentImpl(content, false);
+}
+
+void ScrollView::setContentOwned(Widget* content) {
+    setContentImpl(content, true);
+}
+
+void ScrollView::setContentImpl(Widget* content, bool owned) {
+    const auto oldIt = std::find(getChildren().begin(), getChildren().end(),
+                                 _content);
+    if (_content != nullptr && oldIt != getChildren().end()) {
+        if (_content == content || _content->isExternallyOwned()) {
+            removeChild(_content);
+        } else {
+            destroyWidgetTree(_content);
+        }
     }
-    _content = content;
-    if (_content != nullptr) {
-        addChildExternal(_content);
+    _content = nullptr;
+    if (content != nullptr) {
+        if (content->getParent() != nullptr) {
+            content->detachFromParent();
+        }
+        if (owned) addChild(content);
+        else addChildExternal(content);
+        _content = content;
         if (_vbar == nullptr && _vbarEnabled) {
             ensureBarsCreated();
         }

@@ -34,9 +34,14 @@
 #include "AYUI/DockArea.h"
 #include "AYUI/DockCard.h"
 #include "AYUI/DockOverlay.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/Modal.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/TabStrip.h"
 #include <nlohmann/json.hpp>
 #include <codecvt>
 #include <locale>
+#include <memory>
 
 using namespace ayt::ui;
 using json = nlohmann::json;
@@ -59,6 +64,25 @@ static std::string toUtf8(const std::wstring& str) {
         std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
         return converter.to_bytes(str);
     }
+}
+
+static bool hasStructuredChildPayload(Widget* widget) {
+    return dynamic_cast<ScrollView*>(widget) != nullptr
+        || dynamic_cast<ListView*>(widget) != nullptr
+        || dynamic_cast<ComboBox*>(widget) != nullptr
+        || dynamic_cast<TreeView*>(widget) != nullptr
+        || dynamic_cast<MenuItem*>(widget) != nullptr
+        || dynamic_cast<Menu*>(widget) != nullptr
+        || dynamic_cast<MenuBar*>(widget) != nullptr
+        || dynamic_cast<ToolBar*>(widget) != nullptr
+        || dynamic_cast<StatusBar*>(widget) != nullptr
+        || dynamic_cast<GridPanel*>(widget) != nullptr
+        || dynamic_cast<TabControl*>(widget) != nullptr
+        || dynamic_cast<TabStrip*>(widget) != nullptr
+        || dynamic_cast<DockCard*>(widget) != nullptr
+        || dynamic_cast<DockArea*>(widget) != nullptr
+        || dynamic_cast<DockOverlay*>(widget) != nullptr
+        || dynamic_cast<Modal*>(widget) != nullptr;
 }
 
 std::string WidgetSerializer::serialize(Widget* root, bool pretty) {
@@ -109,6 +133,9 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
 
         widget->setVisible(j.value("visible", true));
         widget->setStyleId(j.value("style", ""));
+        widget->setOpacity(j.value("opacity", 1.0f));
+        widget->setLayoutPositionManaged(j.value("layoutPositionManaged", true));
+        widget->setLayoutSizeManaged(j.value("layoutSizeManaged", true));
 
         // G11 — per-widget theme token overrides. JSON shape:
         //   "styleOverrides": {
@@ -277,6 +304,30 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
+        if (ScrollView* scroll = dynamic_cast<ScrollView*>(widget)) {
+            if (j.contains("verticalScrollBar")) {
+                scroll->setVerticalScrollBarEnabled(j["verticalScrollBar"].get<bool>());
+            }
+            if (j.contains("horizontalScrollBar")) {
+                scroll->setHorizontalScrollBarEnabled(j["horizontalScrollBar"].get<bool>());
+            }
+            if (j.contains("contentSize") && j["contentSize"].is_object()) {
+                scroll->setContentSize(math::FVector2(
+                    j["contentSize"].value("w", 0.0f),
+                    j["contentSize"].value("h", 0.0f)));
+            }
+            if (j.contains("content") && j["content"].is_object()) {
+                if (Widget* content = deserialize(j["content"].dump())) {
+                    scroll->setContentOwned(content);
+                }
+            }
+            if (j.contains("scrollOffset") && j["scrollOffset"].is_object()) {
+                scroll->setScrollOffset(math::FVector2(
+                    j["scrollOffset"].value("x", 0.0f),
+                    j["scrollOffset"].value("y", 0.0f)));
+            }
+        }
+
         if (ListView* lv = dynamic_cast<ListView*>(widget)) {
             if (j.contains("items") && j["items"].is_array()) {
                 std::vector<std::wstring> items;
@@ -340,7 +391,7 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                     if (t.contains("content") && t["content"].is_object()) {
                         content = deserialize(t["content"].dump());
                     }
-                    tc->addTab(toWstring(label), content);
+                    tc->addTabOwned(toWstring(label), content);
                 }
             }
             if (j.contains("selectedIndex")) {
@@ -381,29 +432,99 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                     j["padding"].value("right", 4.0f),
                     j["padding"].value("bottom", 4.0f));
             }
+            if (j.contains("backgroundEnabled")) {
+                panel->setBackgroundEnabled(j["backgroundEnabled"].get<bool>());
+            }
         }
 
         if (GridPanel* gp = dynamic_cast<GridPanel*>(widget)) {
-            int rows = j.value("rowCount", 0);
-            int cols = j.value("columnCount", 0);
+            const int rows = j.value("rowCount", 0);
+            const int cols = j.value("columnCount", 0);
             if (rows > 0) gp->setRowCount(rows);
             if (cols > 0) gp->setColumnCount(cols);
-            // Children are re-attached via the standard children[] walk
-            // below. With v1's lossy serializer (DECISION 5), each child
-            // is placed in the next (row, col) cell in linear order; this
-            // matches what hosts using the JSON path typically want
-            // (grid filled left-to-right, top-to-bottom).
-            if (rows > 0 && cols > 0 && j.contains("children") &&
-                j["children"].is_array()) {
-                int r = 0, c = 0;
+
+            if (j.contains("rowDefs") && j["rowDefs"].is_array()) {
+                int row = 0;
+                for (const auto& defJson : j["rowDefs"]) {
+                    if (row >= gp->getRowCount()) break;
+                    GridPanel::RowDef def;
+                    def.policy = defJson.value("policy", std::string("Stretch")) == "Fixed"
+                        ? GridPanel::SizePolicy::Fixed
+                        : GridPanel::SizePolicy::Stretch;
+                    def.value = defJson.value("value", 1.0f);
+                    gp->setRowDef(row++, def);
+                }
+            }
+            if (j.contains("columnDefs") && j["columnDefs"].is_array()) {
+                int col = 0;
+                for (const auto& defJson : j["columnDefs"]) {
+                    if (col >= gp->getColumnCount()) break;
+                    GridPanel::ColDef def;
+                    def.policy = defJson.value("policy", std::string("Stretch")) == "Fixed"
+                        ? GridPanel::SizePolicy::Fixed
+                        : GridPanel::SizePolicy::Stretch;
+                    def.value = defJson.value("value", 1.0f);
+                    gp->setColumnDef(col++, def);
+                }
+            }
+            if (j.contains("padding") && j["padding"].is_object()) {
+                gp->setPadding(j["padding"].value("left", 4.0f),
+                               j["padding"].value("top", 4.0f),
+                               j["padding"].value("right", 4.0f),
+                               j["padding"].value("bottom", 4.0f));
+            }
+            if (j.contains("spacing") && j["spacing"].is_object()) {
+                gp->setSpacing(j["spacing"].value("horizontal", 4.0f),
+                               j["spacing"].value("vertical", 4.0f));
+            }
+
+            const auto parseHAlign = [](const std::string& value) {
+                if (value == "Left") return GridPanel::HAlign::Left;
+                if (value == "Center") return GridPanel::HAlign::Center;
+                if (value == "Right") return GridPanel::HAlign::Right;
+                return GridPanel::HAlign::Fill;
+            };
+            const auto parseVAlign = [](const std::string& value) {
+                if (value == "Top") return GridPanel::VAlign::Top;
+                if (value == "Middle") return GridPanel::VAlign::Middle;
+                if (value == "Bottom") return GridPanel::VAlign::Bottom;
+                return GridPanel::VAlign::Fill;
+            };
+
+            const bool hasStructuredCells = j.contains("cells") && j["cells"].is_array();
+            if (hasStructuredCells) {
+                for (const auto& cellJson : j["cells"]) {
+                    const int row = cellJson.value("row", -1);
+                    const int col = cellJson.value("col", -1);
+                    if (row < 0 || col < 0 || row >= gp->getRowCount()
+                        || col >= gp->getColumnCount()
+                        || !cellJson.contains("content")
+                        || !cellJson["content"].is_object()) {
+                        continue;
+                    }
+                    Widget* child = deserialize(cellJson["content"].dump());
+                    if (child == nullptr) continue;
+                    gp->setCell(
+                        row, col, child,
+                        cellJson.value("rowSpan", 1),
+                        cellJson.value("colSpan", 1),
+                        parseHAlign(cellJson.value("hAlign", std::string("Fill"))),
+                        parseVAlign(cellJson.value("vAlign", std::string("Fill"))));
+                }
+            } else if (rows > 0 && cols > 0 && j.contains("children")
+                       && j["children"].is_array()) {
+                // Backward compatibility for the old lossy linear payload.
+                int row = 0;
+                int col = 0;
                 for (const auto& childJson : j["children"]) {
                     Widget* child = deserialize(childJson.dump());
-                    if (child != nullptr) {
-                        gp->setCell(r, c, child);
-                        ++c;
-                        if (c >= cols) { c = 0; ++r; }
-                        if (r >= rows) break;
+                    if (child == nullptr) continue;
+                    gp->setCell(row, col, child);
+                    if (++col >= cols) {
+                        col = 0;
+                        ++row;
                     }
+                    if (row >= rows) break;
                 }
             }
         }
@@ -432,6 +553,12 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("inset")) {
                 sep->setInset(j["inset"].get<float>());
             }
+            if (j.contains("color") && j["color"].is_object()) {
+                const auto& c = j["color"];
+                sep->setColor(math::FVector4(
+                    c.value("r", 1.0f), c.value("g", 1.0f),
+                    c.value("b", 1.0f), c.value("a", 1.0f)));
+            }
         }
 
         // G7 — ToolBarSeparator inherits all field handling from the
@@ -446,12 +573,77 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("shortcut")) {
                 mi->setShortcut(toWstring(j["shortcut"].get<std::string>()));
             }
+            if (j.contains("submenu") && j["submenu"].is_object()) {
+                Widget* submenuWidget = deserialize(j["submenu"].dump());
+                Menu* submenu = dynamic_cast<Menu*>(submenuWidget);
+                if (submenu != nullptr) {
+                    mi->setSubmenu(submenu);
+                    mi->addChild(submenu);
+                }
+                else destroyWidgetTree(submenuWidget);
+            }
+        }
+
+        if (Menu* menu = dynamic_cast<Menu*>(widget)) {
+            if (j.contains("items") && j["items"].is_array()) {
+                for (const auto& itemJson : j["items"]) {
+                    MenuItem* item = menu->addItem(toWstring(
+                        itemJson.value("text", std::string())));
+                    if (itemJson.contains("shortcut")) {
+                        item->setShortcut(toWstring(
+                            itemJson["shortcut"].get<std::string>()));
+                    }
+                    if (itemJson.contains("submenu") && itemJson["submenu"].is_object()) {
+                        Widget* submenuWidget = deserialize(itemJson["submenu"].dump());
+                        Menu* submenu = dynamic_cast<Menu*>(submenuWidget);
+                        if (submenu != nullptr) menu->attachSubmenu(item, submenu);
+                        else destroyWidgetTree(submenuWidget);
+                    }
+                }
+            }
+        }
+
+        if (MenuBar* menuBar = dynamic_cast<MenuBar*>(widget)) {
+            if (j.contains("anchorSpacing")) menuBar->setAnchorSpacing(j["anchorSpacing"].get<float>());
+            if (j.contains("anchorWidth")) menuBar->setAnchorWidth(j["anchorWidth"].get<float>());
+            if (j.contains("anchorAutoWidth")) menuBar->setAnchorAutoWidth(j["anchorAutoWidth"].get<bool>());
+            if (j.contains("menus") && j["menus"].is_array()) {
+                for (const auto& menuJson : j["menus"]) {
+                    Menu* menu = menuBar->addMenu(toWstring(
+                        menuJson.value("title", std::string())));
+                    const json* payload = &menuJson;
+                    if (menuJson.contains("menu") && menuJson["menu"].is_object()) {
+                        payload = &menuJson["menu"];
+                    }
+                    if (payload->contains("items") && (*payload)["items"].is_array()) {
+                        for (const auto& itemJson : (*payload)["items"]) {
+                            MenuItem* item = menu->addItem(toWstring(
+                                itemJson.value("text", std::string())));
+                            if (itemJson.contains("shortcut")) {
+                                item->setShortcut(toWstring(
+                                    itemJson["shortcut"].get<std::string>()));
+                            }
+                            if (itemJson.contains("submenu")
+                                && itemJson["submenu"].is_object()) {
+                                Widget* submenuWidget = deserialize(itemJson["submenu"].dump());
+                                Menu* submenu = dynamic_cast<Menu*>(submenuWidget);
+                                if (submenu != nullptr) menu->attachSubmenu(item, submenu);
+                                else destroyWidgetTree(submenuWidget);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (StatusBar* sb = dynamic_cast<StatusBar*>(widget)) {
             if (j.contains("panels") && j["panels"].is_array()) {
                 for (const auto& pj : j["panels"]) {
-                    if (pj.contains("text")) {
+                    if (pj.contains("type")) {
+                        if (Widget* panel = deserialize(pj.dump())) {
+                            sb->addPanel(panel);
+                        }
+                    } else if (pj.contains("text")) {
                         sb->addPanel(toWstring(
                             pj["text"].get<std::string>()));
                     }
@@ -553,6 +745,18 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                 float b = j["padding"].value("bottom", 4.0f);
                 box->setPadding(l, t, r, b);
             }
+            if (j.contains("gravity") && j["gravity"].is_string()) {
+                const std::string gravity = j["gravity"].get<std::string>();
+                if (gravity == "TopCenter") box->setGravity(BoxBase::Gravity::TopCenter);
+                else if (gravity == "TopRight") box->setGravity(BoxBase::Gravity::TopRight);
+                else if (gravity == "CenterLeft") box->setGravity(BoxBase::Gravity::CenterLeft);
+                else if (gravity == "Center") box->setGravity(BoxBase::Gravity::Center);
+                else if (gravity == "CenterRight") box->setGravity(BoxBase::Gravity::CenterRight);
+                else if (gravity == "BottomLeft") box->setGravity(BoxBase::Gravity::BottomLeft);
+                else if (gravity == "BottomCenter") box->setGravity(BoxBase::Gravity::BottomCenter);
+                else if (gravity == "BottomRight") box->setGravity(BoxBase::Gravity::BottomRight);
+                else box->setGravity(BoxBase::Gravity::TopLeft);
+            }
         }
 
         if (Image* img = dynamic_cast<Image*>(widget)) {
@@ -576,7 +780,162 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
         }
 
-        if (j.contains("children") && j["children"].is_array()) {
+        if (SplitterHandle* splitter = dynamic_cast<SplitterHandle*>(widget)) {
+            if (j.value("orientation", std::string("horizontal")) == "vertical") {
+                splitter->setOrientation(SplitterHandle::Orientation::Vertical);
+            } else {
+                splitter->setOrientation(SplitterHandle::Orientation::Horizontal);
+            }
+        }
+
+        if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
+            if (j.contains("title")) card->setTitle(toWstring(j["title"].get<std::string>()));
+            if (j.contains("icon")) card->setIcon(j["icon"].get<std::string>());
+            if (j.contains("closable")) card->setClosable(j["closable"].get<bool>());
+            if (j.contains("floatable")) card->setFloatable(j["floatable"].get<bool>());
+            if (j.contains("collapsed")) card->setCollapsed(j["collapsed"].get<bool>());
+            if (j.contains("headerHeight")) card->setHeaderHeight(j["headerHeight"].get<float>());
+            if (j.contains("content") && j["content"].is_object()) {
+                if (Widget* content = deserialize(j["content"].dump())) {
+                    card->setContent(content);
+                }
+            }
+        }
+
+        if (DockOverlay* overlay = dynamic_cast<DockOverlay*>(widget)) {
+            if (j.contains("floating") && j["floating"].is_array()) {
+                for (const auto& floatingJson : j["floating"]) {
+                    Widget* child = deserialize(floatingJson.dump());
+                    DockCard* card = dynamic_cast<DockCard*>(child);
+                    if (card == nullptr) {
+                        destroyWidgetTree(child);
+                        continue;
+                    }
+                    card->setPosition(math::FVector2(
+                        floatingJson.value("x", card->getPosition().x),
+                        floatingJson.value("y", card->getPosition().y)));
+                    card->setSize(math::FVector2(
+                        floatingJson.value("w", card->getSize().x),
+                        floatingJson.value("h", card->getSize().y)));
+                    overlay->addFloatingCard(card);
+                }
+            }
+        }
+
+        if (DockArea* dock = dynamic_cast<DockArea*>(widget)) {
+            const auto applySlotValues = [dock](const json& values, bool minimums) {
+                if (!values.is_object()) return;
+                for (auto it = values.begin(); it != values.end(); ++it) {
+                    DockArea::Slot slot = DockArea::Slot::Count;
+                    if (!DockArea::parseSlot(it.key(), slot) || !it.value().is_number()) {
+                        continue;
+                    }
+                    if (minimums) dock->setSlotMinSize(slot, it.value().get<float>());
+                    else dock->setSlotWeight(slot, it.value().get<float>());
+                }
+            };
+            if (j.contains("slotWeights")) applySlotValues(j["slotWeights"], false);
+            if (j.contains("slotMinSizes")) applySlotValues(j["slotMinSizes"], true);
+
+            if (j.contains("cards") && j["cards"].is_array()) {
+                for (const auto& cardJson : j["cards"]) {
+                    Widget* child = deserialize(cardJson.dump());
+                    DockCard* card = dynamic_cast<DockCard*>(child);
+                    DockArea::Slot slot = DockArea::Slot::Count;
+                    if (card == nullptr
+                        || !DockArea::parseSlot(cardJson.value("slot", std::string()), slot)) {
+                        destroyWidgetTree(child);
+                        continue;
+                    }
+                    dock->addCard(slot, std::unique_ptr<DockCard>(card));
+                }
+            }
+            if (j.contains("floating") && j["floating"].is_array()
+                && dock->getOverlay() != nullptr) {
+                for (const auto& floatingJson : j["floating"]) {
+                    Widget* child = deserialize(floatingJson.dump());
+                    DockCard* card = dynamic_cast<DockCard*>(child);
+                    if (card == nullptr) {
+                        destroyWidgetTree(child);
+                        continue;
+                    }
+                    card->setPosition(math::FVector2(
+                        floatingJson.value("x", card->getPosition().x),
+                        floatingJson.value("y", card->getPosition().y)));
+                    card->setSize(math::FVector2(
+                        floatingJson.value("w", card->getSize().x),
+                        floatingJson.value("h", card->getSize().y)));
+                    dock->getOverlay()->addFloatingCard(card);
+                }
+            }
+        }
+
+        if (Dimmer* dimmer = dynamic_cast<Dimmer*>(widget)) {
+            if (j.contains("scrimColor") && j["scrimColor"].is_object()) {
+                const auto& c = j["scrimColor"];
+                dimmer->setScrimColor(math::FVector4(
+                    c.value("r", 0.0f), c.value("g", 0.0f),
+                    c.value("b", 0.0f), c.value("a", 0.5f)));
+            }
+        }
+
+        const auto restoreModalBase = [&j](Modal* modal) {
+            if (j.contains("dismissOnDimmerClick")) {
+                modal->setDismissOnDimmerClick(j["dismissOnDimmerClick"].get<bool>());
+            }
+            if (j.contains("dimmer") && j["dimmer"].is_object()) {
+                const auto& dimmerJson = j["dimmer"];
+                auto* dimmer = new Dimmer();
+                if (dimmerJson.contains("scrimColor")
+                    && dimmerJson["scrimColor"].is_object()) {
+                    const auto& c = dimmerJson["scrimColor"];
+                    dimmer->setScrimColor(math::FVector4(
+                        c.value("r", 0.0f), c.value("g", 0.0f),
+                        c.value("b", 0.0f), c.value("a", 0.5f)));
+                }
+                modal->setDimmerOwned(dimmer);
+            }
+        };
+        if (ModalDialog* dialog = dynamic_cast<ModalDialog*>(widget)) {
+            restoreModalBase(dialog);
+            if (j.contains("acceptText")) {
+                dialog->setAcceptText(toWstring(j["acceptText"].get<std::string>()));
+            }
+            if (j.contains("rejectText")) {
+                dialog->setRejectText(toWstring(j["rejectText"].get<std::string>()));
+            }
+            if (j.contains("bodyContent") && j["bodyContent"].is_object()) {
+                if (Widget* body = deserialize(j["bodyContent"].dump())) {
+                    dialog->setBodyContentOwned(body);
+                }
+            }
+        } else if (Modal* modal = dynamic_cast<Modal*>(widget)) {
+            restoreModalBase(modal);
+            if (j.contains("content") && j["content"].is_object()) {
+                if (Widget* content = deserialize(j["content"].dump())) {
+                    modal->setContentOwned(content);
+                }
+            }
+        }
+
+        if (TabStrip* strip = dynamic_cast<TabStrip*>(widget)) {
+            if (j.contains("tabs") && j["tabs"].is_array()) {
+                for (const auto& tabJson : j["tabs"]) {
+                    if (tabJson.is_string()) {
+                        strip->addTab(toWstring(tabJson.get<std::string>()));
+                    }
+                }
+            }
+            if (j.contains("selectedIndex")) strip->setSelectedIndex(j["selectedIndex"].get<int>());
+            if (j.contains("tabHeight")) strip->setTabHeight(j["tabHeight"].get<float>());
+            if (j.contains("spacing")) strip->setSpacing(j["spacing"].get<float>());
+            if (j.contains("indicatorTweenMs")) {
+                strip->setIndicatorTweenMs(j["indicatorTweenMs"].get<float>());
+            }
+        }
+
+        if (!hasStructuredChildPayload(widget)
+            && j.contains("children") && j["children"].is_array()) {
             for (const auto& childJson : j["children"]) {
                 Widget* child = deserialize(childJson.dump());
                 if (child) {
@@ -624,6 +983,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
 
     j["visible"] = widget->isVisible();
     j["style"] = widget->getStyleId();
+    j["opacity"] = widget->getOpacity();
+    j["layoutPositionManaged"] = widget->isLayoutPositionManaged();
+    j["layoutSizeManaged"] = widget->isLayoutSizeManaged();
 
     // G11 — emit per-widget token overrides (when any are set) so the
     // round-trip via deserialize restores them. Empty map = omit the
@@ -708,8 +1070,19 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["orientation"] = (sb->getOrientation() == ScrollBar::Orientation::Vertical)
             ? "vertical" : "horizontal";
     }
-    else if (dynamic_cast<ScrollView*>(widget) != nullptr) {
+    else if (ScrollView* scroll = dynamic_cast<ScrollView*>(widget)) {
         j["type"] = "ScrollView";
+        j["verticalScrollBar"] = scroll->isVerticalScrollBarEnabled();
+        j["horizontalScrollBar"] = scroll->isHorizontalScrollBarEnabled();
+        const auto contentSize = scroll->getContentSize();
+        const auto offset = scroll->getScrollOffset();
+        j["contentSize"] = {{"w", contentSize.x}, {"h", contentSize.y}};
+        j["scrollOffset"] = {{"x", offset.x}, {"y", offset.y}};
+        if (Widget* content = scroll->getContent()) {
+            json contentJson;
+            serializeWidgetToJson(content, contentJson);
+            j["content"] = contentJson;
+        }
     }
     else if (ListView* lv = dynamic_cast<ListView*>(widget)) {
         j["type"] = "ListView";
@@ -755,6 +1128,60 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         j["selectedIndex"] = tc->getSelectedIndex();
         j["headerHeight"] = tc->getHeaderHeight();
+    }
+    else if (TabStrip* strip = dynamic_cast<TabStrip*>(widget)) {
+        j["type"] = "TabStrip";
+        j["tabs"] = json::array();
+        for (int i = 0; i < strip->getTabCount(); ++i) {
+            j["tabs"].push_back(toUtf8(strip->getTabLabel(i)));
+        }
+        j["selectedIndex"] = strip->getSelectedIndex();
+        j["tabHeight"] = strip->getTabHeight();
+        j["spacing"] = strip->getSpacing();
+        j["indicatorTweenMs"] = strip->getIndicatorTweenMs();
+    }
+    else if (ModalDialog* dialog = dynamic_cast<ModalDialog*>(widget)) {
+        j["type"] = "ModalDialog";
+        j["dismissOnDimmerClick"] = dialog->isDismissOnDimmerClick();
+        j["acceptText"] = toUtf8(dialog->getAcceptText());
+        j["rejectText"] = toUtf8(dialog->getRejectText());
+        if (Dimmer* dimmer = dialog->getDimmer()) {
+            const auto& c = dimmer->getScrimColor();
+            j["dimmer"] = {
+                {"scrimColor", {
+                    {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w}
+                }}
+            };
+        }
+        if (Widget* body = dialog->getBodyContent()) {
+            json bodyJson;
+            serializeWidgetToJson(body, bodyJson);
+            j["bodyContent"] = bodyJson;
+        }
+    }
+    else if (Modal* modal = dynamic_cast<Modal*>(widget)) {
+        j["type"] = "Modal";
+        j["dismissOnDimmerClick"] = modal->isDismissOnDimmerClick();
+        if (Dimmer* dimmer = modal->getDimmer()) {
+            const auto& c = dimmer->getScrimColor();
+            j["dimmer"] = {
+                {"scrimColor", {
+                    {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w}
+                }}
+            };
+        }
+        if (Widget* content = modal->getContent()) {
+            json contentJson;
+            serializeWidgetToJson(content, contentJson);
+            j["content"] = contentJson;
+        }
+    }
+    else if (Dimmer* dimmer = dynamic_cast<Dimmer*>(widget)) {
+        j["type"] = "Dimmer";
+        const auto& c = dimmer->getScrimColor();
+        j["scrimColor"] = {
+            {"r", c.x}, {"g", c.y}, {"b", c.z}, {"a", c.w}
+        };
     }
     else if (Window* window = dynamic_cast<Window*>(widget)) {
         j["type"] = "Window";
@@ -813,17 +1240,78 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     else if (Panel* panel = dynamic_cast<Panel*>(widget)) {
         j["type"] = "Panel";
         j["borderEnabled"] = panel->isBorderEnabled();
+        j["backgroundEnabled"] = panel->isBackgroundEnabled();
+        const auto& p = panel->getPadding();
+        j["padding"] = {
+            {"left", p.x}, {"top", p.y}, {"right", p.z}, {"bottom", p.w}
+        };
     }
     else if (GridPanel* gp = dynamic_cast<GridPanel*>(widget)) {
         j["type"] = "GridPanel";
         j["rowCount"] = gp->getRowCount();
         j["columnCount"] = gp->getColumnCount();
-        // v1 simplification: cell positions (row, col) and spans are NOT
-        // serialized. Children are written via the standard children[] walk,
-        // so a round-trip preserves the widget tree but loses its grid
-        // attachment. Hosts needing round-trip fidelity should attach cells
-        // programmatically after deserialize, or wait for v1.1 (see
-        // Controls/AYGridPanel.h DECISION 5 + Test_GridPanel G3).
+        j["rowDefs"] = json::array();
+        for (int row = 0; row < gp->getRowCount(); ++row) {
+            const auto& def = gp->getRowDef(row);
+            j["rowDefs"].push_back({
+                {"policy", def.policy == GridPanel::SizePolicy::Fixed
+                    ? "Fixed" : "Stretch"},
+                {"value", def.value}
+            });
+        }
+        j["columnDefs"] = json::array();
+        for (int col = 0; col < gp->getColumnCount(); ++col) {
+            const auto& def = gp->getColumnDef(col);
+            j["columnDefs"].push_back({
+                {"policy", def.policy == GridPanel::SizePolicy::Fixed
+                    ? "Fixed" : "Stretch"},
+                {"value", def.value}
+            });
+        }
+        const auto& padding = gp->getPadding();
+        j["padding"] = {
+            {"left", padding.x}, {"top", padding.y},
+            {"right", padding.z}, {"bottom", padding.w}
+        };
+        j["spacing"] = {
+            {"horizontal", gp->getHorizontalSpacing()},
+            {"vertical", gp->getVerticalSpacing()}
+        };
+
+        const auto hAlignName = [](GridPanel::HAlign align) {
+            switch (align) {
+            case GridPanel::HAlign::Left: return "Left";
+            case GridPanel::HAlign::Center: return "Center";
+            case GridPanel::HAlign::Right: return "Right";
+            case GridPanel::HAlign::Fill:
+            default: return "Fill";
+            }
+        };
+        const auto vAlignName = [](GridPanel::VAlign align) {
+            switch (align) {
+            case GridPanel::VAlign::Top: return "Top";
+            case GridPanel::VAlign::Middle: return "Middle";
+            case GridPanel::VAlign::Bottom: return "Bottom";
+            case GridPanel::VAlign::Fill:
+            default: return "Fill";
+            }
+        };
+        j["cells"] = json::array();
+        for (int row = 0; row < gp->getRowCount(); ++row) {
+            for (int col = 0; col < gp->getColumnCount(); ++col) {
+                const GridPanel::CellInfo* cell = gp->findCell(row, col);
+                if (cell == nullptr || cell->widget == nullptr) continue;
+                json contentJson;
+                serializeWidgetToJson(cell->widget, contentJson);
+                j["cells"].push_back({
+                    {"row", row}, {"col", col},
+                    {"rowSpan", cell->rowSpan}, {"colSpan", cell->colSpan},
+                    {"hAlign", hAlignName(cell->hAlign)},
+                    {"vAlign", vAlignName(cell->vAlign)},
+                    {"content", contentJson}
+                });
+            }
+        }
     }
     else if (Tooltip* tip = dynamic_cast<Tooltip*>(widget)) {
         j["type"] = "Tooltip";
@@ -860,19 +1348,37 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["text"] = toUtf8(mi->getText());
         j["shortcut"] = toUtf8(mi->getShortcut());
         j["hasSubmenu"] = mi->hasSubmenu();
+        if (Menu* submenu = mi->getSubmenu()) {
+            json submenuJson;
+            serializeWidgetToJson(submenu, submenuJson);
+            j["submenu"] = submenuJson;
+        }
     }
     else if (Menu* menu = dynamic_cast<Menu*>(widget)) {
         j["type"] = "Menu";
-        j["open"] = menu->isOpen();
-        // Children (MenuItems) are walked via the standard children[] block
-        // below, so we don't enumerate items here.
+        j["items"] = json::array();
+        for (size_t i = 0; i < menu->getItemCount(); ++i) {
+            MenuItem* item = menu->getItem(i);
+            if (item == nullptr) continue;
+            json itemJson;
+            serializeWidgetToJson(item, itemJson);
+            j["items"].push_back(itemJson);
+        }
     }
     else if (MenuBar* mb = dynamic_cast<MenuBar*>(widget)) {
         j["type"] = "MenuBar";
+        j["anchorSpacing"] = mb->getAnchorSpacing();
+        j["anchorWidth"] = mb->getAnchorWidth();
+        j["anchorAutoWidth"] = mb->isAnchorAutoWidth();
         j["menus"] = json::array();
         for (size_t i = 0; i < mb->getMenuCount(); ++i) {
             json mj;
             mj["title"] = toUtf8(mb->getMenuTitle(i));
+            if (Menu* menu = mb->getMenu(i)) {
+                json menuJson;
+                serializeWidgetToJson(menu, menuJson);
+                mj["menu"] = menuJson;
+            }
             j["menus"].push_back(mj);
         }
     }
@@ -884,10 +1390,10 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["type"] = "StatusBar";
         j["panels"] = json::array();
         for (size_t i = 0; i < sb->getPanelCount(); ++i) {
-            TextLabel* p = sb->getPanel(i);
+            Widget* p = sb->getPanelWidget(i);
             if (p != nullptr) {
                 json pj;
-                pj["text"] = toUtf8(p->getText());
+                serializeWidgetToJson(p, pj);
                 j["panels"].push_back(pj);
             }
         }
@@ -908,8 +1414,11 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         default: j["gravity"] = "TopLeft"; break;
         }
     }
-    else if (dynamic_cast<SplitterHandle*>(widget) != nullptr) {
+    else if (SplitterHandle* splitter = dynamic_cast<SplitterHandle*>(widget)) {
         j["type"] = "SplitterHandle";
+        j["orientation"] =
+            splitter->getOrientation() == SplitterHandle::Orientation::Vertical
+                ? "vertical" : "horizontal";
     }
     else if (Image* image = dynamic_cast<Image*>(widget)) {
         j["type"] = "Image";
@@ -968,6 +1477,23 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                 {"b", r.color.z}, {"a", r.color.w} };
             rj["fontSize"] = r.fontSize;
             j["runs"].push_back(rj);
+        }
+    }
+    else if (DockOverlay* overlay = dynamic_cast<DockOverlay*>(widget)) {
+        j["type"] = "DockOverlay";
+        j["floating"] = json::array();
+        for (size_t i = 0; i < overlay->getFloatingCardCount(); ++i) {
+            DockCard* card = overlay->getFloatingCard(i);
+            if (card == nullptr) continue;
+            json cardJson;
+            serializeWidgetToJson(card, cardJson);
+            const auto pos = card->getPosition();
+            const auto size = card->getSize();
+            cardJson["x"] = pos.x;
+            cardJson["y"] = pos.y;
+            cardJson["w"] = size.x;
+            cardJson["h"] = size.y;
+            j["floating"].push_back(cardJson);
         }
     }
     else if (DockArea* dock = dynamic_cast<DockArea*>(widget)) {
@@ -1051,8 +1577,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     // containers, DockOverlay, AND every card; the editor shell
     // format intentionally hides those intermediate nodes and only
     // exposes the user-visible card list under `cards[]`.
-    if (dynamic_cast<DockCard*>(widget)  != nullptr ||
-        dynamic_cast<DockArea*>(widget)  != nullptr) {
+    if (hasStructuredChildPayload(widget)) {
         return;
     }
     const auto& children = widget->getChildren();

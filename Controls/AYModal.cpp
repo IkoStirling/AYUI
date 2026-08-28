@@ -2,6 +2,8 @@
 #include "AYUI/UIManager.h"
 #include "AYUI/WidgetFactory.h"
 
+#include <algorithm>
+
 namespace ayt::ui {
 
 namespace {
@@ -56,6 +58,22 @@ Modal::~Modal() {
         getParent()->removeChild(this);
     }
     _focusedBefore = nullptr;
+
+    // Direct `delete modal` must release serializer-owned content, while an
+    // outer destroyWidgetTree(modal) has already removed that child before
+    // entering this destructor. Test membership before dereferencing the
+    // alias so both teardown routes are safe.
+    const auto contentIt = std::find(getChildren().begin(), getChildren().end(),
+                                     _content);
+    if (_content != nullptr && contentIt != getChildren().end()) {
+        if (_content->isExternallyOwned()) {
+            removeChild(_content);
+        } else {
+            destroyWidgetTree(_content);
+        }
+    }
+    _content = nullptr;
+
     if (_dimmer != nullptr) {
         // Code-review 2026-08-02 #12: detach callback. Only delete
         // when ownership was transferred via setDimmerOwned() —
@@ -119,20 +137,41 @@ void Modal::ensureDimmer() {
 }
 
 void Modal::setContent(Widget* content) {
-    if (content == nullptr) {
-        // Detach the existing content without destroying it.
-        if (_content != nullptr && _content->getParent() == this) {
+    setContentImpl(content, false);
+}
+
+void Modal::setContentOwned(Widget* content) {
+    setContentImpl(content, true);
+}
+
+void Modal::setContentImpl(Widget* content, bool owned) {
+    // Detach or destroy the old payload according to the ownership encoded
+    // on the parent edge. Re-attaching the same pointer is intentional: it
+    // allows callers to promote/demote ownership explicitly.
+    const auto oldIt = std::find(getChildren().begin(), getChildren().end(),
+                                 _content);
+    if (_content != nullptr && oldIt != getChildren().end()) {
+        if (_content == content) {
             removeChild(_content);
+        } else if (_content->isExternallyOwned()) {
+            removeChild(_content);
+        } else {
+            destroyWidgetTree(_content);
         }
-        _content = nullptr;
+    }
+    _content = nullptr;
+
+    if (content == nullptr) {
         return;
     }
-    // If `content` is already a child of some other widget, detach it
-    // before re-parenting. Mirror openPopup's defensive detach.
     if (content->getParent() != nullptr) {
-        content->getParent()->removeChild(content);
+        content->detachFromParent();
     }
-    addChildExternal(content);   // ref-only; host owns lifetime
+    if (owned) {
+        addChild(content);
+    } else {
+        addChildExternal(content);
+    }
     _content = content;
 }
 

@@ -4,6 +4,11 @@
 
 namespace ayt::ui {
 
+struct DisplayListRecorder::RecordedPath {
+    PathHandle targetHandle;
+    std::vector<std::function<void(IRenderBackend&, PathHandle)>> operations;
+};
+
 void DisplayList::replay(IRenderBackend& renderer) const
 {
     for (const Command& command : _commands) {
@@ -21,6 +26,13 @@ DisplayListRecorder::DisplayListRecorder(IRenderBackend& target, DisplayList& ou
 void DisplayListRecorder::append(DisplayList::Command command)
 {
     _output._commands.push_back(std::move(command));
+}
+
+std::shared_ptr<DisplayListRecorder::RecordedPath>
+DisplayListRecorder::findRecordedPath(PathHandle path) const
+{
+    const auto it = _recordedPaths.find(path.id);
+    return it != _recordedPaths.end() ? it->second : nullptr;
 }
 
 void DisplayListRecorder::recordAndForwardNested(DisplayList::Command command)
@@ -192,42 +204,66 @@ void DisplayListRecorder::drawRectBlur(const math::FRectangle& bounds,
 
 IRenderBackend::PathHandle DisplayListRecorder::createPath()
 {
-    disableCaching();
-    return _target.createPath();
+    const PathHandle local{_nextRecordedPathId++};
+    auto record = std::make_shared<RecordedPath>();
+    record->targetHandle = _target.createPath();
+    _recordedPaths.emplace(local.id, std::move(record));
+    return local;
 }
 void DisplayListRecorder::releasePath(PathHandle path)
 {
-    AYUI_UNCACHEABLE_FORWARD(releasePath(path));
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    _target.releasePath(record->targetHandle);
+    _recordedPaths.erase(path.id);
 }
 void DisplayListRecorder::addPathRect(PathHandle path,
                                       const math::FRectangle& bounds,
                                       PathWinding winding)
 {
-    disableCaching();
-    _target.addPathRect(path, bounds, winding);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back([bounds, winding](IRenderBackend& backend, PathHandle replay) {
+        backend.addPathRect(replay, bounds, winding);
+    });
+    _target.addPathRect(record->targetHandle, bounds, winding);
 }
 void DisplayListRecorder::addPathRoundedRect(PathHandle path,
                                              const math::FRectangle& bounds,
                                              float cornerRadius,
                                              PathWinding winding)
 {
-    disableCaching();
-    _target.addPathRoundedRect(path, bounds, cornerRadius, winding);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back(
+        [bounds, cornerRadius, winding](IRenderBackend& backend, PathHandle replay) {
+            backend.addPathRoundedRect(replay, bounds, cornerRadius, winding);
+        });
+    _target.addPathRoundedRect(record->targetHandle, bounds, cornerRadius, winding);
 }
 void DisplayListRecorder::addPathEllipse(PathHandle path,
                                          const math::FVector2& center,
                                          float radiusX, float radiusY,
                                          PathWinding winding)
 {
-    disableCaching();
-    _target.addPathEllipse(path, center, radiusX, radiusY, winding);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back(
+        [center, radiusX, radiusY, winding](IRenderBackend& backend, PathHandle replay) {
+            backend.addPathEllipse(replay, center, radiusX, radiusY, winding);
+        });
+    _target.addPathEllipse(record->targetHandle, center, radiusX, radiusY, winding);
 }
 void DisplayListRecorder::addPathLine(PathHandle path,
                                       const math::FVector2& start,
                                       const math::FVector2& end)
 {
-    disableCaching();
-    _target.addPathLine(path, start, end);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back([start, end](IRenderBackend& backend, PathHandle replay) {
+        backend.addPathLine(replay, start, end);
+    });
+    _target.addPathLine(record->targetHandle, start, end);
 }
 void DisplayListRecorder::addPathBezier(PathHandle path,
                                         const math::FVector2& start,
@@ -235,56 +271,112 @@ void DisplayListRecorder::addPathBezier(PathHandle path,
                                         const math::FVector2& control2,
                                         const math::FVector2& end)
 {
-    disableCaching();
-    _target.addPathBezier(path, start, control1, control2, end);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back(
+        [start, control1, control2, end](IRenderBackend& backend, PathHandle replay) {
+            backend.addPathBezier(replay, start, control1, control2, end);
+        });
+    _target.addPathBezier(record->targetHandle, start, control1, control2, end);
 }
 void DisplayListRecorder::addPathArc(PathHandle path,
                                      const math::FVector2& center, float radius,
                                      float startAngle, float endAngle,
                                      PathWinding winding)
 {
-    disableCaching();
-    _target.addPathArc(path, center, radius, startAngle, endAngle, winding);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back(
+        [center, radius, startAngle, endAngle, winding](IRenderBackend& backend,
+                                                        PathHandle replay) {
+            backend.addPathArc(replay, center, radius, startAngle, endAngle, winding);
+        });
+    _target.addPathArc(record->targetHandle, center, radius,
+                       startAngle, endAngle, winding);
 }
 void DisplayListRecorder::addPathPolygon(PathHandle path,
                                          const math::FVector2* points, int count,
                                          PathWinding winding)
 {
-    disableCaching();
-    _target.addPathPolygon(path, points, count, winding);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr || points == nullptr || count <= 0) return;
+    const std::vector<math::FVector2> copy(points, points + count);
+    record->operations.push_back(
+        [copy, winding](IRenderBackend& backend, PathHandle replay) {
+            backend.addPathPolygon(replay, copy.data(),
+                                   static_cast<int>(copy.size()), winding);
+        });
+    _target.addPathPolygon(record->targetHandle, points, count, winding);
 }
 void DisplayListRecorder::setPathFillColor(PathHandle path,
                                            const math::FVector4& color)
 {
-    disableCaching();
-    _target.setPathFillColor(path, color);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back([color](IRenderBackend& backend, PathHandle replay) {
+        backend.setPathFillColor(replay, color);
+    });
+    _target.setPathFillColor(record->targetHandle, color);
 }
 void DisplayListRecorder::setPathStrokeColor(PathHandle path,
                                              const math::FVector4& color)
 {
-    disableCaching();
-    _target.setPathStrokeColor(path, color);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back([color](IRenderBackend& backend, PathHandle replay) {
+        backend.setPathStrokeColor(replay, color);
+    });
+    _target.setPathStrokeColor(record->targetHandle, color);
 }
 void DisplayListRecorder::setPathStrokeWidth(PathHandle path, float width)
 {
-    disableCaching();
-    _target.setPathStrokeWidth(path, width);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back([width](IRenderBackend& backend, PathHandle replay) {
+        backend.setPathStrokeWidth(replay, width);
+    });
+    _target.setPathStrokeWidth(record->targetHandle, width);
 }
 void DisplayListRecorder::drawPath(PathHandle path, PathFillMode mode)
 {
-    disableCaching();
-    _target.drawPath(path, mode);
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    const auto recipe = record->operations;
+    append([recipe, mode](IRenderBackend& backend) {
+        const PathHandle replay = backend.createPath();
+        for (const auto& operation : recipe) operation(backend, replay);
+        backend.drawPath(replay, mode);
+        backend.releasePath(replay);
+    });
+    _target.drawPath(record->targetHandle, mode);
 }
 void DisplayListRecorder::pushPathClip(PathHandle path)
 {
-    AYUI_UNCACHEABLE_FORWARD(pushPathClip(path));
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    const auto recipe = record->operations;
+    append([recipe](IRenderBackend& backend) {
+        const PathHandle replay = backend.createPath();
+        for (const auto& operation : recipe) operation(backend, replay);
+        backend.pushPathClip(replay);
+        backend.releasePath(replay);
+    });
+    _target.pushPathClip(record->targetHandle);
 }
 void DisplayListRecorder::drawRectBlurWithMask(const math::FRectangle& bounds,
                                                PathHandle maskPath,
                                                float blurRadius, BlurType type)
 {
-    disableCaching();
-    _target.drawRectBlurWithMask(bounds, maskPath, blurRadius, type);
+    const auto record = findRecordedPath(maskPath);
+    if (record == nullptr) return;
+    const auto recipe = record->operations;
+    append([recipe, bounds, blurRadius, type](IRenderBackend& backend) {
+        const PathHandle replay = backend.createPath();
+        for (const auto& operation : recipe) operation(backend, replay);
+        backend.drawRectBlurWithMask(bounds, replay, blurRadius, type);
+        backend.releasePath(replay);
+    });
+    _target.drawRectBlurWithMask(bounds, record->targetHandle, blurRadius, type);
 }
 
 IRenderBackend::ParticleHandle DisplayListRecorder::createParticleSystem(int maxParticles)
