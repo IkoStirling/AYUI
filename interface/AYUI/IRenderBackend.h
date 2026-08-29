@@ -930,6 +930,13 @@ public:
         AYUNREFERENCED_PARAM(layer);
         AYUNREFERENCED_PARAM(damage);
     }
+    // Capability-neutral dirty query used by production compositors after a
+    // device reset or target-pool eviction. Unsupported/unknown layers are
+    // conservatively dirty so callers repaint through their immediate path.
+    virtual bool isLayerDirty(LayerHandle layer) const {
+        AYUNREFERENCED_PARAM(layer);
+        return true;
+    }
 
     // =============================================================================
     // Category 15: Animation System / 动画系统

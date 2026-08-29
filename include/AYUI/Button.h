@@ -32,10 +32,9 @@ public:
     }
     void clearFallbackHoverColor() { _hasFallbackHover = false; markDirty(); }
 
-    // Phase D (D4) — preferred-size heuristic used by TabStrip when laying
-    // out tab buttons. Each char ~8px + horizontal padding on each side.
-    // This is intentionally rough; v1.1 swaps in a real text shaper. The
-    // height is the larger of the current widget height and kMinButtonHeight.
+    // Preferred-size estimate used by TabStrip layout. This query has no
+    // renderer parameter, so width uses a deterministic character estimate;
+    // final text drawing and hit geometry still use backend shaping.
     math::FVector2 getPreferredSize() const;
 
 protected:

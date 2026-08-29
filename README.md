@@ -4,8 +4,9 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 
 - CMake 目标版本：`1.0.0`
 - 当前功能里程碑：v1.6 已实现
-- 最近全模块审计：2026-08-28
+- 最近全模块审计：2026-08-29
 - 权威架构文档：[design.md](design.md)
+- 变更记录：[CHANGELOG.md](CHANGELOG.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
 
 ## 当前状态
@@ -32,9 +33,12 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
 - 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
 - `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
+- 可选的 Production root UI Layer：静态主树复用离屏像素，overlay/drag visual 保持即时绘制
+- AYRenderer 共享 RenderTargetPool：FrameGraph 与 UI Layer 复用同一套 FBO 生命周期和预算，窗口
+  resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery 与独立 Layout Editor
 
-2026-08-28 Windows Debug 基线为 `4498 / 4498` 条断言通过。旧基线中的循环内重复
+2026-08-29 Windows Debug 基线为 `4609 / 4609` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
@@ -48,6 +52,29 @@ path 以创建操作和绘制时快照保留，replay 时创建短生命周期�
 后端资源创建/释放或 RenderTarget pass 等不能安全跨帧保留的操作时，Recorder 会自动放弃候选缓存并沿用旧即时路径。自定义控件也可显式调用
 `setDisplayListPolicy(DisplayListPolicy::Immediate)` 作为诊断或兼容兜底。
 
+需要进一步消除静态主树每帧的 display-list replay 时，可在支持 RenderTarget 的后端上显式开启
+`UIManager::setRootLayerCachingEnabled(true)`。首次帧、设备失效或普通 `markDirty()` 会完整重绘透明
+离屏层；显式 `markDirty(rect)` 会把逻辑 damage 合并并传播到根节点，只清除和 replay 受损区域；
+clean 帧只提交一次 layer composite。Popup、Modal、Tooltip 和 drag ghost 始终在 composite 之后走
+即时路径，因此不会被静态层吞掉。创建、resize、device reset 或 paint 失败时，同一帧自动回退到
+普通即时绘制，不要求应用维护第二条 Widget 渲染路线。Gallery 已启用该模式作为生产集成样例。
+
+## 版本与兼容性
+
+`project(VERSION 1.0.0)` 是 CMake 包/目标版本，`v1.6` 是当前能力里程碑；后者用于描述已经
+落地的功能集合，不是第二个可独立发布的语义版本号。后续发布以 CMake 版本和
+[CHANGELOG.md](CHANGELOG.md) 为准，能力里程碑仅用于设计追踪。
+
+AYUI 在 1.x 内把 `AYUI.h` 聚合头、Widget/UIManager、内置控件、布局、Theme、Loader 和
+`IRenderBackend` 的基础契约视为稳定源码 API；新增接口和 JSON 字段优先采用可选、向后兼容的
+扩展。已注册的 JSON `type` 名及文档化持久字段属于兼容面，焦点、hover、拖放会话、缓存句柄等
+运行时状态不属于 wire contract。
+
+当前不承诺跨提交、跨编译器、跨构建选项的 C++ 二进制 ABI。AYUI 或公共头变化后，AYRenderer
+及宿主应与其一起重新编译。高级 RenderTarget/Layer capability、平台原生无障碍适配器、
+display-list 内部表示和具体渲染后端细节仍是演进接口；调用方应做 capability 检查，不能把内部
+结构或后端句柄持久化。
+
 ## 快速接入
 
 常用入口是聚合头 `AYUI.h`：
@@ -60,6 +87,7 @@ ui.initialize(renderBackend);       // renderBackend implements IRenderBackend
 ui.setClientSize(1280.0f, 720.0f);  // physical framebuffer pixels
 ui.setDpiScale(windowDpi / 96.0f);  // OS monitor scale
 ui.setUiScale(userPreference);      // independent in-app zoom
+ui.setRootLayerCachingEnabled(true); // optional retained pixel layer
 
 ui.loadLayout("assets/ui/main.ui.json");
 ui.update(deltaSeconds);
@@ -200,6 +228,21 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 的 modal），要求两种模式的 1280×720 GPU 输出完全一致，同时要求优化路径的 draw call
 不高于保守路径。截图和指标写入指定输出目录，不进入源码树。
 
+Production root Layer 另有真实纹理和局部 damage 门禁：
+
+```powershell
+& .\demo\RunLayerVisualRegression.ps1 `
+    -GalleryExe <build-dir>\AYRuntime\AYUI\demo\AYUI_Gallery.exe `
+    -Backend d3d11 `
+    -OutputDir <output-dir>
+```
+
+脚本在 1.0×/1.5× 下分别生成即时参考、全量 Layer、clean Layer、移动后即时参考和局部 Layer；
+两档都保持 1280×720 DIP 逻辑画布，物理 framebuffer 分别为 1280×720 和 1920×1080，
+覆盖非对称 checker、alpha sprite、atlas、渐变、文本、边框及 stencil path clip。即时与 Layer
+允许一次 RGBA8 离屏往返产生的最多 1 LSB；full repaint 与 clean retained reuse 必须字节完全一致。
+当前 D3D11 基线为 immediate 30、full Layer 31、clean Layer 1、partial Layer 11 次 UI draw call。
+
 ## 目录
 
 - `include/AYUI/`：公共 API
@@ -214,9 +257,16 @@ cmake --build <build-dir> --target AYUI_LayoutEditor
 
 ## 已知边界
 
-- UI Layer / RenderTarget 契约和 MockRenderer 生命周期已经落地；AYRenderer 暂时报告不支持，
-  生产 bgfx FBO、纹理回收及子树离屏缓存仍是下一阶段，因此当前优化减少的是 CPU 侧控件
-  命令构建，不会把静态 UI 变成只提交一次。
+- Production root UI Layer 已接入 AYRenderer，并与 FrameGraph 共用 renderer-wide RenderTargetPool。
+  clean 主树稳定为一次 composite submit；resize、DPI、device reset 或无范围 dirty 会触发全量重绘；
+  显式 dirty rect 会触发 damage 区域的透明覆盖清除、clip 和局部 replay，区域外像素继续保留。
+  overlay/drag visual 仍即时绘制。离屏绘制使用 view 26–249，单个 UI 帧最多 224 次 layer paint；
+  第 225 次或任一步失败会在同帧回退即时路径，下一帧 view 调度自动恢复。
+- RenderTargetPool 当前只接受精确尺寸/格式/深度/采样方式键和 1× sample，默认两帧 quarantine、256 MiB
+  best-effort 预算；leased 或仍在 quarantine 的目标可暂时超过预算。该池与 UI backend 都限定在
+  renderer thread。Noop 契约测试已覆盖复杂路径、嵌套 stencil clip、局部 damage、clean composite、
+  224 次离屏 pass 边界和 reset 重绘；D3D11 已通过 1.0×/1.5× 真实纹理、方向、透明复合与局部清除
+  图像门禁，D3D12/OpenGL/Vulkan 以及 Preserve/resize/device-reset 截图矩阵仍待补齐。
 - vector path 已进入通用 display-list；AYRenderer 支持简单凹多边形、圆角矩形、椭圆、圆弧、
   cubic Bezier、miter stroke、显式 winding 孔洞和嵌套 stencil path clip。自相交路径、布尔运算、
   fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。

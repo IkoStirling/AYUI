@@ -4,26 +4,10 @@
 
 namespace ayt::ui {
 
-// =============================================================================
-// C-8 GridPanel: a fixed-grid form layout container.
-// =============================================================================
-//
-// Architecture (v1):
-//   GridPanel (CompoundWidget)
-//     └─ cells: one Widget* per (row, col) cell — slot is owned by reference
-//        (NOT freed); widgets that span >1 cell are stored under their top-
-//        left cell (rowSpan / colSpan).
-//
-//   Row/Column definitions live in `_rowDefs` / `_colDefs`. Each definition
-//   has a SizePolicy + a value:
-//     - Fixed(h)   → exactly `h` pixels.
-//     - Stretch(w) → proportional share of remaining space; `w` is weight
-//                    (default 1.0). All Stretch rows / columns share the
-//                    leftover after Fixed.
-//
-//   v1 deliberately does NOT auto-measure widget preferred size — every
-//   child fills its allocated cell. Per-cell horizontal / vertical
-//   alignment lets hosts center / right-align / etc. inside the cell.
+// Fixed/Stretch grid layout. Cells keep non-owning Widget pointers and store
+// row/column span plus per-cell alignment; a spanning Widget is indexed by its
+// top-left cell. Fixed definitions consume exact DIP sizes and Stretch
+// definitions divide the remainder by weight.
 //
 // Algorithm (one layout pass, two phases):
 //   Phase 1 (measure): sum the Fixed sizes, split the leftover across
@@ -33,39 +17,9 @@ namespace ayt::ui {
 //                       merged), then apply alignment + spacing + padding
 //                       to position + size the child.
 //
-// -----------------------------------------------------------------------------
-// v1 design decisions + known limitations + v1.1 upgrade paths
-// -----------------------------------------------------------------------------
-//
-// DECISION 1: Fixed-size grid, NOT auto-row/auto-col.
-//   Why: simple, predictable, and the canonical use case (form layout:
-//   3 columns × N rows, "label | input | button") does NOT need auto-row.
-//   v1.1 upgrade: when a host calls addCell(row = current_row_count),
-//   auto-grow rows. Today that throws via the bounds-check; add an
-//   `addCellAuto(widget, col)` that appends to the next free row.
-//
-// DECISION 2: Two SizePolicies (Fixed + Stretch). NO Auto (no measure pass
-// over widget preferred size).
-//   Why: Auto requires every child widget to expose a preferredSize API
-//   that does not yet exist. Adding it now would touch every leaf widget.
-//   v1.1 upgrade: add `Widget::getPreferredSize() const` (default returns
-//   current size) + a third policy `Auto` that picks the column's max
-//   preferred size.
-//
-// DECISION 3: Cell holds a Widget* (no row/col metadata outside).
-//   Why: spans are stored on the cell (rowSpan / colSpan); alignment too.
-//   One allocation per cell keeps the data structure flat — important for
-//   grids with hundreds of cells (inventory views). v1.1: add a flat
-//   `_cellIndex` cache so the inner loop doesn't pay an O(N) lookup.
-//
-// DECISION 4: NO GridSplitter (resizable row/column borders).
-//   v2+. v1.1 path: introduce `GridSplitter` analog of `SplitterHandle`,
-//   bind to (row|col) index. Mirrors HBox's splitter pattern verbatim.
-//
-// DECISION 5: NO z-order rules beyond child add order.
-//   Widgets that overlap (span >1) just paint in tree order — same as
-//   VBox / HBox today. v1.1: add GridPanel::setRowZOrder / setCellZOrder.
-// =============================================================================
+// Current limits are explicit: no Auto/preferred-size policy, automatic row
+// growth, grid splitters or cell-specific z-order. Overlap follows normal
+// child painter order.
 
 class GridPanel : public CompoundWidget {
 public:

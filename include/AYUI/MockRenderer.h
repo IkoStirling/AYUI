@@ -171,7 +171,7 @@ public:
         bool overlay = false;
     };
     const std::vector<LayerEvent>& getLayerEvents() const { return _layerEvents; }
-    bool isLayerDirty(LayerHandle layer) const;
+    bool isLayerDirty(LayerHandle layer) const override;
     RenderTargetDesc getRenderTargetDesc(RenderTargetHandle target) const;
     RenderTargetHandle getLayerRenderTarget(LayerHandle layer) const;
 

@@ -44,7 +44,9 @@ public:
     // HWND), only ONE manager can be "active" (target of get()/tryGet()
     // and ComboBox/Menu/Tooltip popup mounts) at a time. `pushActive`
     // returns an RAII guard that swaps g_activeUIManager in its ctor and
-    // restores the previous owner in its dtor. Use range-for style:
+    // restores the previous owner in its dtor while the guard still owns
+    // that slot. An explicit makeActive()/shutdown() inside the scope wins.
+    // Use range-for style:
     //
     //   for (auto& entry : manager.entries()) {
     //       UIManager::ActiveScope g(entry.ui.get());
@@ -61,17 +63,21 @@ public:
         ~ActiveScope();
         ActiveScope(const ActiveScope&) = delete;
         ActiveScope& operator=(const ActiveScope&) = delete;
-        ActiveScope(ActiveScope&&) = default;
-        ActiveScope& operator=(ActiveScope&&) = default;
+        ActiveScope(ActiveScope&& other) noexcept;
+        ActiveScope& operator=(ActiveScope&& other) noexcept;
     private:
-        UIManager* _prev;
-        bool       _tookOwnership;
+        void release() noexcept;
+
+        UIManager* _prev = nullptr;
+        UIManager* _next = nullptr;
+        bool       _tookOwnership = false;
     };
 
     // Returns an RAII guard that swaps g_activeUIManager to `next` and
-    // restores on scope exit. Manual `popActive()` is forbidden — use
-    // the guard. Pair with the existing setFocus/onKeyDown/etc. APIs
-    // that all read through `tryGet()`.
+    // conditionally restores on scope exit if the process-wide slot was not
+    // changed inside the scope. Manual `popActive()` is forbidden — use the
+    // guard. Pair with the existing setFocus/onKeyDown/etc. APIs that all
+    // read through `tryGet()`.
     static ActiveScope pushActive(UIManager* next);
 
     // Non-RAII claim of the process-wide active slot. Use after a
@@ -133,12 +139,11 @@ public:
 
     // AI-1 (2026-07-20): render() split into populateFrame() + flushFrame()
     // so AYRenderer's RenderPass dispatch can own the per-frame flush
-    // boundary. populateFrame walks and replays the complete visible widget
-    // tree every frame, then accumulates
-    // batches on the backend (beginFrame/beginCanvas + render root +
-    // overlay + drag ghost); flushFrame closes the IRenderBackend
-    // lifecycle (endCanvas + endFrame). render() remains as the
-    // back-compat single-call wrapper.
+    // boundary. populateFrame either paints/composites the opt-in retained
+    // root layer or replays the main tree immediately, then always renders
+    // overlays and the drag ghost on the immediate path. flushFrame closes
+    // the IRenderBackend lifecycle (endCanvas + endFrame). render() remains
+    // as the back-compat single-call wrapper.
     //
     // The split lets AYEditor's renderCompositeFrame pipeline do:
     //   uiPass(populateFrame)  -- populate (no flush, no endFrame)
@@ -154,6 +159,12 @@ public:
     void render();
     void populateFrame();
     void flushFrame();
+
+    // Opt-in pixel-retained root presentation. Static main-tree frames are
+    // composited from one retained layer; overlays and drag visuals stay on
+    // the immediate path. Capability/failure gates fall back per frame.
+    void setRootLayerCachingEnabled(bool enabled);
+    bool isRootLayerCachingEnabled() const;
 
     Widget* root() const { return _root; }
     Widget* findById(const std::string& id) const;
@@ -479,6 +490,7 @@ private:
     // Used by get()'s static fallback: null bookkeeping Widget* so process
     // exit / cross-test get() cannot dereference fixtures that already died.
     void dropTransientWidgetPointers();
+    void releaseRootLayer();
 
     IRenderBackend* _backend = nullptr;
     Widget* _root = nullptr;

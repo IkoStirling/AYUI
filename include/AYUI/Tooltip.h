@@ -1,42 +1,13 @@
 #pragma once
 
-// =============================================================================
-// C-11 Tooltip: a hover-delayed text popup anchored to a target widget.
-// =============================================================================
+// Hover-delayed text popup mounted on UIManager's overlay. UIManager drives
+// attached tooltips from its update path; placement defaults below the target
+// and flips near the viewport edge. Tooltip is pick-through and never steals
+// mouse input.
 //
-// Architecture (v1):
-//   Tooltip (CompoundWidget, hidden by default)
-//     └─ _label: TextLabel  (the body text; may be replaced by any Widget)
-//
-// Lifecycle: tooltip is attached to a target widget via `Tooltip::attachTo`
-// which mounts it on the UIManager's overlay root (NOT as a child of the
-// target — see Phase A A2 for the popup-as-overlay convention). The
-// tooltip's lifetime is therefore INDEPENDENT of the target: when the
-// target is destroyed the tooltip stays alive on the overlay, and the
-// next tick() sees `_target` dangling.
-//
-// To prevent that UAF, callers must call detach() (or destroy the tooltip)
-// BEFORE destroying the target, OR rely on the tick() guard that skips
-// work when _target is no longer reachable. The Tooltip pointer returned
-// from attachTo remains owned by the caller.
-//
-// -----------------------------------------------------------------------------
-// v1 design decisions + known limitations + v1.1 upgrade paths
-// -----------------------------------------------------------------------------
-//
-// DECISION 1: timer advances each call to `tick(dt, mousePos, viewport)`.
-//   Hosts that don't call tick() won't see tooltips appear. UIManager's
-//   default update() propagation through Widget::tick hits every attached
-//   tooltip automatically.
-//   v1.1: a passive timer driven by onMouseMove deltas would let tips
-//   appear without an explicit tick driver.
-//
-// DECISION 2: tooltip appears below the target by default. If the target
-//   is near the bottom of the viewport, the tooltip is flipped upward.
-//   Hosts that don't supply a viewport see the tooltip always below.
-//
-// DECISION 3: tooltip does not steal mouse input. setPickable(false)
-//   so it doesn't intercept click-through.
+// Tooltip lifetime is independent of its non-owning target pointer. Call
+// detach() or destroy the tooltip before destroying the target; the caller
+// owns the Tooltip returned by attachTo().
 
 #include "AYUI/Widget.h"
 #include "AYUI/TextLabel.h"

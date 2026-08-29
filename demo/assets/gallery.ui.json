@@ -200,6 +200,16 @@
             },
             {
               "type": "VBox",
+              "id": "page_layer_visual",
+              "spacing": 8,
+              "padding": { "left": 16, "top": 10, "right": 16, "bottom": 10 },
+              "children": [
+                { "type": "TextLabel", "id": "layer_visual_hdr", "text": "Real GPU retained Layer visual probe", "size": { "w": 820, "h": 24 } },
+                { "type": "Panel", "id": "layer_visual_probe_host", "size": { "w": 820, "h": 510 } }
+              ]
+            },
+            {
+              "type": "VBox",
               "id": "page_input",
               "spacing": 8,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },

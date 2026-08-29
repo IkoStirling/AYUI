@@ -1,6 +1,7 @@
 #include "AYTest.h"
 #include "AYUI/DisplayList.h"
 #include "AYUI/MockRenderer.h"
+#include "AYUI/UIManager.h"
 #include "AYUI/Widget.h"
 
 #include <cstdint>
@@ -311,6 +312,104 @@ TEST_CASE(UILayer_MockLifecycleTracksDpiDamageAndComposite) {
 
     renderer.releaseLayer(layer);
     CHECK_FALSE(renderer.getLayerRenderTarget(layer).isValid());
+}
+
+TEST_CASE(UIManager_ProductionRootLayerCachesMainTreeButKeepsOverlayImmediate) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(320.0f, 180.0f);
+    ui.setRootLayerCachingEnabled(true);
+
+    auto* rootPainter = new CountingPainter();
+    rootPainter->setSize(FVector2(120.0f, 80.0f));
+    rootPainter->setDisplayListPolicy(DisplayListPolicy::Immediate);
+    ui.root()->addChild(rootPainter);
+
+    auto* overlayPainter = new CountingPainter();
+    overlayPainter->setPosition(FVector2(16.0f, 12.0f));
+    overlayPainter->setSize(FVector2(48.0f, 24.0f));
+    overlayPainter->setDisplayListPolicy(DisplayListPolicy::Immediate);
+    ui.getOverlayRoot()->addChild(overlayPainter);
+
+    ui.render();
+    CHECK(rootPainter->paintCount == 1);
+    CHECK(overlayPainter->paintCount == 1);
+    CHECK(renderer.getDrawCalls().size() == 3u);
+    CHECK(renderer.getDrawCalls()[1].type == MockRenderer::DrawCall::Layer);
+
+    int firstFramePaintEvents = 0;
+    int firstFrameCompositeEvents = 0;
+    for (const auto& event : renderer.getLayerEvents()) {
+        if (event.type == MockRenderer::LayerEvent::PaintBegan) {
+            ++firstFramePaintEvents;
+        } else if (event.type == MockRenderer::LayerEvent::Composited) {
+            ++firstFrameCompositeEvents;
+        }
+    }
+    CHECK(firstFramePaintEvents == 1);
+    CHECK(firstFrameCompositeEvents == 1);
+
+    // A clean root is represented by one layer composite. The overlay is
+    // deliberately outside that layer, so it keeps its per-frame path.
+    ui.render();
+    CHECK(rootPainter->paintCount == 1);
+    CHECK(overlayPainter->paintCount == 2);
+    CHECK(renderer.getDrawCalls().size() == 2u);
+    CHECK(renderer.getDrawCalls()[0].type == MockRenderer::DrawCall::Layer);
+
+    int cleanFramePaintEvents = 0;
+    int cleanFrameCompositeEvents = 0;
+    for (const auto& event : renderer.getLayerEvents()) {
+        if (event.type == MockRenderer::LayerEvent::PaintBegan) {
+            ++cleanFramePaintEvents;
+        } else if (event.type == MockRenderer::LayerEvent::Composited) {
+            ++cleanFrameCompositeEvents;
+        }
+    }
+    CHECK(cleanFramePaintEvents == 0);
+    CHECK(cleanFrameCompositeEvents == 1);
+
+    // Explicit damage stays rectangular through the widget ancestry and
+    // drives a Preserve-outside / clear-inside partial layer repaint.
+    const FRectangle damage(8.0f, 10.0f, 42.0f, 36.0f);
+    rootPainter->markDirty(damage);
+    ui.render();
+    CHECK(rootPainter->paintCount == 2);
+    CHECK(overlayPainter->paintCount == 3);
+    int partialPaints = 0;
+    int partialInvalidations = 0;
+    for (const auto& event : renderer.getLayerEvents()) {
+        if (event.type == MockRenderer::LayerEvent::PaintBegan
+            && !event.fullRedraw && event.damage.minX == damage.minX
+            && event.damage.minY == damage.minY
+            && event.damage.maxX == damage.maxX
+            && event.damage.maxY == damage.maxY) {
+            ++partialPaints;
+        } else if (event.type == MockRenderer::LayerEvent::Invalidated
+                   && !event.fullRedraw) {
+            ++partialInvalidations;
+        }
+    }
+    CHECK(partialPaints == 1);
+    CHECK(partialInvalidations == 1);
+    CHECK(renderer.isClipStackBalanced());
+
+    rootPainter->color = FVector4(0.1f, 0.7f, 0.3f, 1.0f);
+    rootPainter->markDirty();
+    ui.render();
+    CHECK(rootPainter->paintCount == 3);
+    CHECK(overlayPainter->paintCount == 4);
+
+    // The feature remains opt-in and has an immediate-mode escape hatch.
+    ui.setRootLayerCachingEnabled(false);
+    ui.render();
+    CHECK(rootPainter->paintCount == 4);
+    CHECK(overlayPainter->paintCount == 5);
+    CHECK(renderer.getDrawCalls().size() == 2u);
+    CHECK(renderer.getDrawCalls()[0].type == MockRenderer::DrawCall::Rect);
+
+    ui.shutdown();
 }
 
 TEST_SUITE_END

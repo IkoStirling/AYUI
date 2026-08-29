@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::ui {
@@ -222,6 +223,20 @@ namespace {
 // or as a member; get() just routes popup helpers to that instance.
 UIManager* g_activeUIManager = nullptr;
 
+// UIManager is consumed across module boundaries and its concrete size has
+// historically remained stable. Keep Production UI Layer state out-of-line
+// so adding retained presentation cannot shift legacy fields or invalidate
+// incrementally-built hosts that allocate UIManager by value.
+struct RootLayerState {
+    IRenderBackend::LayerHandle layer{};
+    IRenderBackend::LayerDesc desc{};
+    bool enabled = false;
+    bool descValid = false;
+    bool painted = false;
+};
+
+std::unordered_map<const UIManager*, RootLayerState> g_rootLayerStates;
+
 // Out-of-line so UIManager's sizeof/layout stays stable across rebuilds
 // of dependents (see lastDragHadDropTarget() docstring).
 bool g_lastDragHadDropTarget = false;
@@ -246,6 +261,7 @@ bool UIManager::lastDragHadDropTarget() const {
 // =============================================================================
 UIManager::ActiveScope::ActiveScope(UIManager* next)
     : _prev(g_activeUIManager)
+    , _next(next)
     , _tookOwnership(next != nullptr) {
     if (_tookOwnership) {
         g_activeUIManager = next;
@@ -253,10 +269,41 @@ UIManager::ActiveScope::ActiveScope(UIManager* next)
 }
 
 UIManager::ActiveScope::~ActiveScope() {
-    if (_tookOwnership) {
-        g_activeUIManager = _prev;
-        _tookOwnership = false;
+    release();
+}
+
+UIManager::ActiveScope::ActiveScope(ActiveScope&& other) noexcept
+    : _prev(other._prev)
+    , _next(other._next)
+    , _tookOwnership(other._tookOwnership) {
+    other._prev = nullptr;
+    other._next = nullptr;
+    other._tookOwnership = false;
+}
+
+UIManager::ActiveScope& UIManager::ActiveScope::operator=(ActiveScope&& other) noexcept {
+    if (this != &other) {
+        release();
+        _prev = other._prev;
+        _next = other._next;
+        _tookOwnership = other._tookOwnership;
+        other._prev = nullptr;
+        other._next = nullptr;
+        other._tookOwnership = false;
     }
+    return *this;
+}
+
+void UIManager::ActiveScope::release() noexcept {
+    // Restore only while this guard still owns the process-wide slot. A
+    // shutdown or an explicit makeActive() inside the scope deliberately
+    // changes that slot; overwriting it here can resurrect a stale manager.
+    if (_tookOwnership && g_activeUIManager == _next) {
+        g_activeUIManager = _prev;
+    }
+    _prev = nullptr;
+    _next = nullptr;
+    _tookOwnership = false;
 }
 
 UIManager::ActiveScope UIManager::pushActive(UIManager* next) {
@@ -605,6 +652,8 @@ void UIManager::shutdown() {
     _composing = false;
     _loader.clearEventBindings();
     _loader.clearWidgetRegistry();
+    releaseRootLayer();
+    g_rootLayerStates.erase(this);
 
     // Phase A (A5): tear down overlay + main root together so a popup
     // parented on the overlay can't survive its host. Order:
@@ -628,6 +677,7 @@ void UIManager::shutdown() {
 }
 
 bool UIManager::loadLayout(const std::string& path) {
+    releaseRootLayer();
     if (_focusedWidget != nullptr) {
         // Phase D (D2) — clearFocusNoDispatch instead of
         // `dynamic_cast + setFocus(false)`. By tree-mutating time (a
@@ -674,6 +724,7 @@ bool UIManager::loadLayout(const std::string& path) {
 }
 
 bool UIManager::loadFromString(const std::string& json) {
+    releaseRootLayer();
     if (_focusedWidget != nullptr) {
         // Phase D (D2) — clearFocusNoDispatch instead of
         // `dynamic_cast + setFocus(false)`. By tree-mutating time (a
@@ -736,6 +787,9 @@ void UIManager::setClientSize(float width, float height) {
         _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
         _overlayRoot->setSize(math::FVector2(_clientWidth, _clientHeight));
     }
+    if (auto it = g_rootLayerStates.find(this); it != g_rootLayerStates.end()) {
+        it->second.descValid = false;
+    }
 }
 
 void UIManager::setDpiScale(float scale) {
@@ -787,6 +841,7 @@ void UIManager::update(float dt) {
         // any open popup is freed (it could otherwise hold references to
         // widgets in the about-to-be-destroyed root).
         tearDownOverlayChildren();
+        releaseRootLayer();
         if (_root != nullptr) {
             destroyWidgetTree(_root);
         }
@@ -924,7 +979,85 @@ void UIManager::populateFrame() {
     math::FRectangle viewport(0.0f, 0.0f,
                               _physicalClientWidth, _physicalClientHeight);
     _backend->beginCanvas(viewport);
-    _root->render(*_backend);
+    bool rootPresented = false;
+    auto rootLayerIt = g_rootLayerStates.find(this);
+    if (rootLayerIt != g_rootLayerStates.end() && rootLayerIt->second.enabled
+        && _backend->supportsRenderTargets()
+        && _clientWidth > 0.0f && _clientHeight > 0.0f) {
+        RootLayerState& rootLayer = rootLayerIt->second;
+        IRenderBackend::LayerDesc desc;
+        desc.logicalBounds = math::FRectangle(0.0f, 0.0f, _clientWidth, _clientHeight);
+        desc.dpiScale = _effectiveScale;
+        desc.hasAlpha = true;
+        desc.overlay = false;
+        desc.clearMode = IRenderBackend::LayerClearMode::Transparent;
+
+        const bool descChanged = !rootLayer.descValid
+            || rootLayer.desc.logicalBounds.minX != desc.logicalBounds.minX
+            || rootLayer.desc.logicalBounds.minY != desc.logicalBounds.minY
+            || rootLayer.desc.logicalBounds.maxX != desc.logicalBounds.maxX
+            || rootLayer.desc.logicalBounds.maxY != desc.logicalBounds.maxY
+            || rootLayer.desc.dpiScale != desc.dpiScale;
+        if (!rootLayer.layer.isValid()) {
+            rootLayer.layer = _backend->createLayer(desc);
+            rootLayer.painted = false;
+        } else if (descChanged && !_backend->updateLayer(rootLayer.layer, desc)) {
+            _backend->releaseLayer(rootLayer.layer);
+            rootLayer.layer = _backend->createLayer(desc);
+            rootLayer.painted = false;
+        }
+        if (rootLayer.layer.isValid()) {
+            rootLayer.desc = desc;
+            rootLayer.descValid = true;
+            const bool backendDirty = _backend->isLayerDirty(rootLayer.layer);
+            const bool hasDamage = _root->hasDirtyRect();
+            const bool needsPaint = !rootLayer.painted || _root->isDirtyThis()
+                || hasDamage || backendDirty;
+            bool layerReady = !needsPaint;
+            if (needsPaint) {
+                bool fullRedraw = !rootLayer.painted || _root->isDirtyThis()
+                    || backendDirty;
+                math::FRectangle damage = desc.logicalBounds;
+                if (!fullRedraw && hasDamage) {
+                    const math::FRectangle& pending = _root->getDirtyRect();
+                    damage = math::FRectangle(
+                        std::max(desc.logicalBounds.minX, pending.minX),
+                        std::max(desc.logicalBounds.minY, pending.minY),
+                        std::min(desc.logicalBounds.maxX, pending.maxX),
+                        std::min(desc.logicalBounds.maxY, pending.maxY));
+                    // Out-of-bounds/degenerate damage is unusual and cannot
+                    // be consumed safely by a clipped replay. Fall back to a
+                    // full repaint instead of risking stale retained pixels.
+                    if (Widget::isDirtyRectEmpty(damage)) {
+                        damage = desc.logicalBounds;
+                        fullRedraw = true;
+                    }
+                }
+                if (rootLayer.painted && !backendDirty) {
+                    _backend->invalidateLayer(rootLayer.layer,
+                        fullRedraw ? math::FRectangle() : damage);
+                }
+                IRenderBackend::LayerPaint paint;
+                paint.damage = damage;
+                paint.fullRedraw = fullRedraw;
+                if (_backend->beginLayerPaint(rootLayer.layer, paint)) {
+                    if (!fullRedraw) _backend->pushClip(damage);
+                    _root->render(*_backend);
+                    if (!fullRedraw) _backend->popClip();
+                    _backend->endLayerPaint(rootLayer.layer);
+                    rootLayer.painted = true;
+                    layerReady = !_backend->isLayerDirty(rootLayer.layer);
+                }
+            }
+            if (layerReady) {
+                _backend->compositeLayer(rootLayer.layer, desc.logicalBounds, 1.0f);
+                rootPresented = true;
+            }
+        }
+    }
+    if (!rootPresented) {
+        _root->render(*_backend);
+    }
     // Phase A: render overlay AFTER the main tree so popups paint on top.
     if (_overlayRoot != nullptr) {
         _overlayRoot->render(*_backend);
@@ -940,6 +1073,42 @@ void UIManager::populateFrame() {
     // pipeline owns the UI submission boundary. Rects are still
     // flushed in flushFrame() → backend->endFrame() →
     // flushColoredRects().
+}
+
+void UIManager::setRootLayerCachingEnabled(bool enabled)
+{
+    if (!enabled) {
+        const auto it = g_rootLayerStates.find(this);
+        if (it == g_rootLayerStates.end()) return;
+        releaseRootLayer();
+        g_rootLayerStates.erase(this);
+        return;
+    }
+
+    RootLayerState& state = g_rootLayerStates[this];
+    if (state.enabled) return;
+    state.enabled = true;
+    state.painted = false;
+}
+
+bool UIManager::isRootLayerCachingEnabled() const
+{
+    const auto it = g_rootLayerStates.find(this);
+    return it != g_rootLayerStates.end() && it->second.enabled;
+}
+
+void UIManager::releaseRootLayer()
+{
+    const auto it = g_rootLayerStates.find(this);
+    if (it == g_rootLayerStates.end()) return;
+    RootLayerState& state = it->second;
+    if (_backend != nullptr && state.layer.isValid()) {
+        _backend->releaseLayer(state.layer);
+    }
+    state.layer = {-1};
+    state.desc = {};
+    state.descValid = false;
+    state.painted = false;
 }
 
 void UIManager::flushFrame() {

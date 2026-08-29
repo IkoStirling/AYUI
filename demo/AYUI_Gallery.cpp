@@ -19,6 +19,11 @@
 #include <Windows.h>
 #include <windowsx.h>
 
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include <stb_image.h>
+
 #include "AYUI.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/Button.h"
@@ -82,8 +87,13 @@ struct VisualCaptureConfig {
     std::string pageId = "page_backend";
     std::string action;
     std::string outputBase;
+    std::string layerProbeScenario;
+    ayt::render::Backend backend = ayt::render::Backend::Auto;
+    bool rootLayerEnabled = true;
     float scrollY = 0.0f;
+    float captureScale = 1.0f;
     int captureFrame = 12;
+    int mutationFrame = 6;
     int exitFrame = 14;
 };
 
@@ -116,7 +126,66 @@ VisualCaptureConfig visualCaptureConfig()
             config.scrollY = parsed;
         }
     }
+    if (const char* scenario = std::getenv("AY_UI_GALLERY_LAYER_PROBE_SCENARIO");
+        scenario != nullptr && scenario[0] != '\0') {
+        config.layerProbeScenario = scenario;
+        config.pageId = "page_layer_visual";
+    }
+    if (const char* rootLayer = std::getenv("AY_UI_GALLERY_ROOT_LAYER");
+        rootLayer != nullptr && std::strcmp(rootLayer, "immediate") == 0) {
+        config.rootLayerEnabled = false;
+    }
+    if (const char* scale = std::getenv("AY_UI_GALLERY_CAPTURE_SCALE");
+        scale != nullptr && scale[0] != '\0') {
+        char* end = nullptr;
+        const float parsed = std::strtof(scale, &end);
+        if (end != scale && std::isfinite(parsed) && parsed > 0.0f) {
+            config.captureScale = parsed;
+        }
+    }
+    if (const char* frame = std::getenv("AY_UI_GALLERY_CAPTURE_FRAME");
+        frame != nullptr && frame[0] != '\0') {
+        char* end = nullptr;
+        const long parsed = std::strtol(frame, &end, 10);
+        if (end != frame && parsed > 0 && parsed < 10000) {
+            config.captureFrame = static_cast<int>(parsed);
+        }
+    }
+    if (const char* frame = std::getenv("AY_UI_GALLERY_MUTATION_FRAME");
+        frame != nullptr && frame[0] != '\0') {
+        char* end = nullptr;
+        const long parsed = std::strtol(frame, &end, 10);
+        if (end != frame && parsed > 0 && parsed < 10000) {
+            config.mutationFrame = static_cast<int>(parsed);
+        }
+    }
+    if (const char* backend = std::getenv("AY_UI_GALLERY_BACKEND");
+        backend != nullptr && backend[0] != '\0') {
+        if (std::strcmp(backend, "d3d11") == 0) {
+            config.backend = ayt::render::Backend::Direct3D11;
+        } else if (std::strcmp(backend, "d3d12") == 0) {
+            config.backend = ayt::render::Backend::Direct3D12;
+        } else if (std::strcmp(backend, "vulkan") == 0) {
+            config.backend = ayt::render::Backend::Vulkan;
+        } else if (std::strcmp(backend, "opengl") == 0) {
+            config.backend = ayt::render::Backend::OpenGL;
+        }
+    }
+    config.exitFrame = config.captureFrame + 3;
     return config;
+}
+
+const char* backendName(ayt::render::Backend backend)
+{
+    switch (backend) {
+    case ayt::render::Backend::Direct3D11: return "d3d11";
+    case ayt::render::Backend::Direct3D12: return "d3d12";
+    case ayt::render::Backend::Vulkan: return "vulkan";
+    case ayt::render::Backend::OpenGL: return "opengl";
+    case ayt::render::Backend::Metal: return "metal";
+    case ayt::render::Backend::Noop: return "noop";
+    default: return "auto";
+    }
 }
 
 bool fileExists(const std::string& path)
@@ -141,6 +210,54 @@ std::string resolveLayoutPath()
     return candidates.front();
 }
 
+struct LoadedBgraImage {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> pixels;
+};
+
+std::string resolveVisualAssetPath(const char* fileName)
+{
+    const std::string relative = std::string("visual_regression/") + fileName;
+    const std::vector<std::string> candidates = {
+        std::string("assets/") + relative,
+        std::string("AYRuntime/AYUI/demo/assets/") + relative,
+        std::string("../AYRuntime/AYUI/demo/assets/") + relative,
+        std::string("../../AYRuntime/AYUI/demo/assets/") + relative,
+    };
+    for (const std::string& path : candidates) {
+        if (fileExists(path)) return path;
+    }
+    return candidates.front();
+}
+
+bool loadVisualPngBgra(const char* fileName, LoadedBgraImage& out)
+{
+    const std::string path = resolveVisualAssetPath(fileName);
+    int components = 0;
+    stbi_uc* rgba = stbi_load(path.c_str(), &out.width, &out.height, &components, 4);
+    if (rgba == nullptr || out.width <= 0 || out.height <= 0) {
+        std::fprintf(stderr, "[AYUI_Gallery] visual texture load failed: %s (%s)\n",
+                     path.c_str(), stbi_failure_reason());
+        if (rgba != nullptr) stbi_image_free(rgba);
+        out = {};
+        return false;
+    }
+    const size_t byteCount = static_cast<size_t>(out.width)
+        * static_cast<size_t>(out.height) * 4u;
+    out.pixels.assign(rgba, rgba + byteCount);
+    stbi_image_free(rgba);
+    // UIRenderBackend::createUiTexture currently accepts BGRA input and
+    // swizzles it to the renderer's RGBA texture. Keep file decoding explicit
+    // so the probe covers the same public upload path as production widgets.
+    for (size_t i = 0; i < byteCount; i += 4u) {
+        std::swap(out.pixels[i + 0u], out.pixels[i + 2u]);
+    }
+    return true;
+}
+
+class LayerVisualProbeWidget;
+
 struct GalleryState {
     ayt::ui::UIManager* ui = nullptr;
     ayt::render::Renderer* renderer = nullptr;
@@ -163,6 +280,11 @@ struct GalleryState {
     // standard Image through TextureRegistry. The Gallery deliberately
     // tears the named refs down before releasing this backend handle.
     void* imageTexAtlas = nullptr;
+    bool enableLayerVisualProbe = false;
+    LayerVisualProbeWidget* layerVisualProbe = nullptr;
+    void* layerProbeChecker = nullptr;
+    void* layerProbeArrow = nullptr;
+    void* layerProbeOrc = nullptr;
     // Animation page: fade-panel visibility latch (survives reload like
     // the other knobs; lives here, not in a button lambda, so the state
     // is not destroyed with the JSON tree).
@@ -247,6 +369,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
         "page_basics", "page_images", "page_input", "page_collections",
         "page_overlay", "page_layout", "page_capabilities",
         "page_backend", "page_animation", "page_productization",
+        "page_layer_visual",
     };
     for (const char* id : kPages) {
         if (ayt::ui::Widget* w = ui.findById(id)) {
@@ -283,6 +406,7 @@ void showPage(ayt::ui::UIManager& ui, const char* pageId)
             else if (std::strcmp(pageId, "page_backend") == 0) msg += L"backend";
             else if (std::strcmp(pageId, "page_animation") == 0) msg += L"animation";
             else if (std::strcmp(pageId, "page_productization") == 0) msg += L"productization";
+            else if (std::strcmp(pageId, "page_layer_visual") == 0) msg += L"layer visual probe";
             lbl->setText(msg);
         }
     }
@@ -1324,6 +1448,172 @@ void toggleTheme(GalleryState& state) {
     }
 }
 
+// Dedicated real-GPU probe for retained root-Layer validation. It combines
+// an asymmetric checker texture, an alpha sprite, an atlas under a stencil
+// path clip, gradients and text. The same widget is rendered through the
+// immediate reference path and the retained Layer path; screenshots must be
+// byte-identical on the same backend.
+class LayerVisualProbeWidget final : public ayt::ui::Widget {
+public:
+    void setTextures(void* checker, void* arrow, void* orc)
+    {
+        _checker = checker;
+        _arrow = arrow;
+        _orc = orc;
+    }
+
+    void invalidateFullProbe() { markDirty(); }
+
+    void moveArrowAndInvalidate()
+    {
+        if (_arrowMoved) return;
+        const ayt::math::FRectangle before = arrowBounds(false);
+        _arrowMoved = true;
+        const ayt::math::FRectangle after = arrowBounds(true);
+        const ayt::math::FRectangle damage(
+            std::min(before.minX, after.minX) - 6.0f,
+            std::min(before.minY, after.minY) - 6.0f,
+            std::max(before.maxX, after.maxX) + 6.0f,
+            std::max(before.maxY, after.maxY) + 6.0f);
+        // Explicit damage uses root-canvas logical coordinates. The union of
+        // old and new sprite bounds proves that partial Transparent clear
+        // erases stale alpha pixels at the old position.
+        markDirty(damage);
+    }
+
+protected:
+    void onRender(ayt::ui::IRenderBackend& r) override
+    {
+        using ayt::math::FRectangle;
+        using ayt::math::FVector4;
+        const FRectangle b = getWorldBounds();
+        if (b.maxX <= b.minX || b.maxY <= b.minY) return;
+
+        r.drawGradientRect(b,
+            FVector4(0.055f, 0.070f, 0.105f, 1.0f),
+            FVector4(0.095f, 0.125f, 0.185f, 1.0f));
+        r.drawText(offsetRect(b, 18, 10, 790, 34),
+                   L"Retained Layer GPU probe: orientation / alpha clear / UV / stencil",
+                   15, FVector4(0.90f, 0.94f, 1.0f, 1.0f));
+
+        const FRectangle checkerRect = offsetRect(b, 18, 44, 318, 214);
+        r.drawRect(checkerRect, FVector4(0.02f, 0.02f, 0.025f, 1.0f));
+        if (_checker != nullptr) {
+            r.drawRect(checkerRect, _checker, FRectangle(0, 0, 1, 1));
+        }
+        r.drawBorderRect(checkerRect, FVector4(0.30f, 0.72f, 1.0f, 1.0f), 2.0f);
+
+        const FRectangle atlasRect = offsetRect(b, 338, 44, 798, 274);
+        const auto atlasClip = r.createPath();
+        r.addPathRoundedRect(atlasClip, atlasRect, 20.0f);
+        r.pushPathClip(atlasClip);
+        r.drawRect(atlasRect, FVector4(0.025f, 0.03f, 0.04f, 1.0f));
+        if (_orc != nullptr) {
+            r.drawRect(atlasRect, _orc, FRectangle(0, 0, 1, 1));
+        }
+        r.popClip();
+        r.releasePath(atlasClip);
+        r.drawBorderRect(atlasRect, FVector4(0.82f, 0.60f, 0.22f, 1.0f), 2.0f);
+
+        const FRectangle stage = offsetRect(b, 18, 296, 798, 490);
+        r.drawGradientRect(stage,
+            FVector4(0.15f, 0.17f, 0.22f, 1.0f),
+            FVector4(0.055f, 0.065f, 0.09f, 1.0f));
+        for (int i = 0; i < 8; ++i) {
+            const float x = stage.minX + static_cast<float>(i) * 97.5f;
+            r.drawRect(FRectangle(x, stage.minY, x + 1.0f, stage.maxY),
+                       FVector4(0.20f, 0.24f, 0.31f, 1.0f));
+        }
+        r.drawText(FRectangle(stage.minX + 12.0f, stage.minY + 8.0f,
+                              stage.maxX - 12.0f, stage.minY + 30.0f),
+                   L"partial test: old sprite pixels must be gone after the move",
+                   13, FVector4(0.82f, 0.86f, 0.94f, 1.0f));
+        const FRectangle sprite = arrowBounds(_arrowMoved);
+        r.drawBorderRect(FRectangle(sprite.minX - 4.0f, sprite.minY - 4.0f,
+                                    sprite.maxX + 4.0f, sprite.maxY + 4.0f),
+                         FVector4(0.82f, 0.32f, 0.55f, 0.75f), 1.0f);
+        if (_arrow != nullptr) {
+            r.drawRect(sprite, _arrow, FRectangle(0, 0, 1, 1));
+        }
+        r.drawBorderRect(stage, FVector4(0.35f, 0.42f, 0.58f, 1.0f), 2.0f);
+    }
+
+private:
+    static ayt::math::FRectangle offsetRect(const ayt::math::FRectangle& b,
+                                             float minX, float minY,
+                                             float maxX, float maxY)
+    {
+        return ayt::math::FRectangle(
+            b.minX + minX, b.minY + minY, b.minX + maxX, b.minY + maxY);
+    }
+
+    ayt::math::FRectangle arrowBounds(bool moved) const
+    {
+        const ayt::math::FRectangle b = getWorldBounds();
+        return moved ? offsetRect(b, 632, 352, 732, 452)
+                     : offsetRect(b, 88, 352, 188, 452);
+    }
+
+    void* _checker = nullptr;
+    void* _arrow = nullptr;
+    void* _orc = nullptr;
+    bool _arrowMoved = false;
+};
+
+void teardownLayerVisualProbe(GalleryState& state);
+
+bool wireLayerVisualProbe(GalleryState& state)
+{
+    if (!state.enableLayerVisualProbe) return true;
+    ayt::ui::Widget* host = state.ui->findById("layer_visual_probe_host");
+    if (host == nullptr || state.uiBackend == nullptr) return false;
+
+    LoadedBgraImage checker;
+    LoadedBgraImage arrow;
+    LoadedBgraImage orc;
+    if (!loadVisualPngBgra("checkerboard.png", checker)
+        || !loadVisualPngBgra("arrow.png", arrow)
+        || !loadVisualPngBgra("orc.png", orc)) {
+        return false;
+    }
+    state.layerProbeChecker = state.uiBackend->createUiTexture(
+        static_cast<uint16_t>(checker.width), static_cast<uint16_t>(checker.height),
+        checker.pixels.data());
+    state.layerProbeArrow = state.uiBackend->createUiTexture(
+        static_cast<uint16_t>(arrow.width), static_cast<uint16_t>(arrow.height),
+        arrow.pixels.data());
+    state.layerProbeOrc = state.uiBackend->createUiTexture(
+        static_cast<uint16_t>(orc.width), static_cast<uint16_t>(orc.height),
+        orc.pixels.data());
+    if (state.layerProbeChecker == nullptr || state.layerProbeArrow == nullptr
+        || state.layerProbeOrc == nullptr) {
+        teardownLayerVisualProbe(state);
+        return false;
+    }
+
+    auto* probe = new LayerVisualProbeWidget();
+    probe->setPosition(ayt::math::FVector2(0.0f, 0.0f));
+    probe->setSize(ayt::math::FVector2(820.0f, 510.0f));
+    probe->setTextures(state.layerProbeChecker, state.layerProbeArrow,
+                       state.layerProbeOrc);
+    host->addChild(probe);
+    state.layerVisualProbe = probe;
+    return true;
+}
+
+void teardownLayerVisualProbe(GalleryState& state)
+{
+    state.layerVisualProbe = nullptr;
+    if (state.uiBackend == nullptr) return;
+    for (void** texture : {&state.layerProbeChecker, &state.layerProbeArrow,
+                           &state.layerProbeOrc}) {
+        if (*texture != nullptr) {
+            state.uiBackend->releaseUiTexture(*texture);
+            *texture = nullptr;
+        }
+    }
+}
+
 // Backend page -- creates the two UI textures (64x64 smooth gradient +
 // 16x16 rounded button) and mounts the host-drawn demo widget into
 // page_backend's VBox (fixed-height slot). Textures are registered with
@@ -1683,7 +1973,13 @@ bool loadAndWire(GalleryState& state)
                             static_cast<float>(state.clientH));
     wireGallery(state);
     wireImageCompositionPage(state);
-    wireCapabilities(state);
+    if (!wireLayerVisualProbe(state)) {
+        std::fprintf(stderr, "[AYUI_Gallery] Layer visual probe wiring failed\n");
+        return false;
+    }
+    if (!state.enableLayerVisualProbe) {
+        wireCapabilities(state);
+    }
     wireBackendPage(state);
     bindReload(state);
     // PR-Dock-TearOff: reload rebuilt the dock tree with fresh cards ??
@@ -1730,6 +2026,7 @@ void bindReload(GalleryState& state)
             // the loaded JSON tree).
             teardownCapabilitiesOverlay(state);
             teardownImageCompositionPage(state);
+            teardownLayerVisualProbe(state);
             teardownBackendPage(state);
             state.clickCount = 0;
             state.imageClickCount = 0;
@@ -2181,14 +2478,23 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     freopen_s(&dummy, "CONOUT$", "w", stderr);
 
     const VisualCaptureConfig capture = visualCaptureConfig();
+    // Capture scale models a denser framebuffer, not a smaller logical
+    // viewport. Keep the probe at 1280x720 DIP and grow physical pixels so
+    // the 1.5x matrix still observes every tested primitive.
+    const int initialPixelWidth = capture.enabled
+        ? std::max(1, static_cast<int>(std::lround(kWidth * capture.captureScale)))
+        : kWidth;
+    const int initialPixelHeight = capture.enabled
+        ? std::max(1, static_cast<int>(std::lround(kHeight * capture.captureScale)))
+        : kHeight;
 
     ayt::device::DeviceManager devices;
     ayt::device::DeviceConfig cfg{};
     // Title carries the build id so a wrong/old exe is obvious without
     // hunting the AllocConsole window.
     cfg.window.title = "AYUI Gallery [Images / Composition]";
-    cfg.window.width = kWidth;
-    cfg.window.height = kHeight;
+    cfg.window.width = initialPixelWidth;
+    cfg.window.height = initialPixelHeight;
     if (!devices.initialize(cfg)) {
         std::fprintf(stderr, "[AYUI_Gallery] DeviceManager initialize failed\n");
         return 1;
@@ -2213,10 +2519,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     ayt::render::Renderer renderer;
     ayt::render::InitDesc init{};
     init.windowHandle = hwnd;
-    init.width = kWidth;
-    init.height = kHeight;
+    init.width = static_cast<uint32_t>(initialPixelWidth);
+    init.height = static_cast<uint32_t>(initialPixelHeight);
     init.vsync = !capture.enabled;
     init.msaa = 0; // UI-only: crisp edges, no need for MSAA
+    init.backend = capture.backend;
     if (!renderer.initialize(init)) {
         std::fprintf(stderr, "[AYUI_Gallery] Renderer initialize failed\n");
         devices.shutdown();
@@ -2230,12 +2537,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.shutdown();
         return 1;
     }
-    uiBackend.setFramebufferSize(static_cast<uint16_t>(kWidth),
-                                 static_cast<uint16_t>(kHeight));
+    uiBackend.setFramebufferSize(static_cast<uint16_t>(initialPixelWidth),
+                                 static_cast<uint16_t>(initialPixelHeight));
     uiBackend.setBatchMode(capture.batchMode);
 
     ayt::ui::UIManager ui;
     ui.initialize(&uiBackend);
+    // Production UI Layer: retain the stable main tree as pixels. Popups,
+    // tooltips and drag visuals remain immediate and preserve painter order.
+    ui.setRootLayerCachingEnabled(capture.rootLayerEnabled);
 
     // PR-B2 ??install built-in dark theme. ensureDefaultThemes is
     // idempotent (no-op if a host registered a theme already) and
@@ -2249,11 +2559,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     state.renderer = &renderer;
     state.uiBackend = &uiBackend;
     state.devices = &devices;
-    state.clientW = kWidth;
-    state.clientH = kHeight;
+    state.clientW = initialPixelWidth;
+    state.clientH = initialPixelHeight;
+    state.enableLayerVisualProbe = !capture.layerProbeScenario.empty();
     if (!capture.enabled) {
         state.dpiScale = std::max(0.5f,
             static_cast<float>(::GetDpiForWindow(hwnd)) / 96.0f);
+        ui.setDpiScale(state.dpiScale);
+    } else {
+        state.dpiScale = capture.captureScale;
         ui.setDpiScale(state.dpiScale);
     }
 
@@ -2311,11 +2625,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         }
         std::fprintf(stderr,
                      "[AYUI_Gallery] visual capture: page=%s mode=%s scrollY=%.1f "
-                     "action=%s output=%s\n",
+                     "action=%s layerProbe=%s rootLayer=%s scale=%.2f backend=%s "
+                     "output=%s\n",
                      capture.pageId.c_str(),
                      capture.batchMode == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
                          ? "ordered" : "overlap",
                      capture.scrollY, capture.action.c_str(),
+                     capture.layerProbeScenario.c_str(),
+                     capture.rootLayerEnabled ? "enabled" : "immediate",
+                     capture.captureScale, backendName(capture.backend),
                      capture.outputBase.c_str());
     }
 
@@ -2385,16 +2703,30 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         // PR-Dock-TearOff: tick promoted child windows BEFORE the primary
         // (each child updates + GDI-renders under its own ActiveScope,
         // then the primary takes the active slot back).
-        state.childWindows->tickAll(dt);
-        ui.update(dt); // caret blink, hover revalidate, hot-reload
+        if (capture.layerProbeScenario.empty()) {
+            state.childWindows->tickAll(dt);
+            ui.update(dt); // caret blink, hover revalidate, hot-reload
+        }
         ui.layout();
-        state.accessibility->update();
+        if (capture.layerProbeScenario.empty()) {
+            state.accessibility->update();
+        }
         if (capture.enabled && capture.scrollY > 0.0f) {
             if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
                     ui.findById("content_scroll"))) {
                 // Apply after layout has established contentSize; applying
                 // only during bootstrap would clamp against the initial 0.
                 scroll->setScrollOffset(ayt::math::FVector2(0.0f, capture.scrollY));
+            }
+        }
+        const int frameNumber = visualFrame + 1;
+        if (!capture.layerProbeScenario.empty()
+            && frameNumber == capture.mutationFrame
+            && state.layerVisualProbe != nullptr) {
+            if (capture.layerProbeScenario == "full") {
+                state.layerVisualProbe->invalidateFullProbe();
+            } else if (capture.layerProbeScenario == "move") {
+                state.layerVisualProbe->moveArrowAndInvalidate();
             }
         }
         // Drop guides paint inside DockArea::render (after its children).
@@ -2413,13 +2745,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
             if (fopen_s(&metrics, metricsPath.c_str(), "wb") == 0 && metrics != nullptr) {
                 std::fprintf(metrics,
                              "page=%s\nmode=%s\nframe=%d\ndrawCalls=%d\n"
-                             "scrollY=%.1f\naction=%s\nqueued=%s\n",
+                             "scrollY=%.1f\naction=%s\nlayerProbe=%s\n"
+                             "rootLayer=%s\nscale=%.2f\nframebuffer=%dx%d\n"
+                             "backend=%s\nqueued=%s\n",
                              capture.pageId.c_str(),
                              capture.batchMode
                                      == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
                                  ? "ordered" : "overlap",
                              visualFrame, uiBackend.getDrawCallCount(),
                              capture.scrollY, capture.action.c_str(),
+                             capture.layerProbeScenario.c_str(),
+                             capture.rootLayerEnabled ? "enabled" : "immediate",
+                             capture.captureScale, state.clientW, state.clientH,
+                             backendName(capture.backend),
                              captureQueued ? "yes" : "no");
                 std::fclose(metrics);
             }
@@ -2451,6 +2789,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     // subsequent shutdown sees no children to free.
     teardownCapabilitiesOverlay(state);
     teardownImageCompositionPage(state);
+    teardownLayerVisualProbe(state);
     // Backend page textures (UIRenderBackend registry) MUST be released
     // before uiBackend.shutdown() -- the registry frees GPU textures in
     // shutdown, double-release is a no-op, but the handles here would

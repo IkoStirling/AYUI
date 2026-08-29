@@ -313,4 +313,30 @@ TEST_CASE(DirtyRect_MarkDirtyWithRectSetsDirtyRect) {
     CHECK_FALSE(w.hasDirtyRect());
 }
 
+TEST_CASE(DirtyRect_ExplicitDamagePropagatesWithoutBecomingFullTreeDirty) {
+    PainterWidget parent;
+    PainterWidget child;
+    parent.setSize(FVector2(200.0f, 120.0f));
+    child.setPosition(FVector2(20.0f, 30.0f));
+    child.setSize(FVector2(60.0f, 40.0f));
+    parent.addChildExternal(&child);
+
+    MockRenderer renderer;
+    parent.render(renderer);
+    CHECK_FALSE(parent.isDirtyThis());
+    CHECK_FALSE(parent.hasDirtyRect());
+
+    const FRectangle first(24.0f, 34.0f, 40.0f, 50.0f);
+    const FRectangle second(50.0f, 45.0f, 76.0f, 66.0f);
+    child.markDirty(first);
+    child.markDirty(second);
+
+    CHECK_FALSE(parent.isDirtyThis());
+    CHECK_TRUE(parent.hasDirtyRect());
+    CHECK(parent.getDirtyRect().minX == 24.0f);
+    CHECK(parent.getDirtyRect().minY == 34.0f);
+    CHECK(parent.getDirtyRect().maxX == 76.0f);
+    CHECK(parent.getDirtyRect().maxY == 66.0f);
+}
+
 TEST_SUITE_END

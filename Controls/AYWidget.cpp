@@ -305,11 +305,35 @@ void Widget::markDescendantsBoundsDirty() {
 }
 
 void Widget::markDirtyFromDescendant() {
-    const bool wasDirty = _dirtyThis || !isDirtyRectEmpty(_dirtyRect);
+    const bool wasFullDirty = _dirtyThis;
     _dirtyThis = true;
     _dirtyRect = math::FRectangle();
-    if (!wasDirty && _parent != nullptr) {
+    if (!wasFullDirty && _parent != nullptr) {
         _parent->markDirtyFromDescendant();
+    }
+}
+
+void Widget::markDirtyFromDescendant(const math::FRectangle& damage) {
+    if (isDirtyRectEmpty(damage)) {
+        markDirtyFromDescendant();
+        return;
+    }
+    if (_dirtyThis) return;
+    const math::FRectangle previous = _dirtyRect;
+    if (isDirtyRectEmpty(_dirtyRect)) {
+        _dirtyRect = damage;
+    } else {
+        _dirtyRect = math::FRectangle::fromMinMax(
+            math::FVector2(std::min(_dirtyRect.minX, damage.minX),
+                           std::min(_dirtyRect.minY, damage.minY)),
+            math::FVector2(std::max(_dirtyRect.maxX, damage.maxX),
+                           std::max(_dirtyRect.maxY, damage.maxY)));
+    }
+    const bool expanded = isDirtyRectEmpty(previous)
+        || previous.minX != _dirtyRect.minX || previous.minY != _dirtyRect.minY
+        || previous.maxX != _dirtyRect.maxX || previous.maxY != _dirtyRect.maxY;
+    if (expanded && _parent != nullptr) {
+        _parent->markDirtyFromDescendant(_dirtyRect);
     }
 }
 

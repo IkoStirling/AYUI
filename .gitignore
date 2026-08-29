@@ -1,6 +1,7 @@
 build/
 .claude/
 *.md
+!CHANGELOG.md
 !docs/Gallery_Regression_Checklist.md
 design/
 report/

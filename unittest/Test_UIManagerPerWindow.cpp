@@ -152,4 +152,32 @@ TEST_CASE(test_make_active_restores_primary_after_child_init) {
     primary.shutdown();
 }
 
+// -------------------------------------------------------------------------
+// 5. A guard must not restore its saved manager after ownership of the
+//    process-wide slot changed inside the scope. shutdown() clears the slot;
+//    restoring the previous pointer here would resurrect stale UI state and
+//    contaminate every popup/focus operation in later frames or tests.
+// -------------------------------------------------------------------------
+TEST_CASE(test_active_scope_does_not_overwrite_external_slot_change) {
+    MockRenderer backendA;
+    MockRenderer backendB;
+    UIManager previous;
+    UIManager scoped;
+    previous.initialize(&backendA);
+    scoped.initialize(&backendB);
+
+    UIManager::makeActive(&previous);
+    {
+        UIManager::ActiveScope guard(&scoped);
+        CHECK(UIManager::tryGet() == &scoped);
+
+        // shutdown() clears the active slot while the guard is still
+        // unwinding. The guard must observe that ownership change.
+        scoped.shutdown();
+    }
+    CHECK(UIManager::tryGet() == nullptr);
+
+    previous.shutdown();
+}
+
 TEST_SUITE_END

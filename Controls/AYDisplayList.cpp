@@ -492,6 +492,11 @@ void DisplayListRecorder::invalidateLayer(LayerHandle layer,
     _target.invalidateLayer(layer, damage);
 }
 
+bool DisplayListRecorder::isLayerDirty(LayerHandle layer) const
+{
+    return _target.isLayerDirty(layer);
+}
+
 IRenderBackend::AnimationHandle DisplayListRecorder::createAnimation(
     float from, float to, float duration, AnimationCurve curve)
 {

@@ -10,38 +10,15 @@
 
 namespace ayt::ui {
 
-// =============================================================================
-// Phase D (D4) — TabStrip: horizontal tab header.
-// =============================================================================
-//
-// Phase D PR-3 re-architects the old TabControl header (which was a vertical
-// ListView, visually wrong — see original TabControl.h DECISION 1). TabStrip
-// is a new widget that lays a row of `Button` (C-1) tabs out left-to-right;
-// the active tab gets a sky-blue accent underline.
-//
-// Q9: New widget, TabControl becomes "strip + body Panel". Public API:
-//   `getHeaderListView()` is replaced by `getTabStrip()`. The 1 existing
-//   internal call site is rewritten. JSON loader/serializer is unchanged —
-//   the legacy `tabs[]` array format round-trips into the new path because
-//   TabControl itself didn't change its serializer payload in Phase C PR-3.
-//
-// Q10: Tabs are plain `Button : InteractiveWidget` (NOT a new TabButton
-// subclass). Each tab's `_onClicked` calls `TabStrip::setSelectedIndex(idx)`.
-// Selection visual: TabStrip::onRender draws the accent underline beneath
-// the active tab. This bypasses the Button's own visual slots and lets
-// hosts theme Buttons separately.
-//
-// Q11: No close × button on tabs (DECISION 5 of original, still deferred).
-//
+// Horizontal Button-based tab header with an animated active indicator.
 // Product overflow policy: Scroll (default) clips and wheel-scrolls a
 // logical horizontal viewport while keeping selection visible; Compress
 // distributes available width down to minTabWidth; Clip preserves the
 // legacy fixed-width behavior. Children never paint outside the strip.
 //
-// Caller-owned content (mirror original DECISION 2): the strip only owns
-// its labels and the Button children. Body content is owned by the host
-// (typically a parent TabControl). Detach / destroy are the host's job.
-// =============================================================================
+// The strip owns labels and Button children only; TabControl or another host
+// owns body content. Close buttons, drag reorder and a built-in overflow menu
+// are not currently exposed.
 class TabStrip : public CompoundFocusableWidget {
 public:
     enum class OverflowMode { Scroll, Compress, Clip };
@@ -130,7 +107,7 @@ public:
 
     void tick(float dt) override;
 
-    // Phase B keyboard nav mirror (B4 had the same on TabControl).
+    // Keyboard navigation mirrors TabControl.
     // Left/Right cycle _selectedIndex. The host sets focus into the
     // strip for keyboard cycling (a Tab traversal host typically lands
     // focus inside the body content, not the strip, so this is rare).

@@ -162,6 +162,7 @@ public:
                         float opacity = 1.0f) override;
     void invalidateLayer(LayerHandle layer,
                          const math::FRectangle& damage = math::FRectangle()) override;
+    bool isLayerDirty(LayerHandle layer) const override;
 
     AnimationHandle createAnimation(float from, float to, float duration,
                                     AnimationCurve curve = AnimationCurve::EaseOut) override;

@@ -520,12 +520,14 @@ public:
     // markDirty(invalidRect) marks THIS widget dirty. The default (invalid
     // rect) means "the whole widget's cached presentation is invalid".
     // Passing a valid rect unions it into _dirtyRect for future retained
-    // display-list or render-target caches.
+    // display-list or render-target caches. Explicit damage is expressed in
+    // root-canvas logical coordinates (the same space as getWorldBounds()).
     //
-    // Dirty state propagates to ancestors so a future subtree cache can
-    // invalidate the complete composited branch. It does NOT gate
-    // Widget::render(): IRenderBackend::beginFrame clears frame-local draw
-    // submissions, so every visible Widget must replay every frame.
+    // Dirty state propagates to ancestors so retained pixel layers can
+    // invalidate the composited branch. It does NOT gate Widget::render():
+    // partial root repaint still traverses the tree, while the backend clip
+    // rejects geometry outside damage. Frame-local submissions are always
+    // rebuilt for whichever region is being painted.
     //
     // NOTE: "invalid" here = FRectangle{0,0,0,0}, which is the default
     // ctor and has zero area. We don't need a separate sentinel; the
@@ -540,13 +542,14 @@ public:
     }
 
     void markDirty(const math::FRectangle& r = math::FRectangle()) {
-        const bool wasDirty = _dirtyThis || !isDirtyRectEmpty(_dirtyRect);
-        if (!isDirtyRectEmpty(r)) {
+        const bool hasExplicitDamage = !isDirtyRectEmpty(r);
+        const bool wasFullDirty = _dirtyThis;
+        if (hasExplicitDamage) {
             // Union into _dirtyRect. Empty union (current rect empty)
             // collapses to just r.
-            if (isDirtyRectEmpty(_dirtyRect)) {
+            if (!_dirtyThis && isDirtyRectEmpty(_dirtyRect)) {
                 _dirtyRect = r;
-            } else {
+            } else if (!_dirtyThis) {
                 _dirtyRect = math::FRectangle::fromMinMax(
                     math::FVector2(
                         std::min(_dirtyRect.minX, r.minX),
@@ -561,18 +564,24 @@ public:
             _dirtyRect = math::FRectangle();
         }
         _displayListDirty = true;
-        // Propagate only if we just transitioned clean → dirty. Once
-        // dirty, the parent is already dirty too — no need to chain
-        // again (avoid O(N) blow-up on deep trees where every widget
-        // is dirty).
-        if (!wasDirty && _parent != nullptr) {
-            _parent->markDirtyFromDescendant();
+        if (_parent != nullptr) {
+            if (hasExplicitDamage && !wasFullDirty) {
+                // Explicit damage is already expressed in root/logical
+                // coordinates. Preserve it through every ancestor so a
+                // retained root layer can repaint only that region.
+                _parent->markDirtyFromDescendant(r);
+            } else if (!hasExplicitDamage && !wasFullDirty) {
+                // The default form deliberately remains conservative: an
+                // arbitrary widget may paint shadows/outsets beyond bounds.
+                _parent->markDirtyFromDescendant();
+            }
         }
     }
 
     // Test/debug: which cache/damage invalidation markers are pending?
     bool isDirtyThis() const { return _dirtyThis; }
     bool hasDirtyRect() const { return !isDirtyRectEmpty(_dirtyRect); }
+    const math::FRectangle& getDirtyRect() const { return _dirtyRect; }
 
 protected:
     // Override in subclasses to implement specific rendering
@@ -666,8 +675,9 @@ protected:
     // partial-redraw/cache callers; for typical setters,
     // markDirty(invalid) is sufficient and clears _dirtyRect.
     //
-    // IMPORTANT: neither field suppresses per-frame submission. The
-    // current renderer owns no persistent display list or UI render target.
+    // IMPORTANT: neither field suppresses Widget traversal by itself.
+    // Widget-local display lists avoid rerunning onRender(), and an enabled
+    // root pixel layer uses _dirtyRect as its clipped repaint region.
     bool _dirtyThis = true;
     math::FRectangle _dirtyRect;
 
@@ -705,7 +715,11 @@ protected:
 
     void updateWorldBounds();
     math::FVector2 getWorldPosition() const;
+    // Keep the no-argument symbol for incrementally-built hosts/TUs. The
+    // overload carries opt-in rectangular damage without changing the
+    // established ABI entry point.
     void markDirtyFromDescendant();
+    void markDirtyFromDescendant(const math::FRectangle& damage);
     void markStyleSubtreeDirty();
     bool recordNestedRenderIfNeeded(IRenderBackend& renderer);
 };

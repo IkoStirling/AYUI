@@ -1,13 +1,13 @@
 # AYUI Design
 
-**文档修订：** 2026-08-28
+**文档修订：** 2026-08-29
 
 **CMake 目标版本：** 1.0.0
 
 **功能里程碑：** v1.6 已实现
 
-**状态：** 根工程集成、Widget-local retained display-list、Layer/RenderTarget 契约、Serializer
-完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
+**状态：** 根工程集成、Widget-local retained display-list、Production root UI Layer、共享
+RenderTargetPool、Serializer 完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
 Tab/RichText 产品化、Unicode shaping、Windows UI Automation adapter、POSIX Clipboard、Docking、
 Layout Editor、动画与完整单测均可构建。
 
@@ -32,6 +32,17 @@ AYUI 是 AliyatEngine 的 UI 领域层。它管理 UI 状态和控件树，但�
 - 跨线程直接修改 Widget 树
 - 在 JSON 中执行任意脚本
 
+### 1.1 版本与兼容性口径
+
+- CMake `project(VERSION 1.0.0)` 是包/目标版本；`v1.6` 是能力完成度里程碑，不构成第二套
+  发布版本。正式发布记录以 CMake 版本和 `CHANGELOG.md` 为准。
+- 1.x 稳定源码面包括 `AYUI.h`、Widget/UIManager、内置控件、布局、Theme、Loader、
+  Serializer 和 `IRenderBackend` 的基础契约。新增能力优先使用可选字段、重载或 capability gate。
+- 已注册 JSON `type` 名和文档化持久字段属于 wire compatibility；运行时焦点、hover、拖放、
+  动画进度、display-list、GPU/平台句柄不进入持久格式。
+- 当前不承诺 C++ 二进制 ABI。公共头、编译器或构建选项变化后，AYUI、AYRenderer 和宿主必须
+  一起重新编译。RenderTarget/Layer、原生平台 adapter 和 display-list 内部表示仍可演进。
+
 ## 2. 系统位置
 
 ```text
@@ -40,7 +51,7 @@ AYDevice / host events
           ▼
       UIManager ────────────── UILayoutLoader / I18n / Theme
           │
-          ├─ root
+          ├─ root ───────────── optional retained pixel layer
           ├─ overlay root ─── Popup / Tooltip / Modal / drag ghost
           └─ per-window state: focus / capture / hover / drag
           │
@@ -130,6 +141,12 @@ Widget
 `onRender()`、样式查询和命令构造开销，但不违反 bgfx 的逐帧 submit 规则。Spinner、Tween
 和滚动惯性仍按状态变化标脏，因此动画期间重建本地 list，完成后回到稳定 replay。
 
+`UIManager::setRootLayerCachingEnabled(true)` 在上述命令保留之上再增加一层可选像素保留：首次、
+主树 dirty、尺寸/DPI 变化或后端报告 layer dirty 时，将 root 完整绘制到透明离屏层；clean 帧不再
+遍历/replay 主树，只在主 view 提交一次 composite。overlay root 与 drag ghost 始终随后即时绘制，
+保证 popup/modal/tooltip 的 painter order。capability、create/update、paint 或 composite 前置条件
+失败时，同一帧直接执行原始 `_root->render()`，所以 Production Layer 不是第二套 Widget renderer。
+
 通用 Recorder 不跨帧持有后端资源句柄。vector path 以 backend-independent construction recipe
 记录；每条 draw/clip 命令捕获当时的 immutable operation snapshot，replay 时临时创建后端路径、
 重建、提交并释放，因此 releasePath 和后续 path mutation 不会改变已缓存命令。粒子更新、字体/
@@ -152,14 +169,31 @@ Widget
 
 Layer 保留的是像素，display-list 保留的是绘制命令，两者不能混为一套缓存。Layer 的逻辑尺寸
 变化或 DPI 变化必须把 backing target resize 为 `ceil(logicalSize * dpiScale)` 并要求重绘；
-dirty Layer 在 `beginLayerPaint()` / `endLayerPaint()` 完成前不能 composite。局部 damage 当前是
-后端可利用的重绘元数据，不授权后端破坏 clip、透明和 painter order。
+dirty Layer 在 `beginLayerPaint()` / `endLayerPaint()` 完成前不能 composite。局部 damage 是实际重绘
+契约：调用方必须把 replay 限制在 damage clip 内；Transparent/Color Layer 先以无混合覆盖写清除
+damage，Preserve Layer 保留原像素。任何实现都不得破坏区域外像素、clip、透明和 painter order。
 
 该 API 是 capability-gated：不支持的后端返回无效 handle 或 `false`，调用方必须继续即时绘制。
-MockRenderer 已实现完整生命周期和可观察事件，用于锁定 resize、DPI、damage、paint/composite
-和 release 契约。AYRenderer 当前明确返回 `supportsRenderTargets() == false`；生产 bgfx FBO、
-纹理生命周期、清除策略和子树选择尚未落地，因此本阶段没有默认把任何 Widget 子树转为像素层。
-overlay 仍由 UIManager 的现有 painter order 管理，未来接入 Layer 时也必须由调用点显式 composite。
+MockRenderer 实现完整生命周期和可观察事件；AYRenderer 现已实现 bgfx FBO、纹理查询/blit、
+Layer create/update/release、paint/composite/invalidate 和 reset 后重建。离屏 paint 使用 view 26–249，
+主 UI composite 使用 view 255；target 切换前 flush 当前 batch，并在 paint 结束后恢复 canvas、clip、
+opacity、blend 与 path-clip 状态。Layer backing target 带 depth/stencil，因此离屏复杂控件路径继续
+支持 nested path clip。每帧最多调度 224 次离屏 pass；第 225 次确定失败，下一帧从 view 26 重新开始。
+这个数值描述 pass 容量，不表示 UI 可以独占同等数量的 renderer-wide framebuffer 句柄。
+
+AYRenderer 的 FrameGraph 与 UI Layer 共用 renderer-wide RenderTargetPool。池按宽、高、格式、
+depth、sampleCount 和采样方式精确匹配，lease 带 generation；release 后默认隔离两帧再复用/销毁，空闲目标
+按 LRU 在 256 MiB best-effort 预算下淘汰。resize/MSAA/device reset 会立即失效 lease 并使逻辑 Layer
+变 dirty。当前仅支持 1× sample；leased/quarantined 资源可暂时超过预算，所有调用限定 renderer
+thread。root Production Layer 已接入显式 dirty rect：`markDirty(rect)` 在祖先链上合并 damage，根层
+以局部透明覆盖清除和 clip replay 更新像素；普通无参 `markDirty()`、首次绘制、resize、DPI 和
+device reset 继续走保守 full redraw。`Preserve` 仍可供不需要背景清除的后端/调用方使用。
+
+UI RenderTarget 使用 point sampling 保持同尺寸复合的 texel identity；FrameGraph 默认目标仍使用线性
+采样，二者通过 pool key 隔离，不能误复用。Layer 内的 straight-alpha draw 使用独立 RGB/alpha
+source-over，使 backing texture 保存 premultiplied RGB 与正确 coverage alpha；最终 composite 使用
+premultiplied-over，避免抗锯齿边缘二次乘 alpha。局部 replay 的所有图元必须满足“裁剪不重新布局”——
+纹理重映射 UV，四角渐变按原 bounds 双线性重映射颜色，SDF/path 使用原 shape 和 damage clip。
 
 ### 4.5 产品化呈现契约
 
@@ -351,7 +385,8 @@ Modal 打开后，UIManager 只向 active modal 子树路由输入；dimmer 吞�
 - ScrollView/ListView 等滚动惯性
 
 `tick()` override 必须先保持基类级联，再推进自身状态。动画中的 Widget 每帧标脏并重建自己的
-display-list；完成后停止无意义的命令重建，改为稳定 replay，但可见内容仍按后端契约每帧提交。
+display-list；完成后停止无意义的命令重建。普通路径回到稳定 replay；启用 root Layer 后则进一步
+回到单次像素层 composite，但 bgfx 可见内容仍按后端契约每帧提交。
 
 ## 11. 公共 API 与兼容性
 
@@ -361,6 +396,7 @@ display-list；完成后停止无意义的命令重建，改为稳定 replay，�
 - 新控件优先复用 InteractiveWidget、FocusableWidget、SelectableWidget、ScrollableWidget 等现有契约。
 - Setter 必须保持幂等；可见/布局状态变化需要正确 dirty/cache invalidation。
 - 删除或改名公共类型前，应先提供迁移路径；JSON `type` 名同样视为兼容面。
+- 兼容性承诺以 1.1 节为准；公共虚函数或 public struct 变化即使保持源码兼容，也可能破坏 ABI。
 
 ## 12. 构建与引擎集成
 
@@ -386,23 +422,24 @@ Animation 和 Productization 十页；Images 页覆盖共享 `TextureRegistry` �
 Unicode/Bidi 多字体 RichText 和 Clipboard。
 
 AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
-display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill/clip，但生产 RenderTarget/Layer 能力尚未启用。MockRenderer 用于无 GPU
-单测，并实现 Layer 生命周期测试面，不应和生产 backend 行为产生不同的 Widget 语义。
+display-list replay、Production root UI Layer，以及 CPU path tessellation + stencil path fill/clip。
+FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。MockRenderer 用于无 GPU 单测，
+并实现相同 Layer 生命周期测试面，不应和生产 backend 行为产生不同的 Widget 语义。
 
 ## 13. 测试与审计基线
 
-2026-08-28 全模块审计统计：
+2026-08-29 全模块审计统计：
 
 - 78 个公共/支持 header
 - 66 个非 demo、非 unittest 的 `.cpp`
 - 93 个 `Test_*.cpp`
-- 1000 个 `TEST_CASE`
-- Windows Debug：`4498 / 4498` 条断言通过
+- 1022 个 `TEST_CASE`
+- Windows Debug：`4609 / 4609` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
-能力测试随后把当前基线增加到 `4498 / 4498`。
+能力测试随后把当前基线增加到 `4609 / 4609`。
 
 审计覆盖：
 
@@ -412,7 +449,7 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 - 控件生命周期和拥有/非拥有指针
 - dirty/cache invalidation、retained display-list、即时兜底、frame-local backend replay、
   world-bounds cache 和容器 clip/hit-test 契约
-- Layer/RenderTarget 的 DPI、resize、damage、paint/composite 和 release 生命周期
+- Layer/RenderTarget 的 DPI、resize、damage、paint/composite、release、共享池 quarantine/预算和 reset 生命周期
 - DPI/UI scale 的逻辑布局、物理输入换算、语义树/动作/diff、主题继承与控件级联、Tab overflow、
   RichText wrap/justify/ellipsis/decoration/Unicode grapheme/Bidi/命中和 Serializer 往返
 - TreeView 千节点重复建树性能
@@ -435,7 +472,14 @@ display-list 的逐帧 replay，以及 CPU path tessellation + stencil path fill
 - ScrollView 运行时 scrollbar enable/disable、Box 自然尺寸缓存和多个视觉 setter 的 invalidation。
 - 公共聚合头和 CMake header 清单补齐。
 - Widget-local retained display-list、复杂控件 replay 顺序、祖先几何级联失效与显式即时兜底。
-- RenderTarget/UI Layer 接口及 MockRenderer 契约；AYRenderer 未实现 FBO 时明确关闭 capability。
+- RenderTarget/UI Layer 接口、MockRenderer 契约与 AYRenderer bgfx 实现；root 主树 opt-in 像素保留，
+  clean frame 单 composite，overlay 即时叠加，失败同帧回退。
+- renderer-wide RenderTargetPool 统一 FrameGraph/UI Layer 物理 FBO，使用 generation lease、两帧
+  quarantine、精确键复用、LRU 预算回收和 reset 失效。
+- Widget 显式 dirty rect 在祖先链上合并传播；Production root Layer 对 damage 做透明覆盖清除和
+  clip replay，无范围 dirty 与 backend/device 失效仍保守全量重绘。
+- UIManager 的 Production Layer 状态放在 out-of-line sidecar，不改变既有对象布局；ActiveScope
+  不会在 shutdown 或 host 显式切换 active slot 后恢复陈旧上下文。
 - 40 个注册 Widget 的 serializer type/字段往返，Grid cell 和复合控件结构化 payload。
 - backend-independent retained path recipe；AYRenderer 凹多边形/曲线 tessellation、winding 孔洞、
   miter stroke、嵌套 stencil path clip 和排序屏障。
@@ -457,8 +501,11 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 按优先级记录剩余边界：
 
-1. 为 AYRenderer 实现生产 bgfx RenderTarget/Layer：FBO 与纹理回收、clear/preserve、局部 damage、
-   resize/DPI、overlay 合成顺序和显存预算；在此之前保持 capability 关闭。
+1. Production root UI Layer 已完成显式 dirty rect、扩展 view 调度和 D3D11 真实 GPU 基线；1.0×/1.5×
+   保持同一 1280×720 DIP 画布并使用 1280×720/1920×1080 framebuffer，full/clean/partial 场景覆盖
+   纹理方向、alpha、UV、stencil 与局部覆盖清除。下一步补 D3D12、
+   Vulkan、OpenGL 以及 Preserve、resize/device-reset 帧；随后再评估多 damage region 与子树分层，
+   避免 union rect 过大。
 2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
    支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
 3. Windows UI Automation provider 已完成第一阶段；后续补 TextPattern/selection range/live region，
@@ -480,9 +527,12 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    clean Widget 每帧按 z-order replay；不缓存 bgfx transient buffer 或跨帧 `UiItem`。旧即时路径
    保留为显式策略和不安全命令的自动兜底。下一步是降低 `std::function` 存储开销、增加缓存
    内存统计/预算，并逐类扩展 typed command，而不是复制第二套 Widget 渲染器。
-2. **UI Layer / RenderTarget（契约与 Mock 完成）**：接口已经定义透明、clear/preserve、damage、
-   resize、DPI 和 overlay 元数据，MockRenderer 已锁定生命周期。下一步在 AYRenderer 实现 bgfx
-   FBO/纹理池和显存回收，再选择高收益稳定子树 opt-in；滤镜、背景模糊、多 viewport 以及未来
+2. **UI Layer / RenderTarget（Production root 第二阶段完成）**：接口、Mock 和 AYRenderer bgfx
+   实现已经闭环；FrameGraph/UI Layer 共用 generation-safe RenderTargetPool。UIManager 可 opt-in
+   root 像素层，clean frame 仅 composite，显式 dirty rect 局部 repaint，overlay 即时叠加，失败同帧
+   回退；每帧 224 次离屏 pass 的边界可确定复现并跨帧恢复。D3D11 的 1.0×/1.5× 图像矩阵已验证
+   immediate/full/clean/partial，clean reuse 字节精确、Layer 语义最多差 1 个 RGBA8 LSB。下一阶段是
+   多 region/子树策略和其余 GPU backend 视觉基线；滤镜、背景模糊、多 viewport 以及未来
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
 3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
    Menu/StatusBar、Tab、Modal 和 Dock 复合结构具有专用 wire contract 与往返测试。运行时瞬态明确排除。
@@ -509,7 +559,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 数据格式 | 复用 JSON UILayoutLoader，不引入第二套配置系统 |
 | 渲染解耦 | `IRenderBackend`，AYRenderer 提供实现 |
 | 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
-| 像素层缓存 | Layer/RenderTarget 契约与 Mock 已完成；AYRenderer capability 暂时关闭 |
+| 像素层缓存 | Production root Layer opt-in；AYRenderer/Mock 完成，FrameGraph/UI 共用 RenderTargetPool；clean frame 单 composite，显式 dirty rect 局部 repaint |
 | 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
 | DPI/UI scale | Widget/damage/accessibility 使用 DIP；宿主输入与 framebuffer 使用物理像素；后端最终缩放 |
 | 无障碍 | AYUI 输出 snapshot/action/diff；Windows adapter 发布原生 UIA，AT-SPI/NSAccessibility 待接入 |

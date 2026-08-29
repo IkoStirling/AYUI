@@ -1,33 +1,9 @@
 #pragma once
 
-// =============================================================================
-// C-11 ToolBar: a horizontal strip of ToolButtons + optional separators.
-// =============================================================================
-//
-// Architecture (v1):
-//   ToolBar (CompoundWidget)
-//     └─ horizontally-laid-out children: Button, Separator
-//
-// Each ToolButton is just a regular `Button` (already in C-1 lane). We do
-// not introduce a new "ToolButton" class — the only difference (no padding)
-// is a host-side styling choice. ToolBar lays them out left-to-right with
-// optional visual separation between groups.
-//
-// -----------------------------------------------------------------------------
-// v1 design decisions + known limitations + v1.1 upgrade paths
-// -----------------------------------------------------------------------------
-//
-// DECISION 1: ToolBar's children can be Button, Separator, or any other
-//   widget. We do not enforce a particular type — the container just
-//   lays them out in order with kItemSpacing.
-//
-// DECISION 2: ToolBar is non-scrolling in v1. When too many items are
-//   added, they spill past the right edge.
-//   v1.1 upgrade: horizontal scroll mode (similar to ScrollView) toggled
-//   when content width exceeds viewport width.
-//
-// DECISION 3: ToolBar supports vertical orientation in v1.1; v1 ships
-//   horizontal-only.
+// Horizontal strip of Buttons and separators. Items live in an internal
+// content strip wrapped by ScrollView; overflow enables horizontal scrolling
+// instead of painting past the ToolBar bounds. ToolBar owns all items and the
+// internal scroll widgets. Vertical orientation is not currently exposed.
 
 #include "AYUI/Widget.h"
 #include <string>
@@ -74,8 +50,7 @@ private:
     };
     std::vector<ItemRecord> _items;
 
-    // G3 — wrap pattern (matches TabStrip Q12 plan: "v1.1 wraps the
-    // whole strip in a ScrollView"). Items are children of _contentStrip
+    // Items are children of _contentStrip.
     // (an internal CompoundWidget); ToolBar owns the ScrollView +
     // _contentStrip and is responsible for deleting them in ~ToolBar.
     // When items' total width exceeds ToolBar width, the ScrollView

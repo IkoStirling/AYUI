@@ -7,46 +7,12 @@
 
 namespace ayt::ui {
 
-// C-3 TextInput: a single-line text input with caret + selection +
-// password mask. NOT multi-line (that's C-10 TextArea, scoped to
-// C-4 + C-3 reuse).
-//
-// Why extends FocusableWidget (not InteractiveWidget, not Widget):
-//   - FocusableWidget owns the focus lifecycle and gives us a single
-//     state ('_hasFocus') that determines cursor-hint (Beam) and which
-//     overrides UIManager routes key/text input to.
-//   - We do NOT need InteractiveWidget's hover state machine — a
-//     focused TextInput the cursor has moved away from remains
-//     focused; the cursor continues blinking. Hover is layered on
-//     top via the base Widget's getCursorHint interaction with the
-//     hovered Widget tree (UIManager already merges focus + hover
-//     hint precedence).
-//
-// Text payload uses AYTextContent's TextContent-equivalent fields
-// inline (NOT the full struct) — adopting TextContent fully would
-// force TextInput to share Button's text-alignment logic, but
-// TextInput has stricter caret-driven horizontal positioning that
-// differs from Button's centered label. The free helper text-typing
-// API uses std::wstring directly. Promote when ScrollView/ListView
-// need similar text containers.
-//
-// v1 semantics covered:
-//   - single-line input via setText / getText / insertChar / deleteLeft /
-//     deleteRight / clear / appendText
-//   - selection (start, end) caret positions; range selection via
-//     setSelection / clearSelection / selectAll
-//   - password mask: when _passwordMode is true, renders '*' chars
-//     without changing underlying text
-//   - caret blink (driven by a tick() callback — blinks every 0.5s;
-//     default-on when focused)
-//   - readonly mode (setReadOnly) blocks text edit but still allows
-//     selection / cursor moves
-//
-// v1 NOT covered (deferred):
-//   - IME / composition
-//   - placeholder text
-//   - text alignment beyond Left (no Center / Right)
-//   - drag-to-select
+// Single-line FocusableWidget editor. Caret, selection, deletion and mouse
+// hit-testing snap to Unicode grapheme boundaries and use backend-aware text
+// measurement. Supports IME composition preview/commit, placeholder text,
+// password/read-only modes, Left/Center/Right alignment, drag and double-click
+// selection, clipboard, undo/redo and optional numeric scrubbing. Multi-line
+// editing remains the responsibility of TextArea.
 
 class TextInput : public FocusableWidget {
 public:
@@ -135,12 +101,10 @@ public:
         _onNumericScrub = std::move(cb);
     }
 
-    // =================================================================
-    // Phase C (C4) — placeholder text. Drawn when the buffer is empty
+    // Placeholder text. Drawn when the buffer is empty
     // AND the widget is not focused. Style override via
     // `placeholderColor` (WidgetStyle key added in PR-1). Default muted
     // gray, semitransparent.
-    // =================================================================
     void setPlaceholder(const std::wstring& text) { _placeholder = text; markDirty(); }
     const std::wstring& getPlaceholder() const { return _placeholder; }
 
@@ -150,8 +114,7 @@ public:
     bool onTextInputText(const std::wstring& text) override;
     bool onKeyDown(int keyCode) override;
 
-    // =================================================================
-    // Phase C (S4): IME composition hooks. See AYFocusableWidget.h for
+    // IME composition hooks. See AYFocusableWidget.h for
     // the state-machine contract. We override here because TextInput is
     // the canonical single-line recipient of IME composition.
     //
@@ -159,18 +122,15 @@ public:
     // code-unit offset on Windows (or wchar_t offset elsewhere). Editing
     // and navigation then snap that offset to a Unicode grapheme boundary,
     // so surrogate pairs and combining sequences remain indivisible.
-    // =================================================================
     bool onImeCompositionStart(const std::string& text, int caret) override;
     bool onImeCompositionUpdate(const std::string& text, int caret) override;
     bool onImeCompositionEnd(const std::string& committed) override;
 
-    // Phase C: state-query helper for tests + UI hints. True between
+    // State-query helper for tests + UI hints. True between
     // onImeCompositionStart and the matching onImeCompositionEnd.
     bool isComposing() const { return _composing; }
 
-    // =================================================================
-    // Phase C (C5) — mouse drag-to-select.
-    // =================================================================
+    // Mouse drag-to-select.
     // onMouseButtonDown returns true (so UIManager captures the widget)
     // and records the click as the drag anchor. onMouseMove (when this
     // is the captured widget) extends the selection from anchor to
@@ -178,24 +138,17 @@ public:
     //
     // Hit testing measures candidate grapheme spans through the renderer,
     // matching the same text path used for drawing.
-    // =================================================================
     bool onMouseMove(const UIMouseEvent& e) override;
 
     bool isDragging() const { return _dragging; }
 
-    // Phase C: a TextInput IS a text-editing widget per the
+    // A TextInput IS a text-editing widget per the
     // UIManager::isTextEditing() helper. AYDevice::TextInput gate is
     // flipped when this widget gains/loses focus.
     bool isTextEditingWidget() const override { return true; }
 
-    // =================================================================
-    // G6 — text horizontal alignment. v1 was always Left (v1.1 adds
-    // Center + Right). Affects the rendered textBounds.minX only;
-    // caret stays at the right padding edge as a deliberately
-    // approximate signal (we don't have a precise text shaper; v1.2
-    // will tighten). Default Left preserves v1 contract — every
-    // existing test that pins drawRect bounds stays green.
-    // =================================================================
+    // Horizontal alignment for both text and measured caret geometry.
+    // Default Left preserves the original layout contract.
     enum class HAlign { Left, Center, Right };
     void  setHAlign(HAlign a) { _hAlign = a; markDirty(); }
     HAlign getHAlign() const   { return _hAlign; }
@@ -217,8 +170,7 @@ public:
     // `restoreSnapshot` — undo/redo are user-visible actions; the host
     // already observes them through canUndo/canRedo/getText, and
     // re-firing onTextChanged would double-count the same change
-    // (which is what caused the Phase C P1 baseline regression in
-    // TextArea before the equivalent guard was added).
+    // (matching the equivalent TextArea history contract).
     // =================================================================
     bool canUndo() const { return !_undoStack.empty(); }
     bool canRedo() const { return !_redoStack.empty(); }
@@ -299,7 +251,7 @@ protected:
     static constexpr float kScrubPixelsPerUnit = 2.0f;
 
     // =================================================================
-    // Phase C (S4): IME composition state.
+    // IME composition state.
     // =================================================================
     // _compositionPreview holds the IME's pre-edit string (UTF-16
     // decoded from AYDevice's UTF-8 chunk). It's NOT merged into _text
@@ -318,21 +270,21 @@ protected:
     int          _compositionCaretBytes = 0;
     bool         _composing = false;
 
-    // Phase C (C4) placeholder.
+    // Placeholder state.
     std::wstring _placeholder;
 
     // =================================================================
-    // Phase C (C5) — drag-select state.
+    // Drag-select state.
     // =================================================================
     // _dragging is set by onMouseButtonDown (returns true so UIManager
     // captures) and cleared by onMouseButtonUp. While _dragging is true,
     // onMouseMove extends _selStart.._selEnd from _dragAnchorCol to the
-    // current approximate column.
+    // current measured grapheme boundary.
     //
     // _dragAnchorWorld is the world-space mouse position at button-down.
-    // We translate to a column via the same 7px approximation used in
-    // the renderer. C5 of Phase C; mirrors Phase B's B1 onKeyDown
-    // approximation philosophy.
+    // We translate to a column through the same backend-aware measurement
+    // helper used by rendering, so proportional fonts and grapheme clusters
+    // share one geometry path.
     bool           _dragging = false;
     math::FVector2 _dragAnchorWorld = math::FVector2(0.0f, 0.0f);
     size_t         _dragAnchorCol = 0;

@@ -38,6 +38,12 @@ function Get-DrawCalls([string]$MetricsPath) {
 
 $results = @()
 try {
+    $env:AY_UI_GALLERY_ROOT_LAYER = "layer"
+    Remove-Item Env:\AY_UI_GALLERY_LAYER_PROBE_SCENARIO -ErrorAction SilentlyContinue
+    Remove-Item Env:\AY_UI_GALLERY_CAPTURE_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\AY_UI_GALLERY_MUTATION_FRAME -ErrorAction SilentlyContinue
+    Remove-Item Env:\AY_UI_GALLERY_CAPTURE_SCALE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AY_UI_GALLERY_BACKEND -ErrorAction SilentlyContinue
     foreach ($case in $cases) {
         $captures = @{}
         foreach ($mode in @("ordered", "overlap")) {
@@ -88,6 +94,7 @@ finally {
     Remove-Item Env:\AY_UI_GALLERY_CAPTURE_ACTION -ErrorAction SilentlyContinue
     Remove-Item Env:\AY_UI_GALLERY_CAPTURE_SCROLL_Y -ErrorAction SilentlyContinue
     Remove-Item Env:\AY_UI_GALLERY_CAPTURE_BASE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AY_UI_GALLERY_ROOT_LAYER -ErrorAction SilentlyContinue
 }
 
 $results | Format-Table -AutoSize
