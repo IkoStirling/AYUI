@@ -72,6 +72,7 @@
 #include <memory>
 #include <string>
 #include <sys/stat.h>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -88,6 +89,7 @@ struct VisualCaptureConfig {
     std::string action;
     std::string outputBase;
     std::string layerProbeScenario;
+    std::string layerMatrixScenario;
     ayt::render::Backend backend = ayt::render::Backend::Auto;
     bool rootLayerEnabled = true;
     float scrollY = 0.0f;
@@ -130,6 +132,10 @@ VisualCaptureConfig visualCaptureConfig()
         scenario != nullptr && scenario[0] != '\0') {
         config.layerProbeScenario = scenario;
         config.pageId = "page_layer_visual";
+    }
+    if (const char* scenario = std::getenv("AY_UI_GALLERY_LAYER_MATRIX_SCENARIO");
+        scenario != nullptr && scenario[0] != '\0') {
+        config.layerMatrixScenario = scenario;
     }
     if (const char* rootLayer = std::getenv("AY_UI_GALLERY_ROOT_LAYER");
         rootLayer != nullptr && std::strcmp(rootLayer, "immediate") == 0) {
@@ -1614,6 +1620,459 @@ void teardownLayerVisualProbe(GalleryState& state)
     }
 }
 
+// Capture-only probe that exercises Layer semantics without the Gallery shell.
+// The main framebuffer first receives an asymmetric opaque backdrop; the test
+// content is then either drawn immediately or painted into a retained Layer and
+// composited. This makes transparent pixels and group composition observable,
+// while keeping the two paths driven by the exact same primitive functions.
+class LayerMatrixProbe final {
+public:
+    LayerMatrixProbe(std::string scenario, bool useLayer, float initialScale)
+        : _scenario(std::move(scenario)),
+          _useLayer(useLayer),
+          _uiScale(std::max(0.5f, initialScale))
+    {
+    }
+
+    bool enabled() const { return !_scenario.empty(); }
+
+    void beforeFrame(GalleryState& state,
+                     int frameNumber,
+                     int mutationFrame)
+    {
+        if (_mutated || frameNumber != mutationFrame) return;
+        _mutated = true;
+
+        if (_scenario == "resize") {
+            const int width = std::max(64, static_cast<int>(std::lround(1440.0f * _uiScale)));
+            const int height = std::max(64, static_cast<int>(std::lround(810.0f * _uiScale)));
+            resizeFramebuffer(state, width, height);
+        } else if (_scenario == "dpi") {
+            _uiScale = 1.5f;
+            state.dpiScale = _uiScale;
+            if (state.ui != nullptr) state.ui->setDpiScale(_uiScale);
+            resizeFramebuffer(state,
+                static_cast<int>(std::lround(kWidth * _uiScale)),
+                static_cast<int>(std::lround(kHeight * _uiScale)));
+        } else if (_scenario == "reset") {
+            state.renderer->resize(static_cast<uint32_t>(state.clientW),
+                                   static_cast<uint32_t>(state.clientH));
+            _expectLeaseInvalidation = _useLayer;
+        } else if (_scenario == "msaa" || _scenario == "msaa_fresh") {
+            state.renderer->setMsaaSampleCount(2);
+            _expectLeaseInvalidation = _useLayer && _scenario == "msaa";
+        }
+
+        if (isPartialClearScenario()) {
+            _contentGeneration = 1;
+            _pendingPartial = _useLayer;
+        }
+    }
+
+    void render(ayt::render::UIRenderBackend& backend,
+                int physicalWidth,
+                int physicalHeight)
+    {
+        using ayt::math::FRectangle;
+
+        const float logicalWidth = static_cast<float>(physicalWidth) / _uiScale;
+        const float logicalHeight = static_cast<float>(physicalHeight) / _uiScale;
+        backend.beginFrame();
+        backend.setUiScale(_uiScale);
+        backend.beginCanvas(FRectangle(0.0f, 0.0f,
+                                       static_cast<float>(physicalWidth),
+                                       static_cast<float>(physicalHeight)));
+
+        drawBackdrop(backend, logicalWidth, logicalHeight);
+        const ayt::ui::IRenderBackend::LayerDesc desc =
+            makeLayerDesc(logicalWidth, logicalHeight);
+        if (_useLayer && !(_scenario == "msaa_fresh" && !_mutated)) {
+            renderLayer(backend, desc);
+        } else if (!_useLayer) {
+            drawImmediate(backend, desc.logicalBounds);
+        }
+
+        backend.endCanvas();
+        backend.endFrame();
+        _dirtyAtEnd = _useLayer && backend.isLayerDirty(_layer);
+    }
+
+    void release(ayt::render::UIRenderBackend& backend)
+    {
+        if (_layer.isValid()) backend.releaseLayer(_layer);
+        _layer = {-1};
+        _descValid = false;
+        _painted = false;
+    }
+
+    const std::string& scenario() const { return _scenario; }
+    const char* pathName() const { return _useLayer ? "layer" : "immediate"; }
+    float uiScale() const { return _uiScale; }
+    int layerPaints() const { return _layerPaints; }
+    int fullPaints() const { return _fullPaints; }
+    int partialPaints() const { return _partialPaints; }
+    int layerUpdates() const { return _layerUpdates; }
+    bool observedLeaseInvalidation() const { return _observedLeaseInvalidation; }
+    bool recoveredLease() const { return _recoveredLease; }
+    bool dirtyAtEnd() const { return _dirtyAtEnd; }
+
+private:
+    using Rect = ayt::math::FRectangle;
+    using Color = ayt::math::FVector4;
+    using LayerDesc = ayt::ui::IRenderBackend::LayerDesc;
+
+    bool isPartialClearScenario() const
+    {
+        return _scenario == "clear_transparent"
+            || _scenario == "clear_color"
+            || _scenario == "clear_preserve";
+    }
+
+    static void resizeFramebuffer(GalleryState& state, int width, int height)
+    {
+        state.clientW = std::max(32, width);
+        state.clientH = std::max(32, height);
+        if (state.ui != nullptr) {
+            state.ui->setClientSize(static_cast<float>(state.clientW),
+                                    static_cast<float>(state.clientH));
+        }
+        if (state.renderer != nullptr) {
+            state.renderer->resize(static_cast<uint32_t>(state.clientW),
+                                   static_cast<uint32_t>(state.clientH));
+        }
+        if (state.uiBackend != nullptr) {
+            state.uiBackend->setFramebufferSize(
+                static_cast<uint16_t>(state.clientW),
+                static_cast<uint16_t>(state.clientH));
+        }
+    }
+
+    static bool sameShape(const LayerDesc& a, const LayerDesc& b)
+    {
+        return a.logicalBounds.minX == b.logicalBounds.minX
+            && a.logicalBounds.minY == b.logicalBounds.minY
+            && a.logicalBounds.maxX == b.logicalBounds.maxX
+            && a.logicalBounds.maxY == b.logicalBounds.maxY
+            && a.dpiScale == b.dpiScale
+            && a.hasAlpha == b.hasAlpha
+            && a.clearMode == b.clearMode;
+    }
+
+    LayerDesc makeLayerDesc(float logicalWidth, float logicalHeight) const
+    {
+        LayerDesc desc;
+        const float marginX = std::max(80.0f, logicalWidth * 0.105f);
+        const float marginY = std::max(54.0f, logicalHeight * 0.105f);
+        desc.logicalBounds = Rect(marginX, marginY,
+                                  logicalWidth - marginX,
+                                  logicalHeight - marginY);
+        desc.dpiScale = _uiScale;
+        desc.hasAlpha = true;
+        if (_scenario == "clear_color") {
+            desc.clearMode = ayt::ui::IRenderBackend::LayerClearMode::Color;
+            desc.clearColor = Color(0.065f, 0.115f, 0.185f, 0.82f);
+        } else if (_scenario == "clear_preserve") {
+            desc.clearMode = ayt::ui::IRenderBackend::LayerClearMode::Preserve;
+        } else {
+            desc.clearMode = ayt::ui::IRenderBackend::LayerClearMode::Transparent;
+        }
+        return desc;
+    }
+
+    static Rect inset(const Rect& b, float left, float top,
+                      float right, float bottom)
+    {
+        return Rect(b.minX + left, b.minY + top,
+                    b.maxX - right, b.maxY - bottom);
+    }
+
+    static Rect markerBounds(const Rect& b, bool moved)
+    {
+        const float width = b.maxX - b.minX;
+        const float height = b.maxY - b.minY;
+        const float size = std::min(112.0f, height * 0.29f);
+        const float x = moved ? b.maxX - size - width * 0.10f
+                              : b.minX + width * 0.10f;
+        const float y = b.minY + height * 0.57f;
+        return Rect(x, y, x + size, y + size);
+    }
+
+    static Rect unionRect(const Rect& a, const Rect& b)
+    {
+        return Rect(std::min(a.minX, b.minX) - 3.0f,
+                    std::min(a.minY, b.minY) - 3.0f,
+                    std::max(a.maxX, b.maxX) + 3.0f,
+                    std::max(a.maxY, b.maxY) + 3.0f);
+    }
+
+    static void drawBackdrop(ayt::ui::IRenderBackend& r,
+                             float width, float height)
+    {
+        const float midX = width * 0.5f;
+        const float midY = height * 0.5f;
+        r.drawRect(Rect(0, 0, midX, midY),
+                   Color(0.055f, 0.11f, 0.19f, 1.0f));
+        r.drawRect(Rect(midX, 0, width, midY),
+                   Color(0.23f, 0.075f, 0.11f, 1.0f));
+        r.drawRect(Rect(0, midY, midX, height),
+                   Color(0.075f, 0.20f, 0.13f, 1.0f));
+        r.drawRect(Rect(midX, midY, width, height),
+                   Color(0.21f, 0.15f, 0.045f, 1.0f));
+        for (int i = 0; i < 9; ++i) {
+            const float x = width * (0.07f + static_cast<float>(i) * 0.105f);
+            r.drawRect(Rect(x, 0.0f, x + 3.0f, height),
+                       Color(0.62f, 0.72f, 0.92f, 0.16f));
+        }
+        r.drawGradientRect(Rect(width * 0.04f, height * 0.045f,
+                                width * 0.43f, height * 0.105f),
+                           Color(0.18f, 0.78f, 0.96f, 0.88f),
+                           Color(0.96f, 0.28f, 0.52f, 0.88f));
+    }
+
+    static void drawMarker(ayt::ui::IRenderBackend& r, const Rect& b,
+                           const Color& color)
+    {
+        r.drawRect(b, color);
+        const float w = b.maxX - b.minX;
+        const float h = b.maxY - b.minY;
+        r.drawGradientRect(Rect(b.minX + w * 0.18f, b.minY + h * 0.18f,
+                                b.maxX - w * 0.18f, b.maxY - h * 0.18f),
+                           Color(1.0f, 0.82f, 0.24f, 0.70f),
+                           Color(0.20f, 0.88f, 1.0f, 0.38f));
+    }
+
+    static void drawTransparentContent(ayt::ui::IRenderBackend& r,
+                                       const Rect& b)
+    {
+        const float w = b.maxX - b.minX;
+        const float h = b.maxY - b.minY;
+        r.drawRect(Rect(b.minX + w * 0.06f, b.minY + h * 0.08f,
+                        b.minX + w * 0.52f, b.minY + h * 0.48f),
+                   Color(0.10f, 0.70f, 0.96f, 0.58f));
+        r.drawGradientRect(Rect(b.minX + w * 0.31f, b.minY + h * 0.22f,
+                                b.minX + w * 0.80f, b.minY + h * 0.62f),
+                           Color(0.96f, 0.18f, 0.42f, 0.66f),
+                           Color(0.38f, 0.12f, 0.90f, 0.34f));
+        r.drawRect(Rect(b.minX + w * 0.69f, b.minY + h * 0.10f,
+                        b.minX + w * 0.92f, b.minY + h * 0.34f),
+                   Color(0.96f, 0.78f, 0.18f, 0.72f));
+        // Deliberately leave the lower middle empty: the asymmetric main
+        // backdrop must remain visible through the Layer texture.
+    }
+
+    static void drawOpacityContent(ayt::ui::IRenderBackend& r,
+                                   const Rect& b)
+    {
+        const float w = b.maxX - b.minX;
+        const float h = b.maxY - b.minY;
+        r.drawRect(Rect(b.minX + w * 0.06f, b.minY + h * 0.10f,
+                        b.minX + w * 0.28f, b.minY + h * 0.42f),
+                   Color(0.12f, 0.82f, 0.96f, 0.86f));
+        r.pushOpacity(0.60f);
+        r.pushOpacity(0.50f);
+        r.drawGradientRect(Rect(b.minX + w * 0.39f, b.minY + h * 0.10f,
+                                b.minX + w * 0.61f, b.minY + h * 0.42f),
+                           Color(0.98f, 0.24f, 0.46f, 0.90f),
+                           Color(0.56f, 0.20f, 0.94f, 0.74f));
+        r.popOpacity();
+        r.popOpacity();
+        r.drawRect(Rect(b.minX + w * 0.72f, b.minY + h * 0.10f,
+                        b.minX + w * 0.94f, b.minY + h * 0.42f),
+                   Color(0.96f, 0.74f, 0.16f, 0.64f));
+        r.drawRect(Rect(b.minX + w * 0.14f, b.minY + h * 0.64f,
+                        b.minX + w * 0.86f, b.minY + h * 0.82f),
+                   Color(0.24f, 0.92f, 0.48f, 0.52f));
+    }
+
+    static void drawBlendContent(ayt::ui::IRenderBackend& r, const Rect& b)
+    {
+        const float w = b.maxX - b.minX;
+        const float h = b.maxY - b.minY;
+        r.setBlendMode(ayt::ui::BlendMode::Normal);
+        r.drawGradientRect(b, Color(0.12f, 0.23f, 0.42f, 1.0f),
+                           Color(0.74f, 0.26f, 0.13f, 1.0f));
+        const float top = b.minY + h * 0.18f;
+        const float bottom = b.minY + h * 0.82f;
+        const float gap = w * 0.035f;
+        const float cell = (w - gap * 4.0f) / 3.0f;
+        const Rect additive(b.minX + gap, top,
+                            b.minX + gap + cell, bottom);
+        const Rect multiply(additive.maxX + gap, top,
+                            additive.maxX + gap + cell, bottom);
+        const Rect screen(multiply.maxX + gap, top,
+                          multiply.maxX + gap + cell, bottom);
+        r.setBlendMode(ayt::ui::BlendMode::Additive);
+        r.drawGradientRect(additive, Color(0.18f, 0.76f, 0.94f, 0.74f),
+                           Color(0.92f, 0.22f, 0.44f, 0.62f));
+        r.setBlendMode(ayt::ui::BlendMode::Multiply);
+        r.drawGradientRect(multiply, Color(0.22f, 0.92f, 0.46f, 0.82f),
+                           Color(0.92f, 0.70f, 0.16f, 0.68f));
+        r.setBlendMode(ayt::ui::BlendMode::Screen);
+        r.drawGradientRect(screen, Color(0.56f, 0.22f, 0.94f, 0.72f),
+                           Color(0.12f, 0.86f, 0.90f, 0.78f));
+        r.setBlendMode(ayt::ui::BlendMode::Normal);
+    }
+
+    void drawClearContent(ayt::ui::IRenderBackend& r, const Rect& b,
+                          bool fullPaint) const
+    {
+        const bool preserve = _scenario == "clear_preserve";
+        const Rect oldMarker = markerBounds(b, false);
+        const Rect newMarker = markerBounds(b, true);
+        if (preserve && fullPaint) {
+            r.drawGradientRect(b, Color(0.055f, 0.085f, 0.15f, 1.0f),
+                               Color(0.12f, 0.22f, 0.17f, 1.0f));
+        }
+        if (fullPaint) {
+            const float w = b.maxX - b.minX;
+            const float h = b.maxY - b.minY;
+            r.drawRect(Rect(b.minX + w * 0.40f, b.minY + h * 0.12f,
+                            b.minX + w * 0.60f, b.minY + h * 0.28f),
+                       Color(0.18f, 0.82f, 0.64f, 0.78f));
+        }
+        if (_contentGeneration == 0 || (preserve && fullPaint)) {
+            drawMarker(r, oldMarker, Color(0.92f, 0.18f, 0.38f, 0.76f));
+        } else {
+            drawMarker(r, newMarker, Color(0.18f, 0.72f, 0.98f, 0.76f));
+        }
+    }
+
+    void drawImmediate(ayt::ui::IRenderBackend& r, const Rect& b) const
+    {
+        if (_scenario == "opacity") {
+            r.pushOpacity(0.55f);
+            drawOpacityContent(r, b);
+            r.popOpacity();
+        } else if (_scenario == "blend") {
+            drawBlendContent(r, b);
+        } else if (isPartialClearScenario()) {
+            if (_scenario == "clear_color") {
+                r.drawRect(b, Color(0.065f, 0.115f, 0.185f, 0.82f));
+            } else if (_scenario == "clear_preserve") {
+                r.drawGradientRect(b, Color(0.055f, 0.085f, 0.15f, 1.0f),
+                                   Color(0.12f, 0.22f, 0.17f, 1.0f));
+            }
+            const float w = b.maxX - b.minX;
+            const float h = b.maxY - b.minY;
+            r.drawRect(Rect(b.minX + w * 0.40f, b.minY + h * 0.12f,
+                            b.minX + w * 0.60f, b.minY + h * 0.28f),
+                       Color(0.18f, 0.82f, 0.64f, 0.78f));
+            if (_scenario == "clear_preserve" && _contentGeneration > 0) {
+                drawMarker(r, markerBounds(b, false),
+                           Color(0.92f, 0.18f, 0.38f, 0.76f));
+            }
+            drawMarker(r, markerBounds(b, _contentGeneration > 0),
+                       _contentGeneration > 0
+                           ? Color(0.18f, 0.72f, 0.98f, 0.76f)
+                           : Color(0.92f, 0.18f, 0.38f, 0.76f));
+        } else {
+            drawTransparentContent(r, b);
+        }
+    }
+
+    void drawLayerPaint(ayt::ui::IRenderBackend& r, const Rect& b,
+                        bool fullPaint) const
+    {
+        if (_scenario == "opacity") {
+            drawOpacityContent(r, b);
+        } else if (_scenario == "blend") {
+            drawBlendContent(r, b);
+        } else if (isPartialClearScenario()) {
+            drawClearContent(r, b, fullPaint);
+        } else {
+            drawTransparentContent(r, b);
+        }
+    }
+
+    Rect partialDamage(const Rect& b) const
+    {
+        const Rect oldMarker = markerBounds(b, false);
+        const Rect newMarker = markerBounds(b, true);
+        return _scenario == "clear_preserve"
+            ? inset(newMarker, -3.0f, -3.0f, -3.0f, -3.0f)
+            : unionRect(oldMarker, newMarker);
+    }
+
+    void renderLayer(ayt::render::UIRenderBackend& backend,
+                     const LayerDesc& desired)
+    {
+        bool shapeChanged = false;
+        if (!_layer.isValid()) {
+            _layer = backend.createLayer(desired);
+            _desc = desired;
+            _descValid = _layer.isValid();
+            _painted = false;
+            shapeChanged = true;
+        } else if (!_descValid || !sameShape(_desc, desired)) {
+            shapeChanged = true;
+            ++_layerUpdates;
+            if (!backend.updateLayer(_layer, desired)) {
+                backend.releaseLayer(_layer);
+                _layer = backend.createLayer(desired);
+                _painted = false;
+            }
+            _desc = desired;
+            _descValid = _layer.isValid();
+        }
+        if (!_layer.isValid()) return;
+
+        Rect damage = desired.logicalBounds;
+        if (_pendingPartial && !shapeChanged) {
+            damage = partialDamage(desired.logicalBounds);
+            backend.invalidateLayer(_layer, damage);
+        }
+
+        const bool backendDirty = backend.isLayerDirty(_layer);
+        if (_expectLeaseInvalidation && backendDirty) {
+            _observedLeaseInvalidation = true;
+        }
+        if (backendDirty) {
+            const bool partial = _pendingPartial && _painted && !shapeChanged;
+            ayt::ui::IRenderBackend::LayerPaint paint;
+            paint.fullRedraw = !partial;
+            paint.damage = partial ? damage : desired.logicalBounds;
+            if (backend.beginLayerPaint(_layer, paint)) {
+                if (partial) backend.pushClip(damage);
+                drawLayerPaint(backend, desired.logicalBounds, !partial);
+                if (partial) backend.popClip();
+                backend.endLayerPaint(_layer);
+                _painted = true;
+                ++_layerPaints;
+                if (partial) ++_partialPaints;
+                else ++_fullPaints;
+                _pendingPartial = false;
+            }
+        }
+
+        if (_observedLeaseInvalidation && !backend.isLayerDirty(_layer)) {
+            _recoveredLease = true;
+        }
+        if (!backend.isLayerDirty(_layer)) {
+            backend.compositeLayer(_layer, desired.logicalBounds,
+                                   _scenario == "opacity" ? 0.55f : 1.0f);
+        }
+    }
+
+    std::string _scenario;
+    bool _useLayer = false;
+    float _uiScale = 1.0f;
+    ayt::ui::IRenderBackend::LayerHandle _layer{-1};
+    LayerDesc _desc{};
+    bool _descValid = false;
+    bool _painted = false;
+    bool _mutated = false;
+    bool _pendingPartial = false;
+    bool _expectLeaseInvalidation = false;
+    bool _observedLeaseInvalidation = false;
+    bool _recoveredLease = false;
+    bool _dirtyAtEnd = false;
+    int _contentGeneration = 0;
+    int _layerPaints = 0;
+    int _fullPaints = 0;
+    int _partialPaints = 0;
+    int _layerUpdates = 0;
+};
+
 // Backend page -- creates the two UI textures (64x64 smooth gradient +
 // 16x16 rounded button) and mounts the host-drawn demo widget into
 // page_backend's VBox (fixed-height slot). Textures are registered with
@@ -2570,6 +3029,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         state.dpiScale = capture.captureScale;
         ui.setDpiScale(state.dpiScale);
     }
+    LayerMatrixProbe layerMatrix(capture.layerMatrixScenario,
+                                 capture.rootLayerEnabled,
+                                 capture.captureScale);
 
     // TextInput focus gate + Device?UI text/IME bridge.
     ui.onTextEditingFocusChanged = [&devices](bool editing) {
@@ -2625,13 +3087,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         }
         std::fprintf(stderr,
                      "[AYUI_Gallery] visual capture: page=%s mode=%s scrollY=%.1f "
-                     "action=%s layerProbe=%s rootLayer=%s scale=%.2f backend=%s "
+                     "action=%s layerProbe=%s layerMatrix=%s rootLayer=%s "
+                     "scale=%.2f backend=%s "
                      "output=%s\n",
                      capture.pageId.c_str(),
                      capture.batchMode == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
                          ? "ordered" : "overlap",
                      capture.scrollY, capture.action.c_str(),
                      capture.layerProbeScenario.c_str(),
+                     capture.layerMatrixScenario.c_str(),
                      capture.rootLayerEnabled ? "enabled" : "immediate",
                      capture.captureScale, backendName(capture.backend),
                      capture.outputBase.c_str());
@@ -2689,6 +3153,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         if (dt > 0.1f) dt = 0.1f; // clamp hitch spikes
         if (capture.enabled) dt = 1.0f / 60.0f; // deterministic visual regression step
 
+        const int frameNumber = visualFrame + 1;
+        if (layerMatrix.enabled()) {
+            // resize/reset must occur before beginCompositeFrame: bgfx reset
+            // invalidates pool leases and the following UI beginFrame is
+            // responsible for observing and recovering the Layer.
+            layerMatrix.beforeFrame(state, frameNumber,
+                                    capture.mutationFrame);
+        }
+
         ayt::render::ClearDesc clear;
         clear.r = 0.10f;
         clear.g = 0.10f;
@@ -2700,42 +3173,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
         uiBackend.setFramebufferSize(static_cast<uint16_t>(state.clientW),
                                      static_cast<uint16_t>(state.clientH));
-        // PR-Dock-TearOff: tick promoted child windows BEFORE the primary
-        // (each child updates + GDI-renders under its own ActiveScope,
-        // then the primary takes the active slot back).
-        if (capture.layerProbeScenario.empty()) {
-            state.childWindows->tickAll(dt);
-            ui.update(dt); // caret blink, hover revalidate, hot-reload
-        }
-        ui.layout();
-        if (capture.layerProbeScenario.empty()) {
-            state.accessibility->update();
-        }
-        if (capture.enabled && capture.scrollY > 0.0f) {
-            if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
-                    ui.findById("content_scroll"))) {
-                // Apply after layout has established contentSize; applying
-                // only during bootstrap would clamp against the initial 0.
-                scroll->setScrollOffset(ayt::math::FVector2(0.0f, capture.scrollY));
+        if (layerMatrix.enabled()) {
+            layerMatrix.render(uiBackend, state.clientW, state.clientH);
+        } else {
+            // PR-Dock-TearOff: tick promoted child windows BEFORE the primary
+            // (each child updates + GDI-renders under its own ActiveScope,
+            // then the primary takes the active slot back).
+            if (capture.layerProbeScenario.empty()) {
+                state.childWindows->tickAll(dt);
+                ui.update(dt); // caret blink, hover revalidate, hot-reload
             }
-        }
-        const int frameNumber = visualFrame + 1;
-        if (!capture.layerProbeScenario.empty()
-            && frameNumber == capture.mutationFrame
-            && state.layerVisualProbe != nullptr) {
-            if (capture.layerProbeScenario == "full") {
-                state.layerVisualProbe->invalidateFullProbe();
-            } else if (capture.layerProbeScenario == "move") {
-                state.layerVisualProbe->moveArrowAndInvalidate();
+            ui.layout();
+            if (capture.layerProbeScenario.empty()) {
+                state.accessibility->update();
             }
+            if (capture.enabled && capture.scrollY > 0.0f) {
+                if (auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(
+                        ui.findById("content_scroll"))) {
+                    // Apply after layout has established contentSize; applying
+                    // only during bootstrap would clamp against the initial 0.
+                    scroll->setScrollOffset(ayt::math::FVector2(0.0f, capture.scrollY));
+                }
+            }
+            if (!capture.layerProbeScenario.empty()
+                && frameNumber == capture.mutationFrame
+                && state.layerVisualProbe != nullptr) {
+                if (capture.layerProbeScenario == "full") {
+                    state.layerVisualProbe->invalidateFullProbe();
+                } else if (capture.layerProbeScenario == "move") {
+                    state.layerVisualProbe->moveArrowAndInvalidate();
+                }
+            }
+            // Drop guides paint inside DockArea::render (after its children).
+            // Child-window redock still works: tickAll/updateRedockHover sets
+            // setExternalDropPos before populateFrame.
+            ui.populateFrame();
+            ui.flushFrame();
         }
-        // Drop guides paint inside DockArea::render (after its children).
-        // Do NOT call paintDropGuide again here ??that stacked a second
-        // copy of the Phase-3 join/split preview on top of the first.
-        // Child-window redock still works: tickAll ??updateRedockHover
-        // sets setExternalDropPos before populateFrame.
-        ui.populateFrame();
-        ui.flushFrame();
 
         ++visualFrame;
         if (capture.enabled && visualFrame == capture.captureFrame) {
@@ -2747,7 +3221,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
                              "page=%s\nmode=%s\nframe=%d\ndrawCalls=%d\n"
                              "scrollY=%.1f\naction=%s\nlayerProbe=%s\n"
                              "rootLayer=%s\nscale=%.2f\nframebuffer=%dx%d\n"
-                             "backend=%s\nqueued=%s\n",
+                             "backend=%s\nqueued=%s\nlayerMatrix=%s\n"
+                             "matrixPath=%s\nmatrixScale=%.2f\n"
+                             "layerPaints=%d\nfullPaints=%d\npartialPaints=%d\n"
+                             "layerUpdates=%d\nobservedLeaseInvalidation=%s\n"
+                             "recoveredLease=%s\nlayerDirtyAtCapture=%s\nmsaa=%u\n",
                              capture.pageId.c_str(),
                              capture.batchMode
                                      == ayt::render::UIRenderBackend::BatchMode::OrderedRuns
@@ -2758,7 +3236,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
                              capture.rootLayerEnabled ? "enabled" : "immediate",
                              capture.captureScale, state.clientW, state.clientH,
                              backendName(capture.backend),
-                             captureQueued ? "yes" : "no");
+                             captureQueued ? "yes" : "no",
+                             layerMatrix.scenario().c_str(),
+                             layerMatrix.pathName(), layerMatrix.uiScale(),
+                             layerMatrix.layerPaints(), layerMatrix.fullPaints(),
+                             layerMatrix.partialPaints(), layerMatrix.layerUpdates(),
+                             layerMatrix.observedLeaseInvalidation() ? "yes" : "no",
+                             layerMatrix.recoveredLease() ? "yes" : "no",
+                             layerMatrix.dirtyAtEnd() ? "yes" : "no",
+                             renderer.msaaSampleCount());
                 std::fclose(metrics);
             }
             std::fprintf(stderr,
@@ -2790,6 +3276,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     teardownCapabilitiesOverlay(state);
     teardownImageCompositionPage(state);
     teardownLayerVisualProbe(state);
+    layerMatrix.release(uiBackend);
     // Backend page textures (UIRenderBackend registry) MUST be released
     // before uiBackend.shutdown() -- the registry frees GPU textures in
     // shutdown, double-release is a no-op, but the handles here would

@@ -237,11 +237,14 @@ Production root Layer 另有真实纹理和局部 damage 门禁：
     -OutputDir <output-dir>
 ```
 
-脚本在 1.0×/1.5× 下分别生成即时参考、全量 Layer、clean Layer、移动后即时参考和局部 Layer；
-两档都保持 1280×720 DIP 逻辑画布，物理 framebuffer 分别为 1280×720 和 1920×1080，
-覆盖非对称 checker、alpha sprite、atlas、渐变、文本、边框及 stencil path clip。即时与 Layer
-允许一次 RGBA8 离屏往返产生的最多 1 LSB；full repaint 与 clean retained reuse 必须字节完全一致。
-当前 D3D11 基线为 immediate 30、full Layer 31、clean Layer 1、partial Layer 11 次 UI draw call。
+脚本运行 36 次独立 GPU capture。原复杂控件矩阵在 1.0×/1.5× 下生成即时、full、clean 和 partial
+参考，两档保持 1280×720 DIP，framebuffer 为 1280×720/1920×1080，并覆盖非对称 checker、alpha
+sprite、atlas、渐变、文本、边框及 stencil path clip。独立的透明矩阵在非对称主画布上验证透明
+Layer、嵌套 opacity 与 Additive/Multiply/Screen 隔离组；生命周期矩阵验证 framebuffer resize、动态
+DPI、device reset、MSAA reset 后的 pool lease 恢复，以及 Transparent/Color/Preserve 局部 clear。
+除 RGBA8 group opacity 的双重量化上限为 2 LSB 外，其余即时语义对照最多 1 LSB；isolated blend、
+Preserve 和 clean retained reuse 字节完全一致。当前 D3D11 root 基线仍为 immediate 30、full Layer 31、
+clean Layer 1、partial Layer 11 次 UI draw call。
 
 ## 目录
 
@@ -265,8 +268,10 @@ Production root Layer 另有真实纹理和局部 damage 门禁：
 - RenderTargetPool 当前只接受精确尺寸/格式/深度/采样方式键和 1× sample，默认两帧 quarantine、256 MiB
   best-effort 预算；leased 或仍在 quarantine 的目标可暂时超过预算。该池与 UI backend 都限定在
   renderer thread。Noop 契约测试已覆盖复杂路径、嵌套 stencil clip、局部 damage、clean composite、
-  224 次离屏 pass 边界和 reset 重绘；D3D11 已通过 1.0×/1.5× 真实纹理、方向、透明复合与局部清除
-  图像门禁，D3D12/OpenGL/Vulkan 以及 Preserve/resize/device-reset 截图矩阵仍待补齐。
+  224 次离屏 pass 边界和 reset 重绘；D3D11 已通过 36-capture 的真实纹理、透明/opacity/blend、
+  Preserve/Transparent/Color、resize/DPI/device-reset/MSAA-reset 图像门禁。UI Layer 保持 1× sample，
+  因而 MSAA 门禁比较“reset 后恢复的旧 Layer”与“reset 后新建 Layer”，不把 multisampled immediate
+  边缘当作同一参考。D3D12/OpenGL/Vulkan 的同矩阵仍待补齐。
 - vector path 已进入通用 display-list；AYRenderer 支持简单凹多边形、圆角矩形、椭圆、圆弧、
   cubic Bezier、miter stroke、显式 winding 孔洞和嵌套 stencil path clip。自相交路径、布尔运算、
   fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。

@@ -168,7 +168,10 @@ Widget
   clear mode/color；`LayerPaint` 携带局部 damage 和 full-redraw 选择。
 
 Layer 保留的是像素，display-list 保留的是绘制命令，两者不能混为一套缓存。Layer 的逻辑尺寸
-变化或 DPI 变化必须把 backing target resize 为 `ceil(logicalSize * dpiScale)` 并要求重绘；
+变化或 DPI 变化必须把逻辑边界的 min/max 分别按 DPI 向外 `floor/ceil` 到物理像素，backing target
+使用两条对齐边之差并要求重绘；只对 `logicalSize * dpiScale` 做 `ceil` 会让小数 origin 的离屏像素
+中心相对主 framebuffer 偏移，point composite 在图元边缘产生一像素接缝。合成完整 backing 后必须
+裁回公开 logical bounds，Color padding 不得泄漏到层外。
 dirty Layer 在 `beginLayerPaint()` / `endLayerPaint()` 完成前不能 composite。局部 damage 是实际重绘
 契约：调用方必须把 replay 限制在 damage clip 内；Transparent/Color Layer 先以无混合覆盖写清除
 damage，Preserve Layer 保留原像素。任何实现都不得破坏区域外像素、clip、透明和 painter order。
@@ -194,6 +197,9 @@ UI RenderTarget 使用 point sampling 保持同尺寸复合的 texel identity；
 source-over，使 backing texture 保存 premultiplied RGB 与正确 coverage alpha；最终 composite 使用
 premultiplied-over，避免抗锯齿边缘二次乘 alpha。局部 replay 的所有图元必须满足“裁剪不重新布局”——
 纹理重映射 UV，四角渐变按原 bounds 双线性重映射颜色，SDF/path 使用原 shape 和 damage clip。
+半透明 Color clear 同样必须先写入 `(rgb*alpha, alpha)`，不能把 straight RGB 直接放进 premultiplied
+backing。Additive/Multiply/Screen 只改变 RGB blend 方程，alpha 一律独立使用 coverage source-over；
+否则 Multiply/Screen 会把已经不透明的隔离层重新变成透明，最终错误混入 Layer 外部背景。
 
 ### 4.5 产品化呈现契约
 
@@ -501,10 +507,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 按优先级记录剩余边界：
 
-1. Production root UI Layer 已完成显式 dirty rect、扩展 view 调度和 D3D11 真实 GPU 基线；1.0×/1.5×
-   保持同一 1280×720 DIP 画布并使用 1280×720/1920×1080 framebuffer，full/clean/partial 场景覆盖
-   纹理方向、alpha、UV、stencil 与局部覆盖清除。下一步补 D3D12、
-   Vulkan、OpenGL 以及 Preserve、resize/device-reset 帧；随后再评估多 damage region 与子树分层，
+1. Production root UI Layer 已完成显式 dirty rect、扩展 view 调度和 D3D11 36-capture GPU 基线；
+   除原 1.0×/1.5× full/clean/partial 复杂控件路径外，已覆盖透明 Layer、嵌套/group opacity、三种
+   高级 blend 隔离、resize、动态 DPI、device/MSAA reset lease 恢复及 Preserve/Transparent/Color
+   局部 clear。下一步补 D3D12、Vulkan、OpenGL 同矩阵；随后评估多 damage region 与子树分层，
    避免 union rect 过大。
 2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
    支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
@@ -530,8 +536,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 2. **UI Layer / RenderTarget（Production root 第二阶段完成）**：接口、Mock 和 AYRenderer bgfx
    实现已经闭环；FrameGraph/UI Layer 共用 generation-safe RenderTargetPool。UIManager 可 opt-in
    root 像素层，clean frame 仅 composite，显式 dirty rect 局部 repaint，overlay 即时叠加，失败同帧
-   回退；每帧 224 次离屏 pass 的边界可确定复现并跨帧恢复。D3D11 的 1.0×/1.5× 图像矩阵已验证
-   immediate/full/clean/partial，clean reuse 字节精确、Layer 语义最多差 1 个 RGBA8 LSB。下一阶段是
+   回退；每帧 224 次离屏 pass 的边界可确定复现并跨帧恢复。D3D11 的 36-capture 图像矩阵已验证
+   immediate/full/clean/partial、透明/opacity/blend 和完整生命周期；clean reuse、isolated blend 与
+   Preserve 字节精确，通常最多差 1 LSB，RGBA8 group opacity 因双重量化最多 2 LSB。下一阶段是
    多 region/子树策略和其余 GPU backend 视觉基线；滤镜、背景模糊、多 viewport 以及未来
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
 3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
