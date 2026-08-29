@@ -99,6 +99,18 @@ struct VisualCaptureConfig {
     int exitFrame = 14;
 };
 
+void writeCaptureStartupStage(const VisualCaptureConfig& capture,
+                              const char* stage)
+{
+    if (!capture.enabled || capture.outputBase.empty() || stage == nullptr) return;
+    const std::string path = capture.outputBase + ".startup.txt";
+    FILE* output = nullptr;
+    if (fopen_s(&output, path.c_str(), "ab") == 0 && output != nullptr) {
+        std::fprintf(output, "%s\n", stage);
+        std::fclose(output);
+    }
+}
+
 VisualCaptureConfig visualCaptureConfig()
 {
     VisualCaptureConfig config;
@@ -1730,8 +1742,19 @@ private:
 
     static void resizeFramebuffer(GalleryState& state, int width, int height)
     {
-        state.clientW = std::max(32, width);
-        state.clientH = std::max(32, height);
+        int actualWidth = std::max(32, width);
+        int actualHeight = std::max(32, height);
+        // Vulkan swapchains must use the HWND surface extent. Resize the
+        // capture window together with renderer/reset state; resizing only
+        // bgfx works on D3D but creates a hidden second scale on Vulkan.
+        if (state.devices != nullptr) {
+            ayt::device::WindowManager& window = state.devices->window();
+            window.setSize(actualWidth, actualHeight);
+            actualWidth = std::max(32, window.getWidth());
+            actualHeight = std::max(32, window.getHeight());
+        }
+        state.clientW = actualWidth;
+        state.clientH = actualHeight;
         if (state.ui != nullptr) {
             state.ui->setClientSize(static_cast<float>(state.clientW),
                                     static_cast<float>(state.clientH));
@@ -2931,12 +2954,25 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
+    // Keep HWND client pixels, bgfx swapchain extent and AYUI's explicit
+    // capture scale in one coordinate system. Without per-monitor awareness,
+    // Vulkan must honor the DPI-virtualized surface extent while D3D can keep
+    // the requested reset size, making a 1.5x Layer comparison perform an
+    // accidental second resample on Vulkan.
+    if (!::SetProcessDpiAwarenessContext(
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
+        ::SetProcessDPIAware();
+    }
     AllocConsole();
     FILE* dummy = nullptr;
     freopen_s(&dummy, "CONOUT$", "w", stdout);
     freopen_s(&dummy, "CONOUT$", "w", stderr);
 
     const VisualCaptureConfig capture = visualCaptureConfig();
+    if (capture.enabled) {
+        std::remove((capture.outputBase + ".startup.txt").c_str());
+        writeCaptureStartupStage(capture, "capture_config_ready");
+    }
     // Capture scale models a denser framebuffer, not a smaller logical
     // viewport. Keep the probe at 1280x720 DIP and grow physical pixels so
     // the 1.5x matrix still observes every tested primitive.
@@ -2954,14 +2990,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     cfg.window.title = "AYUI Gallery [Images / Composition]";
     cfg.window.width = initialPixelWidth;
     cfg.window.height = initialPixelHeight;
+    cfg.window.hidden = capture.enabled;
     if (!devices.initialize(cfg)) {
+        writeCaptureStartupStage(capture, "device_initialize_failed");
         std::fprintf(stderr, "[AYUI_Gallery] DeviceManager initialize failed\n");
         return 1;
     }
+    writeCaptureStartupStage(capture, "device_ready");
 
     ayt::device::WindowManager& window = devices.window();
     HWND hwnd = static_cast<HWND>(window.getWindowHandle());
     if (hwnd == nullptr) {
+        writeCaptureStartupStage(capture, "native_window_missing");
         std::fprintf(stderr, "[AYUI_Gallery] no HWND\n");
         devices.shutdown();
         return 1;
@@ -2983,19 +3023,25 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     init.vsync = !capture.enabled;
     init.msaa = 0; // UI-only: crisp edges, no need for MSAA
     init.backend = capture.backend;
+    writeCaptureStartupStage(capture, "renderer_initialize_begin");
     if (!renderer.initialize(init)) {
+        writeCaptureStartupStage(capture, "renderer_initialize_failed");
         std::fprintf(stderr, "[AYUI_Gallery] Renderer initialize failed\n");
         devices.shutdown();
         return 1;
     }
+    writeCaptureStartupStage(capture, "renderer_ready");
 
     ayt::render::UIRenderBackend uiBackend;
+    writeCaptureStartupStage(capture, "ui_backend_initialize_begin");
     if (!uiBackend.initialize(renderer)) {
+        writeCaptureStartupStage(capture, "ui_backend_initialize_failed");
         std::fprintf(stderr, "[AYUI_Gallery] UIRenderBackend initialize failed\n");
         renderer.shutdown();
         devices.shutdown();
         return 1;
     }
+    writeCaptureStartupStage(capture, "ui_backend_ready");
     uiBackend.setFramebufferSize(static_cast<uint16_t>(initialPixelWidth),
                                  static_cast<uint16_t>(initialPixelHeight));
     uiBackend.setBatchMode(capture.batchMode);
@@ -3060,12 +3106,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     state.layoutPath = resolveLayoutPath();
     if (!loadAndWire(state)) {
+        writeCaptureStartupStage(capture, "gallery_layout_failed");
         ui.shutdown();
         uiBackend.shutdown();
         renderer.shutdown();
         devices.shutdown();
         return 1;
     }
+    writeCaptureStartupStage(capture, "gallery_ready");
     state.accessibility = ayt::ui::createNativeAccessibilityAdapter(ui, hwnd);
     if (capture.enabled) {
         showPage(ui, capture.pageId.c_str());
@@ -3214,6 +3262,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         ++visualFrame;
         if (capture.enabled && visualFrame == capture.captureFrame) {
             captureQueued = renderer.captureScreenshot(capture.outputBase);
+            writeCaptureStartupStage(capture,
+                captureQueued ? "capture_queued" : "capture_queue_failed");
             const std::string metricsPath = capture.outputBase + ".metrics.txt";
             FILE* metrics = nullptr;
             if (fopen_s(&metrics, metricsPath.c_str(), "wb") == 0 && metrics != nullptr) {
@@ -3292,5 +3342,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     uiBackend.shutdown();
     renderer.shutdown();
     devices.shutdown();
+    writeCaptureStartupStage(capture, "shutdown_complete");
     return 0;
 }

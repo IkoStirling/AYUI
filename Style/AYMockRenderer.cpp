@@ -45,6 +45,8 @@ void MockRenderer::clear() {
     _layerEvents.clear();
     _boundRenderTarget = RenderTargetHandle{-1};
     _activeLayer = LayerHandle{-1};
+    _layerCacheStats = {};
+    _frameIndex = 0;
 }
 
 void MockRenderer::beginFrame() {
@@ -60,6 +62,7 @@ void MockRenderer::beginFrame() {
     _layerEvents.clear();
     _boundRenderTarget = RenderTargetHandle{-1};
     _activeLayer = LayerHandle{-1};
+    ++_frameIndex;
 }
 
 // PR-Container-Contract-Cut2: clip-stack recording overrides. Pre-PR
@@ -558,6 +561,7 @@ IRenderBackend::LayerHandle MockRenderer::createLayer(const LayerDesc& desc) {
     data.target = target;
     data.dirty = true;
     _layers.emplace(handle.id, data);
+    ++_layerCacheStats.layerCreates;
     _layerEvents.push_back({LayerEvent::Created, handle, desc.logicalBounds,
                             math::FRectangle(), 1.0f, true, desc.overlay});
     return handle;
@@ -576,6 +580,7 @@ void MockRenderer::releaseLayer(LayerHandle layer) {
     }
     _layerEvents.push_back({LayerEvent::Released, layer, desc.logicalBounds,
                             math::FRectangle(), 1.0f, false, desc.overlay});
+    ++_layerCacheStats.layerReleases;
 }
 
 bool MockRenderer::updateLayer(LayerHandle layer, const LayerDesc& desc) {
@@ -611,11 +616,21 @@ bool MockRenderer::beginLayerPaint(LayerHandle layer, const LayerPaint& paint) {
         return false;
     }
     it->second.painting = true;
+    it->second.lastPaintFrame = _frameIndex;
     _activeLayer = layer;
     bindRenderTarget(it->second.target);
     _layerEvents.push_back({LayerEvent::PaintBegan, layer,
                             it->second.desc.logicalBounds, paint.damage,
                             1.0f, paint.fullRedraw, it->second.desc.overlay});
+    if (paint.fullRedraw) ++_layerCacheStats.fullPaints;
+    else ++_layerCacheStats.partialPaints;
+    const math::FRectangle areaBounds = paint.fullRedraw
+        ? it->second.desc.logicalBounds : paint.damage;
+    const double physicalArea = std::max(0.0, static_cast<double>(areaBounds.maxX - areaBounds.minX))
+        * std::max(0.0, static_cast<double>(areaBounds.maxY - areaBounds.minY))
+        * static_cast<double>(it->second.desc.dpiScale)
+        * static_cast<double>(it->second.desc.dpiScale);
+    _layerCacheStats.repaintPixelArea += static_cast<uint64_t>(std::ceil(physicalArea));
     return true;
 }
 
@@ -654,6 +669,10 @@ void MockRenderer::compositeLayer(LayerHandle layer,
     _layerEvents.push_back({LayerEvent::Composited, layer, destBounds,
                             math::FRectangle(), alpha, false,
                             it->second.desc.overlay});
+    ++_layerCacheStats.composites;
+    if (it->second.lastPaintFrame != _frameIndex) {
+        ++_layerCacheStats.cacheHits;
+    }
 }
 
 void MockRenderer::invalidateLayer(LayerHandle layer,
@@ -685,6 +704,28 @@ void MockRenderer::invalidateLayer(LayerHandle layer,
 bool MockRenderer::isLayerDirty(LayerHandle layer) const {
     const auto it = _layers.find(layer.id);
     return it == _layers.end() || it->second.dirty;
+}
+
+IRenderBackend::LayerCacheStats MockRenderer::getLayerCacheStats() const {
+    LayerCacheStats out = _layerCacheStats;
+    out.liveLayers = static_cast<uint32_t>(_layers.size());
+    out.liveTargetLeases = static_cast<uint32_t>(_renderTargets.size());
+    out.targetAllocations = static_cast<uint64_t>(_renderTargets.size());
+    out.targetBudgetBytes = _layerCacheBudgetBytes;
+    for (const auto& [id, target] : _renderTargets) {
+        AYUNREFERENCED_PARAM(id);
+        out.allocatedTargetBytes += static_cast<size_t>(target.desc.width)
+            * static_cast<size_t>(target.desc.height) * 4u;
+    }
+    return out;
+}
+
+void MockRenderer::setLayerCacheBudgetBytes(size_t bytes) {
+    _layerCacheBudgetBytes = bytes;
+}
+
+void MockRenderer::resetLayerCacheStats() {
+    _layerCacheStats = {};
 }
 
 IRenderBackend::RenderTargetDesc MockRenderer::getRenderTargetDesc(

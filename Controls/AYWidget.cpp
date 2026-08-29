@@ -6,12 +6,70 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <unordered_map>
 #include <utility>
 
 namespace ayt::ui {
 
 namespace {
 std::atomic<uint64_t> g_nextAccessibilityId{1};
+
+struct WidgetRetainedState {
+    std::vector<math::FRectangle> damageRegions;
+    LayerCachePolicy policy = LayerCachePolicy::Disabled;
+    IRenderBackend* backend = nullptr;
+    IRenderBackend::LayerHandle layer{};
+    IRenderBackend::LayerDesc desc{};
+    bool descValid = false;
+    bool painted = false;
+    bool autoActive = false;
+    uint32_t stableFrames = 0;
+    uint32_t unstableFrames = 0;
+};
+
+std::unordered_map<const Widget*, WidgetRetainedState> g_widgetRetainedStates;
+
+bool damageRectsTouchOrOverlap(const math::FRectangle& a,
+                               const math::FRectangle& b) {
+    return a.minX <= b.maxX && a.maxX >= b.minX
+        && a.minY <= b.maxY && a.maxY >= b.minY;
+}
+
+math::FRectangle unionDamageRects(const math::FRectangle& a,
+                                  const math::FRectangle& b) {
+    return math::FRectangle(
+        std::min(a.minX, b.minX), std::min(a.minY, b.minY),
+        std::max(a.maxX, b.maxX), std::max(a.maxY, b.maxY));
+}
+
+math::FRectangle intersectDamageRect(const math::FRectangle& a,
+                                     const math::FRectangle& b) {
+    return math::FRectangle(
+        std::max(a.minX, b.minX), std::max(a.minY, b.minY),
+        std::min(a.maxX, b.maxX), std::min(a.maxY, b.maxY));
+}
+
+bool layerDescsEqual(const IRenderBackend::LayerDesc& a,
+                     const IRenderBackend::LayerDesc& b) {
+    return a.logicalBounds.minX == b.logicalBounds.minX
+        && a.logicalBounds.minY == b.logicalBounds.minY
+        && a.logicalBounds.maxX == b.logicalBounds.maxX
+        && a.logicalBounds.maxY == b.logicalBounds.maxY
+        && a.dpiScale == b.dpiScale && a.hasAlpha == b.hasAlpha
+        && a.overlay == b.overlay && a.clearMode == b.clearMode
+        && a.clearColor == b.clearColor;
+}
+
+void releaseWidgetLayer(WidgetRetainedState& state) {
+    if (state.backend != nullptr && state.layer.isValid()) {
+        state.backend->releaseLayer(state.layer);
+    }
+    state.backend = nullptr;
+    state.layer = {-1};
+    state.desc = {};
+    state.descValid = false;
+    state.painted = false;
+}
 }
 
 // =============================================================================
@@ -145,6 +203,11 @@ Widget::Widget()
 }
 
 Widget::~Widget() {
+    if (auto retained = g_widgetRetainedStates.find(this);
+        retained != g_widgetRetainedStates.end()) {
+        releaseWidgetLayer(retained->second);
+        g_widgetRetainedStates.erase(retained);
+    }
     // Detach from parent FIRST. Otherwise `delete child` while still in
     // parent's `_children` (common with addChildExternal + host delete)
     // leaves a dangling entry → next tree walk / composition / layout SEGV.
@@ -300,6 +363,7 @@ void Widget::markDescendantsBoundsDirty() {
         child->_displayListDirty = true;
         child->_dirtyThis = true;
         child->_dirtyRect = math::FRectangle();
+        child->clearDirtyRegions();
         child->markDescendantsBoundsDirty();
     }
 }
@@ -308,6 +372,7 @@ void Widget::markDirtyFromDescendant() {
     const bool wasFullDirty = _dirtyThis;
     _dirtyThis = true;
     _dirtyRect = math::FRectangle();
+    clearDirtyRegions();
     if (!wasFullDirty && _parent != nullptr) {
         _parent->markDirtyFromDescendant();
     }
@@ -319,7 +384,8 @@ void Widget::markDirtyFromDescendant(const math::FRectangle& damage) {
         return;
     }
     if (_dirtyThis) return;
-    const math::FRectangle previous = _dirtyRect;
+    const bool regionChanged = appendDirtyRegion(damage);
+    if (!regionChanged) return;
     if (isDirtyRectEmpty(_dirtyRect)) {
         _dirtyRect = damage;
     } else {
@@ -329,11 +395,10 @@ void Widget::markDirtyFromDescendant(const math::FRectangle& damage) {
             math::FVector2(std::max(_dirtyRect.maxX, damage.maxX),
                            std::max(_dirtyRect.maxY, damage.maxY)));
     }
-    const bool expanded = isDirtyRectEmpty(previous)
-        || previous.minX != _dirtyRect.minX || previous.minY != _dirtyRect.minY
-        || previous.maxX != _dirtyRect.maxX || previous.maxY != _dirtyRect.maxY;
-    if (expanded && _parent != nullptr) {
-        _parent->markDirtyFromDescendant(_dirtyRect);
+    // Propagate the original region, not the compatibility union. Two small
+    // distant child invalidations must remain two regions at the root.
+    if (_parent != nullptr) {
+        _parent->markDirtyFromDescendant(damage);
     }
 }
 
@@ -341,6 +406,7 @@ void Widget::markStyleSubtreeDirty() {
     _displayListDirty = true;
     _dirtyThis = true;
     _dirtyRect = math::FRectangle();
+    clearDirtyRegions();
     for (Widget* child : _children) {
         if (child != nullptr) child->markStyleSubtreeDirty();
     }
@@ -590,12 +656,205 @@ bool Widget::recordNestedRenderIfNeeded(IRenderBackend& renderer) {
     return false;
 }
 
+const std::vector<math::FRectangle>& Widget::getDirtyRegions() const {
+    static const std::vector<math::FRectangle> kEmpty;
+    const auto it = g_widgetRetainedStates.find(this);
+    return it == g_widgetRetainedStates.end() ? kEmpty : it->second.damageRegions;
+}
+
+bool Widget::appendDirtyRegion(const math::FRectangle& damage) {
+    if (isDirtyRectEmpty(damage)) return false;
+    WidgetRetainedState& state = g_widgetRetainedStates[this];
+    math::FRectangle merged = damage;
+    for (size_t i = 0; i < state.damageRegions.size();) {
+        const math::FRectangle& existing = state.damageRegions[i];
+        if (existing.minX <= merged.minX && existing.minY <= merged.minY
+            && existing.maxX >= merged.maxX && existing.maxY >= merged.maxY) {
+            return false;
+        }
+        if (damageRectsTouchOrOverlap(existing, merged)) {
+            merged = unionDamageRects(existing, merged);
+            state.damageRegions.erase(state.damageRegions.begin()
+                                      + static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        ++i;
+    }
+    if (state.damageRegions.size() >= kMaxDamageRegions) {
+        for (const math::FRectangle& existing : state.damageRegions) {
+            merged = unionDamageRects(merged, existing);
+        }
+        state.damageRegions.clear();
+    }
+    state.damageRegions.push_back(merged);
+    return true;
+}
+
+void Widget::clearDirtyRegions() {
+    const auto it = g_widgetRetainedStates.find(this);
+    if (it != g_widgetRetainedStates.end()) {
+        it->second.damageRegions.clear();
+    }
+}
+
+void Widget::setLayerCachePolicy(LayerCachePolicy policy) {
+    WidgetRetainedState& state = g_widgetRetainedStates[this];
+    if (state.policy == policy) return;
+    if (policy == LayerCachePolicy::Disabled) {
+        releaseWidgetLayer(state);
+        state.autoActive = false;
+        state.stableFrames = 0;
+        state.unstableFrames = 0;
+    }
+    state.policy = policy;
+    markDirty();
+}
+
+LayerCachePolicy Widget::getLayerCachePolicy() const {
+    const auto it = g_widgetRetainedStates.find(this);
+    return it == g_widgetRetainedStates.end()
+        ? LayerCachePolicy::Disabled : it->second.policy;
+}
+
+bool Widget::hasActiveLayerCache() const {
+    const auto it = g_widgetRetainedStates.find(this);
+    return it != g_widgetRetainedStates.end() && it->second.layer.isValid()
+        && it->second.painted
+        && (it->second.policy == LayerCachePolicy::Always
+            || it->second.autoActive);
+}
+
+size_t Widget::estimateSubtreeDisplayCommandCount() const {
+    size_t count = _displayListValid ? _displayList.size() : 1u;
+    for (const Widget* child : _children) {
+        if (child != nullptr && child->isVisible()) {
+            count += child->estimateSubtreeDisplayCommandCount();
+        }
+    }
+    return count;
+}
+
+bool Widget::tryRenderLayerCache(IRenderBackend& renderer) {
+    auto stateIt = g_widgetRetainedStates.find(this);
+    if (stateIt == g_widgetRetainedStates.end()
+        || stateIt->second.policy == LayerCachePolicy::Disabled
+        || !renderer.supportsRenderTargets()) {
+        return false;
+    }
+    WidgetRetainedState& state = stateIt->second;
+    const bool invalidated = _dirtyThis || hasDirtyRect();
+    if (state.policy == LayerCachePolicy::Auto) {
+        if (state.autoActive) {
+            state.unstableFrames = invalidated ? state.unstableFrames + 1u : 0u;
+            if (state.unstableFrames >= 3u) {
+                releaseWidgetLayer(state);
+                state.autoActive = false;
+                state.stableFrames = 0;
+                state.unstableFrames = 0;
+                return false;
+            }
+        } else {
+            state.stableFrames = invalidated ? 0u : state.stableFrames + 1u;
+            const math::FRectangle bounds = getWorldBounds();
+            const float area = std::max(0.0f, bounds.maxX - bounds.minX)
+                * std::max(0.0f, bounds.maxY - bounds.minY);
+            if (state.stableFrames < 3u || area < 4096.0f
+                || estimateSubtreeDisplayCommandCount() < 12u) {
+                return false;
+            }
+            state.autoActive = true;
+        }
+    }
+
+    const math::FRectangle bounds = getWorldBounds();
+    if (isDirtyRectEmpty(bounds)) return false;
+    IRenderBackend::LayerDesc desc;
+    desc.logicalBounds = bounds;
+    desc.dpiScale = renderer.getUiScale();
+    desc.hasAlpha = true;
+    desc.overlay = false;
+    desc.clearMode = IRenderBackend::LayerClearMode::Transparent;
+
+    if (state.backend != &renderer) {
+        releaseWidgetLayer(state);
+        state.backend = &renderer;
+    }
+    const bool descChanged = !state.descValid || !layerDescsEqual(state.desc, desc);
+    if (!state.layer.isValid()) {
+        state.layer = renderer.createLayer(desc);
+        state.painted = false;
+    } else if (descChanged && !renderer.updateLayer(state.layer, desc)) {
+        renderer.releaseLayer(state.layer);
+        state.layer = renderer.createLayer(desc);
+        state.painted = false;
+    }
+    if (!state.layer.isValid()) return false;
+    state.desc = desc;
+    state.descValid = true;
+
+    const bool backendDirty = renderer.isLayerDirty(state.layer);
+    const bool needsPaint = !state.painted || invalidated || backendDirty || descChanged;
+    bool fullRedraw = !state.painted || _dirtyThis || backendDirty || descChanged;
+    std::vector<math::FRectangle> regions;
+    if (needsPaint && !fullRedraw) {
+        regions = getDirtyRegions();
+        if (regions.empty() && hasDirtyRect()) regions.push_back(getDirtyRect());
+        float repaintArea = 0.0f;
+        for (math::FRectangle& region : regions) {
+            region = intersectDamageRect(region, bounds);
+            if (!isDirtyRectEmpty(region)) {
+                repaintArea += (region.maxX - region.minX) * (region.maxY - region.minY);
+            }
+        }
+        regions.erase(std::remove_if(regions.begin(), regions.end(),
+            [](const math::FRectangle& r) { return Widget::isDirtyRectEmpty(r); }),
+            regions.end());
+        const float layerArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+        if (regions.empty() || repaintArea >= layerArea * 0.70f) fullRedraw = true;
+    }
+    if (needsPaint && fullRedraw) regions.assign(1u, bounds);
+
+    if (needsPaint) {
+        for (const math::FRectangle& damage : regions) {
+            if (state.painted && !backendDirty) {
+                renderer.invalidateLayer(state.layer,
+                    fullRedraw ? math::FRectangle() : damage);
+            }
+            IRenderBackend::LayerPaint paint;
+            paint.damage = damage;
+            paint.fullRedraw = fullRedraw;
+            if (!renderer.beginLayerPaint(state.layer, paint)) {
+                renderer.invalidateLayer(state.layer);
+                state.painted = false;
+                return false;
+            }
+            if (!fullRedraw) renderer.pushClip(damage);
+            renderSubtreeContent(renderer);
+            if (!fullRedraw) renderer.popClip();
+            renderer.endLayerPaint(state.layer);
+            state.painted = true;
+        }
+    }
+    if (!state.painted || renderer.isLayerDirty(state.layer)) return false;
+    renderer.compositeLayer(state.layer, bounds, 1.0f);
+    if (renderer.isLayerDirty(state.layer)) {
+        state.painted = false;
+        return false;
+    }
+    return true;
+}
+
 void Widget::render(IRenderBackend& renderer) {
     // Record even a currently hidden nested widget. Its visibility is
     // evaluated by the dynamic command on every replay, so showing it later
     // cannot leave it permanently absent from a container's cached order.
     if (recordNestedRenderIfNeeded(renderer)) return;
     if (!_visible) return;
+    if (tryRenderLayerCache(renderer)) return;
+    renderSubtreeContent(renderer);
+}
+
+void Widget::renderSubtreeContent(IRenderBackend& renderer) {
     // UIRenderBackend remains an immediate per-frame submission backend:
     // beginFrame() discards prior UiItems and bgfx transient submissions.
     // The Widget-local display list below retains high-level commands only;
@@ -656,6 +915,7 @@ void Widget::render(IRenderBackend& renderer) {
     // next frame because the backend command buffer is frame-local.
     _dirtyThis = false;
     _dirtyRect = math::FRectangle();
+    clearDirtyRegions();
     _displayListDirty = false;
 }
 

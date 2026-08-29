@@ -5,6 +5,7 @@
 #include "AYFont.h"
 #include "AYUI/UnicodeText.h"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -892,6 +893,31 @@ public:
         bool fullRedraw = true;
     };
 
+    // Cumulative production-layer telemetry. Backends may expose a shared
+    // RenderTargetPool, so target memory/allocation fields can include
+    // non-UI users while paint/composite counters remain UI-layer specific.
+    // `cacheHits / composites` is the retained-pixel hit rate (guard the
+    // zero-composite case in callers).
+    struct LayerCacheStats {
+        uint64_t layerCreates = 0;
+        uint64_t layerReleases = 0;
+        uint64_t fullPaints = 0;
+        uint64_t partialPaints = 0;
+        uint64_t composites = 0;
+        uint64_t cacheHits = 0;
+        uint64_t repaintPixelArea = 0;
+        uint64_t allocationFailures = 0;
+        uint64_t degradedLayers = 0;
+        uint64_t targetAllocations = 0;
+        uint64_t targetReuses = 0;
+        uint64_t targetEvictions = 0;
+        uint32_t liveLayers = 0;
+        uint32_t liveTargetLeases = 0;
+        uint32_t idleTargets = 0;
+        size_t allocatedTargetBytes = 0;
+        size_t targetBudgetBytes = 0;
+    };
+
     virtual LayerHandle createLayer(const LayerDesc& desc) {
         AYUNREFERENCED_PARAM(desc);
         return LayerHandle{-1};
@@ -937,6 +963,16 @@ public:
         AYUNREFERENCED_PARAM(layer);
         return true;
     }
+    virtual LayerCacheStats getLayerCacheStats() const {
+        return {};
+    }
+    // The budget is renderer-wide when UI and FrameGraph share a pool.
+    // A zero budget disables new retained backing allocations; callers keep
+    // their logical LayerHandle and fall back to immediate rendering.
+    virtual void setLayerCacheBudgetBytes(size_t bytes) {
+        AYUNREFERENCED_PARAM(bytes);
+    }
+    virtual void resetLayerCacheStats() {}
 
     // =============================================================================
     // Category 15: Animation System / 动画系统

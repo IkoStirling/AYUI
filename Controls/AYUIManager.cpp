@@ -1010,43 +1010,68 @@ void UIManager::populateFrame() {
             rootLayer.desc = desc;
             rootLayer.descValid = true;
             const bool backendDirty = _backend->isLayerDirty(rootLayer.layer);
-            const bool hasDamage = _root->hasDirtyRect();
+            std::vector<math::FRectangle> pendingRegions = _root->getDirtyRegions();
+            const bool hasDamage = !pendingRegions.empty() || _root->hasDirtyRect();
             const bool needsPaint = !rootLayer.painted || _root->isDirtyThis()
                 || hasDamage || backendDirty;
             bool layerReady = !needsPaint;
             if (needsPaint) {
                 bool fullRedraw = !rootLayer.painted || _root->isDirtyThis()
                     || backendDirty;
-                math::FRectangle damage = desc.logicalBounds;
                 if (!fullRedraw && hasDamage) {
-                    const math::FRectangle& pending = _root->getDirtyRect();
-                    damage = math::FRectangle(
-                        std::max(desc.logicalBounds.minX, pending.minX),
-                        std::max(desc.logicalBounds.minY, pending.minY),
-                        std::min(desc.logicalBounds.maxX, pending.maxX),
-                        std::min(desc.logicalBounds.maxY, pending.maxY));
-                    // Out-of-bounds/degenerate damage is unusual and cannot
-                    // be consumed safely by a clipped replay. Fall back to a
-                    // full repaint instead of risking stale retained pixels.
-                    if (Widget::isDirtyRectEmpty(damage)) {
-                        damage = desc.logicalBounds;
+                    if (pendingRegions.empty()) {
+                        pendingRegions.push_back(_root->getDirtyRect());
+                    }
+                    float repaintArea = 0.0f;
+                    for (math::FRectangle& damage : pendingRegions) {
+                        damage = math::FRectangle(
+                            std::max(desc.logicalBounds.minX, damage.minX),
+                            std::max(desc.logicalBounds.minY, damage.minY),
+                            std::min(desc.logicalBounds.maxX, damage.maxX),
+                            std::min(desc.logicalBounds.maxY, damage.maxY));
+                        if (!Widget::isDirtyRectEmpty(damage)) {
+                            repaintArea += (damage.maxX - damage.minX)
+                                * (damage.maxY - damage.minY);
+                        }
+                    }
+                    pendingRegions.erase(std::remove_if(
+                        pendingRegions.begin(), pendingRegions.end(),
+                        [](const math::FRectangle& damage) {
+                            return Widget::isDirtyRectEmpty(damage);
+                        }), pendingRegions.end());
+                    const float layerArea = _clientWidth * _clientHeight;
+                    if (pendingRegions.empty() || repaintArea >= layerArea * 0.70f) {
                         fullRedraw = true;
                     }
                 }
-                if (rootLayer.painted && !backendDirty) {
-                    _backend->invalidateLayer(rootLayer.layer,
-                        fullRedraw ? math::FRectangle() : damage);
-                }
-                IRenderBackend::LayerPaint paint;
-                paint.damage = damage;
-                paint.fullRedraw = fullRedraw;
-                if (_backend->beginLayerPaint(rootLayer.layer, paint)) {
+                if (fullRedraw) pendingRegions.assign(1u, desc.logicalBounds);
+
+                bool allRegionsPainted = true;
+                for (const math::FRectangle& damage : pendingRegions) {
+                    if (rootLayer.painted && !backendDirty) {
+                        _backend->invalidateLayer(rootLayer.layer,
+                            fullRedraw ? math::FRectangle() : damage);
+                    }
+                    IRenderBackend::LayerPaint paint;
+                    paint.damage = damage;
+                    paint.fullRedraw = fullRedraw;
+                    if (!_backend->beginLayerPaint(rootLayer.layer, paint)) {
+                        allRegionsPainted = false;
+                        break;
+                    }
                     if (!fullRedraw) _backend->pushClip(damage);
                     _root->render(*_backend);
                     if (!fullRedraw) _backend->popClip();
                     _backend->endLayerPaint(rootLayer.layer);
                     rootLayer.painted = true;
-                    layerReady = !_backend->isLayerDirty(rootLayer.layer);
+                }
+                if (!allRegionsPainted) {
+                    _backend->invalidateLayer(rootLayer.layer);
+                    rootLayer.painted = false;
+                    layerReady = false;
+                } else {
+                    layerReady = rootLayer.painted
+                        && !_backend->isLayerDirty(rootLayer.layer);
                 }
             }
             if (layerReady) {
@@ -1095,6 +1120,22 @@ bool UIManager::isRootLayerCachingEnabled() const
 {
     const auto it = g_rootLayerStates.find(this);
     return it != g_rootLayerStates.end() && it->second.enabled;
+}
+
+IRenderBackend::LayerCacheStats UIManager::getLayerCacheStats() const
+{
+    return _backend != nullptr ? _backend->getLayerCacheStats()
+                               : IRenderBackend::LayerCacheStats{};
+}
+
+void UIManager::setLayerCacheBudgetBytes(size_t bytes)
+{
+    if (_backend != nullptr) _backend->setLayerCacheBudgetBytes(bytes);
+}
+
+void UIManager::resetLayerCacheStats()
+{
+    if (_backend != nullptr) _backend->resetLayerCacheStats();
 }
 
 void UIManager::releaseRootLayer()

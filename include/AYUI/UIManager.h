@@ -165,6 +165,9 @@ public:
     // the immediate path. Capability/failure gates fall back per frame.
     void setRootLayerCachingEnabled(bool enabled);
     bool isRootLayerCachingEnabled() const;
+    IRenderBackend::LayerCacheStats getLayerCacheStats() const;
+    void setLayerCacheBudgetBytes(size_t bytes);
+    void resetLayerCacheStats();
 
     Widget* root() const { return _root; }
     Widget* findById(const std::string& id) const;

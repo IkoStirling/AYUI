@@ -38,7 +38,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery 与独立 Layout Editor
 
-2026-08-29 Windows Debug 基线为 `4609 / 4609` 条断言通过。旧基线中的循环内重复
+2026-08-29 Windows Debug 基线为 `4643 / 4643` 条断言通过。旧基线中的循环内重复
 `CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
@@ -54,10 +54,21 @@ path 以创建操作和绘制时快照保留，replay 时创建短生命周期�
 
 需要进一步消除静态主树每帧的 display-list replay 时，可在支持 RenderTarget 的后端上显式开启
 `UIManager::setRootLayerCachingEnabled(true)`。首次帧、设备失效或普通 `markDirty()` 会完整重绘透明
-离屏层；显式 `markDirty(rect)` 会把逻辑 damage 合并并传播到根节点，只清除和 replay 受损区域；
+离屏层；显式 `markDirty(rect)` 会把最多 8 个逻辑 damage region 传播到根节点，重叠/相邻区域就地
+合并，第 9 个区域退化为 union，累计面积达到 Layer 的 70% 时改走 full redraw；其余情况逐区清除和
+replay；
 clean 帧只提交一次 layer composite。Popup、Modal、Tooltip 和 drag ghost 始终在 composite 之后走
 即时路径，因此不会被静态层吞掉。创建、resize、device reset 或 paint 失败时，同一帧自动回退到
 普通即时绘制，不要求应用维护第二条 Widget 渲染路线。Gallery 已启用该模式作为生产集成样例。
+
+局部稳定的复杂子树可使用 `Widget::setLayerCachePolicy()`：`Always` 强制建立子树 Layer，`Auto` 在
+连续 3 个 clean frame、物理前逻辑面积至少 4096 且估算 display command 至少 12 条时晋升；连续
+3 个 invalidated frame 自动降级并释放 backing。子树 Layer 仍调用同一个 `renderSubtreeContent()`，
+失败立即回到 display-list/immediate 路径，不形成需要双线维护的控件 renderer。
+
+`UIManager::getLayerCacheStats()` 暴露 full/partial paint、composite/cache hit、实际重绘像素面积、
+分配失败/降级、pool allocation/reuse/eviction、live lease/idle target 与预算；
+`setLayerCacheBudgetBytes()` 可设置 UI 严格预算，`resetLayerCacheStats()` 只重置计数不销毁缓存。
 
 ## 版本与兼容性
 
@@ -237,14 +248,24 @@ Production root Layer 另有真实纹理和局部 damage 门禁：
     -OutputDir <output-dir>
 ```
 
+跨后端门禁可一次运行 D3D12、Vulkan、OpenGL（也可通过 `-Backends` 加入 D3D11）：
+
+```powershell
+& .\demo\RunLayerVisualRegressionMatrix.ps1 `
+    -GalleryExe <build-dir>\AYRuntime\AYUI\demo\AYUI_Gallery.exe `
+    -OutputRoot <output-root>
+```
+
 脚本运行 36 次独立 GPU capture。原复杂控件矩阵在 1.0×/1.5× 下生成即时、full、clean 和 partial
 参考，两档保持 1280×720 DIP，framebuffer 为 1280×720/1920×1080，并覆盖非对称 checker、alpha
 sprite、atlas、渐变、文本、边框及 stencil path clip。独立的透明矩阵在非对称主画布上验证透明
 Layer、嵌套 opacity 与 Additive/Multiply/Screen 隔离组；生命周期矩阵验证 framebuffer resize、动态
 DPI、device reset、MSAA reset 后的 pool lease 恢复，以及 Transparent/Color/Preserve 局部 clear。
 除 RGBA8 group opacity 的双重量化上限为 2 LSB 外，其余即时语义对照最多 1 LSB；isolated blend、
-Preserve 和 clean retained reuse 字节完全一致。当前 D3D11 root 基线仍为 immediate 30、full Layer 31、
-clean Layer 1、partial Layer 11 次 UI draw call。
+Preserve 和 clean retained reuse 字节完全一致。D3D11、D3D12、Vulkan、OpenGL 已通过同一矩阵；各
+后端 root 基线均为 immediate 30、full Layer 31、clean Layer 1、partial Layer 11 次 UI draw call。
+OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph quad 吸附物理像素网格，保证
+默认 framebuffer 与 FBO 在 1.0×/1.5× 下使用一致覆盖。
 
 ## 目录
 
@@ -262,16 +283,21 @@ clean Layer 1、partial Layer 11 次 UI draw call。
 
 - Production root UI Layer 已接入 AYRenderer，并与 FrameGraph 共用 renderer-wide RenderTargetPool。
   clean 主树稳定为一次 composite submit；resize、DPI、device reset 或无范围 dirty 会触发全量重绘；
-  显式 dirty rect 会触发 damage 区域的透明覆盖清除、clip 和局部 replay，区域外像素继续保留。
+  显式 dirty rect 保留最多 8 个 damage region，并逐区透明覆盖清除、clip 和局部 replay，区域外像素
+  继续保留；累计面积达到 70% 或 region 溢出时确定性退化为 union/full redraw。Widget 子树可选择
+  `Always`/`Auto` Layer，root、子树和 immediate 共用同一绘制实现。
   overlay/drag visual 仍即时绘制。离屏绘制使用 view 26–249，单个 UI 帧最多 224 次 layer paint；
   第 225 次或任一步失败会在同帧回退即时路径，下一帧 view 调度自动恢复。
 - RenderTargetPool 当前只接受精确尺寸/格式/深度/采样方式键和 1× sample，默认两帧 quarantine、256 MiB
-  best-effort 预算；leased 或仍在 quarantine 的目标可暂时超过预算。该池与 UI backend 都限定在
+  预算。FrameGraph 申请保持 soft/best-effort；UI Layer 申请使用 strict budget，必要时淘汰 idle LRU，
+  再撤销最久未合成的 Layer backing。逻辑 LayerHandle 保持有效并标脏；本帧无法取得 backing 时同帧
+  immediate 降级，隔离期结束后可复用目标。该池与 UI backend 都限定在
   renderer thread。Noop 契约测试已覆盖复杂路径、嵌套 stencil clip、局部 damage、clean composite、
-  224 次离屏 pass 边界和 reset 重绘；D3D11 已通过 36-capture 的真实纹理、透明/opacity/blend、
+  224 次离屏 pass 边界、strict budget/LRU 压力降级和 reset 重绘；D3D11/D3D12/Vulkan/OpenGL 均已
+  通过 36-capture 的真实纹理、透明/opacity/blend、
   Preserve/Transparent/Color、resize/DPI/device-reset/MSAA-reset 图像门禁。UI Layer 保持 1× sample，
   因而 MSAA 门禁比较“reset 后恢复的旧 Layer”与“reset 后新建 Layer”，不把 multisampled immediate
-  边缘当作同一参考。D3D12/OpenGL/Vulkan 的同矩阵仍待补齐。
+  边缘当作同一参考。
 - vector path 已进入通用 display-list；AYRenderer 支持简单凹多边形、圆角矩形、椭圆、圆弧、
   cubic Bezier、miter stroke、显式 winding 孔洞和嵌套 stencil path clip。自相交路径、布尔运算、
   fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。

@@ -91,6 +91,16 @@ enum class UiCursorHint {
     Beam,
 };
 
+// Pixel-retained subtree policy. Disabled preserves the display-list/immediate
+// path. Always explicitly caches this widget plus descendants in a Layer.
+// Auto promotes only sufficiently complex, stable, non-trivial subtrees and
+// demotes them again after repeated invalidation.
+enum class LayerCachePolicy : uint8_t {
+    Disabled,
+    Always,
+    Auto
+};
+
 class Widget {
 public:
     Widget();
@@ -487,6 +497,14 @@ public:
     bool hasCachedDisplayList() const { return _displayListValid; }
     size_t getCachedDisplayCommandCount() const { return _displayList.size(); }
 
+    // Optional pixel cache for this widget's complete subtree. The Layer is
+    // clipped to getWorldBounds(); custom widgets that intentionally paint
+    // outside those bounds should keep this disabled or provide a containing
+    // cache widget. Allocation/paint failures fall back to normal rendering.
+    void setLayerCachePolicy(LayerCachePolicy policy);
+    LayerCachePolicy getLayerCachePolicy() const;
+    bool hasActiveLayerCache() const;
+
     void markBoundsDirty() {
         // Phase UI-PERF-1: lazy-propagate. Previously this recursed through
         // every descendant (O(N) per call), and VBox/HBox layout calls
@@ -544,11 +562,13 @@ public:
     void markDirty(const math::FRectangle& r = math::FRectangle()) {
         const bool hasExplicitDamage = !isDirtyRectEmpty(r);
         const bool wasFullDirty = _dirtyThis;
+        bool damageChanged = false;
         if (hasExplicitDamage) {
             // Union into _dirtyRect. Empty union (current rect empty)
             // collapses to just r.
             if (!_dirtyThis && isDirtyRectEmpty(_dirtyRect)) {
                 _dirtyRect = r;
+                damageChanged = appendDirtyRegion(r);
             } else if (!_dirtyThis) {
                 _dirtyRect = math::FRectangle::fromMinMax(
                     math::FVector2(
@@ -557,15 +577,17 @@ public:
                     math::FVector2(
                         std::max(_dirtyRect.maxX, r.maxX),
                         std::max(_dirtyRect.maxY, r.maxY)));
+                damageChanged = appendDirtyRegion(r);
             }
         } else {
             // Empty/invalid rect passed → mark the whole widget.
             _dirtyThis = true;
             _dirtyRect = math::FRectangle();
+            clearDirtyRegions();
         }
         _displayListDirty = true;
         if (_parent != nullptr) {
-            if (hasExplicitDamage && !wasFullDirty) {
+            if (hasExplicitDamage && !wasFullDirty && damageChanged) {
                 // Explicit damage is already expressed in root/logical
                 // coordinates. Preserve it through every ancestor so a
                 // retained root layer can repaint only that region.
@@ -582,6 +604,8 @@ public:
     bool isDirtyThis() const { return _dirtyThis; }
     bool hasDirtyRect() const { return !isDirtyRectEmpty(_dirtyRect); }
     const math::FRectangle& getDirtyRect() const { return _dirtyRect; }
+    const std::vector<math::FRectangle>& getDirtyRegions() const;
+    static constexpr size_t kMaxDamageRegions = 8u;
 
 protected:
     // Override in subclasses to implement specific rendering
@@ -722,6 +746,11 @@ protected:
     void markDirtyFromDescendant(const math::FRectangle& damage);
     void markStyleSubtreeDirty();
     bool recordNestedRenderIfNeeded(IRenderBackend& renderer);
+    bool appendDirtyRegion(const math::FRectangle& damage);
+    void clearDirtyRegions();
+    bool tryRenderLayerCache(IRenderBackend& renderer);
+    void renderSubtreeContent(IRenderBackend& renderer);
+    size_t estimateSubtreeDisplayCommandCount() const;
 };
 
 class CompoundWidget : public Widget {

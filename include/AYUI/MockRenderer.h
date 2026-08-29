@@ -172,6 +172,9 @@ public:
     };
     const std::vector<LayerEvent>& getLayerEvents() const { return _layerEvents; }
     bool isLayerDirty(LayerHandle layer) const override;
+    LayerCacheStats getLayerCacheStats() const override;
+    void setLayerCacheBudgetBytes(size_t bytes) override;
+    void resetLayerCacheStats() override;
     RenderTargetDesc getRenderTargetDesc(RenderTargetHandle target) const;
     RenderTargetHandle getLayerRenderTarget(LayerHandle layer) const;
 
@@ -283,10 +286,14 @@ private:
         math::FRectangle damage;
         bool dirty = true;
         bool painting = false;
+        uint64_t lastPaintFrame = 0;
     };
     std::unordered_map<int, LayerData> _layers;
     LayerHandle _activeLayer;
     std::vector<LayerEvent> _layerEvents;
+    LayerCacheStats _layerCacheStats;
+    uint64_t _frameIndex = 0;
+    size_t _layerCacheBudgetBytes = 256u * 1024u * 1024u;
 
     // PR-Container-Contract-Cut2: clip stack frames (bounds per push).
     std::vector<ClipEvent> _clipStack;

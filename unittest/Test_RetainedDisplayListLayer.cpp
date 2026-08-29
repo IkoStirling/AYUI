@@ -4,6 +4,7 @@
 #include "AYUI/UIManager.h"
 #include "AYUI/Widget.h"
 
+#include <array>
 #include <cstdint>
 
 using namespace ayt::ui;
@@ -252,6 +253,120 @@ TEST_CASE(DisplayList_ReplayPreservesOptimizedHighLevelCommands) {
     CHECK(renderer.isClipStackBalanced());
 }
 
+TEST_CASE(DamageRegions_PreserveDistantRectsMergeOverlapAndCapComplexity) {
+    Widget parent;
+    CountingPainter child;
+    parent.setSize(FVector2(320.0f, 180.0f));
+    child.setSize(FVector2(300.0f, 160.0f));
+    parent.addChildExternal(&child);
+
+    MockRenderer renderer;
+    parent.render(renderer);
+    CHECK_FALSE(parent.isDirtyThis());
+
+    const FRectangle first(8.0f, 10.0f, 28.0f, 30.0f);
+    const FRectangle second(220.0f, 100.0f, 250.0f, 130.0f);
+    child.markDirty(first);
+    child.markDirty(second);
+    CHECK(parent.getDirtyRegions().size() == 2u);
+    CHECK(parent.getDirtyRect().minX == first.minX);
+    CHECK(parent.getDirtyRect().maxY == second.maxY);
+
+    child.markDirty(FRectangle(20.0f, 20.0f, 36.0f, 38.0f));
+    CHECK(parent.getDirtyRegions().size() == 2u);
+    int mergedFirstRegions = 0;
+    for (const FRectangle& region : parent.getDirtyRegions()) {
+        if (region.minX == 8.0f && region.minY == 10.0f
+            && region.maxX == 36.0f && region.maxY == 38.0f) {
+            ++mergedFirstRegions;
+        }
+    }
+    CHECK(mergedFirstRegions == 1);
+
+    renderer.beginFrame();
+    parent.render(renderer);
+    constexpr float kSpacing = 24.0f;
+    for (size_t i = 0; i < Widget::kMaxDamageRegions; ++i) {
+        const float x = static_cast<float>(i) * kSpacing;
+        child.markDirty(FRectangle(x, 60.0f, x + 8.0f, 68.0f));
+    }
+    CHECK(parent.getDirtyRegions().size() == Widget::kMaxDamageRegions);
+
+    child.markDirty(FRectangle(220.0f, 60.0f, 228.0f, 68.0f));
+    CHECK(parent.getDirtyRegions().size() == 1u);
+    CHECK(parent.getDirtyRegions()[0].minX == 0.0f);
+    CHECK(parent.getDirtyRegions()[0].maxX == 228.0f);
+}
+
+TEST_CASE(WidgetLayer_AlwaysCachesSubtreeAndUsesPartialDamage) {
+    CountingPainter painter;
+    painter.setSize(FVector2(160.0f, 80.0f));
+    painter.setLayerCachePolicy(LayerCachePolicy::Always);
+    MockRenderer renderer;
+
+    renderer.beginFrame();
+    painter.render(renderer);
+    CHECK_TRUE(painter.hasActiveLayerCache());
+    CHECK(painter.paintCount == 1);
+    auto stats = renderer.getLayerCacheStats();
+    CHECK(stats.fullPaints == 1u);
+    CHECK(stats.composites == 1u);
+    CHECK(stats.cacheHits == 0u);
+
+    renderer.beginFrame();
+    painter.render(renderer);
+    CHECK(painter.paintCount == 1);
+    CHECK(renderer.getDrawCalls().size() == 1u);
+    CHECK(renderer.getDrawCalls()[0].type == MockRenderer::DrawCall::Layer);
+    stats = renderer.getLayerCacheStats();
+    CHECK(stats.composites == 2u);
+    CHECK(stats.cacheHits == 1u);
+
+    const FRectangle damage(12.0f, 14.0f, 42.0f, 34.0f);
+    painter.markDirty(damage);
+    renderer.beginFrame();
+    painter.render(renderer);
+    CHECK(painter.paintCount == 2);
+    stats = renderer.getLayerCacheStats();
+    CHECK(stats.partialPaints == 1u);
+    CHECK(stats.repaintPixelArea == 160u * 80u + 30u * 20u);
+    CHECK(renderer.isClipStackBalanced());
+
+    painter.setLayerCachePolicy(LayerCachePolicy::Disabled);
+    CHECK_FALSE(painter.hasActiveLayerCache());
+    CHECK(renderer.getLayerCacheStats().layerReleases == 1u);
+}
+
+TEST_CASE(WidgetLayer_AutoPromotesStableComplexSubtreeAndDemotesChurn) {
+    Widget parent;
+    parent.setSize(FVector2(240.0f, 120.0f));
+    parent.setLayerCachePolicy(LayerCachePolicy::Auto);
+    std::array<CountingPainter, 12> children;
+    for (size_t i = 0; i < children.size(); ++i) {
+        children[i].setPosition(FVector2(
+            static_cast<float>((i % 6u) * 36u),
+            static_cast<float>((i / 6u) * 44u)));
+        children[i].setSize(FVector2(28.0f, 28.0f));
+        parent.addChildExternal(&children[i]);
+    }
+
+    MockRenderer renderer;
+    for (int frame = 0; frame < 4; ++frame) {
+        renderer.beginFrame();
+        parent.render(renderer);
+    }
+    CHECK_TRUE(parent.hasActiveLayerCache());
+    CHECK(renderer.getLayerCacheStats().layerCreates == 1u);
+
+    for (int frame = 0; frame < 3; ++frame) {
+        parent.markDirty();
+        renderer.beginFrame();
+        parent.render(renderer);
+    }
+    CHECK_FALSE(parent.hasActiveLayerCache());
+    CHECK(renderer.getLayerCacheStats().layerReleases == 1u);
+}
+
 TEST_CASE(UILayer_MockLifecycleTracksDpiDamageAndComposite) {
     MockRenderer renderer;
     CHECK_TRUE(renderer.supportsRenderTargets());
@@ -395,17 +510,48 @@ TEST_CASE(UIManager_ProductionRootLayerCachesMainTreeButKeepsOverlayImmediate) {
     CHECK(partialInvalidations == 1);
     CHECK(renderer.isClipStackBalanced());
 
+    // Distant invalidations stay independent all the way to the root layer.
+    // This avoids repainting the large untouched rectangle between them.
+    const FRectangle leftDamage(4.0f, 6.0f, 20.0f, 18.0f);
+    const FRectangle rightDamage(88.0f, 54.0f, 112.0f, 72.0f);
+    rootPainter->markDirty(leftDamage);
+    rootPainter->markDirty(rightDamage);
+    ui.render();
+    int multiRegionPaints = 0;
+    int matchingRegions = 0;
+    for (const auto& event : renderer.getLayerEvents()) {
+        if (event.type != MockRenderer::LayerEvent::PaintBegan
+            || event.fullRedraw) {
+            continue;
+        }
+        ++multiRegionPaints;
+        if ((event.damage.minX == leftDamage.minX
+             && event.damage.minY == leftDamage.minY
+             && event.damage.maxX == leftDamage.maxX
+             && event.damage.maxY == leftDamage.maxY)
+            || (event.damage.minX == rightDamage.minX
+                && event.damage.minY == rightDamage.minY
+                && event.damage.maxX == rightDamage.maxX
+                && event.damage.maxY == rightDamage.maxY)) {
+            ++matchingRegions;
+        }
+    }
+    CHECK(multiRegionPaints == 2);
+    CHECK(matchingRegions == 2);
+    CHECK(rootPainter->paintCount == 4);
+    CHECK(overlayPainter->paintCount == 4);
+
     rootPainter->color = FVector4(0.1f, 0.7f, 0.3f, 1.0f);
     rootPainter->markDirty();
     ui.render();
-    CHECK(rootPainter->paintCount == 3);
-    CHECK(overlayPainter->paintCount == 4);
+    CHECK(rootPainter->paintCount == 5);
+    CHECK(overlayPainter->paintCount == 5);
 
     // The feature remains opt-in and has an immediate-mode escape hatch.
     ui.setRootLayerCachingEnabled(false);
     ui.render();
-    CHECK(rootPainter->paintCount == 4);
-    CHECK(overlayPainter->paintCount == 5);
+    CHECK(rootPainter->paintCount == 6);
+    CHECK(overlayPainter->paintCount == 6);
     CHECK(renderer.getDrawCalls().size() == 2u);
     CHECK(renderer.getDrawCalls()[0].type == MockRenderer::DrawCall::Rect);
 

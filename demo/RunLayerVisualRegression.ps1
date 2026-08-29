@@ -14,6 +14,10 @@ $ErrorActionPreference = "Stop"
 
 $galleryPath = (Resolve-Path -LiteralPath $GalleryExe).Path
 $galleryDirectory = Split-Path -Parent $galleryPath
+if (-not [IO.Path]::IsPathRooted($OutputDir)) {
+    $OutputDir = Join-Path (Get-Location).Path $OutputDir
+}
+$OutputDir = [IO.Path]::GetFullPath($OutputDir)
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 function Get-Metric([string]$MetricsPath, [string]$Name) {
@@ -58,7 +62,13 @@ function Invoke-GalleryCapture(
         -WorkingDirectory $galleryDirectory `
         -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) {
-        throw "$Name exited with code $($process.ExitCode)"
+        $startup = "$base.startup.txt"
+        $detail = if (Test-Path -LiteralPath $startup) {
+            (Get-Content -LiteralPath $startup) -join " -> "
+        } else {
+            "no startup diagnostics"
+        }
+        throw "$Name exited with code $($process.ExitCode); $detail"
     }
 
     $tga = "$base.tga"
@@ -109,7 +119,13 @@ function Invoke-LayerMatrixCapture(
         -WorkingDirectory $galleryDirectory `
         -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) {
-        throw "$Name exited with code $($process.ExitCode)"
+        $startup = "$base.startup.txt"
+        $detail = if (Test-Path -LiteralPath $startup) {
+            (Get-Content -LiteralPath $startup) -join " -> "
+        } else {
+            "no startup diagnostics"
+        }
+        throw "$Name exited with code $($process.ExitCode); $detail"
     }
 
     $tga = "$base.tga"

@@ -6,7 +6,7 @@
 
 **功能里程碑：** v1.6 已实现
 
-**状态：** 根工程集成、Widget-local retained display-list、Production root UI Layer、共享
+**状态：** 根工程集成、Widget-local retained display-list、Production root/subtree UI Layer、共享
 RenderTargetPool、Serializer 完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
 Tab/RichText 产品化、Unicode shaping、Windows UI Automation adapter、POSIX Clipboard、Docking、
 Layout Editor、动画与完整单测均可构建。
@@ -143,9 +143,17 @@ Widget
 
 `UIManager::setRootLayerCachingEnabled(true)` 在上述命令保留之上再增加一层可选像素保留：首次、
 主树 dirty、尺寸/DPI 变化或后端报告 layer dirty 时，将 root 完整绘制到透明离屏层；clean 帧不再
-遍历/replay 主树，只在主 view 提交一次 composite。overlay root 与 drag ghost 始终随后即时绘制，
-保证 popup/modal/tooltip 的 painter order。capability、create/update、paint 或 composite 前置条件
-失败时，同一帧直接执行原始 `_root->render()`，所以 Production Layer 不是第二套 Widget renderer。
+遍历/replay 主树，只在主 view 提交一次 composite。`markDirty(rect)` 在 sidecar 中保留最多 8 个
+damage region；重叠或接触的矩形立即合并，第 9 个区域退化为 union，累计 repaint 面积达到 layer
+面积 70% 时改为 full redraw。其余情况逐 region clear/clip/replay，避免两个相距很远的小更新被
+union 成大面积重绘。overlay root 与 drag ghost 始终随后即时绘制，保证 popup/modal/tooltip 的
+painter order。capability、create/update、paint 或 composite 前置条件失败时，同一帧直接执行原始
+`_root->render()`，所以 Production Layer 不是第二套 Widget renderer。
+
+`Widget::setLayerCachePolicy(Always/Auto)` 把相同像素保留能力下沉到复杂子树。`Always` 强制缓存；
+`Auto` 在连续 3 个 clean frame、逻辑面积至少 4096、估算 display command 至少 12 条时晋升，连续
+3 个 invalidated frame 时撤销 backing 并回到 display-list。子树 paint 调用原
+`renderSubtreeContent()`，可以嵌套 path clip/子 Layer；任何失败都只影响当前帧并立即走原路径。
 
 通用 Recorder 不跨帧持有后端资源句柄。vector path 以 backend-independent construction recipe
 记录；每条 draw/clip 命令捕获当时的 immutable operation snapshot，replay 时临时创建后端路径、
@@ -185,12 +193,18 @@ opacity、blend 与 path-clip 状态。Layer backing target 带 depth/stencil，
 这个数值描述 pass 容量，不表示 UI 可以独占同等数量的 renderer-wide framebuffer 句柄。
 
 AYRenderer 的 FrameGraph 与 UI Layer 共用 renderer-wide RenderTargetPool。池按宽、高、格式、
-depth、sampleCount 和采样方式精确匹配，lease 带 generation；release 后默认隔离两帧再复用/销毁，空闲目标
-按 LRU 在 256 MiB best-effort 预算下淘汰。resize/MSAA/device reset 会立即失效 lease 并使逻辑 Layer
-变 dirty。当前仅支持 1× sample；leased/quarantined 资源可暂时超过预算，所有调用限定 renderer
-thread。root Production Layer 已接入显式 dirty rect：`markDirty(rect)` 在祖先链上合并 damage，根层
-以局部透明覆盖清除和 clip replay 更新像素；普通无参 `markDirty()`、首次绘制、resize、DPI 和
-device reset 继续走保守 full redraw。`Preserve` 仍可供不需要背景清除的后端/调用方使用。
+depth、sampleCount 和采样方式精确匹配，lease 带 generation；release 后默认隔离两帧再复用/销毁。
+FrameGraph 使用允许暂时超预算的 soft acquire；UI Layer 使用 strict acquire，先淘汰越过 quarantine
+的 idle LRU，再撤销最久未 composite 的 Layer backing。逻辑 LayerHandle 不随 backing 被撤销而失效，
+只重新标脏；当前帧若仍拿不到 target 则 immediate 降级，后续帧在 quarantine 结束后重试。这样
+256 MiB 预算对 UI 是硬上限，对既有 FrameGraph 行为仍是 best-effort。resize/MSAA/device reset 会
+立即失效 lease 并使逻辑 Layer 变 dirty。当前仅支持 1× sample，所有调用限定 renderer thread。
+`Preserve` 仍可供不需要背景清除的后端/调用方使用。
+
+`LayerCacheStats` 把策略反馈闭环暴露给宿主：layer create/release、full/partial paint、composite、
+cache hit、物理 repaint area、allocation failure/degradation，以及 pool allocation/reuse/eviction、
+live lease、idle target、allocated/budget bytes。重置统计不影响 live cache；预算调整可在下一次
+acquire/beginFrame 触发回收。
 
 UI RenderTarget 使用 point sampling 保持同尺寸复合的 texel identity；FrameGraph 默认目标仍使用线性
 采样，二者通过 pool key 隔离，不能误复用。Layer 内的 straight-alpha draw 使用独立 RGB/alpha
@@ -440,12 +454,12 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 66 个非 demo、非 unittest 的 `.cpp`
 - 93 个 `Test_*.cpp`
 - 1022 个 `TEST_CASE`
-- Windows Debug：`4609 / 4609` 条断言通过
+- Windows Debug：`4643 / 4643` 条断言通过
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
-能力测试随后把当前基线增加到 `4609 / 4609`。
+能力测试随后把当前基线增加到 `4643 / 4643`。
 
 审计覆盖：
 
@@ -482,8 +496,13 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
   clean frame 单 composite，overlay 即时叠加，失败同帧回退。
 - renderer-wide RenderTargetPool 统一 FrameGraph/UI Layer 物理 FBO，使用 generation lease、两帧
   quarantine、精确键复用、LRU 预算回收和 reset 失效。
-- Widget 显式 dirty rect 在祖先链上合并传播；Production root Layer 对 damage 做透明覆盖清除和
-  clip replay，无范围 dirty 与 backend/device 失效仍保守全量重绘。
+- Widget 显式 dirty rect 在祖先链上以最多 8 个 region 传播；Production root/subtree Layer 对每个
+  damage 做透明覆盖清除和 clip replay，70% 面积阈值、region 溢出、无范围 dirty 与 backend/device
+  失效确定性退化为全量重绘。
+- Widget 子树支持 `Always`/`Auto` Layer 策略；Auto 由稳定帧、面积、display-command 数和连续失效帧
+  驱动晋升/降级，不复制控件绘制实现。
+- RenderTargetPool 对 FrameGraph 保留 soft budget，对 UI 使用 strict budget；压力下撤销 LRU backing、
+  保持逻辑 Layer handle、同帧 immediate fallback，并通过统一统计暴露命中、重绘面积和降级。
 - UIManager 的 Production Layer 状态放在 out-of-line sidecar，不改变既有对象布局；ActiveScope
   不会在 shutdown 或 host 显式切换 active slot 后恢复陈旧上下文。
 - 40 个注册 Widget 的 serializer type/字段往返，Grid cell 和复合控件结构化 payload。
@@ -507,11 +526,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 
 按优先级记录剩余边界：
 
-1. Production root UI Layer 已完成显式 dirty rect、扩展 view 调度和 D3D11 36-capture GPU 基线；
-   除原 1.0×/1.5× full/clean/partial 复杂控件路径外，已覆盖透明 Layer、嵌套/group opacity、三种
-   高级 blend 隔离、resize、动态 DPI、device/MSAA reset lease 恢复及 Preserve/Transparent/Color
-   局部 clear。下一步补 D3D12、Vulkan、OpenGL 同矩阵；随后评估多 damage region 与子树分层，
-   避免 union rect 过大。
+1. Production UI Layer 已完成多 damage region、root/Always/Auto 子树分层、strict budget/LRU 压力
+   降级、统计反馈及 D3D11/D3D12/Vulkan/OpenGL 的 36-capture 矩阵。下一步是基于历史 repaint cost
+   和命中率自适应 Auto 阈值、按 Layer 类别分预算，以及 filtered/backdrop Layer；不能让策略判断
+   进入每个控件的业务实现。
 2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
    支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
 3. Windows UI Automation provider 已完成第一阶段；后续补 TextPattern/selection range/live region，
@@ -533,13 +551,15 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    clean Widget 每帧按 z-order replay；不缓存 bgfx transient buffer 或跨帧 `UiItem`。旧即时路径
    保留为显式策略和不安全命令的自动兜底。下一步是降低 `std::function` 存储开销、增加缓存
    内存统计/预算，并逐类扩展 typed command，而不是复制第二套 Widget 渲染器。
-2. **UI Layer / RenderTarget（Production root 第二阶段完成）**：接口、Mock 和 AYRenderer bgfx
+2. **UI Layer / RenderTarget（Production 第三阶段完成）**：接口、Mock 和 AYRenderer bgfx
    实现已经闭环；FrameGraph/UI Layer 共用 generation-safe RenderTargetPool。UIManager 可 opt-in
-   root 像素层，clean frame 仅 composite，显式 dirty rect 局部 repaint，overlay 即时叠加，失败同帧
-   回退；每帧 224 次离屏 pass 的边界可确定复现并跨帧恢复。D3D11 的 36-capture 图像矩阵已验证
+   root 像素层，Widget 可选择 Always/Auto 子树层；最多 8 个 damage region 独立 repaint，70% 阈值
+   full fallback，overlay 即时叠加，失败同帧回退；每帧 224 次离屏 pass 的边界可确定复现并跨帧恢复。
+   UI strict budget 会撤销 LRU backing 而不销毁逻辑 handle，并暴露 cache/pool 统计。四个生产后端的
+   36-capture 图像矩阵已验证
    immediate/full/clean/partial、透明/opacity/blend 和完整生命周期；clean reuse、isolated blend 与
    Preserve 字节精确，通常最多差 1 LSB，RGBA8 group opacity 因双重量化最多 2 LSB。下一阶段是
-   多 region/子树策略和其余 GPU backend 视觉基线；滤镜、背景模糊、多 viewport 以及未来
+   adaptive cost model、分级预算；滤镜、背景模糊、多 viewport 以及未来
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
 3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
    Menu/StatusBar、Tab、Modal 和 Dock 复合结构具有专用 wire contract 与往返测试。运行时瞬态明确排除。
@@ -566,7 +586,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 数据格式 | 复用 JSON UILayoutLoader，不引入第二套配置系统 |
 | 渲染解耦 | `IRenderBackend`，AYRenderer 提供实现 |
 | 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
-| 像素层缓存 | Production root Layer opt-in；AYRenderer/Mock 完成，FrameGraph/UI 共用 RenderTargetPool；clean frame 单 composite，显式 dirty rect 局部 repaint |
+| 像素层缓存 | Production root + Always/Auto subtree Layer；最多 8 个 damage region；FrameGraph/UI 共用 RenderTargetPool，UI strict budget/LRU 降级；clean frame 单 composite |
 | 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
 | DPI/UI scale | Widget/damage/accessibility 使用 DIP；宿主输入与 framebuffer 使用物理像素；后端最终缩放 |
 | 无障碍 | AYUI 输出 snapshot/action/diff；Windows adapter 发布原生 UIA，AT-SPI/NSAccessibility 待接入 |
