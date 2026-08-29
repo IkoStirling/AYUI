@@ -44,8 +44,11 @@ MenuItem* Menu::addItem(const std::wstring& text) {
                                   kDefaultHeight));
     addChild(item);   // owning
     _items.push_back(item);
-    // Forward click → menu-close hand-off.
-    item->setOnActivate([this, idx = _items.size() - 1]() {
+    // Keep popup bookkeeping out of MenuItem's host callback slot. Hosts call
+    // setOnActivate() after addItem(); using that same slot here meant the
+    // host silently replaced close(), leaving an active popup that captured
+    // all subsequent input (notably Editor -> Create Empty Entity).
+    item->setOnMenuActivate([this, idx = _items.size() - 1]() {
         _lastActivatedIndex = static_cast<int>(idx);
         if (_onItemActivated) _onItemActivated(static_cast<int>(idx));
         close();
@@ -499,17 +502,13 @@ void Menu::tick(float dt) {
 }
 
 void Menu::activateItem(int index) {
-    // Mirror the same side effects MenuItem's onMouseButtonUp callback
-    // triggers (see the lambda installed in addItem): record index,
-    // fire _onItemActivated, close. Centralized here so the keyboard
-    // path and the mouse path stay byte-identical without exposing
-    // MenuItem's protected handleClick().
+    // Route keyboard activation through the item too, so its host-facing
+    // callback fires exactly as it does for mouse/accelerator activation.
+    // MenuItem's internal menu callback records the index and closes us.
     if (index < 0 || index >= static_cast<int>(_items.size())) return;
-    _lastActivatedIndex = index;
-    if (_onItemActivated) {
-        _onItemActivated(index);
-    }
-    close();
+    MenuItem* item = _items[static_cast<size_t>(index)];
+    if (item == nullptr || !item->isEnabled()) return;
+    item->handleClick();
 }
 
 void Menu::dismissFromManager() {

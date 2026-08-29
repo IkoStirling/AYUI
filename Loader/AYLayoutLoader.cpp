@@ -14,6 +14,7 @@
 #include "AYUI/Image.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/ListView.h"
+#include "AYUI/ScrollView.h"
 #include "AYUI/Slider.h"
 #include "AYUI/CheckBox.h"
 #include "AYUI/ProgressBar.h"
@@ -698,6 +699,36 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
     if (CheckBox* cb = dynamic_cast<CheckBox*>(widget)) {
         if (j.contains("checked")) {
             cb->setChecked(j["checked"].get<bool>());
+        }
+    }
+
+    // LayoutLoader is the path used by Editor shell JSON. Keep ScrollView's
+    // single-content wire format symmetric with WidgetSerializer; treating
+    // `content` as an ordinary child leaves ScrollView::_content null, so the
+    // subtree is neither laid out nor painted and its ids cannot be bound.
+    if (ScrollView* scroll = dynamic_cast<ScrollView*>(widget)) {
+        if (j.contains("verticalScrollBar")) {
+            scroll->setVerticalScrollBarEnabled(
+                j["verticalScrollBar"].get<bool>());
+        }
+        if (j.contains("horizontalScrollBar")) {
+            scroll->setHorizontalScrollBarEnabled(
+                j["horizontalScrollBar"].get<bool>());
+        }
+        if (j.contains("contentSize") && j["contentSize"].is_object()) {
+            scroll->setContentSize(math::FVector2(
+                j["contentSize"].value("w", 0.0f),
+                j["contentSize"].value("h", 0.0f)));
+        }
+        if (j.contains("content") && j["content"].is_object()) {
+            if (Widget* content = buildWidgetTree(j["content"])) {
+                scroll->setContentOwned(content);
+            }
+        }
+        if (j.contains("scrollOffset") && j["scrollOffset"].is_object()) {
+            scroll->setScrollOffset(math::FVector2(
+                j["scrollOffset"].value("x", 0.0f),
+                j["scrollOffset"].value("y", 0.0f)));
         }
     }
 

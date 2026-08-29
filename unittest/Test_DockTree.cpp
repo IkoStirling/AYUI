@@ -142,6 +142,21 @@ HBox* midBox(DockArea* dock) {
     return nullptr;
 }
 
+DockTabGroup* findLeafById(Widget* node, const std::string& leafId) {
+    if (node == nullptr) {
+        return nullptr;
+    }
+    if (auto* leaf = dynamic_cast<DockTabGroup*>(node)) {
+        return leaf->getLeafId() == leafId ? leaf : nullptr;
+    }
+    for (Widget* child : node->getChildren()) {
+        if (DockTabGroup* found = findLeafById(child, leafId)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 TEST_SUITE(AYUI_DockTree)
@@ -388,7 +403,82 @@ TEST_CASE(test_join_after_south_split_no_crash) {
 }
 
 // -------------------------------------------------------------------------
-// 3d. Empty side pinned leaves collapse (hidden + bordering splitters)
+// 3d. Real editor crash path: tear the active tab out of a two-tab pinned
+//     Left leaf, then drag the remaining solo card onto the new g_0 edge.
+//     Emptying Left extracts it from the nest while splitLeaf still owns an
+//     empty, not-yet-populated g_1. Recursive prune at that point used to
+//     delete g_1 and splitLeaf subsequently dereferenced the freed leaf.
+// -------------------------------------------------------------------------
+TEST_CASE(test_split_pinned_tab_then_split_remaining_card_no_uaf) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    dock->addCard(DockArea::Slot::Left,
+                  treeMakeCard("outliner", L"Outliner"));
+    dock->addCard(DockArea::Slot::Left,
+                  treeMakeCard("render", L"Render"));
+    dock->addCard(DockArea::Slot::Center,
+                  treeMakeCard("viewport", L"Viewport"));
+    dock->addCard(DockArea::Slot::Right,
+                  treeMakeCard("inspector", L"Inspector"));
+    dock->performLayout();
+
+    DockTabGroup* left = findLeafById(rootBox(dock.get()), "Left");
+    CHECK_NOT_NULL(left);
+    if (left == nullptr) return;
+    CHECK(left->getActiveTabId() == "render");
+
+    // Start through UIManager (not the direct DockCard helper) so this is
+    // the same active-tab-strip input path used by AYEditorShellDemo.
+    const FRectangle lb = left->getWorldBounds();
+    const FVector2 activeTabPt(lb.minX + (lb.maxX - lb.minX) * 0.75f,
+                               lb.minY + 10.0f);
+    CHECK(f.ui.onMouseButtonDown(activeTabPt.x, activeTabPt.y, 0));
+    CHECK(f.ui.isDragging());
+    const FVector2 firstDrop((lb.minX + lb.maxX) * 0.5f, lb.minY + 5.0f);
+    f.ui.onMouseMove(firstDrop.x, firstDrop.y);
+    f.ui.onMouseButtonUp(firstDrop.x, firstDrop.y, 0);
+    CHECK_FALSE(f.ui.isDragging());
+    dock->performLayout();
+
+    DockTabGroup* g0 = findLeafById(rootBox(dock.get()), "g_0");
+    left = findLeafById(rootBox(dock.get()), "Left");
+    DockCard* outliner = dock->findCard("outliner");
+    CHECK_NOT_NULL(g0);
+    CHECK_NOT_NULL(left);
+    CHECK_NOT_NULL(outliner);
+    if (g0 == nullptr || left == nullptr || outliner == nullptr) return;
+    CHECK(g0->containsCard(dock->findCard("render")));
+    CHECK(left->containsCard(outliner));
+
+    // Split at g_0's north edge while the only remaining Left card is the
+    // drag source. Left becomes empty and is re-homed into the template.
+    const FVector2 sourcePt = treeTitleBarPoint(outliner);
+    CHECK(f.ui.onMouseButtonDown(sourcePt.x, sourcePt.y, 0));
+    CHECK(f.ui.isDragging());
+    const FRectangle gb = g0->getWorldBounds();
+    const FVector2 secondDrop((gb.minX + gb.maxX) * 0.5f, gb.minY + 5.0f);
+    f.ui.onMouseMove(secondDrop.x, secondDrop.y);
+    f.ui.onMouseButtonUp(secondDrop.x, secondDrop.y, 0);
+    CHECK_FALSE(f.ui.isDragging());
+    dock->performLayout();
+
+    DockTabGroup* g1 = findLeafById(rootBox(dock.get()), "g_1");
+    left = findLeafById(rootBox(dock.get()), "Left");
+    CHECK_NOT_NULL(g1);
+    CHECK_NOT_NULL(left);
+    if (g1 == nullptr || left == nullptr) return;
+    CHECK(g1->containsCard(outliner));
+    CHECK(left->getTabCount() == 0);
+
+    // Exercise the next input/tick after the structural edit; stale hover
+    // or capture references often surface one frame after the drop.
+    f.ui.onMouseMove(400.0f, 300.0f);
+    f.ui.update(1.0f / 60.0f);
+}
+
+// -------------------------------------------------------------------------
+// 3e. Empty side pinned leaves collapse (hidden + bordering splitters)
 //     so the fill column expands. Re-docking into that slot expands them.
 // -------------------------------------------------------------------------
 TEST_CASE(test_empty_side_pinned_collapses_and_expands) {
@@ -919,6 +1009,25 @@ TEST_CASE(test_drag_paints_tree_previews) {
         }
     }
     CHECK(foundJoin);
+
+    // Drop guides are immediate-mode overlay commands and must be emitted
+    // every frame even if the mouse has not moved. A cursor-position gate
+    // made the guide alternate between present and absent frames.
+    f.backend.clear();
+    dock->paintDropGuide(f.backend);
+    bool foundStationaryJoin = false;
+    for (const auto& dc : f.backend.getDrawCalls()) {
+        if (dc.type == MockRenderer::DrawCall::Rect
+            && std::fabs(dc.color.w - 0.20f) < 0.02f
+            && std::fabs(dc.bounds.minX - cb.minX) < 0.5f
+            && std::fabs(dc.bounds.maxX - cb.maxX) < 0.5f
+            && std::fabs(dc.bounds.minY - cb.minY) < 0.5f
+            && std::fabs(dc.bounds.maxY - cb.maxY) < 0.5f) {
+            foundStationaryJoin = true;
+            break;
+        }
+    }
+    CHECK(foundStationaryJoin);
 
     // Split preview: 25% edge band at Center's east side (keep ≥10px
     // from the dock outer edge so a collapsed Right revive strip does

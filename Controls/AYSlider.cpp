@@ -21,6 +21,9 @@ void Slider::setMin(float v) {
         return;
     }
     _min = v;
+    // Range changes alter the normalized handle position even when the
+    // current value remains valid, so invalidate the retained paint list.
+    markDirty();
     // Re-clamp value into the new range — setValue fires _onValueChanged
     // only if the post-clamp value actually changed.
     setValue(_value);
@@ -34,6 +37,7 @@ void Slider::setMax(float v) {
         return;
     }
     _max = v;
+    markDirty();
     setValue(_value);
 }
 
@@ -46,6 +50,9 @@ void Slider::setValueRange(float minVal, float maxVal) {
     const bool maxChanged = fabsf(maxVal - _max) >= kMinMaxEpsilon;
     _min = minVal;
     _max = maxVal;
+    if (minChanged || maxChanged) {
+        markDirty();
+    }
     // Reset _value to the new min if the current value now exceeds the
     // new range; otherwise leave it for setValue to no-op on identity.
     if (_value < _min) {
@@ -69,6 +76,9 @@ void Slider::setValue(float v) {
         return;
     }
     _value = clamped;
+    // Slider geometry is value-derived. Retained display lists must be
+    // rebuilt before this frame is replayed or the handle appears frozen.
+    markDirty();
     if (_onValueChanged) {
         _onValueChanged(_value);
     }
@@ -134,6 +144,7 @@ bool Slider::onMouseButtonDown(const UIMouseEvent& e) {
     // so we leave state Normal (pointer is over the slider; base state
     // machine will flip to Hovered via its own onMouseMove if applicable).
     _state = ButtonState::Pressed;
+    markDirty();
     return true;
 }
 
@@ -176,6 +187,7 @@ bool Slider::onMouseButtonUp(const UIMouseEvent& e) {
         _isPressed = false;
     }
     _state = (_isMouseOver ? ButtonState::Hovered : ButtonState::Normal);
+    markDirty();
     return true;
 }
 

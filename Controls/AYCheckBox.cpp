@@ -19,6 +19,10 @@ void CheckBox::setChecked(bool checked) {
         return;
     }
     _checked = checked;
+    // The checked accent is cached in the retained display list. Rebuild it
+    // in the same frame as the state change instead of waiting for a later
+    // hover/leave event to invalidate the widget.
+    markDirty();
     if (_onToggled) {
         _onToggled(_checked);
     }
@@ -51,6 +55,7 @@ bool CheckBox::onMouseButtonUp(const UIMouseEvent& e) {
     if (stillOver) {
         _checked = !_checked;
         _state = ButtonState::Hovered;
+        markDirty();
         if (_onToggled) {
             _onToggled(_checked);
         }
@@ -60,6 +65,7 @@ bool CheckBox::onMouseButtonUp(const UIMouseEvent& e) {
         return true;
     }
     _state = ButtonState::Normal;
+    markDirty();
     return false;
 }
 

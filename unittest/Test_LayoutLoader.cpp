@@ -10,6 +10,7 @@
 #include "AYUI/Image.h"
 #include "AYUI/ImageTexture.h"
 #include "AYUI/GridPanel.h"
+#include "AYUI/ScrollView.h"
 #include "AYUI/Window.h"
 #include "AYUI/Box.h"
 #include "AYUI/Widget.h"
@@ -307,6 +308,40 @@ TEST_CASE(test_layout_loader_partial_height_fills_parent_width) {
     Widget* btnPause = loader.findWidgetById("btn_pause");
     CHECK(btnPause != nullptr);
     CHECK(toolbar->hitTest(FVector2(130.0f, 22.0f)) == btnPause);
+
+    destroyWidgetTree(root);
+}
+
+TEST_CASE(test_layout_loader_scrollview_builds_and_registers_content) {
+    UILayoutLoader loader;
+
+    const char* json = R"({
+        "type": "ScrollView",
+        "id": "scroll",
+        "size": { "w": 200, "h": 100 },
+        "verticalScrollBar": true,
+        "horizontalScrollBar": false,
+        "contentSize": { "w": 180, "h": 240 },
+        "content": {
+            "type": "VBox",
+            "id": "scroll_body",
+            "children": [
+                { "type": "Slider", "id": "deep_slider",
+                  "size": { "w": 160, "h": 24 } }
+            ]
+        }
+    })";
+
+    Widget* root = loader.loadFromString(json);
+    auto* scroll = dynamic_cast<ScrollView*>(root);
+    CHECK(scroll != nullptr);
+    CHECK(scroll->getContent() != nullptr);
+    CHECK(scroll->getContent()->getId() == "scroll_body");
+    CHECK(loader.findWidgetById("scroll_body") == scroll->getContent());
+    CHECK(loader.findWidgetById("deep_slider") != nullptr);
+    CHECK(scroll->isVerticalScrollBarEnabled());
+    CHECK_FALSE(scroll->isHorizontalScrollBarEnabled());
+    CHECK_FLOAT_EQ(scroll->getContentSize().y, 240.0f, 1e-5f);
 
     destroyWidgetTree(root);
 }

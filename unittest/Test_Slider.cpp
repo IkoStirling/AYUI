@@ -196,6 +196,47 @@ TEST_CASE(slider_render_emits_accent_fill) {
     CHECK(foundAccent);
 }
 
+TEST_CASE(slider_retained_display_list_tracks_click_and_drag_value) {
+    Slider s;
+    s.setSize(FVector2(200.0f, 24.0f));
+    s.setPosition(FVector2(0.0f, 0.0f));
+
+    auto accentFillMaxX = [](const MockRenderer& renderer) {
+        for (const auto& dc : renderer.getDrawCalls()) {
+            if (dc.type == MockRenderer::DrawCall::Rect
+                && fabsf(dc.color.x - 0.18f) < 1e-4f
+                && fabsf(dc.color.y - 0.45f) < 1e-4f
+                && fabsf(dc.color.z - 0.78f) < 1e-4f) {
+                return dc.bounds.maxX;
+            }
+        }
+        return -1.0f;
+    };
+
+    MockRenderer renderer;
+    s.render(renderer);
+    CHECK_TRUE(s.hasCachedDisplayList());
+    const float initialMaxX = accentFillMaxX(renderer);
+    CHECK(initialMaxX > 0.0f);
+
+    CHECK(s.onMouseButtonDown(
+        UIMouseEvent(FVector2(50.0f, 12.0f), 0)));
+    renderer.beginFrame();
+    s.render(renderer);
+    const float clickMaxX = accentFillMaxX(renderer);
+    CHECK(clickMaxX < initialMaxX);
+
+    CHECK(s.onMouseMove(UIMouseEvent(FVector2(150.0f, 12.0f), 0)));
+    renderer.beginFrame();
+    s.render(renderer);
+    const float dragMaxX = accentFillMaxX(renderer);
+    CHECK(dragMaxX > initialMaxX);
+    CHECK(dragMaxX > clickMaxX);
+
+    CHECK(s.onMouseButtonUp(
+        UIMouseEvent(FVector2(150.0f, 12.0f), 0)));
+}
+
 // C-7: factory + serializer round-trip. factory.create("Slider") returns
 // a Slider; serialize emits type Slider + min/max/value; deserialize
 // restores all three.

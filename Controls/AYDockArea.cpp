@@ -1238,17 +1238,12 @@ void DockArea::paintDropGuide(IRenderBackend& renderer) {
         cursor = ui->getDragLastMousePos();
     }
 
-    // AYUI-Perf-2026-08-26: cursor-gate. If the cursor hasn't moved
-    // (within 1 px) since the last paint, skip the resolver + draw
-    // calls entirely. The render loop calls paintDropGuide every
-    // frame at 60Hz; during a drag where the mouse sits still over
-    // a slot, the cached hit would otherwise re-run resolveDropTarget
-    // and a tree-walk hit-test each frame.
-    const bool cursorMoved = (std::fabs(cursor.x - _lastDropGuideCursor.x) > 1.0f)
-                          || (std::fabs(cursor.y - _lastDropGuideCursor.y) > 1.0f);
-    if (!cursorMoved && _lastDropGuidePainted) {
-        return;
-    }
+    // The guide is immediate-mode: its draw commands must be emitted on
+    // every rendered frame. Skipping the whole paint when the cursor is
+    // stationary produces an alternating present/absent overlay as the
+    // backend clears its command list each frame. Keep the last cursor as
+    // ABI-stable bookkeeping only; a future optimization may cache the
+    // resolved DropTarget, but must still replay the guide draw commands.
     _lastDropGuideCursor = cursor;
     _lastDropGuidePainted = true;
 
@@ -2378,7 +2373,6 @@ void DockArea::setSidePinnedCollapsed(DockTabGroup* leaf, bool collapsed) {
     if (id != "Left" && id != "Right" && id != "Top" && id != "Bottom") {
         return;
     }
-    bool extracted = false;
     if (collapsed) {
         if (auto* box = dynamic_cast<BoxBase*>(leaf->getParent())) {
             if (!isTemplateHost(box, _rootNode)) {
@@ -2391,7 +2385,6 @@ void DockArea::setSidePinnedCollapsed(DockTabGroup* leaf, bool collapsed) {
                 detachLeafKeepAlive(box, leaf);
                 ensureNestHasVisibleFill(box);
                 reinsertSidePinnedIntoTemplate(_rootNode, leaf);
-                extracted = true;
             }
         }
     }
@@ -2411,9 +2404,12 @@ void DockArea::setSidePinnedCollapsed(DockTabGroup* leaf, bool collapsed) {
             ensureNestHasVisibleFill(box);
         }
     }
-    if (extracted) {
-        pruneEmptySplitNodes();
-    }
+    // Never prune recursively here. removeTabFromLeaf is called while
+    // splitLeaf still has a structurally attached but empty destination
+    // leaf. Pruning at this point can delete that destination and the nest
+    // around it, after which splitLeaf would add the card through a freed
+    // pointer. Every top-level remove/move/split path prunes after the card
+    // has reached its final parent.
 }
 
 void DockArea::collapseEmptySidePinnedLeaves() {

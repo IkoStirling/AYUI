@@ -40,17 +40,48 @@ TEST_CASE(menu_item_shortcut) {
 }
 
 TEST_CASE(menu_activate_closes_menu) {
-    Menu menu;
-    menu.addItem(L"Open");
-    menu.addItem(L"Save");
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
 
-    // Manually open without a host (host-less test fixture).
-    menu.setVisible(true);
-    menu.setPosition(FVector2(0.0f, 0.0f));
-    // We can't easily flip _open=true without open(); use a small hook:
-    // we'll just call into Menu's path that requires it. Skip — instead,
-    // check that addItem registers the close callback.
-    CHECK(menu.getItemCount() == 2u);
+    Widget host;
+    Menu* menu = new Menu();
+    MenuItem* item = menu->addItem(L"Create Empty Entity");
+    bool hostCallbackFired = false;
+    item->setOnActivate([&]() { hostCallbackFired = true; });
+    menu->open(&host, FVector2(0.0f, 20.0f));
+    menu->performLayout();
+
+    const FRectangle bounds = item->getWorldBounds();
+    UIMouseEvent event(
+        FVector2((bounds.minX + bounds.maxX) * 0.5f,
+                 (bounds.minY + bounds.maxY) * 0.5f),
+        0);
+    CHECK(item->onMouseButtonUp(event));
+    CHECK(hostCallbackFired);
+    CHECK_FALSE(menu->isOpen());
+
+    ui.shutdown();
+}
+
+TEST_CASE(menu_keyboard_activation_runs_item_callback_and_closes) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    Widget host;
+    Menu* menu = new Menu();
+    MenuItem* item = menu->addItem(L"Create Empty Entity");
+    int activations = 0;
+    item->setOnActivate([&]() { ++activations; });
+    menu->open(&host, FVector2(0.0f, 20.0f));
+
+    CHECK(menu->onKeyDown(UIKey_Down));
+    CHECK(menu->onKeyDown(UIKey_Enter));
+    CHECK(activations == 1);
+    CHECK_FALSE(menu->isOpen());
+
+    ui.shutdown();
 }
 
 TEST_CASE(menu_render_emits_background) {

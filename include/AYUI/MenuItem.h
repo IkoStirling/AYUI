@@ -133,16 +133,27 @@ public:
     void onRender(IRenderBackend& renderer) override;
 
 private:
+    // Menu owns the popup state machine separately from the host-facing
+    // callback installed through setOnActivate().  Keeping the two channels
+    // distinct prevents a host callback from replacing the mandatory
+    // "record item + close popup" tail installed by Menu::addItem().
+    void setOnMenuActivate(std::function<void()> cb) {
+        _onMenuActivate = std::move(cb);
+    }
+
     std::wstring _text;
     std::wstring _shortcut;
     Menu*        _submenu = nullptr;
     std::function<void()> _onActivate;
+    std::function<void()> _onMenuActivate;
     bool         _isKeyboardHovered = false;  // PR-C3 hotfix
 
     // Polish (P3): cached parse result for _shortcut. _accelKey = 0
     // means unparseable — setShortcut failed to recognize a key token.
     uint8_t _accelMods = 0;
     int     _accelKey  = 0;
+
+    friend class Menu;
 };
 
 Widget* createMenuItemWidget();

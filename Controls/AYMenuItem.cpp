@@ -164,10 +164,14 @@ void MenuItem::setShortcut(const std::wstring& s) {
 }
 
 bool MenuItem::handleClick() {
-    // Fire the activate callback. We do NOT toggle selection — menus
-    // are not persistent single-select; the row visually highlights while
-    // hovered and disappears when the menu closes.
-    if (_onActivate) _onActivate();
+    // Settle popup/focus bookkeeping before invoking host code. Editor menu
+    // actions can mutate scene and inspector state; doing that while the
+    // popup is still active leaves UIManager routing input to a stale modal
+    // layer. Copy the host callback first because closing may eventually
+    // unmount (or, for a custom owner, destroy) this item.
+    const std::function<void()> hostActivate = _onActivate;
+    if (_onMenuActivate) _onMenuActivate();
+    if (hostActivate) hostActivate();
     return true;
 }
 

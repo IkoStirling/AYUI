@@ -189,6 +189,43 @@ TEST_CASE(checkbox_render_checked_accent_fill) {
     CHECK(foundAccent);
 }
 
+TEST_CASE(checkbox_retained_display_list_updates_on_release) {
+    CheckBox cb;
+    cb.setSize(FVector2(140.0f, 24.0f));
+    cb.setPosition(FVector2(0.0f, 0.0f));
+
+    auto hasAccent = [](const MockRenderer& renderer) {
+        for (const auto& dc : renderer.getDrawCalls()) {
+            if (dc.type == MockRenderer::DrawCall::Rect
+                && fabsf(dc.color.x - 0.18f) < 1e-4f
+                && fabsf(dc.color.y - 0.45f) < 1e-4f
+                && fabsf(dc.color.z - 0.78f) < 1e-4f) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    MockRenderer renderer;
+    cb.render(renderer);
+    CHECK_TRUE(cb.hasCachedDisplayList());
+    CHECK_FALSE(hasAccent(renderer));
+
+    const UIMouseEvent click(FVector2(40.0f, 12.0f), 0);
+    cb.onMouseMove(click);
+    CHECK(cb.onMouseButtonDown(click));
+    // Rebuild the pressed/unchecked list before release. This mirrors the
+    // real event loop and catches a missing mouse-up invalidation.
+    renderer.beginFrame();
+    cb.render(renderer);
+    CHECK_FALSE(hasAccent(renderer));
+
+    CHECK(cb.onMouseButtonUp(click));
+    renderer.beginFrame();
+    cb.render(renderer);
+    CHECK_TRUE(hasAccent(renderer));
+}
+
 // C-2: a non-empty label produces exactly one drawText call carrying the
 // label's wide-string content (wide-to-byte lossy read is OK for ASCII).
 TEST_CASE(checkbox_render_label_text) {

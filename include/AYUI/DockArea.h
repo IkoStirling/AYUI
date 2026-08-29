@@ -318,13 +318,10 @@ private:
     // onDragEnter for use by onDrop (overlay drop uses this position).
     math::FVector2 _dragEnterPos = math::FVector2(-1.0f, -1.0f);
 
-    // AYUI-Perf-2026-08-26: paintDropGuide() is called every frame the
-    // dock renders while a drag is in flight. The drop-target resolver
-    // (resolveDropTarget) is itself a non-trivial tree walk, and the
-    // slot rect math runs even when the cursor hasn't moved (mouse
-    // hasn't changed pos, but the render loop still ticks at 60Hz).
-    // Cache the last-painted cursor; if the next call sees the same
-    // position within 1 px, skip the resolver and the draw entirely.
+    // Kept in place to preserve DockArea's binary layout across mixed
+    // incremental builds. Immediate-mode drop-guide commands must still
+    // be emitted every frame; these fields may only support a future
+    // resolved-target cache, never a whole-paint early return.
     math::FVector2 _lastDropGuideCursor = math::FVector2(-1.0f, -1.0f);
     bool           _lastDropGuidePainted = false;
 
