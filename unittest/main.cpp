@@ -101,6 +101,7 @@
 #include "Test_MenuBarLifecycle.cpp"         // AYUI-Audit-2026-08-26 Batch A: ~MenuBar dtor UAF regression
 #include "Test_Productization.cpp"            // DPI, semantics, theme cascade, overflow, rich layout
 #include "Test_UnicodeText.cpp"                // grapheme, UAX #14 and bidi analysis
+#include "Test_DeviceInputBridge.cpp"          // AYDevice -> AYUI platform-neutral input seam
 
 int runTest()
 {

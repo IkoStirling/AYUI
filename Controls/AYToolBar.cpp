@@ -149,11 +149,8 @@ void ToolBar::layoutItems() {
     // contentSize trigger uses this to compute the horizontal scrollbar.
     _contentStrip->setSize(math::FVector2(totalW, getHeight()));
     _scrollView->setContentSize(math::FVector2(totalW, getHeight()));
-    // NOTE: hbar visibility derivation is deferred to performLayout —
-    // ScrollView::performLayout lazily creates the hbar via
-    // ensureBarsCreated(), so it does not exist yet here. Setting
-    // visibility on a non-existent pointer would be a NOP; doing it
-    // after CompoundWidget::performLayout guarantees the hbar exists.
+    // ScrollView's Auto policy derives horizontal-bar visibility from this
+    // content extent during its own layout pass.
 }
 
 void ToolBar::performLayout() {
@@ -174,17 +171,6 @@ void ToolBar::performLayout() {
     // triggers ScrollView::performLayout which lazily creates the
     // horizontal ScrollBar via ensureBarsCreated().
     CompoundWidget::performLayout();
-    // G3 — derive hbar visibility AFTER ScrollView::performLayout so
-    // the hbar is guaranteed to exist. ScrollView itself never toggles
-    // ScrollBar.isVisible when content ≤ viewport; we must do it here
-    // for the "content fits → no chrome" polish (line 192/303 of
-    // AYWidget.cpp honor setVisible for hitTest + render).
-    if (ScrollBar* hbar = _scrollView->getHorizontalScrollBar()) {
-        const float viewW = getWidth();
-        const float contentW = _contentStrip->getSize().x;
-        const bool needsHbar = contentW > viewW + 1e-3f;
-        hbar->setVisible(needsHbar);
-    }
 }
 
 void ToolBar::onRender(IRenderBackend& renderer) {

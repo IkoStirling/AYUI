@@ -162,6 +162,15 @@ painter order。capability、create/update、paint 或 composite 前置条件失
 本帧命令转发给真实后端，下一帧继续旧即时路径。`DisplayListPolicy::Immediate` 可显式保留该路径，
 用于自定义控件兼容、诊断和 A/B 对照。
 
+`SvgDocument` 在这条 vector-path recipe 上提供原生矢量图标层，不引入 SVG→PNG 烘焙器或第三方
+DOM/rasterizer。当前安全子集支持 `<svg>`/`<path>`、`viewBox`、多个 path/subpath、完整
+`M/L/H/V/C/S/Q/T/A/Z` 命令、fill/stroke/currentColor/opacity，以及 butt/round/square cap 和
+miter/round/bevel join；曲线与椭圆弧在提交时自适应离散，按 `xMidYMid meet` 缩放到逻辑 DIP。
+`SvgIcon` 是叶 Widget，`Button` 可持有共享不可变 `SvgDocument`，因此 DPI 变化不需要重新生成
+位图或持有后端纹理句柄。为避免“部分画对、部分静默丢失”，`transform`、CSS `style`、显式
+`fill-rule`、clip/mask/filter 和非 path 图元目前直接返回解析错误；输入还受 4 MiB 文档与路径/
+命令数量上限约束。这是图标 SVG 子集，不等同浏览器级 SVG 实现。
+
 图片组合遵循同一树顺序：父节点先执行 `onRender()`，子节点再按插入顺序绘制，`bringToFront()` 可把同级节点移到末尾。`Image` 提供纹理句柄、UV 和 opacity；图片按钮使用 `Button -> Image` 装饰子节点，命中仍返回 Button。图片背景上的交互层应使用 `Panel -> [Image, ..., Button]`，Panel 会下降命中并让后加入的 Button 覆盖在图片上。Gallery 的 `Images` 页面是该契约的可视化回归样例。
 
 渲染后端负责矩形、边框、文本、纹理、裁剪、opacity stack 等图元，不负责 Widget 生命周期或布局。`UIRenderBackend` 的 `UiItem`、clip stack 和 transient geometry 都是 frame-local；不得通过跨帧保留 `items` 来模拟 Widget 缓存。
@@ -456,6 +465,9 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 1022 个 `TEST_CASE`
 - Windows Debug：`4643 / 4643` 条断言通过
 
+2026-08-31 原生 SVG、连续 contour 与设备输入桥接扩展后的当前 Windows Debug 基线为
+`4810 / 4810`；上面的 2026-08-29 数量保留为该轮审计快照。
+
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
@@ -530,8 +542,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    降级、统计反馈及 D3D11/D3D12/Vulkan/OpenGL 的 36-capture 矩阵。下一步是基于历史 repaint cost
    和命中率自适应 Auto 阈值、按 Layer 类别分预算，以及 filtered/backdrop Layer；不能让策略判断
    进入每个控件的业务实现。
-2. vector path 补充 self-intersection/fill-rule、布尔组合、join/cap 选择和独立 AA fringe；当前明确
-   支持 simple contour、显式 clockwise hole 和 stencil nesting，不隐式承诺任意 SVG 语义。
+2. vector path 补充 self-intersection/fill-rule、布尔组合和独立 AA fringe；continuous contour 及
+   butt/round/square cap、miter/round/bevel join 已落地。原生 SVG 当前只承诺上文图标子集，
+   transform/CSS/clip/mask/filter 与非 path 图元仍显式拒绝，不隐式承诺任意 SVG 语义。
 3. Windows UI Automation provider 已完成第一阶段；后续补 TextPattern/selection range/live region，
    并以同一 snapshot/action/diff 状态机实现 AT-SPI 与 NSAccessibility，不能在平台层重新推断控件语义。
 4. RichText 的 grapheme/bidi/UAX #14-compatible break、family/weight face 与真实 shaping 已完成第一阶段；
@@ -563,10 +576,11 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
 3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
    Menu/StatusBar、Tab、Modal 和 Dock 复合结构具有专用 wire contract 与往返测试。运行时瞬态明确排除。
-4. **高级裁剪和矢量路径（第一阶段完成）**：DisplayList 保留 backend-independent path recipe；
-   AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、stroke、winding hole 与嵌套
-   stencil clip。path fill/clip 是显式排序屏障，两种 batch mode 不复制实现。下一阶段是 SVG 级
-   fill-rule/boolean/join-cap 和 AA fringe。
+4. **高级裁剪和矢量路径（图标 SVG 阶段完成）**：DisplayList 保留 backend-independent path
+   recipe；AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、连续 contour、
+   cap/join stroke、winding hole 与嵌套 stencil clip。`SvgDocument`/`SvgIcon`/Button icon slot
+   直接消费安全 SVG path 子集。path fill/clip 是显式排序屏障，两种 batch mode 不复制实现。
+   下一阶段是完整 fill-rule/boolean、transform/CSS/clip 语义和 AA fringe。
 5. **产品化能力（第二阶段完成）**：Widget 使用逻辑 DIP，DPI/UI scale 在输入和最终 raster
    边界闭环；无障碍 snapshot/action、Theme/Widget 两级继承、TabStrip Scroll/Compress/Clip、
    RichText paragraph layout 和 Win32/macOS/Wayland/X11 Clipboard 均有 API、Serializer、Gallery
@@ -587,7 +601,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 渲染解耦 | `IRenderBackend`，AYRenderer 提供实现 |
 | 帧提交 | 可见 Widget 每帧遍历；dirty 重建本地 display-list，clean replay，bgfx 仍逐帧 submit |
 | 像素层缓存 | Production root + Always/Auto subtree Layer；最多 8 个 damage region；FrameGraph/UI 共用 RenderTargetPool，UI strict budget/LRU 降级；clean frame 单 composite |
-| 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；复杂 path 是合批排序屏障 |
+| 矢量路径 | retained recipe；AYRenderer CPU tessellation + stencil fill/clip；原生安全 SVG 图标子集；复杂 path 是合批排序屏障 |
 | DPI/UI scale | Widget/damage/accessibility 使用 DIP；宿主输入与 framebuffer 使用物理像素；后端最终缩放 |
 | 无障碍 | AYUI 输出 snapshot/action/diff；Windows adapter 发布原生 UIA，AT-SPI/NSAccessibility 待接入 |
 | 主题 | 命名 parent theme + 控件树 token override 级联，parent-first / nearest-wins |

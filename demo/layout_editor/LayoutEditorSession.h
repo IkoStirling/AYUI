@@ -69,6 +69,7 @@ public:
     bool onWheel(const math::FVector2& worldPos, float deltaY);
 
     bool onKeyDown(int uiKeyCode);
+    void onKeyUp(int uiKeyCode);
     UiCursorHint canvasCursorHint(const math::FVector2& worldPos) const;
     void syncSelectionChrome();
 
@@ -257,6 +258,7 @@ private:
 
     float _viewZoom = 1.0f;
     bool _snapEnabled = true;
+    bool _spaceDown = false;
     float _gridSize = 8.0f;
     std::vector<std::string> _clipboardItems;
 

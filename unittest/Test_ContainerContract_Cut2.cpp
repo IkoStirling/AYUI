@@ -94,11 +94,10 @@ TEST_CASE(scrollview_hit_test_outside_client_falls_through_to_self) {
     // Click far outside world bounds — should miss.
     Widget* miss = sv->hitTest(FVector2(9999.0f, 9999.0f));
     CHECK(miss == nullptr);
-    // Click outside clientRect but inside world bounds. The vbar lives
-    // at default position (0, 0) before performLayout runs; clicking
-    // there should hit the vbar (chrome — visible above content via
-    // reverse-order child walk in the shared helper).
-    Widget* gutterHit = sv->hitTest(FVector2(2.0f, 50.0f));
+    // Click outside clientRect but inside world bounds. setContentSize now
+    // resolves Auto visibility and positions the bar immediately, so the
+    // live gutter is the rightmost 12px even before performLayout.
+    Widget* gutterHit = sv->hitTest(FVector2(194.0f, 50.0f));
     CHECK(gutterHit != nullptr);
     CHECK(gutterHit == sv->getVerticalScrollBar());
     delete sv;

@@ -11,12 +11,12 @@
 #  define NOMINMAX
 #endif
 #include <Windows.h>
-#include <windowsx.h>
 #include <commdlg.h>
 
 #include "LayoutEditorSession.h"
 
 #include "AYUI.h"
+#include "AYUI/DeviceInputBridge.h"
 #include "AYUI/UIManager.h"
 #include "AYRenderer/UIRenderBackend.h"
 #include "AYRenderer.h"
@@ -25,11 +25,13 @@
 #include "AYDevice/DeviceManager.h"
 #include "AYUI/UIKeyCode.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <sys/stat.h>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -147,7 +149,6 @@ struct AppState {
     ayt::ui::LayoutEditorSession* session = nullptr;
     ayt::render::Renderer* renderer = nullptr;
     ayt::render::UIRenderBackend* uiBackend = nullptr;
-    ayt::device::DeviceManager* devices = nullptr;
     int clientW = kWidth;
     int clientH = kHeight;
     float mouseX = 0.0f;
@@ -155,190 +156,34 @@ struct AppState {
     bool running = true;
 };
 
-static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint) {
-    static const HCURSOR arrow = ::LoadCursorW(nullptr, IDC_ARROW);
-    static const HCURSOR hand  = ::LoadCursorW(nullptr, IDC_HAND);
-    static const HCURSOR we    = ::LoadCursorW(nullptr, IDC_SIZEWE);
-    static const HCURSOR ns    = ::LoadCursorW(nullptr, IDC_SIZENS);
-    static const HCURSOR nwse  = ::LoadCursorW(nullptr, IDC_SIZENWSE);
-    static const HCURSOR nesw  = ::LoadCursorW(nullptr, IDC_SIZENESW);
-    static const HCURSOR move  = ::LoadCursorW(nullptr, IDC_SIZEALL);
-    static const HCURSOR beam  = ::LoadCursorW(nullptr, IDC_IBEAM);
-    switch (hint) {
-    case ayt::ui::UiCursorHint::Hand:  return hand;
-    case ayt::ui::UiCursorHint::SizeWe:
-    case ayt::ui::UiCursorHint::SizeHorizontal: return we;
-    case ayt::ui::UiCursorHint::SizeNs:
-    case ayt::ui::UiCursorHint::SizeVertical:   return ns;
-    case ayt::ui::UiCursorHint::SizeNwse: return nwse;
-    case ayt::ui::UiCursorHint::SizeNesw: return nesw;
-    case ayt::ui::UiCursorHint::Move:  return move;
-    case ayt::ui::UiCursorHint::Beam:  return beam;
-    case ayt::ui::UiCursorHint::Default:
-    default: return arrow;
+void updateCursor(AppState& state, ayt::device::WindowManager& window) {
+    ayt::ui::UiCursorHint hint = ayt::ui::UiCursorHint::Default;
+    if (state.session != nullptr) {
+        hint = state.session->canvasCursorHint(
+            ayt::math::FVector2(state.mouseX, state.mouseY));
     }
+    if (hint == ayt::ui::UiCursorHint::Default && state.ui != nullptr) {
+        hint = state.ui->getCursorHint();
+    }
+    window.setCursorShape(ayt::ui::systemCursorFromUi(hint));
 }
 
-std::intptr_t handleMessage(AppState* state, unsigned msg, std::uintptr_t wParam,
-                            std::intptr_t lParam, bool& handled) {
-    handled = false;
-    if (state == nullptr || state->ui == nullptr) {
-        return 0;
+void resizeApp(AppState& state, int width, int height) {
+    state.clientW = std::max(width, 32);
+    state.clientH = std::max(height, 32);
+    if (state.ui != nullptr) {
+        state.ui->setClientSize(static_cast<float>(state.clientW),
+                                static_cast<float>(state.clientH));
     }
-    ayt::ui::UIManager& ui = *state->ui;
-
-    switch (msg) {
-    case WM_SETCURSOR: {
-        ayt::ui::UiCursorHint hint = ayt::ui::UiCursorHint::Default;
-        if (state->session != nullptr) {
-            hint = state->session->canvasCursorHint(
-                ayt::math::FVector2(state->mouseX, state->mouseY));
-        }
-        if (hint == ayt::ui::UiCursorHint::Default) {
-            hint = ui.getCursorHint();
-        }
-        ::SetCursor(cursorForHint(hint));
-        handled = true;
-        return TRUE;
+    if (state.renderer != nullptr) {
+        state.renderer->resize(static_cast<uint32_t>(state.clientW),
+                               static_cast<uint32_t>(state.clientH));
     }
-    case WM_SIZE: {
-        state->clientW = LOWORD(lParam);
-        state->clientH = HIWORD(lParam);
-        if (state->clientW < 32) {
-            state->clientW = 32;
-        }
-        if (state->clientH < 32) {
-            state->clientH = 32;
-        }
-        ui.setClientSize(static_cast<float>(state->clientW),
-                         static_cast<float>(state->clientH));
-        if (state->renderer != nullptr) {
-            state->renderer->resize(static_cast<uint32_t>(state->clientW),
-                                   static_cast<uint32_t>(state->clientH));
-        }
-        if (state->uiBackend != nullptr) {
-            state->uiBackend->setFramebufferSize(
-                static_cast<uint16_t>(state->clientW),
-                static_cast<uint16_t>(state->clientH));
-        }
-        handled = true;
-        return 0;
+    if (state.uiBackend != nullptr) {
+        state.uiBackend->setFramebufferSize(
+            static_cast<uint16_t>(state.clientW),
+            static_cast<uint16_t>(state.clientH));
     }
-    case WM_MOUSEMOVE: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->mouseX = x;
-        state->mouseY = y;
-        const ayt::math::FVector2 pos(x, y);
-        if (state->session != nullptr && state->session->onPointerMove(pos)) {
-            handled = true;
-            return 0;
-        }
-        ui.onMouseMove(x, y);
-        return 0;
-    }
-    case WM_LBUTTONDOWN: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        const ayt::math::FVector2 pos(x, y);
-        if (state->session != nullptr && state->session->onPointerDown(pos, 0)) {
-            handled = true;
-            return 0;
-        }
-        ui.onMouseButtonDown(x, y, 0);
-        handled = true;
-        return 0;
-    }
-    case WM_LBUTTONUP: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        const ayt::math::FVector2 pos(x, y);
-        if (state->session != nullptr && state->session->onPointerUp(pos, 0)) {
-            handled = true;
-            return 0;
-        }
-        ui.onMouseButtonUp(x, y, 0);
-        handled = true;
-        return 0;
-    }
-    case WM_MBUTTONDOWN: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        if (state->session != nullptr &&
-            state->session->onPointerDown(ayt::math::FVector2(x, y), 2)) {
-            handled = true;
-            return 0;
-        }
-        break;
-    }
-    case WM_MBUTTONUP: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        if (state->session != nullptr &&
-            state->session->onPointerUp(ayt::math::FVector2(x, y), 2)) {
-            handled = true;
-            return 0;
-        }
-        break;
-    }
-    case WM_RBUTTONDOWN: {
-        ui.onMouseButtonDown(static_cast<float>(GET_X_LPARAM(lParam)),
-                             static_cast<float>(GET_Y_LPARAM(lParam)), 1);
-        handled = true;
-        return 0;
-    }
-    case WM_RBUTTONUP: {
-        ui.onMouseButtonUp(static_cast<float>(GET_X_LPARAM(lParam)),
-                           static_cast<float>(GET_Y_LPARAM(lParam)), 1);
-        handled = true;
-        return 0;
-    }
-    case WM_MOUSEWHEEL: {
-        constexpr float kPixelsPerNotch = 40.0f;
-        const short raw = static_cast<short>(HIWORD(wParam));
-        const float deltaY =
-            -(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA)) * kPixelsPerNotch;
-        POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-        if (state->devices != nullptr) {
-            HWND hwnd = static_cast<HWND>(state->devices->window().getWindowHandle());
-            if (hwnd != nullptr) {
-                ::ScreenToClient(hwnd, &pt);
-            }
-        }
-        const ayt::math::FVector2 pos(static_cast<float>(pt.x),
-                                      static_cast<float>(pt.y));
-        if (state->session != nullptr && state->session->onWheel(pos, deltaY)) {
-            handled = true;
-            return 0;
-        }
-        ui.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y), deltaY);
-        handled = true;
-        return 0;
-    }
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN: {
-        const int key = static_cast<int>(wParam);
-        if (key == ayt::ui::UIKey_Shift || key == ayt::ui::UIKey_Control ||
-            key == ayt::ui::UIKey_Alt) {
-            ui.onKeyDown(key);
-        } else if (state->session != nullptr && state->session->onKeyDown(key)) {
-            // Editor shortcuts (Ctrl+Z/Y, Delete) — skip UIManager.
-        } else {
-            ui.onKeyDown(key);
-        }
-        handled = true;
-        return 0;
-    }
-    case WM_KEYUP:
-    case WM_SYSKEYUP: {
-        ui.onKeyUp(static_cast<int>(wParam));
-        handled = true;
-        return 0;
-    }
-    default:
-        break;
-    }
-    return 0;
 }
 
 } // namespace
@@ -411,26 +256,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     state.ui = &ui;
     state.renderer = &renderer;
     state.uiBackend = &uiBackend;
-    state.devices = &devices;
     state.clientW = kWidth;
     state.clientH = kHeight;
-
-    ui.onTextEditingFocusChanged = [&devices](bool editing) {
-        devices.textInput().setEnabled(editing);
-    };
-    devices.textInput().onCommit = [&ui](const std::string& chunk) {
-        if (!chunk.empty()) {
-            ui.onDeviceChar(chunk.data(), static_cast<int>(chunk.size()));
-        }
-    };
-    devices.textInput().onCompositionUpdate =
-        [&ui, &devices](const std::string& text, int caret) {
-            if (text.empty() && !devices.textInput().isComposing()) {
-                ui.onDeviceCompositionEnd("");
-                return;
-            }
-            ui.onDeviceCompositionUpdate(text, caret);
-        };
 
     const std::string chromePath = resolveChromePath();
     if (!ui.loadLayout(chromePath)) {
@@ -468,11 +295,92 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     }
 
     window.setWindowCloseCallback([&state]() { state.running = false; });
-    window.setWindowMessageCallback(
-        [&state](unsigned msg, std::uintptr_t wParam, std::intptr_t lParam,
-                 bool& handled) -> std::intptr_t {
-            return handleMessage(&state, msg, wParam, lParam, handled);
-        });
+    window.setWindowResizeCallback([&state](int width, int height) {
+        resizeApp(state, width, height);
+    });
+    window.setWindowFocusCallback([&ui, &session](bool focused) {
+        if (focused) {
+            return;
+        }
+        session.onKeyUp(ayt::ui::UIKey_Space);
+        ui.onKeyUp(ayt::ui::UIKey_Shift);
+        ui.onKeyUp(ayt::ui::UIKey_Control);
+        ui.onKeyUp(ayt::ui::UIKey_Alt);
+        ui.cancelDrag();
+    });
+
+    ayt::ui::DeviceInputBridge::Callbacks inputCallbacks{};
+    inputCallbacks.onMouseMove = [&state, &ui, &session, &window](float x, float y) {
+        state.mouseX = x;
+        state.mouseY = y;
+        const ayt::math::FVector2 pos(x, y);
+        const bool handled = session.onPointerMove(pos) || ui.onMouseMove(x, y);
+        updateCursor(state, window);
+        return handled;
+    };
+    inputCallbacks.onMouseLeave = [&ui, &window]() {
+        ui.onMouseLeave();
+        window.setCursorShape(ayt::device::SystemCursorShape::Arrow);
+    };
+    inputCallbacks.onMouseButton =
+        [&state, &ui, &session, &window](float x, float y, int button, bool pressed) {
+            state.mouseX = x;
+            state.mouseY = y;
+            const ayt::math::FVector2 pos(x, y);
+            bool handled = false;
+            if (button == 0 || button == 2) {
+                handled = pressed ? session.onPointerDown(pos, button)
+                                  : session.onPointerUp(pos, button);
+            }
+            if (!handled) {
+                handled = pressed ? ui.onMouseButtonDown(x, y, button)
+                                  : ui.onMouseButtonUp(x, y, button);
+            }
+            updateCursor(state, window);
+            return handled;
+        };
+    inputCallbacks.onMouseWheel = [&ui, &session](float x, float y, float deltaY) {
+        const ayt::math::FVector2 pos(x, y);
+        return session.onWheel(pos, deltaY) || ui.onMouseWheel(x, y, deltaY);
+    };
+    inputCallbacks.onKey = [&ui, &session](ayt::device::KeyCode key, bool pressed,
+                                           bool /*repeat*/) {
+        const int uiKey = static_cast<int>(ayt::ui::fromDeviceKey(key));
+        if (pressed) {
+            if (uiKey == ayt::ui::UIKey_Shift
+                || uiKey == ayt::ui::UIKey_Control
+                || uiKey == ayt::ui::UIKey_Alt) {
+                return ui.onKeyDown(uiKey);
+            }
+            return session.onKeyDown(uiKey) || ui.onKeyDown(uiKey);
+        }
+        session.onKeyUp(uiKey);
+        return ui.onKeyUp(uiKey);
+    };
+    inputCallbacks.onTextCommit = [&ui](const std::string& text) {
+        return !text.empty()
+            && ui.onDeviceChar(text.data(), static_cast<int>(text.size()));
+    };
+    inputCallbacks.onComposition = [&ui](ayt::device::DeviceInputEventType type,
+                                          const std::string& text, int caret) {
+        switch (type) {
+        case ayt::device::DeviceInputEventType::CompositionStart:
+            ui.onDeviceCompositionStart(text, caret);
+            break;
+        case ayt::device::DeviceInputEventType::CompositionUpdate:
+            ui.onDeviceCompositionUpdate(text, caret);
+            break;
+        case ayt::device::DeviceInputEventType::CompositionEnd:
+            ui.onDeviceCompositionEnd("");
+            break;
+        default:
+            break;
+        }
+    };
+    ayt::ui::DeviceInputBridge inputBridge(std::move(inputCallbacks));
+    inputBridge.connect(devices);
+    inputBridge.bindTextInputFocus(ui);
+    updateCursor(state, window);
 
     std::fprintf(stderr, "[AYUI_LayoutEditor] chrome=%s\n", chromePath.c_str());
 

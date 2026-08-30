@@ -37,6 +37,12 @@ namespace ayt::ui {
 
 class ScrollView : public CompoundWidget {
 public:
+    enum class ScrollBarVisibility {
+        Auto,    // Show only when the content exceeds the viewport.
+        Always,  // Reserve the gutter and show the bar even when content fits.
+        Hidden   // Never show the bar or reserve its gutter.
+    };
+
     ScrollView();
     ~ScrollView() override;
 
@@ -57,10 +63,25 @@ public:
     // its widget bounds).
     void setContentSize(const math::FVector2& size);
 
+    void setVerticalScrollBarVisibility(ScrollBarVisibility visibility);
+    void setHorizontalScrollBarVisibility(ScrollBarVisibility visibility);
+    ScrollBarVisibility getVerticalScrollBarVisibility() const {
+        return _vbarVisibility;
+    }
+    ScrollBarVisibility getHorizontalScrollBarVisibility() const {
+        return _hbarVisibility;
+    }
+
+    // Backward-compatible boolean API. Enabled now means the normal Auto
+    // policy; disabling maps to Hidden. Call the visibility API for Always.
     void setVerticalScrollBarEnabled(bool enabled);
     void setHorizontalScrollBarEnabled(bool enabled);
-    bool isVerticalScrollBarEnabled() const { return _vbarEnabled; }
-    bool isHorizontalScrollBarEnabled() const { return _hbarEnabled; }
+    bool isVerticalScrollBarEnabled() const {
+        return _vbarVisibility != ScrollBarVisibility::Hidden;
+    }
+    bool isHorizontalScrollBarEnabled() const {
+        return _hbarVisibility != ScrollBarVisibility::Hidden;
+    }
     const math::FVector2& getContentSize() const {
         return _scrollState.getContentSize();
     }
@@ -128,6 +149,8 @@ protected:
 private:
     void setContentImpl(Widget* content, bool owned);
     void ensureBarsCreated();
+    void updateBarVisibility();
+    void layoutBars();
     void syncBarsToOffset();
     // Keep content local pos at -scrollOffset so paint and hitTest agree.
     // Render-only temporary offsets (then restore) cause "visual moved,
@@ -139,8 +162,8 @@ private:
     Widget*  _content = nullptr;
     ScrollBar* _vbar = nullptr;
     ScrollBar* _hbar = nullptr;
-    bool _vbarEnabled = true;
-    bool _hbarEnabled = false;
+    ScrollBarVisibility _vbarVisibility = ScrollBarVisibility::Auto;
+    ScrollBarVisibility _hbarVisibility = ScrollBarVisibility::Hidden;
     // When the host supplies a virtual extent, performLayout must not
     // collapse it back to the viewport-sized content widget.
     bool _contentSizeExplicit = false;

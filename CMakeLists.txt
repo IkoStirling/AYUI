@@ -20,6 +20,7 @@ set(SRC_FILES
     Controls/AYScrollBar.cpp
     Controls/AYScrollView.cpp
     Controls/AYImage.cpp
+    Controls/AYSvgIcon.cpp
     Controls/AYTextureRegistry.cpp
     Controls/AYInteractiveWidget.cpp
     Controls/AYSelectableWidget.cpp
@@ -58,6 +59,7 @@ set(SRC_FILES
     Controls/AYDockOverlay.cpp
     Controls/AYDockTabGroup.cpp
     Controls/AYUIManager.cpp
+    Controls/AYDeviceInputBridge.cpp
     Controls/AYAccessibility.cpp
     Controls/AYAccessibilityAdapter.cpp
     Controls/AYUnicodeText.cpp
@@ -99,6 +101,7 @@ set(HEAD_FILES
     include/AYUI/ScrollBarSync.h
     include/AYUI/ScrollView.h
     include/AYUI/Image.h
+    include/AYUI/SvgIcon.h
     include/AYUI/ImageTexture.h
     include/AYUI/TextureRegistry.h
     include/AYUI/InteractiveWidget.h
@@ -126,6 +129,7 @@ set(HEAD_FILES
     include/AYUI/Widget.h
     include/AYUI/DisplayList.h
     include/AYUI/UIManager.h
+    include/AYUI/DeviceInputBridge.h
     include/AYUI/Window.h
     include/AYUI/Modal.h
     include/AYUI/ModalDialog.h

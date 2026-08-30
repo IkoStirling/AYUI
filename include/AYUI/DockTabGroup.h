@@ -32,6 +32,10 @@ class DockCard;
 class DockTabGroup : public CompoundWidget {
 public:
     static constexpr float kTabStripHeight = 26.0f;
+    // Dock tabs keep an editor-like fixed width while the strip has room.
+    // Once the preferred widths no longer fit, every tab compresses evenly
+    // and its title is ellipsized by the paint path.
+    static constexpr float kPreferredTabWidth = 140.0f;
 
     DockTabGroup();
     ~DockTabGroup() override;
@@ -46,6 +50,10 @@ public:
     void activateTabById(const std::string& id);
     DockCard* getActiveTab() const;
     std::string getActiveTabId() const;
+
+    // Read-only world geometry used by accessibility, hosts and interaction
+    // tests. An out-of-range index returns an empty rectangle.
+    math::FRectangle getTabRectWorld(size_t index) const;
 
     // ---- leaf identity ----
     void setLeafId(const std::string& id) { _leafId = id; }
@@ -72,7 +80,6 @@ public:
 
 private:
     math::FRectangle stripRectWorld() const;
-    math::FRectangle tabRectWorld(size_t index) const;
     math::FRectangle closeRectWorld(size_t index) const;
     int tabIndexAt(const math::FVector2& worldPos) const;   // -1 = none
     void paintStrip(IRenderBackend& renderer);

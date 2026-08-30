@@ -381,6 +381,24 @@ void MockRenderer::addPathPolygon(PathHandle path, const math::FVector2* points,
     AYUNREFERENCED_PARAM(winding);
 }
 
+void MockRenderer::addPathContour(PathHandle path, const math::FVector2* points,
+                                  int count, bool closed, PathWinding winding) {
+    auto it = _paths.find(path.id);
+    if (it != _paths.end() && points != nullptr && count >= 2) {
+        math::FRectangle bounds(points[0].x, points[0].y, points[0].x, points[0].y);
+        for (int i = 1; i < count; ++i) {
+            bounds.minX = std::min(bounds.minX, points[i].x);
+            bounds.minY = std::min(bounds.minY, points[i].y);
+            bounds.maxX = std::max(bounds.maxX, points[i].x);
+            bounds.maxY = std::max(bounds.maxY, points[i].y);
+        }
+        includePathBounds(it->second, bounds);
+        ++it->second.contourCount;
+    }
+    AYUNREFERENCED_PARAM(closed);
+    AYUNREFERENCED_PARAM(winding);
+}
+
 void MockRenderer::setPathFillColor(PathHandle path, const math::FVector4& color) {
     auto it = _paths.find(path.id);
     if (it != _paths.end()) {
@@ -402,6 +420,16 @@ void MockRenderer::setPathStrokeWidth(PathHandle path, float width) {
     }
 }
 
+void MockRenderer::setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                                      PathStrokeJoin join, float miterLimit) {
+    auto it = _paths.find(path.id);
+    if (it != _paths.end()) {
+        it->second.strokeCap = cap;
+        it->second.strokeJoin = join;
+        it->second.miterLimit = std::max(1.0f, miterLimit);
+    }
+}
+
 void MockRenderer::drawPath(PathHandle path, PathFillMode mode) {
     auto it = _paths.find(path.id);
     if (it != _paths.end()) {
@@ -413,6 +441,10 @@ void MockRenderer::drawPath(PathHandle path, PathFillMode mode) {
         dc.floatParam1 = it->second.strokeWidth;
         dc.intParam1 = static_cast<int>(mode);
         dc.pathHandle = path;
+        dc.pathContourCount = it->second.contourCount;
+        dc.pathStrokeCap = it->second.strokeCap;
+        dc.pathStrokeJoin = it->second.strokeJoin;
+        dc.pathMiterLimit = it->second.miterLimit;
         _drawCalls.push_back(dc);
     }
 }

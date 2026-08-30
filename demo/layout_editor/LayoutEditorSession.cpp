@@ -211,6 +211,7 @@ void LayoutEditorSession::detach() {
     _dragMode = DragMode::None;
     _dragTarget = nullptr;
     _toolDrag = ToolDrag::None;
+    _spaceDown = false;
     _paletteType.clear();
     _hierDragWidget = nullptr;
     _mutationOpen = false;
@@ -2044,22 +2045,12 @@ bool LayoutEditorSession::chromeEditingText() const {
 }
 
 bool LayoutEditorSession::modifiersCtrl() const {
-#if defined(_WIN32)
-    if ((::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) {
-        return true;
-    }
-#endif
     if (_ui == nullptr) return false;
     const uint32_t mods = _ui->getModifiers();
     return (mods & (1u << (UIKey_Control - UIKey_Shift))) != 0u;
 }
 
 bool LayoutEditorSession::modifiersShift() const {
-#if defined(_WIN32)
-    if ((::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0) {
-        return true;
-    }
-#endif
     if (_ui == nullptr) return false;
     const uint32_t mods = _ui->getModifiers();
     return (mods & (1u << (UIKey_Shift - UIKey_Shift))) != 0u;
@@ -2070,16 +2061,16 @@ bool LayoutEditorSession::modifiersAdditive() const {
 }
 
 bool LayoutEditorSession::modifiersSpace() const {
-#if defined(_WIN32)
-    return (::GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-#else
-    return false;
-#endif
+    return _spaceDown;
 }
 
 bool LayoutEditorSession::onKeyDown(int uiKeyCode) {
     if (_ui == nullptr) {
         return false;
+    }
+
+    if (uiKeyCode == UIKey_Space) {
+        _spaceDown = true;
     }
 
     if (modifiersCtrl() && uiKeyCode == UIKey_Z) {
@@ -2155,6 +2146,12 @@ bool LayoutEditorSession::onKeyDown(int uiKeyCode) {
         return true;
     }
     return false;
+}
+
+void LayoutEditorSession::onKeyUp(int uiKeyCode) {
+    if (uiKeyCode == UIKey_Space) {
+        _spaceDown = false;
+    }
 }
 
 void LayoutEditorSession::setStatus(const std::wstring& text) {

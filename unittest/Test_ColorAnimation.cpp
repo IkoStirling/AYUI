@@ -1,6 +1,7 @@
 #include "AYTest.h"
 #include "AYUI/Button.h"
 #include "AYUI/CheckBox.h"
+#include "AYUI/Menu.h"
 #include "AYUI/MenuItem.h"
 #include "AYUI/Style.h"
 #include "AYUI/UIManager.h"
@@ -195,6 +196,56 @@ TEST_CASE(menuitem_hover_bar_fades) {
     MockRenderer r5;
     item.render(r5);
     CHECK_FALSE(hasBar(r5));
+}
+
+// Shell/Gallery popup path: Menu overrides tick while mounted on the overlay.
+// The override must keep descending into MenuItem children or their hover bar
+// starts at alpha 0 and never becomes visible even though clicks still work.
+TEST_CASE(menu_overlay_tick_advances_item_hover_bar) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(800.0f, 600.0f);
+
+    Widget host;
+    host.setSize(FVector2(200.0f, 24.0f));
+    Menu* menu = new Menu();
+    MenuItem* item = menu->addItem(L"Open");
+    menu->open(&host, FVector2(20.0f, 24.0f));
+    menu->performLayout();
+
+    auto barAlpha = [](const MockRenderer& renderer) {
+        for (const auto& call : renderer.getDrawCalls()) {
+            if (call.type == MockRenderer::DrawCall::Rect
+                && std::abs(call.color.x - 0.18f) < 1e-4f
+                && std::abs(call.color.y - 0.45f) < 1e-4f
+                && std::abs(call.color.z - 0.78f) < 1e-4f) {
+                return call.color.w;
+            }
+        }
+        return -1.0f;
+    };
+
+    MockRenderer prime;
+    item->render(prime);
+
+    const FRectangle bounds = item->getWorldBounds();
+    CHECK(ui.onMouseMove((bounds.minX + bounds.maxX) * 0.5f,
+                         (bounds.minY + bounds.maxY) * 0.5f));
+    CHECK(item->isMouseOver());
+
+    MockRenderer start;
+    item->render(start);
+    CHECK_FLOAT_EQ(barAlpha(start), 0.0f, 1e-5f);
+
+    ui.update(0.045f);
+    MockRenderer mid;
+    item->render(mid);
+    const float alpha = barAlpha(mid);
+    CHECK(alpha > 0.0f && alpha < 0.55f);
+
+    menu->close();
+    ui.shutdown();
 }
 
 // Gallery-shaped scenario: a JSON-loaded button inside a UIManager root.

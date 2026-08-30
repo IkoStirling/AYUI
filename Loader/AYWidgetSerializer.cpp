@@ -328,6 +328,25 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("horizontalScrollBar")) {
                 scroll->setHorizontalScrollBarEnabled(j["horizontalScrollBar"].get<bool>());
             }
+            auto parseVisibility = [](const json& value,
+                                      ScrollView::ScrollBarVisibility fallback) {
+                if (!value.is_string()) return fallback;
+                const std::string mode = value.get<std::string>();
+                if (mode == "auto") return ScrollView::ScrollBarVisibility::Auto;
+                if (mode == "always") return ScrollView::ScrollBarVisibility::Always;
+                if (mode == "hidden") return ScrollView::ScrollBarVisibility::Hidden;
+                return fallback;
+            };
+            if (j.contains("verticalScrollBarVisibility")) {
+                scroll->setVerticalScrollBarVisibility(parseVisibility(
+                    j["verticalScrollBarVisibility"],
+                    scroll->getVerticalScrollBarVisibility()));
+            }
+            if (j.contains("horizontalScrollBarVisibility")) {
+                scroll->setHorizontalScrollBarVisibility(parseVisibility(
+                    j["horizontalScrollBarVisibility"],
+                    scroll->getHorizontalScrollBarVisibility()));
+            }
             if (j.contains("contentSize") && j["contentSize"].is_object()) {
                 scroll->setContentSize(math::FVector2(
                     j["contentSize"].value("w", 0.0f),
@@ -1151,8 +1170,22 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
     }
     else if (ScrollView* scroll = dynamic_cast<ScrollView*>(widget)) {
         j["type"] = "ScrollView";
+        auto visibilityName = [](ScrollView::ScrollBarVisibility visibility) {
+            switch (visibility) {
+            case ScrollView::ScrollBarVisibility::Always: return "always";
+            case ScrollView::ScrollBarVisibility::Hidden: return "hidden";
+            case ScrollView::ScrollBarVisibility::Auto:   return "auto";
+            }
+            return "auto";
+        };
+        // Keep the legacy booleans for older layout readers. New readers use
+        // the explicit policy fields below, which can also preserve Always.
         j["verticalScrollBar"] = scroll->isVerticalScrollBarEnabled();
         j["horizontalScrollBar"] = scroll->isHorizontalScrollBarEnabled();
+        j["verticalScrollBarVisibility"] = visibilityName(
+            scroll->getVerticalScrollBarVisibility());
+        j["horizontalScrollBarVisibility"] = visibilityName(
+            scroll->getHorizontalScrollBarVisibility());
         const auto contentSize = scroll->getContentSize();
         const auto offset = scroll->getScrollOffset();
         j["contentSize"] = {{"w", contentSize.x}, {"h", contentSize.y}};

@@ -3,6 +3,7 @@
 #include "AYUI/Style.h"
 #include "AYUI/TextMeasure.h"
 #include "AYUI/DockTrace.h"
+#include "AYUI/SvgIcon.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {
@@ -21,10 +22,38 @@ void Button::setPadding(float left, float top, float right, float bottom) {
     markDirty();
 }
 
+void Button::setIconDocument(std::shared_ptr<const SvgDocument> document) {
+    if (_iconDocument == document) return;
+    _iconDocument = std::move(document);
+    markDirty();
+}
+
+void Button::setIconSize(float size) {
+    const float clamped = std::max(0.0f, size);
+    if (_iconSize == clamped) return;
+    _iconSize = clamped;
+    markDirty();
+}
+
+void Button::setIconGap(float gap) {
+    const float clamped = std::max(0.0f, gap);
+    if (_iconGap == clamped) return;
+    _iconGap = clamped;
+    markDirty();
+}
+
+void Button::setIconColor(const math::FVector4& color) {
+    if (_iconColor == color) return;
+    _iconColor = color;
+    markDirty();
+}
+
 math::FRectangle Button::getTextBounds() const {
     math::FRectangle bounds = getWorldBounds();
+    const float iconAdvance = _iconDocument != nullptr && !_text.empty()
+        ? _iconSize + _iconGap : 0.0f;
     return math::FRectangle(
-        bounds.minX + _padding.x,
+        bounds.minX + _padding.x + iconAdvance,
         bounds.minY + _padding.y,
         bounds.maxX - _padding.z,
         bounds.maxY - _padding.w
@@ -43,7 +72,9 @@ math::FVector2 Button::getPreferredSize() const {
     constexpr float kMinButtonHeight = 24.0f;
     const float textW = measurePrefixWidth(_text, _text.size());
     const float preferredH = std::max(kMinButtonHeight, getHeight());
-    return math::FVector2(textW + _padding.x + _padding.z, preferredH);
+    const float iconW = _iconDocument != nullptr
+        ? _iconSize + (_text.empty() ? 0.0f : _iconGap) : 0.0f;
+    return math::FVector2(textW + iconW + _padding.x + _padding.z, preferredH);
 }
 
 // R-5: style resolution is centralized in resolveStyle() (see AYStyle.h).
@@ -98,6 +129,26 @@ void Button::onRender(IRenderBackend& renderer) {
         // B1: 2px rounded fill under the 2px rounded border (fallback).
         renderer.drawRoundedRect(bounds, bg, 2.0f);
         renderer.drawBorderRect(bounds, math::FVector4(0.12f, 0.12f, 0.12f, 1.0f), 1.0f, 2.0f);
+    }
+
+    if (_iconDocument != nullptr && _iconSize > 0.0f) {
+        const math::FRectangle content(
+            bounds.minX + _padding.x, bounds.minY + _padding.y,
+            bounds.maxX - _padding.z, bounds.maxY - _padding.w);
+        const float availableW = std::max(0.0f, content.maxX - content.minX);
+        const float availableH = std::max(0.0f, content.maxY - content.minY);
+        const float size = std::min({_iconSize, availableW, availableH});
+        if (size > 0.0f) {
+            const float x = _text.empty()
+                ? content.minX + (availableW - size) * 0.5f : content.minX;
+            const float y = content.minY + (availableH - size) * 0.5f;
+            math::FVector4 color = isEnabled()
+                ? _iconColor
+                : math::FVector4(_iconColor.x, _iconColor.y, _iconColor.z,
+                                 _iconColor.w * 0.55f);
+            _iconDocument->draw(renderer,
+                math::FRectangle(x, y, x + size, y + size), color);
+        }
     }
 
     if (!_text.empty()) {

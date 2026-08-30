@@ -66,6 +66,23 @@ TEST_CASE(menubar_render) {
     CHECK(rectCount >= 1);   // at least background + border
 }
 
+TEST_CASE(menubar_respects_parent_assigned_height) {
+    MenuBar bar;
+    bar.setSize(FVector2(240.0f, 22.0f));
+    bar.addMenu(L"File");
+    bar.addMenu(L"Edit");
+    bar.performLayout();
+
+    CHECK(bar.getSize().y == 22.0f);
+    for (Widget* child : bar.getChildren()) {
+        if (auto* anchor = dynamic_cast<Button*>(child)) {
+            CHECK(anchor->getSize().y == 22.0f);
+            CHECK(anchor->getWorldBounds().maxY
+                  <= bar.getWorldBounds().maxY);
+        }
+    }
+}
+
 // PR-S1c (Gallery Menu): click-outside closes a menu via UIManager →
 // Menu::close() without updating MenuBar::_openIdx. The next anchor
 // click must still reopen it (previously the stale _openIdx hit the
@@ -134,4 +151,3 @@ TEST_CASE(menubar_factory_registered) {
 }
 
 TEST_SUITE_END
-

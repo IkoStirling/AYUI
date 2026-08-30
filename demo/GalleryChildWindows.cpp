@@ -3,6 +3,7 @@
 #include "AYUI/DockArea.h"
 #include "AYUI/DockCard.h"
 #include "AYUI/DockTrace.h"
+#include "AYUI/DeviceInputBridge.h"
 
 #if defined(_WIN32)
 #  include "GalleryChildBackend.h"
@@ -123,10 +124,12 @@ bool GalleryChildWindows::cursorToPrimaryWorld(ayt::math::FVector2& out) const {
     if (primaryHwnd == nullptr) {
         return false;
     }
-    POINT pt{};
-    if (!::GetCursorPos(&pt)) {
+    int screenX = 0;
+    int screenY = 0;
+    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
         return false;
     }
+    POINT pt{static_cast<LONG>(screenX), static_cast<LONG>(screenY)};
     if (!::ScreenToClient(primaryHwnd, &pt)) {
         return false;
     }
@@ -145,10 +148,12 @@ bool GalleryChildWindows::cursorOverPrimaryWindow() const {
     if (primaryHwnd == nullptr) {
         return false;
     }
-    POINT pt{};
-    if (!::GetCursorPos(&pt)) {
+    int screenX = 0;
+    int screenY = 0;
+    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
         return false;
     }
+    POINT pt{static_cast<LONG>(screenX), static_cast<LONG>(screenY)};
     // Geometry gate: cursor must lie in the primary client rect. This is
     // independent of which HWND is topmost — the tear-off follows the
     // cursor with SetWindowPos, so WindowFromPoint alone always sees the
@@ -195,15 +200,17 @@ void GalleryChildWindows::beginDragMove(void* handle) {
         return;
     }
     HWND hwnd = static_cast<HWND>(e->handle);
-    POINT pt{};
+    int screenX = 0;
+    int screenY = 0;
     RECT wr{};
-    if (!::GetCursorPos(&pt) || !::GetWindowRect(hwnd, &wr)) {
+    if (!_wm.getCursorScreenPosition(screenX, screenY)
+        || !::GetWindowRect(hwnd, &wr)) {
         return;
     }
-    e->dragGrabX = static_cast<int>(pt.x - wr.left);
-    e->dragGrabY = static_cast<int>(pt.y - wr.top);
-    e->dragStartScreenX = static_cast<int>(pt.x);
-    e->dragStartScreenY = static_cast<int>(pt.y);
+    e->dragGrabX = screenX - static_cast<int>(wr.left);
+    e->dragGrabY = screenY - static_cast<int>(wr.top);
+    e->dragStartScreenX = screenX;
+    e->dragStartScreenY = screenY;
     e->dragMoveActive = true;
 #else
     (void)handle;
@@ -220,12 +227,13 @@ void GalleryChildWindows::updateDragMove(void* handle) {
         e->dragMoveActive = false;
         return;
     }
-    POINT pt{};
-    if (!::GetCursorPos(&pt)) {
+    int screenX = 0;
+    int screenY = 0;
+    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
         return;
     }
     ::SetWindowPos(static_cast<HWND>(e->handle), nullptr,
-                   pt.x - e->dragGrabX, pt.y - e->dragGrabY,
+                   screenX - e->dragGrabX, screenY - e->dragGrabY,
                    0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 #else
     (void)handle;
@@ -337,25 +345,10 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
         ayt::ui::UIManager::ActiveScope guard(ui.get());
         ui->onMouseLeave();
     };
-#if defined(_WIN32)
-    cbs.onSetCursor = [ui]() -> bool {
+    cbs.cursorShape = [ui]() {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
-        // Mirror Gallery primary WM_SETCURSOR �?DockCard Move/Hand hints.
-        static const HCURSOR arrow = ::LoadCursor(nullptr, IDC_ARROW);
-        static const HCURSOR hand  = ::LoadCursor(nullptr, IDC_HAND);
-        static const HCURSOR move  = ::LoadCursor(nullptr, IDC_SIZEALL);
-        static const HCURSOR beam  = ::LoadCursor(nullptr, IDC_IBEAM);
-        HCURSOR c = arrow;
-        switch (ui->getCursorHint()) {
-        case ayt::ui::UiCursorHint::Hand: c = hand; break;
-        case ayt::ui::UiCursorHint::Move: c = move; break;
-        case ayt::ui::UiCursorHint::Beam: c = beam; break;
-        default: break;
-        }
-        ::SetCursor(c);
-        return true;
+        return ayt::ui::systemCursorFromUi(ui->getCursorHint());
     };
-#endif
     cbs.onMouseButton = [this, ui, handle](float x, float y, int button,
                                            bool pressed) {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
@@ -455,10 +448,11 @@ bool GalleryChildWindows::tryRedock(
 
 #if defined(_WIN32)
     // Title-click / tiny nudge must not redock.
-    POINT pt{};
-    if (::GetCursorPos(&pt)) {
-        const int moved = std::abs(pt.x - entry->dragStartScreenX)
-                        + std::abs(pt.y - entry->dragStartScreenY);
+    int screenX = 0;
+    int screenY = 0;
+    if (_wm.getCursorScreenPosition(screenX, screenY)) {
+        const int moved = std::abs(screenX - entry->dragStartScreenX)
+                        + std::abs(screenY - entry->dragStartScreenY);
         if (moved < 12) {
             ayt::ui::dockTrace("[child] tryRedock skip moved=%d\n", moved);
             return false;

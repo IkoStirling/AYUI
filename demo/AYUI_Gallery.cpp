@@ -17,7 +17,6 @@
 #  define NOMINMAX
 #endif
 #include <Windows.h>
-#include <windowsx.h>
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -25,6 +24,7 @@
 #include <stb_image.h>
 
 #include "AYUI.h"
+#include "AYUI/DeviceInputBridge.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/Button.h"
 #include "AYUI/Image.h"
@@ -367,10 +367,17 @@ struct GalleryState {
     // F5 knows which way to flip.
     std::string activeThemeName = "dark";
 
-    // Set when handleMessage consumes WM_MOUSEWHEEL this poll. Prevents
-    // the Device?UI bridge from double-applying the same gesture when
-    // WM_INPUT RI_MOUSE_WHEEL also fires (precision trackpads).
-    bool wheelHandledThisFrame = false;
+    struct TouchGesture {
+        bool active = false;
+        bool dragStarted = false;
+        int64_t pointerId = -1;
+        float x = 0.0f;
+        float y = 0.0f;
+        float startX = 0.0f;
+        float startY = 0.0f;
+        float lastY = 0.0f;
+        float accumulatedDy = 0.0f;
+    } touch;
 
     // PR-Dock-TearOff: promoted DockCards' top-level child windows.
     // Constructed ONCE in wWinMain BEFORE the first loadAndWire (the
@@ -1442,10 +1449,8 @@ void bindDockPersistence(GalleryState& state);
 // theme's tokens at draw time, so the next render() pass picks up the
 // new colors without a reload.
 //
-// VK_F5 = 0x74. We intercept this at the WM_KEYDOWN layer rather than
-// the UIManager key tree (UIManager doesn't define UIKey_F5 today and
-// adding it just for Gallery would leak a dev hotkey into the public
-// surface).
+// The AYDevice bridge intercepts KeyCode::F5 before the UIManager key tree,
+// so this host-only shortcut never leaks into focused-widget behavior.
 void toggleTheme(GalleryState& state) {
     if (state.activeThemeName == "dark") {
         state.activeThemeName = "light";
@@ -2577,37 +2582,94 @@ void bindDockPersistence(GalleryState& state)
     }
 }
 
-// PR-S5: UiCursorHint ??Win32 cursor. The UI layer computes hints
-// (Window resize edges / title-bar Move, ScrollBar SizeNs, Hand, Beam)
-// but Gallery never applied them ??resize/drag felt "functional but the
-// cursor never changed". LoadCursor lazily caches the system cursors.
-static HCURSOR cursorForHint(ayt::ui::UiCursorHint hint)
+void resizeGallery(GalleryState& state, int width, int height)
 {
-    static const HCURSOR arrow = ::LoadCursorW(nullptr, IDC_ARROW);
-    static const HCURSOR hand  = ::LoadCursorW(nullptr, IDC_HAND);
-    static const HCURSOR we    = ::LoadCursorW(nullptr, IDC_SIZEWE);
-    static const HCURSOR ns    = ::LoadCursorW(nullptr, IDC_SIZENS);
-    static const HCURSOR nwse  = ::LoadCursorW(nullptr, IDC_SIZENWSE);
-    static const HCURSOR nesw  = ::LoadCursorW(nullptr, IDC_SIZENESW);
-    static const HCURSOR move  = ::LoadCursorW(nullptr, IDC_SIZEALL);
-    static const HCURSOR beam  = ::LoadCursorW(nullptr, IDC_IBEAM);
-    switch (hint) {
-    case ayt::ui::UiCursorHint::Hand:  return hand;
-    case ayt::ui::UiCursorHint::SizeWe:
-    case ayt::ui::UiCursorHint::SizeHorizontal: return we;
-    case ayt::ui::UiCursorHint::SizeNs:
-    case ayt::ui::UiCursorHint::SizeVertical:   return ns;
-    case ayt::ui::UiCursorHint::SizeNwse: return nwse;
-    case ayt::ui::UiCursorHint::SizeNesw: return nesw;
-    case ayt::ui::UiCursorHint::Move:  return move;
-    case ayt::ui::UiCursorHint::Beam:  return beam;
-    case ayt::ui::UiCursorHint::Default:
-    default: return arrow;
+    state.clientW = std::max(width, 32);
+    state.clientH = std::max(height, 32);
+    if (state.ui != nullptr) {
+        state.ui->setClientSize(static_cast<float>(state.clientW),
+                                static_cast<float>(state.clientH));
+    }
+    if (state.renderer != nullptr) {
+        state.renderer->resize(static_cast<uint32_t>(state.clientW),
+                               static_cast<uint32_t>(state.clientH));
+    }
+    if (state.uiBackend != nullptr) {
+        state.uiBackend->setFramebufferSize(
+            static_cast<uint16_t>(state.clientW),
+            static_cast<uint16_t>(state.clientH));
     }
 }
 
-std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
-                            std::uintptr_t wParam, std::intptr_t lParam, bool& handled)
+void handleGalleryTouch(GalleryState& state, int64_t pointerId, float x,
+                        float y, ayt::device::TouchPhase phase)
+{
+    if (state.ui == nullptr) {
+        return;
+    }
+
+    constexpr float kTouchWheelScale = 1.2f;
+    constexpr float kTouchDragThresholdPx = 6.0f;
+    constexpr float kTouchWheelThresholdPx = 8.0f;
+    GalleryState::TouchGesture& touch = state.touch;
+
+    if (phase == ayt::device::TouchPhase::Began) {
+        if (touch.active) {
+            return;
+        }
+        touch.active = true;
+        touch.dragStarted = false;
+        touch.pointerId = pointerId;
+        touch.x = x;
+        touch.y = y;
+        touch.startX = x;
+        touch.startY = y;
+        touch.lastY = y;
+        touch.accumulatedDy = 0.0f;
+        state.ui->onMouseMove(x, y);
+        return;
+    }
+    if (!touch.active || touch.pointerId != pointerId) {
+        return;
+    }
+
+    touch.x = x;
+    touch.y = y;
+    if (phase == ayt::device::TouchPhase::Moved
+        || phase == ayt::device::TouchPhase::Stationary) {
+        touch.accumulatedDy += y - touch.lastY;
+        touch.lastY = y;
+        state.ui->onMouseMove(x, y);
+        if (!touch.dragStarted) {
+            const float totalDx = x - touch.startX;
+            const float totalDy = y - touch.startY;
+            touch.dragStarted = std::fabs(totalDx) >= kTouchDragThresholdPx
+                || std::fabs(totalDy) >= kTouchDragThresholdPx;
+        }
+        if (touch.dragStarted
+            && std::fabs(touch.accumulatedDy) >= kTouchWheelThresholdPx) {
+            state.ui->onMouseWheel(x, y,
+                -touch.accumulatedDy * kTouchWheelScale);
+            touch.accumulatedDy = 0.0f;
+        }
+        return;
+    }
+
+    if (phase == ayt::device::TouchPhase::Ended
+        || phase == ayt::device::TouchPhase::Cancelled) {
+        state.ui->onMouseMove(x, y);
+        if (phase == ayt::device::TouchPhase::Ended && !touch.dragStarted) {
+            state.ui->onMouseButtonDown(x, y, 0);
+            state.ui->onMouseButtonUp(x, y, 0);
+        }
+        touch = {};
+        touch.pointerId = -1;
+    }
+}
+
+std::intptr_t handleNativeHostMessage(GalleryState* state, unsigned msg,
+                                      std::uintptr_t wParam,
+                                      std::intptr_t lParam, bool& handled)
 {
     handled = false;
     if (state == nullptr || state->ui == nullptr) {
@@ -2623,48 +2685,16 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
         }
     }
 
-    // ---- Touch tracking (touchscreen laptops w/o mouse emulation) ----
-    // WM_TOUCH is delivered when RegisterTouchWindow was called on the
-    // hwnd. We map the primary touch into onMouseMove / onMouseButtonDown
-    // / onMouseButtonUp so the entire UI tree (hover tooltips, button
-    // click, focus) works on a finger tap. Vertical pan delta is fed
-    // into onMouseWheel so ScrollView / ListView scroll when the user
-    // drags a finger ??same code path as a real wheel on a desktop.
-    struct TouchState {
-        bool    active       = false;
-        // PR-B5 ??dragStarted flips true once the finger crosses the
-        // drag threshold. While false, the gesture is a "tentative tap"
-        // and we suppress the synthesized mouse-down so a ListView
-        // row click doesn't fire before the user has shown they want
-        // to scroll (touchscreen users naturally flick instead of
-        // press-and-drag like a mouse).
-        bool    dragStarted  = false;
-        float   lastY        = 0.0f;
-        float   accumulatedDy = 0.0f; // // positive = finger moved down
-        float   x            = 0.0f;
-        float   y            = 0.0f;
-        float   startX       = 0.0f;
-        float   startY       = 0.0f;
-        DWORD   pointerId    = 0;
-    };
-    static thread_local TouchState gTouch;
-    // Wheel scale: a 100-px finger drag ??1 notch of mouse wheel delta
-    // (typical deltaY = 120). Flip sign so dragging finger UP scrolls
-    // content DOWN (matches native scrolling convention).
-    constexpr float kTouchWheelScale = 1.2f;
-    // Threshold beyond which a tentative tap becomes a drag-scroll:
-    // beyond this distance, the gesture is treated as a scroll and
-    // the mouse-down (which would have selected a row) is suppressed.
-    constexpr float kTouchDragThresholdPx = 6.0f;
-
-    switch (msg) {
-    case WM_DPICHANGED: {
+    // DPI remains a native window concern. All keyboard, pointer, touch,
+    // wheel, text and IME traffic is routed through DeviceInputBridge.
+    if (msg == WM_DPICHANGED) {
         const UINT dpi = LOWORD(wParam);
         state->dpiScale = std::max(0.5f, static_cast<float>(dpi) / 96.0f);
         state->ui->setDpiScale(state->dpiScale);
         updateProductScaleLabel(*state);
         if (state->devices != nullptr && lParam != 0) {
-            HWND hwnd = static_cast<HWND>(state->devices->window().getWindowHandle());
+            HWND hwnd = static_cast<HWND>(
+                state->devices->window().getWindowHandle());
             const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
             if (hwnd != nullptr && suggested != nullptr) {
                 ::SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
@@ -2674,278 +2704,6 @@ std::intptr_t handleMessage(HWND, GalleryState* state, unsigned msg,
             }
         }
         handled = true;
-        return 0;
-    }
-    case WM_SIZE: {
-        state->clientW = LOWORD(lParam);
-        state->clientH = HIWORD(lParam);
-        if (state->clientW < 32) state->clientW = 32;
-        if (state->clientH < 32) state->clientH = 32;
-        state->ui->setClientSize(static_cast<float>(state->clientW),
-                                 static_cast<float>(state->clientH));
-        if (state->renderer != nullptr) {
-            state->renderer->resize(static_cast<uint32_t>(state->clientW),
-                                    static_cast<uint32_t>(state->clientH));
-        }
-        if (state->uiBackend != nullptr) {
-            state->uiBackend->setFramebufferSize(
-                static_cast<uint16_t>(state->clientW),
-                static_cast<uint16_t>(state->clientH));
-        }
-        handled = true;
-        return 0;
-    }
-    case WM_MOUSEMOVE: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->ui->onMouseMove(x, y);
-        // Keep handled=false so Device also updates MouseDevice position.
-        // Returning handled=true previously starved getWheelDelta bridging
-        // of a valid cursor (Device pos stayed at 0,0 ??pickTopmost miss).
-        return 0;
-    }
-    case WM_SETCURSOR: {
-        // PR-S5: apply the UI layer's cursor hint (resize edges,
-        // title-bar Move, Beam, Hand). SetCursor here
-        // and skip DefWindowProc so the OS doesn't snap back to arrow.
-        // _hoverWidget/_capturedWidget are already fresh ??WM_SETCURSOR
-        // follows the WM_MOUSEMOVE that updated them.
-        ::SetCursor(cursorForHint(state->ui->getCursorHint()));
-        handled = true;
-        return 0;
-    }
-    case WM_MOUSEWHEEL: {
-        // Primary wheel path: client coords from the message (not Device
-        // mouse pos). Gallery swallows move for UI but must own wheel too
-        // ??otherwise only the post-poll Device bridge runs, often at a
-        // stale (0,0) pick point.
-        //
-        // Sign: Win32 positive = wheel away / natural trackpad "swipe up"
-        // often arrives as negative. UI scrollOffset increases to reveal
-        // lower content (browser-like: finger up ??content up). Negate
-        // Win32 notches so swipe/wheel matches browser natural scrolling.
-        constexpr float kPixelsPerNotch = 40.0f;
-        const short raw = static_cast<short>(HIWORD(wParam));
-        const float deltaY =
-            -(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA))
-            * kPixelsPerNotch;
-        POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-        if (state->devices != nullptr) {
-            HWND hwnd = static_cast<HWND>(
-                state->devices->window().getWindowHandle());
-            if (hwnd != nullptr) {
-                ::ScreenToClient(hwnd, &pt);
-            }
-        }
-        state->ui->onMouseWheel(static_cast<float>(pt.x),
-                                static_cast<float>(pt.y), deltaY);
-        state->wheelHandledThisFrame = true;
-        handled = true;
-        return 0;
-    }
-    case WM_LBUTTONDOWN: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->ui->onMouseButtonDown(x, y, 0);
-        // PR-Dock-TearOff: while a G12 dock drag is active, capture the
-        // mouse so moves + the release keep routing to the MAIN window
-        // even when the cursor crosses a promoted child top-level window
-        // (otherwise the drag session stalls over the child and the
-        // void-drop promote fires from a stale position). Released on the
-        // matching UP below (and re-synced on any DOWN if the drag was
-        // Esc-cancelled).
-        if (state->devices != nullptr) {
-            HWND hwnd = static_cast<HWND>(
-                state->devices->window().getWindowHandle());
-            if (state->ui->isDragging()) {
-                if (hwnd != nullptr) ::SetCapture(hwnd);
-            } else if (hwnd != nullptr && ::GetCapture() == hwnd) {
-                ::ReleaseCapture();
-            }
-        }
-        handled = true;
-        return 0;
-    }
-    case WM_LBUTTONUP: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->ui->onMouseButtonUp(x, y, 0);
-        if (state->devices != nullptr) {
-            HWND hwnd = static_cast<HWND>(
-                state->devices->window().getWindowHandle());
-            if (hwnd != nullptr && ::GetCapture() == hwnd) {
-                ::ReleaseCapture();
-            }
-        }
-        handled = true;
-        return 0;
-    }
-    case WM_RBUTTONDOWN: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->ui->onMouseButtonDown(x, y, 1);
-        handled = true;
-        return 0;
-    }
-    case WM_RBUTTONUP: {
-        const float x = static_cast<float>(GET_X_LPARAM(lParam));
-        const float y = static_cast<float>(GET_Y_LPARAM(lParam));
-        state->ui->onMouseButtonUp(x, y, 1);
-        handled = true;
-        return 0;
-    }
-    case WM_MOUSELEAVE:
-        state->ui->onMouseLeave();
-        handled = true;
-        return 0;
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN: {
-        // PR-B2 ??F5 toggles dark <-> light. Intercept BEFORE the UI key
-        // tree so the keystroke never reaches the focused widget (a
-        // future TextInput with setShortcut("F5") would otherwise eat
-        // it). VK_F5 = 0x74.
-        if (wParam == VK_F5) {
-            toggleTheme(*state);
-            handled = true;
-            return 0;
-        }
-        state->ui->onKeyDown(static_cast<int>(wParam));
-        handled = true;
-        return 0;
-    }
-    case WM_KEYUP:
-    case WM_SYSKEYUP: {
-        state->ui->onKeyUp(static_cast<int>(wParam));
-        handled = true;
-        return 0;
-    }
-    case WM_TOUCH: {
-        // Decode TOUCHINPUT array (count in LOWORD(wParam)). We only
-        // track the FIRST active touch ??the Gallery is single-finger
-        // interaction. Multi-touch gestures (pinch-zoom etc.) are out
-        // of scope.
-        const int count = LOWORD(wParam);
-        if (count <= 0) {
-            handled = true;
-            return 0;
-        }
-        std::vector<TOUCHINPUT> inputs(count);
-        if (!::GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam),
-                                 static_cast<UINT>(count),
-                                 inputs.data(),
-                                 sizeof(TOUCHINPUT))) {
-            handled = true;
-            return 0;
-        }
-
-        // Screen -> client coords (TOUCHINPUT gives screen coords).
-        POINT pt{};
-        for (const TOUCHINPUT& ti : inputs) {
-            if (ti.dwID != gTouch.pointerId) continue;
-            pt.x = TOUCH_COORD_TO_PIXEL(ti.x);
-            pt.y = TOUCH_COORD_TO_PIXEL(ti.y);
-            ::ScreenToClient(static_cast<HWND>(state->devices->window().getWindowHandle()), &pt);
-            gTouch.x = static_cast<float>(pt.x);
-            gTouch.y = static_cast<float>(pt.y);
-            break;
-        }
-
-        bool sawDown = false;
-        bool sawUp   = false;
-        bool sawMove = false;
-        for (const TOUCHINPUT& ti : inputs) {
-            if (ti.dwID != gTouch.pointerId) continue;
-            if (ti.dwFlags & TOUCHEVENTF_DOWN) sawDown = true;
-            if (ti.dwFlags & TOUCHEVENTF_UP)   sawUp   = true;
-            if (ti.dwFlags & TOUCHEVENTF_MOVE) sawMove = true;
-            break;
-        }
-
-        if (sawDown) {
-            // First contact ??record the tentative tap. We DO NOT
-            // synthesize mouse-down yet; the previously-shipped code
-            // fired onMouseButtonDown immediately, which on a ListView
-            // selected a row before the user had a chance to scroll.
-            // The new flow: track start, fire mouse-down only after
-            // we're sure the gesture is a tap (no drag within the
-            // threshold). dragStarted flips true on the first move
-            // past kTouchDragThresholdPx and the gesture becomes a
-            // pure scroll.
-            gTouch.active        = true;
-            gTouch.dragStarted   = false;
-            gTouch.lastY         = gTouch.y;
-            gTouch.accumulatedDy = 0.0f;
-            gTouch.pointerId     = inputs.empty() ? 0 : inputs[0].dwID;
-            // Find the actual pointer id we tracked (in case it differs).
-            for (const TOUCHINPUT& ti : inputs) {
-                if (ti.dwID == gTouch.pointerId) break;
-            }
-            // Re-resolve pointerId from the first input (single-finger).
-            gTouch.pointerId = inputs[0].dwID;
-            pt.x = TOUCH_COORD_TO_PIXEL(inputs[0].x);
-            pt.y = TOUCH_COORD_TO_PIXEL(inputs[0].y);
-            ::ScreenToClient(static_cast<HWND>(state->devices->window().getWindowHandle()), &pt);
-            gTouch.x = static_cast<float>(pt.x);
-            gTouch.y = static_cast<float>(pt.y);
-            gTouch.startX = gTouch.x;
-            gTouch.startY = gTouch.y;
-            state->ui->onMouseMove(gTouch.x, gTouch.y);
-        } else if (sawMove && gTouch.active) {
-            const float dy = gTouch.y - gTouch.lastY;
-            gTouch.accumulatedDy += dy;
-            gTouch.lastY = gTouch.y;
-            state->ui->onMouseMove(gTouch.x, gTouch.y);
-
-            // PR-B5 ??once the finger crosses the drag threshold,
-            // commit the gesture as a scroll. We DON'T synthesize a
-            // mouse-down (which would have selected a row); the
-            // accumulated dy is fed straight into onMouseWheel.
-            if (!gTouch.dragStarted) {
-                const float totalDx = gTouch.x - gTouch.startX;
-                const float totalDy = gTouch.y - gTouch.startY;
-                if (std::fabs(totalDy) >= kTouchDragThresholdPx ||
-                    std::fabs(totalDx) >= kTouchDragThresholdPx) {
-                    gTouch.dragStarted = true;
-                }
-            }
-            if (gTouch.dragStarted) {
-                // Threshold = 8 px (one wheel notch ??6-8 px on most
-                // precision touchpads).
-                constexpr float kTouchWheelThresholdPx = 8.0f;
-                if (std::fabs(gTouch.accumulatedDy) >= kTouchWheelThresholdPx) {
-                    // Sign convention: UIManager::onMouseWheel deltaY is
-                    // "content to move by -deltaY in y" (scroll wheel up
-                    // has positive deltaY per Win32 convention). Our
-                    // accumulatedDy is "finger moved down" which feels
-                    // like "scroll content up" ??so we negate.
-                    const float wheelDelta =
-                        -gTouch.accumulatedDy * kTouchWheelScale;
-                    state->ui->onMouseWheel(gTouch.x, gTouch.y, wheelDelta);
-                    gTouch.accumulatedDy = 0.0f;
-                }
-            }
-        } else if (sawUp && gTouch.active) {
-            // Only fire mouse-up if the gesture was actually a tap
-            // (no drag). For a drag-scroll, we never sent a
-            // mouse-down, so the up is a no-op.
-            if (!gTouch.dragStarted) {
-                state->ui->onMouseButtonDown(gTouch.x, gTouch.y, 0);
-                state->ui->onMouseButtonUp(gTouch.x, gTouch.y, 0);
-            }
-            gTouch.active        = false;
-            gTouch.dragStarted   = false;
-            gTouch.accumulatedDy = 0.0f;
-            gTouch.pointerId     = 0;
-        }
-
-        ::CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(lParam));
-        handled = true;
-        return 0;
-    }
-    // WM_CHAR / IME: leave unhandled so DeviceManager::textInput() receives
-    // them; the main loop pumps committed UTF-8 into UIManager.
-    default:
-        break;
     }
     return 0;
 }
@@ -2991,6 +2749,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     cfg.window.width = initialPixelWidth;
     cfg.window.height = initialPixelHeight;
     cfg.window.hidden = capture.enabled;
+    cfg.enableTouch = true;
     if (!devices.initialize(cfg)) {
         writeCaptureStartupStage(capture, "device_initialize_failed");
         std::fprintf(stderr, "[AYUI_Gallery] DeviceManager initialize failed\n");
@@ -3006,14 +2765,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         devices.shutdown();
         return 1;
     }
-
-    // Enable WM_TOUCH delivery so touchscreens (laptop trackpads,
-    // Surface, etc.) can drive onMouseMove + onMouseWheel. TWF_FINETOUCH
-    // gives us the highest-fidelity coordinates for the single-finger
-    // drag-to-scroll path in handleMessage. Without this call, touch
-    // devices fall back to synthesized mouse messages which SDL2/our
-    // window proc may not see on every touch panel.
-    ::RegisterTouchWindow(hwnd, TWF_FINETOUCH);
 
     ayt::render::Renderer renderer;
     ayt::render::InitDesc init{};
@@ -3079,25 +2830,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
                                  capture.rootLayerEnabled,
                                  capture.captureScale);
 
-    // TextInput focus gate + Device?UI text/IME bridge.
-    ui.onTextEditingFocusChanged = [&devices](bool editing) {
-        devices.textInput().setEnabled(editing);
-    };
-    devices.textInput().onCommit = [&ui](const std::string& chunk) {
-        if (!chunk.empty()) {
-            ui.onDeviceChar(chunk.data(), static_cast<int>(chunk.size()));
-        }
-    };
-    devices.textInput().onCompositionUpdate =
-        [&ui, &devices](const std::string& text, int caret) {
-            // endComposition() clears _composing then fires empty update.
-            if (text.empty() && !devices.textInput().isComposing()) {
-                ui.onDeviceCompositionEnd("");
-                return;
-            }
-            ui.onDeviceCompositionUpdate(text, caret);
-        };
-
     // PR-Dock-TearOff: child-window host ??must exist BEFORE the first
     // loadAndWire because wireDockPromotion's lambdas close over
     // state.childWindows.
@@ -3150,11 +2882,81 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
 
     window.setWindowCloseCallback([&state]() { state.running = false; });
+    window.setWindowResizeCallback([&state](int width, int height) {
+        resizeGallery(state, width, height);
+    });
+    window.setWindowFocusCallback([&ui](bool focused) {
+        if (focused) {
+            return;
+        }
+        ui.onKeyUp(ayt::ui::UIKey_Shift);
+        ui.onKeyUp(ayt::ui::UIKey_Control);
+        ui.onKeyUp(ayt::ui::UIKey_Alt);
+        ui.cancelDrag();
+    });
     window.setWindowMessageCallback(
         [&state](unsigned msg, std::uintptr_t wParam, std::intptr_t lParam,
                  bool& handled) -> std::intptr_t {
-            return handleMessage(nullptr, &state, msg, wParam, lParam, handled);
+            return handleNativeHostMessage(&state, msg, wParam, lParam, handled);
         });
+
+    ayt::ui::DeviceInputBridge::Callbacks inputCallbacks{};
+    inputCallbacks.onMouseMove = [&ui, &window](float x, float y) {
+        const bool handled = ui.onMouseMove(x, y);
+        window.setCursorShape(ayt::ui::systemCursorFromUi(ui.getCursorHint()));
+        return handled;
+    };
+    inputCallbacks.onMouseLeave = [&ui, &window]() {
+        ui.onMouseLeave();
+        window.setCursorShape(ayt::device::SystemCursorShape::Arrow);
+    };
+    inputCallbacks.onMouseButton = [&ui, &window](float x, float y, int button,
+                                                  bool pressed) {
+        const bool handled = pressed ? ui.onMouseButtonDown(x, y, button)
+                                     : ui.onMouseButtonUp(x, y, button);
+        window.setCursorShape(ayt::ui::systemCursorFromUi(ui.getCursorHint()));
+        return handled;
+    };
+    inputCallbacks.onMouseWheel = [&ui](float x, float y, float deltaY) {
+        return ui.onMouseWheel(x, y, deltaY);
+    };
+    inputCallbacks.onKey = [&state, &ui](ayt::device::KeyCode key, bool pressed,
+                                         bool repeat) {
+        if (key == ayt::device::KeyCode::F5 && pressed && !repeat) {
+            toggleTheme(state);
+            return true;
+        }
+        const int uiKey = static_cast<int>(ayt::ui::fromDeviceKey(key));
+        return pressed ? ui.onKeyDown(uiKey) : ui.onKeyUp(uiKey);
+    };
+    inputCallbacks.onTextCommit = [&ui](const std::string& text) {
+        return !text.empty()
+            && ui.onDeviceChar(text.data(), static_cast<int>(text.size()));
+    };
+    inputCallbacks.onComposition = [&ui](ayt::device::DeviceInputEventType type,
+                                          const std::string& text, int caret) {
+        switch (type) {
+        case ayt::device::DeviceInputEventType::CompositionStart:
+            ui.onDeviceCompositionStart(text, caret);
+            break;
+        case ayt::device::DeviceInputEventType::CompositionUpdate:
+            ui.onDeviceCompositionUpdate(text, caret);
+            break;
+        case ayt::device::DeviceInputEventType::CompositionEnd:
+            ui.onDeviceCompositionEnd("");
+            break;
+        default:
+            break;
+        }
+    };
+    inputCallbacks.onTouch = [&state](int64_t pointerId, float x, float y,
+                                      ayt::device::TouchPhase phase) {
+        handleGalleryTouch(state, pointerId, x, y, phase);
+    };
+    ayt::ui::DeviceInputBridge inputBridge(std::move(inputCallbacks));
+    inputBridge.connect(devices);
+    inputBridge.bindTextInputFocus(ui);
+    window.setCursorShape(ayt::ui::systemCursorFromUi(ui.getCursorHint()));
 
     std::fprintf(stderr,
                  "[AYUI_Gallery] ready ??UI-only composite (no RenderScene)\n"
@@ -3169,27 +2971,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     bool captureQueued = false;
 
     while (state.running && window.isWindowValid()) {
-        state.wheelHandledThisFrame = false;
         devices.pollEvents();
-
-        // Fallback bridge: precision trackpads may deliver wheel only via
-        // WM_INPUT ??MouseDevice (no WM_MOUSEWHEEL). Use UIManager's last
-        // mouse (updated by WM_MOUSEMOVE), never Device pos alone ??move
-        // used to be handled=true and starved Device coordinates.
-        if (!state.wheelHandledThisFrame) {
-            if (ayt::device::MouseDevice* mouse = devices.mouse()) {
-                const float notches = mouse->getWheelDelta();
-                if (notches != 0.0f) {
-                    constexpr float kPixelsPerNotch = 40.0f;
-                    const ayt::math::FVector2 pos = ui.hasMousePos()
-                        ? ui.getMousePos()
-                        : ayt::math::FVector2(mouse->getPosition().x,
-                                              mouse->getPosition().y);
-                    // Same Win32?UI sign flip as WM_MOUSEWHEEL handler.
-                    ui.onMouseWheel(pos.x, pos.y, -notches * kPixelsPerNotch);
-                }
-            }
-        }
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);

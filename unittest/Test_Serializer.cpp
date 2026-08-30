@@ -4,6 +4,7 @@
 #include "AYUI/Button.h"
 #include "AYUI/Window.h"
 #include "AYUI/Box.h"
+#include "AYUI/ScrollView.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -199,6 +200,29 @@ TEST_CASE(test_roundtrip) {
     CHECK(restoredWindow->getTitle() == L"Original Title");
 
     destroyWidgetTree(window);
+    destroyWidgetTree(restored);
+}
+
+TEST_CASE(test_scrollview_visibility_policy_roundtrip) {
+    ScrollView scroll;
+    scroll.setVerticalScrollBarVisibility(
+        ScrollView::ScrollBarVisibility::Always);
+    scroll.setHorizontalScrollBarVisibility(
+        ScrollView::ScrollBarVisibility::Auto);
+
+    const std::string json = WidgetSerializer::serialize(&scroll);
+    CHECK(json.find("verticalScrollBarVisibility") != std::string::npos);
+    CHECK(json.find("horizontalScrollBarVisibility") != std::string::npos);
+
+    Widget* restored = WidgetSerializer::deserialize(json);
+    ScrollView* restoredScroll = dynamic_cast<ScrollView*>(restored);
+    CHECK_NOT_NULL(restoredScroll);
+    if (restoredScroll != nullptr) {
+        CHECK(restoredScroll->getVerticalScrollBarVisibility()
+              == ScrollView::ScrollBarVisibility::Always);
+        CHECK(restoredScroll->getHorizontalScrollBarVisibility()
+              == ScrollView::ScrollBarVisibility::Auto);
+    }
     destroyWidgetTree(restored);
 }
 

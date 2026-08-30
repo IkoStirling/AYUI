@@ -487,17 +487,13 @@ bool Menu::onKeyDown(int keyCode) {
 }
 
 void Menu::tick(float dt) {
-    // PR-anim: chain the base FIRST — opacity tweens live in
-    // Widget::tick. compoundDescendTick forces the base for nodes it
-    // reaches as `self`, but the overlay cascade reaches the Menu as a
-    // CHILD (virtual dispatch → this override), so without the chain
-    // the pop-in fade would never advance.
-    Widget::tick(dt);
+    // Menu is a compound popup. Calling only Widget::tick advanced the
+    // popup's opacity/position but stopped the cascade here, so MenuItem
+    // hover-color tweens stayed forever at their transparent first frame.
+    // Chain the compound base to advance this Menu and every item/submenu.
+    CompoundFocusableWidget::tick(dt);
     // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
-    // Driven by UIManager::update → _root->tick cascade when the Menu
-    // is in the _root subtree (the common case after open() reparents
-    // onto the overlay — the overlay is mounted in _root, so the
-    // cascade still reaches the Menu through the overlay's children).
+    // Driven by UIManager::update's overlay cascade while the Menu is open.
     _typeaheadBuffer.tick(dt);
 }
 

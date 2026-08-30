@@ -2,6 +2,7 @@
 #include "AYUI/Button.h"
 #include "AYUI/Style.h"
 #include "AYUI/MockRenderer.h"
+#include "AYUI/SvgIcon.h"
 #include <iostream>
 
 using namespace ayt::ui;
@@ -20,6 +21,29 @@ TEST_CASE(button_set_text) {
     Button button;
     button.setText(L"Click Me");
     CHECK(button.getText() == L"Click Me");
+}
+
+TEST_CASE(button_svg_icon_slot_centers_icon_without_texture_state) {
+    const auto document = SvgDocument::parse(
+        R"svg(<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4v16l14 -8z"/></svg>)svg");
+    CHECK(document != nullptr);
+
+    Button button;
+    button.setSize(FVector2(32.0f, 28.0f));
+    button.setIconDocument(document);
+    button.setIconSize(16.0f);
+    MockRenderer renderer;
+    button.render(renderer);
+
+    bool foundPath = false;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type == MockRenderer::DrawCall::Path) {
+            foundPath = true;
+            CHECK(call.bounds.minX >= 8.0f);
+            CHECK(call.bounds.maxX <= 24.0f);
+        }
+    }
+    CHECK(foundPath);
 }
 
 TEST_CASE(button_hover_state) {

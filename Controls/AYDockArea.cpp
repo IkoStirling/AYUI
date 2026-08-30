@@ -1053,6 +1053,8 @@ DockArea::DockArea() {
 DockArea::~DockArea() {
     // Clear bookkeeping aliases first — do not delete through them.
     // Actual heap teardown walks getChildren() below.
+    _onCardCloseRequested = {};
+    _hiddenCardSlots.clear();
     _cardIndex.clear();
     _rootNode = nullptr;
     for (int i = 0; i < (int)Slot::Count; ++i) {
@@ -1141,6 +1143,7 @@ bool DockArea::removeCard(const std::string& cardId) {
     }
     DockCard* card = it->second;
     _cardIndex.erase(cardId);
+    _hiddenCardSlots.erase(cardId);
 
     // Detach from its leaf (if docked), then free.
     if (DockTabGroup* leaf = findLeafOfCard(card)) {
@@ -1178,6 +1181,87 @@ bool DockArea::closeCard(const std::string& cardId) {
         return true;
     }
     return false;
+}
+
+bool DockArea::requestCloseCard(DockCard* card) {
+    if (card == nullptr) {
+        return false;
+    }
+    if (_onCardCloseRequested && _onCardCloseRequested(card)) {
+        return true;
+    }
+    return closeCard(card->getId());
+}
+
+bool DockArea::setCardVisible(const std::string& cardId,
+                              bool visible,
+                              Slot restoreSlot) {
+    if (cardId.empty()
+        || (int)restoreSlot < 0
+        || (int)restoreSlot >= (int)Slot::Count) {
+        return false;
+    }
+
+    auto hidden = _hiddenCardSlots.find(cardId);
+    if (visible && hidden != _hiddenCardSlots.end()) {
+        auto indexed = _cardIndex.find(cardId);
+        if (indexed == _cardIndex.end() || indexed->second == nullptr) {
+            _hiddenCardSlots.erase(hidden);
+            return false;
+        }
+        ensureRootTree();
+        DockTabGroup* leaf = leafForSlot(hidden->second);
+        if (leaf == nullptr) {
+            leaf = leafForSlot(restoreSlot);
+        }
+        if (leaf == nullptr) {
+            return false;
+        }
+        DockCard* card = indexed->second;
+        _hiddenCardSlots.erase(hidden);
+        addTabToLeaf(leaf, card);
+        card->setVisible(true);
+        markBoundsDirty();
+        requestRelayout();
+        return true;
+    }
+    if (!visible && hidden != _hiddenCardSlots.end()) {
+        return true;
+    }
+
+    DockCard* card = findCard(cardId);
+    if (card == nullptr) {
+        return false;
+    }
+    if (visible) {
+        if (DockTabGroup* leaf = findLeafOfCard(card)) {
+            leaf->activateTabById(cardId);
+        }
+        card->setVisible(true);
+        markBoundsDirty();
+        requestRelayout();
+        return true;
+    }
+
+    if (DockTabGroup* leaf = findLeafOfCard(card)) {
+        removeTabFromLeaf(leaf, card);
+        pruneEmptySplitNodes();
+    } else if (_overlay != nullptr) {
+        _overlay->removeFloatingCard(card);
+    }
+
+    // Keep the widget tree and UIManager id registry alive. addChild also
+    // takes ownership after the detach-only tab/overlay removal above.
+    addChild(card);
+    card->setVisible(false);
+    _cardIndex[cardId] = card;
+    _hiddenCardSlots[cardId] = restoreSlot;
+    if (_overlay != nullptr) {
+        _overlay->bringToFront();
+    }
+    markBoundsDirty();
+    requestRelayout();
+    return true;
 }
 
 DockCard* DockArea::findCard(const std::string& cardId) const {
@@ -1888,7 +1972,7 @@ DockTabGroup* DockArea::makePinnedLeaf(Slot slot) {
     leaf->setPinned(true);
     leaf->setOnCloseTab([this](DockCard* card) {
         if (card != nullptr) {
-            closeCard(card->getId());
+            requestCloseCard(card);
         }
     });
     _rootLeaves[(int)slot] = leaf;
@@ -2123,7 +2207,7 @@ void DockArea::splitLeaf(DockTabGroup* leaf, TreeDropZone zone,
     newLeaf->setPinned(false);
     newLeaf->setOnCloseTab([this](DockCard* c) {
         if (c != nullptr) {
-            closeCard(c->getId());
+            requestCloseCard(c);
         }
     });
 
@@ -2741,6 +2825,13 @@ std::string DockArea::serializeDockTree() const {
         }
     }
     root["floating"] = floating;
+    ayt::ui::json hidden = ayt::ui::json::array();
+    for (const auto& entry : _hiddenCardSlots) {
+        hidden.push_back({
+            {"id", entry.first},
+            {"slot", dockSlotName((int)entry.second)}});
+    }
+    root["hidden"] = hidden;
     return root.dump();
 }
 
@@ -2859,6 +2950,27 @@ bool DockArea::applyDockTree(const std::string& jsonStr) {
                 _overlay->addFloatingCard(c);
             }
         }
+        if (j.contains("hidden") && j["hidden"].is_array()) {
+            for (const auto& hj : j["hidden"]) {
+                const std::string id = hj.value("id", "");
+                Slot slot = Slot::Center;
+                if (id.empty()
+                    || !parseSlot(hj.value("slot", "Center"), slot)) {
+                    continue;
+                }
+                auto it = pool.find(id);
+                if (it == pool.end() || it->second == nullptr) {
+                    continue;
+                }
+                DockCard* card = it->second;
+                pool.erase(it);
+                addChild(card);
+                card->setVisible(false);
+                _cardIndex[id] = card;
+                _hiddenCardSlots[id] = slot;
+            }
+            _overlay->bringToFront();
+        }
         int k = 0;
         for (auto& kv : pool) {
             DockCard* c = kv.second;
@@ -2915,6 +3027,18 @@ void DockArea::poolAllCards(
             }
         }
     }
+    for (const auto& entry : _hiddenCardSlots) {
+        auto it = _cardIndex.find(entry.first);
+        if (it == _cardIndex.end() || it->second == nullptr) {
+            continue;
+        }
+        DockCard* card = it->second;
+        if (card->getParent() == this) {
+            removeChild(card);
+        }
+        pool[entry.first] = card;
+    }
+    _hiddenCardSlots.clear();
     _cardIndex.clear();
 }
 
@@ -2935,7 +3059,7 @@ Widget* DockArea::buildNodeFromJson(
             leaf->setPinned(false);
             leaf->setOnCloseTab([this](DockCard* c) {
                 if (c != nullptr) {
-                    closeCard(c->getId());
+                    requestCloseCard(c);
                 }
             });
         }

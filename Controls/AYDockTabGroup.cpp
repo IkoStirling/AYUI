@@ -3,11 +3,51 @@
 #include "AYUI/UIManager.h"
 #include "AYUI/DockTrace.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/TextMeasure.h"
 
 #include <algorithm>
 #include <cmath>
 
 namespace ayt::ui {
+
+namespace {
+
+constexpr int kDockTabFontSize = 12;
+
+std::wstring ellipsizeTabTitle(const std::wstring& title,
+                               float availableWidth,
+                               IRenderBackend& renderer) {
+    if (title.empty() || availableWidth <= 0.0f) {
+        return {};
+    }
+    if (measurePrefixWidth(title, title.size(), &renderer,
+                           kDockTabFontSize) <= availableWidth) {
+        return title;
+    }
+
+    const std::wstring ellipsis = L"\x2026";
+    const float ellipsisWidth = measurePrefixWidth(
+        ellipsis, ellipsis.size(), &renderer, kDockTabFontSize);
+    if (ellipsisWidth > availableWidth) {
+        return {};
+    }
+
+    size_t low = 0;
+    size_t high = title.size();
+    while (low < high) {
+        const size_t mid = low + (high - low + 1) / 2;
+        const float prefixWidth = measurePrefixWidth(
+            title, mid, &renderer, kDockTabFontSize);
+        if (prefixWidth + ellipsisWidth <= availableWidth) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return title.substr(0, low) + ellipsis;
+}
+
+} // namespace
 
 DockTabGroup::DockTabGroup() {
     setSize(math::FVector2(200.0f, 200.0f));
@@ -164,18 +204,26 @@ math::FRectangle DockTabGroup::stripRectWorld() const {
     return math::FRectangle(b.minX, b.minY, b.maxX, b.minY + kTabStripHeight);
 }
 
-math::FRectangle DockTabGroup::tabRectWorld(size_t index) const {
+math::FRectangle DockTabGroup::getTabRectWorld(size_t index) const {
     const math::FRectangle strip = stripRectWorld();
-    const size_t n = std::max<size_t>(1, _tabs.size());
-    const float w = (strip.maxX - strip.minX) / static_cast<float>(n);
+    if (index >= _tabs.size() || _tabs.empty()) {
+        return math::FRectangle();
+    }
+    const float stripWidth = std::max(0.0f, strip.maxX - strip.minX);
+    const float preferredTotal =
+        kPreferredTabWidth * static_cast<float>(_tabs.size());
+    const float w = preferredTotal <= stripWidth
+        ? kPreferredTabWidth
+        : stripWidth / static_cast<float>(_tabs.size());
     return math::FRectangle(strip.minX + w * static_cast<float>(index),
                             strip.minY,
-                            strip.minX + w * static_cast<float>(index + 1),
+                            std::min(strip.maxX,
+                                     strip.minX + w * static_cast<float>(index + 1)),
                             strip.maxY);
 }
 
 math::FRectangle DockTabGroup::closeRectWorld(size_t index) const {
-    const math::FRectangle tab = tabRectWorld(index);
+    const math::FRectangle tab = getTabRectWorld(index);
     constexpr float kCloseHalfWidth = 8.0f;
     return math::FRectangle(tab.maxX - kCloseHalfWidth, tab.minY,
                             tab.maxX, tab.maxY);
@@ -186,7 +234,7 @@ int DockTabGroup::tabIndexAt(const math::FVector2& worldPos) const {
         return -1;
     }
     for (size_t i = 0; i < _tabs.size(); ++i) {
-        if (tabRectWorld(i).contains(worldPos)) {
+        if (getTabRectWorld(i).contains(worldPos)) {
             return static_cast<int>(i);
         }
     }
@@ -233,7 +281,9 @@ bool DockTabGroup::onMouseButtonDown(const UIMouseEvent& e) {
 
     // Close x fires before activate/drag (mirrors DockCard's
     // close-first rule for its own title bar).
-    if (closeRectWorld(static_cast<size_t>(idx)).contains(e.mousePos)) {
+    if (static_cast<size_t>(idx) == _activeIndex
+        && tab->isClosable()
+        && closeRectWorld(static_cast<size_t>(idx)).contains(e.mousePos)) {
         dockTrace("[dock] tabGroup close x card=%s leaf=%s\n",
                   tab->getId().c_str(), _leafId.c_str());
         if (_onCloseTab) {
@@ -268,7 +318,10 @@ bool DockTabGroup::onMouseMove(const UIMouseEvent& e) {
         const int idx = tabIndexAt(e.mousePos);
         if (idx >= 0) {
             _hoveredTab = idx;
-            if (closeRectWorld(static_cast<size_t>(idx)).contains(e.mousePos)) {
+            DockCard* tab = _tabs[static_cast<size_t>(idx)];
+            if (static_cast<size_t>(idx) == _activeIndex
+                && tab != nullptr && tab->isClosable()
+                && closeRectWorld(static_cast<size_t>(idx)).contains(e.mousePos)) {
                 _hoveredClose = idx;
             }
         }
@@ -332,9 +385,10 @@ void DockTabGroup::paintStrip(IRenderBackend& renderer) {
         if (tab == nullptr) {
             continue;
         }
-        const math::FRectangle r = tabRectWorld(i);
+        const math::FRectangle r = getTabRectWorld(i);
         const math::FRectangle close = closeRectWorld(i);
         const bool isActive = (i == _activeIndex);
+        const bool showClose = isActive && tab->isClosable();
         const bool hovered = (static_cast<int>(i) == _hoveredTab);
 
         if (isActive) {
@@ -343,21 +397,27 @@ void DockTabGroup::paintStrip(IRenderBackend& renderer) {
             renderer.drawRect(r, math::FVector4(0.18f, 0.18f, 0.22f, 1.0f));
         }
 
-        // Title text (leave room for the close x).
+        // Inactive tabs use the full title area. Only the selected tab
+        // reserves space for its close affordance.
         const math::FRectangle textRect(
             r.minX + 6.0f, r.minY,
-            close.maxX - 2.0f, r.maxY);
+            showClose ? close.minX - 2.0f : r.maxX - 6.0f, r.maxY);
         if (!tab->getTitle().empty()) {
-            renderer.drawText(textRect, tab->getTitle(), 12,
+            const std::wstring displayTitle = ellipsizeTabTitle(
+                tab->getTitle(),
+                std::max(0.0f, textRect.maxX - textRect.minX), renderer);
+            renderer.drawText(textRect, displayTitle, kDockTabFontSize,
                               math::FVector4(0.90f, 0.90f, 0.92f, 1.0f));
         }
 
-        // Close x (hover highlight + glyph).
-        if (static_cast<int>(i) == _hoveredClose) {
-            renderer.drawRect(close, math::FVector4(0.55f, 0.18f, 0.18f, 1.0f));
+        // Only the selected, closable tab exposes the close x.
+        if (showClose) {
+            if (static_cast<int>(i) == _hoveredClose) {
+                renderer.drawRect(close, math::FVector4(0.55f, 0.18f, 0.18f, 1.0f));
+            }
+            renderer.drawText(close, L"x", kDockTabFontSize,
+                              math::FVector4(0.90f, 0.90f, 0.92f, 1.0f));
         }
-        renderer.drawText(close, L"x", 12,
-                          math::FVector4(0.90f, 0.90f, 0.92f, 1.0f));
     }
 }
 

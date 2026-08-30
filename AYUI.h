@@ -42,6 +42,7 @@
 #include "AYUI/StatusBar.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/Image.h"
+#include "AYUI/SvgIcon.h"
 #include "AYUI/Window.h"
 #include "AYUI/Panel.h"
 #include "AYUI/Box.h"
@@ -72,4 +73,5 @@
 #include "AYUI/I18n.h"
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/UIManager.h"
+#include "AYUI/DeviceInputBridge.h"
 #include "AYUI/IRenderBackend.h"

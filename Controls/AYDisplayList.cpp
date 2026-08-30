@@ -308,6 +308,20 @@ void DisplayListRecorder::addPathPolygon(PathHandle path,
         });
     _target.addPathPolygon(record->targetHandle, points, count, winding);
 }
+void DisplayListRecorder::addPathContour(PathHandle path,
+                                         const math::FVector2* points, int count,
+                                         bool closed, PathWinding winding)
+{
+    const auto record = findRecordedPath(path);
+    if (record == nullptr || points == nullptr || count < 2) return;
+    const std::vector<math::FVector2> copy(points, points + count);
+    record->operations.push_back(
+        [copy, closed, winding](IRenderBackend& backend, PathHandle replay) {
+            backend.addPathContour(replay, copy.data(),
+                                   static_cast<int>(copy.size()), closed, winding);
+        });
+    _target.addPathContour(record->targetHandle, points, count, closed, winding);
+}
 void DisplayListRecorder::setPathFillColor(PathHandle path,
                                            const math::FVector4& color)
 {
@@ -336,6 +350,18 @@ void DisplayListRecorder::setPathStrokeWidth(PathHandle path, float width)
         backend.setPathStrokeWidth(replay, width);
     });
     _target.setPathStrokeWidth(record->targetHandle, width);
+}
+void DisplayListRecorder::setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                                             PathStrokeJoin join,
+                                             float miterLimit)
+{
+    const auto record = findRecordedPath(path);
+    if (record == nullptr) return;
+    record->operations.push_back(
+        [cap, join, miterLimit](IRenderBackend& backend, PathHandle replay) {
+            backend.setPathStrokeStyle(replay, cap, join, miterLimit);
+        });
+    _target.setPathStrokeStyle(record->targetHandle, cap, join, miterLimit);
 }
 void DisplayListRecorder::drawPath(PathHandle path, PathFillMode mode)
 {

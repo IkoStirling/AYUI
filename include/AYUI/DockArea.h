@@ -10,6 +10,7 @@
 // Provides the `ayt::ui::json` alias used by the Phase-4 persistence
 // helpers (serializeNode / buildNodeFromJson signatures).
 #include "AYUI/WidgetSerializer.h"
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -129,6 +130,22 @@ public:
     // Close a card whether docked or floating on the overlay (destroys
     // the widget tree). Used by DockCard's header close affordance.
     bool closeCard(const std::string& cardId);
+
+    // Route a user close request through the host before falling back to
+    // destructive closeCard(). Persistent editor panels use this hook to
+    // park the live card so Window-menu reopen keeps all widget bindings.
+    using CardCloseRequestHandler = std::function<bool(DockCard* card)>;
+    void setOnCardCloseRequested(CardCloseRequestHandler handler) {
+        _onCardCloseRequested = std::move(handler);
+    }
+    bool requestCloseCard(DockCard* card);
+
+    // Non-destructive visibility for persistent tool panels. Hiding detaches
+    // the card from its tab/floating host and parks it under this DockArea;
+    // showing reattaches the same instance to restoreSlot.
+    bool setCardVisible(const std::string& cardId,
+                        bool visible,
+                        Slot restoreSlot);
 
     // Find a card anywhere (slots or floating overlay) by id. Returns
     // nullptr if not found.
@@ -295,6 +312,11 @@ private:
     // id -> card (across all slots + overlay). Ownership stays in the
     // dock tree / overlay.
     std::unordered_map<std::string, DockCard*> _cardIndex;
+
+    // Cards hidden by setCardVisible remain owned by DockArea and indexed by
+    // id. The slot is the stable home used by a later Window-menu reopen.
+    std::unordered_map<std::string, Slot> _hiddenCardSlots;
+    CardCloseRequestHandler _onCardCloseRequested;
 
     // Floating overlay (always present, child of DockArea). Raw pointer
     // because lifetime is owned by the children tree; we don't want a

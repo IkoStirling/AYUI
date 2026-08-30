@@ -44,6 +44,13 @@ enum class PathFillMode { Fill, Stroke, FillAndStroke };
 
 enum class PathWinding { CounterClockwise, Clockwise };
 
+// Stroke geometry is part of the backend-independent path recipe.  SVG icon
+// sets (including Tabler) rely on round caps/joins; leaving those choices in
+// an individual backend changes the authored silhouette.
+enum class PathStrokeCap { Butt, Round, Square };
+
+enum class PathStrokeJoin { Miter, Round, Bevel };
+
 enum class BlurType { Gaussian, Box, Motion };
 
 enum class AnimationCurve { Linear, EaseIn, EaseOut, EaseInOut, Spring };
@@ -69,6 +76,8 @@ public:
     using GradientType = ::ayt::ui::GradientType;
     using PathFillMode = ::ayt::ui::PathFillMode;
     using PathWinding = ::ayt::ui::PathWinding;
+    using PathStrokeCap = ::ayt::ui::PathStrokeCap;
+    using PathStrokeJoin = ::ayt::ui::PathStrokeJoin;
     using BlurType = ::ayt::ui::BlurType;
     using AnimationCurve = ::ayt::ui::AnimationCurve;
     using AnimationFlags = ::ayt::ui::AnimationFlags;
@@ -631,6 +640,29 @@ public:
     virtual void addPathPolygon(PathHandle path, const math::FVector2* points, int count, PathWinding winding = PathWinding::CounterClockwise) {}
 
     /*
+       @name: addPathContour
+       @func: 添加连续轮廓 - 与逐段 addPathLine 不同，所有点共享连接样式
+       @param path: 目标路径句柄
+       @param points: 连续轮廓顶点
+       @param count: 顶点数量
+       @param closed: 是否闭合最后一点与第一点
+       @param winding: 闭合轮廓的填充方向
+       @note: SVG/path flattening 应使用该入口以保留 join/cap 语义
+    */
+    virtual void addPathContour(PathHandle path, const math::FVector2* points,
+                                int count, bool closed,
+                                PathWinding winding = PathWinding::CounterClockwise) {
+        if (points == nullptr || count < 2) return;
+        if (closed && count >= 3) {
+            addPathPolygon(path, points, count, winding);
+            return;
+        }
+        for (int i = 1; i < count; ++i) {
+            addPathLine(path, points[i - 1], points[i]);
+        }
+    }
+
+    /*
        @name: setPathFillColor
        @func: 设置路径填充颜色
        @param path: 目标路径句柄
@@ -653,6 +685,15 @@ public:
        @param width: 描边宽度（像素）
     */
     virtual void setPathStrokeWidth(PathHandle path, float width) {}
+
+    /*
+       @name: setPathStrokeStyle
+       @func: 设置连续轮廓的端点、连接和斜接限制
+       @param miterLimit: 相对半描边宽度的最大斜接长度，最小为 1
+    */
+    virtual void setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                                    PathStrokeJoin join,
+                                    float miterLimit = 4.0f) {}
 
     /*
        @name: drawPath

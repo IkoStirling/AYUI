@@ -321,6 +321,8 @@ TEST_CASE(test_layout_loader_scrollview_builds_and_registers_content) {
         "size": { "w": 200, "h": 100 },
         "verticalScrollBar": true,
         "horizontalScrollBar": false,
+        "verticalScrollBarVisibility": "always",
+        "horizontalScrollBarVisibility": "auto",
         "contentSize": { "w": 180, "h": 240 },
         "content": {
             "type": "VBox",
@@ -340,7 +342,11 @@ TEST_CASE(test_layout_loader_scrollview_builds_and_registers_content) {
     CHECK(loader.findWidgetById("scroll_body") == scroll->getContent());
     CHECK(loader.findWidgetById("deep_slider") != nullptr);
     CHECK(scroll->isVerticalScrollBarEnabled());
-    CHECK_FALSE(scroll->isHorizontalScrollBarEnabled());
+    CHECK(scroll->isHorizontalScrollBarEnabled());
+    CHECK(scroll->getVerticalScrollBarVisibility()
+          == ScrollView::ScrollBarVisibility::Always);
+    CHECK(scroll->getHorizontalScrollBarVisibility()
+          == ScrollView::ScrollBarVisibility::Auto);
     CHECK_FLOAT_EQ(scroll->getContentSize().y, 240.0f, 1e-5f);
 
     destroyWidgetTree(root);

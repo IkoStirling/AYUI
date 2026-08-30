@@ -124,9 +124,15 @@ public:
                     PathWinding winding = PathWinding::CounterClockwise) override;
     void addPathPolygon(PathHandle path, const math::FVector2* points, int count,
                         PathWinding winding = PathWinding::CounterClockwise) override;
+    void addPathContour(PathHandle path, const math::FVector2* points, int count,
+                        bool closed,
+                        PathWinding winding = PathWinding::CounterClockwise) override;
     void setPathFillColor(PathHandle path, const math::FVector4& color) override;
     void setPathStrokeColor(PathHandle path, const math::FVector4& color) override;
     void setPathStrokeWidth(PathHandle path, float width) override;
+    void setPathStrokeStyle(PathHandle path, PathStrokeCap cap,
+                            PathStrokeJoin join,
+                            float miterLimit = 4.0f) override;
     void drawPath(PathHandle path, PathFillMode mode = PathFillMode::Fill) override;
     void pushPathClip(PathHandle path) override;
     void drawRectBlurWithMask(const math::FRectangle& bounds, PathHandle maskPath,

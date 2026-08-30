@@ -109,7 +109,11 @@ Menu* MenuBar::addMenu(const std::wstring& title) {
     // Anchor button lives next to the menu (sibling-style).
     class Button* btn = new Button();
     btn->setText(title);
-    btn->setSize(math::FVector2(_anchorWidth, kDefaultHeight));
+    // Respect the height assigned by a parent layout. The editor shell puts
+    // MenuBar inside a 26px row with 2px vertical padding, so its live height
+    // is 22px rather than the standalone 26px default.
+    btn->setSize(math::FVector2(
+        _anchorWidth, std::max(1.0f, getSize().y)));
     btn->setLayoutPositionManaged(false);
     btn->setLayoutSizeManaged(false);
     addChild(btn);
@@ -220,7 +224,7 @@ void MenuBar::onAnchorClicked(int index) {
         const math::FVector2 anchorWorld(b.minX, b.maxY);
         m->open(this, anchorWorld);
     } else {
-        m->open(this, math::FVector2(0.0f, kDefaultHeight));
+        m->open(this, math::FVector2(0.0f, getSize().y));
     }
     _openIdx = index;
 }
@@ -242,7 +246,10 @@ void MenuBar::setAnchorAutoWidth(bool enabled) {
 
 void MenuBar::layoutAnchors() {
     float x = 0.0f;
-    const float h = kDefaultHeight;
+    // Parent containers own the cross-axis size. Forcing the standalone
+    // default here made the editor's 22px MenuBar overflow its padded 26px
+    // chrome row and overlap the DockArea below by 2px.
+    const float h = std::max(1.0f, getSize().y);
     bool first = true;
     for (size_t i = 0; i < _menus.size(); ++i) {
         if (_menus[i].anchor == nullptr) continue;

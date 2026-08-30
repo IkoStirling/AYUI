@@ -715,6 +715,25 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             scroll->setHorizontalScrollBarEnabled(
                 j["horizontalScrollBar"].get<bool>());
         }
+        auto parseVisibility = [](const json& value,
+                                  ScrollView::ScrollBarVisibility fallback) {
+            if (!value.is_string()) return fallback;
+            const std::string mode = value.get<std::string>();
+            if (mode == "auto") return ScrollView::ScrollBarVisibility::Auto;
+            if (mode == "always") return ScrollView::ScrollBarVisibility::Always;
+            if (mode == "hidden") return ScrollView::ScrollBarVisibility::Hidden;
+            return fallback;
+        };
+        if (j.contains("verticalScrollBarVisibility")) {
+            scroll->setVerticalScrollBarVisibility(parseVisibility(
+                j["verticalScrollBarVisibility"],
+                scroll->getVerticalScrollBarVisibility()));
+        }
+        if (j.contains("horizontalScrollBarVisibility")) {
+            scroll->setHorizontalScrollBarVisibility(parseVisibility(
+                j["horizontalScrollBarVisibility"],
+                scroll->getHorizontalScrollBarVisibility()));
+        }
         if (j.contains("contentSize") && j["contentSize"].is_object()) {
             scroll->setContentSize(math::FVector2(
                 j["contentSize"].value("w", 0.0f),

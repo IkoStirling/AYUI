@@ -75,7 +75,8 @@ void ScrollView::setContentImpl(Widget* content, bool owned) {
         if (owned) addChild(content);
         else addChildExternal(content);
         _content = content;
-        if (_vbar == nullptr && _vbarEnabled) {
+        if (_vbar == nullptr
+            && _vbarVisibility != ScrollBarVisibility::Hidden) {
             ensureBarsCreated();
         }
         syncBarsToOffset();
@@ -89,28 +90,40 @@ void ScrollView::setContentSize(const math::FVector2& size) {
     syncBarsToOffset();
 }
 
-void ScrollView::setVerticalScrollBarEnabled(bool enabled) {
-    if (_vbarEnabled == enabled) return;
-    _vbarEnabled = enabled;
-    if (enabled) ensureBarsCreated();
-    if (_vbar != nullptr) _vbar->setVisible(enabled);
+void ScrollView::setVerticalScrollBarVisibility(
+    ScrollBarVisibility visibility) {
+    if (_vbarVisibility == visibility) return;
+    _vbarVisibility = visibility;
+    if (visibility != ScrollBarVisibility::Hidden) ensureBarsCreated();
     syncBarsToOffset();
     markBoundsDirty();
     markDirty();
+}
+
+void ScrollView::setHorizontalScrollBarVisibility(
+    ScrollBarVisibility visibility) {
+    if (_hbarVisibility == visibility) return;
+    _hbarVisibility = visibility;
+    if (visibility != ScrollBarVisibility::Hidden) ensureBarsCreated();
+    syncBarsToOffset();
+    markBoundsDirty();
+    markDirty();
+}
+
+void ScrollView::setVerticalScrollBarEnabled(bool enabled) {
+    setVerticalScrollBarVisibility(enabled
+        ? ScrollBarVisibility::Auto
+        : ScrollBarVisibility::Hidden);
 }
 
 void ScrollView::setHorizontalScrollBarEnabled(bool enabled) {
-    if (_hbarEnabled == enabled) return;
-    _hbarEnabled = enabled;
-    if (enabled) ensureBarsCreated();
-    if (_hbar != nullptr) _hbar->setVisible(enabled);
-    syncBarsToOffset();
-    markBoundsDirty();
-    markDirty();
+    setHorizontalScrollBarVisibility(enabled
+        ? ScrollBarVisibility::Auto
+        : ScrollBarVisibility::Hidden);
 }
 
 void ScrollView::ensureBarsCreated() {
-    if (_vbarEnabled && _vbar == nullptr) {
+    if (_vbarVisibility != ScrollBarVisibility::Hidden && _vbar == nullptr) {
         _vbar = new ScrollBar();
         _vbar->setOrientation(ScrollBar::Orientation::Vertical);
         _vbar->setOnValueChanged([this](float v) {
@@ -131,8 +144,9 @@ void ScrollView::ensureBarsCreated() {
             }
         });
         addChildExternal(_vbar);
+        _vbar->setVisible(_vbarVisibility == ScrollBarVisibility::Always);
     }
-    if (_hbarEnabled && _hbar == nullptr) {
+    if (_hbarVisibility != ScrollBarVisibility::Hidden && _hbar == nullptr) {
         _hbar = new ScrollBar();
         _hbar->setOrientation(ScrollBar::Orientation::Horizontal);
         _hbar->setOnValueChanged([this](float v) {
@@ -149,11 +163,17 @@ void ScrollView::ensureBarsCreated() {
             }
         });
         addChildExternal(_hbar);
+        _hbar->setVisible(_hbarVisibility == ScrollBarVisibility::Always);
     }
 }
 
 math::FVector2 ScrollView::getViewportSize() const {
-    return math::FVector2(getWidth(), getHeight());
+    const float barW = ScrollBar::kDefaultBarWidth;
+    return math::FVector2(
+        std::max(0.0f, getWidth()
+            - ((_vbar != nullptr && _vbar->isVisible()) ? barW : 0.0f)),
+        std::max(0.0f, getHeight()
+            - ((_hbar != nullptr && _hbar->isVisible()) ? barW : 0.0f)));
 }
 
 void ScrollView::syncContentPosition() {
@@ -208,26 +228,95 @@ math::FRectangle ScrollView::contentClipRect() const {
     return getClientRect();
 }
 
+void ScrollView::updateBarVisibility() {
+    const math::FVector2 content = _scrollState.getContentSize();
+    const float width = std::max(0.0f, getWidth());
+    const float height = std::max(0.0f, getHeight());
+    const float barW = ScrollBar::kDefaultBarWidth;
+    constexpr float kOverflowEpsilon = 0.5f;
+
+    bool showV = _vbarVisibility == ScrollBarVisibility::Always;
+    bool showH = _hbarVisibility == ScrollBarVisibility::Always;
+
+    // Start with only Always gutters, then add Auto gutters monotonically.
+    // Two axes can trigger each other: a vertical gutter narrows the viewport
+    // enough to require a horizontal bar, whose gutter can then require the
+    // vertical bar. A bounded fixed-point pass makes that result stable and
+    // avoids frame-to-frame visibility oscillation.
+    for (int pass = 0; pass < 3; ++pass) {
+        const float viewportW = std::max(0.0f, width - (showV ? barW : 0.0f));
+        const float viewportH = std::max(0.0f, height - (showH ? barW : 0.0f));
+        const bool nextV = _vbarVisibility == ScrollBarVisibility::Always
+            || (_vbarVisibility == ScrollBarVisibility::Auto
+                && height > 0.0f
+                && content.y > viewportH + kOverflowEpsilon);
+        const bool nextH = _hbarVisibility == ScrollBarVisibility::Always
+            || (_hbarVisibility == ScrollBarVisibility::Auto
+                && width > 0.0f
+                && content.x > viewportW + kOverflowEpsilon);
+        if (nextV == showV && nextH == showH) break;
+        showV = nextV;
+        showH = nextH;
+    }
+
+    if (_vbar != nullptr) _vbar->setVisible(showV);
+    if (_hbar != nullptr) _hbar->setVisible(showH);
+}
+
+void ScrollView::layoutBars() {
+    const float barW = ScrollBar::kDefaultBarWidth;
+    const bool showV = _vbar != nullptr && _vbar->isVisible();
+    const bool showH = _hbar != nullptr && _hbar->isVisible();
+    if (_vbar != nullptr) {
+        _vbar->setPosition(math::FVector2(getWidth() - barW, 0.0f));
+        _vbar->setSize(math::FVector2(
+            barW, std::max(0.0f, getHeight() - (showH ? barW : 0.0f))));
+    }
+    if (_hbar != nullptr) {
+        _hbar->setPosition(math::FVector2(0.0f, getHeight() - barW));
+        _hbar->setSize(math::FVector2(
+            std::max(0.0f, getWidth() - (showV ? barW : 0.0f)), barW));
+    }
+}
+
 void ScrollView::syncBarsToOffset() {
     const bool wasSyncing = _syncingBars;
     _syncingBars = true;
+    updateBarVisibility();
+    layoutBars();
     const math::FVector2 vp = getViewportSize();
     const math::FVector2 content = _scrollState.getContentSize();
+
+    // A content shrink or an Auto bar disappearing enlarges the viewport.
+    // Clamp a formerly valid offset immediately so hidden overflow cannot
+    // leave the content parked outside its new range.
+    const math::FVector2 oldOffset = _scrollState.getScrollOffset();
+    const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+        oldOffset, vp, content);
+    const bool offsetChanged = std::fabs(clamped.x - oldOffset.x) > 1e-5f
+        || std::fabs(clamped.y - oldOffset.y) > 1e-5f;
+    if (offsetChanged) {
+        _scrollState.setScrollOffset(clamped);
+        syncContentPosition();
+    }
     // PR-SyncVerticalBar: direction-agnostic helper. ScrollView is the
     // only H consumer — passing .x keeps the contract identical.
-    if (_vbarEnabled) {
+    if (_vbarVisibility != ScrollBarVisibility::Hidden) {
         syncVerticalBar(_vbar, content.y, vp.y,
                         _scrollState.getScrollOffset().y);
     } else if (_vbar != nullptr) {
         _vbar->setVisible(false);
     }
-    if (_hbarEnabled) {
+    if (_hbarVisibility != ScrollBarVisibility::Hidden) {
         syncVerticalBar(_hbar, content.x, vp.x,
                         _scrollState.getScrollOffset().x);
     } else if (_hbar != nullptr) {
         _hbar->setVisible(false);
     }
     _syncingBars = wasSyncing;
+    if (offsetChanged && _onScroll) {
+        _onScroll(_scrollState.getScrollOffset());
+    }
 }
 
 // AYUI-DirtyRect-2026-08-26 Batch B (rebase fix): performLayout was
@@ -281,21 +370,10 @@ void ScrollView::performLayout() {
     if (getWidth() <= 0.0f) {
         setSize(math::FVector2(200.0f, 150.0f));
     }
-    if (_vbarEnabled) ensureBarsCreated();
-    if (_hbarEnabled) ensureBarsCreated();
-
-    const float barW = ScrollBar::kDefaultBarWidth;
-    if (_vbar != nullptr) {
-        _vbar->setPosition(math::FVector2(
-            getWidth() - barW, 0.0f));
-        _vbar->setSize(math::FVector2(barW, getHeight()));
-    }
-    if (_hbar != nullptr) {
-        _hbar->setPosition(math::FVector2(
-            0.0f, getHeight() - barW));
-        _hbar->setSize(math::FVector2(
-            getWidth() - ((_vbar != nullptr && _vbar->isVisible()) ? barW : 0.0f), barW));
-    }
+    if (_vbarVisibility != ScrollBarVisibility::Hidden) ensureBarsCreated();
+    if (_hbarVisibility != ScrollBarVisibility::Hidden) ensureBarsCreated();
+    updateBarVisibility();
+    layoutBars();
 
     auto clientSize = [this]() -> math::FVector2 {
         const math::FRectangle c = getClientRect();
@@ -311,7 +389,7 @@ void ScrollView::performLayout() {
     // natural width and hide the hbar.
     const bool sizeContentToClient = (_content != nullptr)
         && _content->isLayoutSizeManaged()
-        && !_hbarEnabled
+        && _hbarVisibility == ScrollBarVisibility::Hidden
         && !_contentSizeExplicit;
 
     if (sizeContentToClient) {
@@ -376,6 +454,9 @@ void ScrollView::performLayout() {
             syncBarsToOffset();
         }
     }
+    // Content measurement can change Auto visibility. Reposition both bars
+    // after the final fixed-point result so they meet without overlapping.
+    layoutBars();
 }
 
 void ScrollView::onRender(IRenderBackend& renderer) {

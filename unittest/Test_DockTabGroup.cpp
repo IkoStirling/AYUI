@@ -172,6 +172,51 @@ TEST_CASE(test_tab_group_multi_card_layout_slides_card_under_strip) {
                    DockTabGroup::kTabStripHeight, 1e-5f);
 }
 
+TEST_CASE(test_tab_group_tabs_keep_fixed_width_until_strip_is_full) {
+    DockTabGroup group;
+    group.setSize(FVector2(500.0f, 300.0f));
+    group.addTab(makeCard("a").release());
+    group.addTab(makeCard("b").release());
+
+    const FRectangle a = group.getTabRectWorld(0);
+    const FRectangle b = group.getTabRectWorld(1);
+    CHECK_FLOAT_EQ(a.maxX - a.minX,
+                   DockTabGroup::kPreferredTabWidth, 1e-5f);
+    CHECK_FLOAT_EQ(b.maxX - b.minX,
+                   DockTabGroup::kPreferredTabWidth, 1e-5f);
+    CHECK_FLOAT_EQ(b.minX, a.maxX, 1e-5f);
+    CHECK(b.maxX < group.getWorldBounds().maxX);
+
+    // Empty trailing strip space is chrome, not a stretched tab.
+    CHECK_FALSE(group.onMouseButtonDown(
+        UIMouseEvent(FVector2(450.0f, 13.0f), 0)));
+}
+
+TEST_CASE(test_tab_group_tabs_compress_and_titles_ellipsis_on_overflow) {
+    MockRenderer renderer;
+    DockTabGroup group;
+    group.setSize(FVector2(150.0f, 300.0f));
+    group.addTab(makeCard("first-very-long-panel-name").release());
+    group.addTab(makeCard("second-very-long-panel-name").release());
+    group.addTab(makeCard("third-very-long-panel-name").release());
+
+    for (size_t i = 0; i < group.getTabCount(); ++i) {
+        const FRectangle tab = group.getTabRectWorld(i);
+        CHECK_FLOAT_EQ(tab.maxX - tab.minX, 50.0f, 1e-5f);
+    }
+
+    group.performLayout();
+    group.render(renderer);
+    int ellipsizedTitles = 0;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type == MockRenderer::DrawCall::Text
+            && call.text.find(L'\x2026') != std::wstring::npos) {
+            ++ellipsizedTitles;
+        }
+    }
+    CHECK(ellipsizedTitles == 3);
+}
+
 TEST_CASE(test_tab_group_zero_header_card_body_at_strip) {
     DockTabGroup group;
     group.setSize(FVector2(400.0f, 300.0f));
@@ -256,7 +301,9 @@ TEST_CASE(test_tab_group_strip_claims_hits_above_card) {
     group.performLayout();
 
     // Strip region → the group itself (tab click / close x / drag).
-    CHECK(group.hitTest(FVector2(300.0f, 13.0f)) == &group);
+    const FRectangle activeTab = group.getTabRectWorld(1);
+    CHECK(group.hitTest(FVector2(
+              (activeTab.minX + activeTab.maxX) * 0.5f, 13.0f)) == &group);
     // Body region → the active card (title bar / content hit path).
     DockCard* b = group.getTab(1);
     CHECK_NOT_NULL(b);
@@ -288,19 +335,46 @@ TEST_CASE(test_tab_group_close_x_fires_callback) {
     DockCard* closed = nullptr;
     group.setOnCloseTab([&](DockCard* card) { closed = card; });
 
-    // Tab 0 occupies x in [0, 200); its close x is the rightmost 16px.
-    const FVector2 closePt(199.0f - 4.0f, 13.0f);
-    UIMouseEvent e(closePt, 0);
-    CHECK(group.onMouseButtonDown(e));
-    CHECK(closed == group.getTab(0));
-
-    // Clicking a NON-active tab activates it (no close).
-    closed = nullptr;
-    const FVector2 tabPt(50.0f, 13.0f);
-    UIMouseEvent e2(tabPt, 0);
-    CHECK(group.onMouseButtonDown(e2));
+    // A non-active tab has no close affordance. Clicking the area where its
+    // x would have been activates the tab instead of closing it.
+    const FRectangle inactive = group.getTabRectWorld(0);
+    const FVector2 inactiveRight(inactive.maxX - 2.0f, 13.0f);
+    CHECK(group.onMouseButtonDown(UIMouseEvent(inactiveRight, 0)));
     CHECK(closed == nullptr);
     CHECK(group.getActiveTabId() == "a");
+
+    // The newly-active tab now exposes its close x.
+    const FRectangle active = group.getTabRectWorld(0);
+    const FVector2 closePt(active.maxX - 2.0f, 13.0f);
+    CHECK(group.onMouseButtonDown(UIMouseEvent(closePt, 0)));
+    CHECK(closed == group.getTab(0));
+}
+
+TEST_CASE(test_tab_group_paints_close_only_for_active_tab) {
+    MockRenderer renderer;
+    DockTabGroup group;
+    group.setSize(FVector2(500.0f, 300.0f));
+    group.addTab(makeCard("a").release());
+    group.addTab(makeCard("b").release());
+    group.performLayout();
+    group.render(renderer);
+
+    const FRectangle inactive = group.getTabRectWorld(0);
+    const FRectangle active = group.getTabRectWorld(1);
+    int inactiveCloseGlyphs = 0;
+    int activeCloseGlyphs = 0;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type != MockRenderer::DrawCall::Text || call.text != L"x") continue;
+        const float centerX = (call.bounds.minX + call.bounds.maxX) * 0.5f;
+        if (centerX >= inactive.minX && centerX <= inactive.maxX) {
+            ++inactiveCloseGlyphs;
+        }
+        if (centerX >= active.minX && centerX <= active.maxX) {
+            ++activeCloseGlyphs;
+        }
+    }
+    CHECK(inactiveCloseGlyphs == 0);
+    CHECK(activeCloseGlyphs == 1);
 }
 
 TEST_CASE(test_tab_group_active_tab_press_begins_drag) {
@@ -313,7 +387,8 @@ TEST_CASE(test_tab_group_active_tab_press_begins_drag) {
 
     // Press the ACTIVE tab (b, second half of the strip) → tear-off
     // drag begins with the G12 payload convention of the card.
-    const FVector2 activePt(300.0f, 13.0f);
+    const FRectangle active = group->getTabRectWorld(1);
+    const FVector2 activePt((active.minX + active.maxX) * 0.5f, 13.0f);
     UIMouseEvent e(activePt, 0);
     CHECK(group->onMouseButtonDown(e));
     CHECK(f.ui.isDragging());
@@ -333,7 +408,8 @@ TEST_CASE(test_tab_group_non_floatable_active_tab_no_drag) {
     group->addTab(b);
     f.ui.getOverlayRoot()->addChildExternal(group.get());
 
-    const FVector2 activePt(300.0f, 13.0f);
+    const FRectangle active = group->getTabRectWorld(1);
+    const FVector2 activePt((active.minX + active.maxX) * 0.5f, 13.0f);
     UIMouseEvent e(activePt, 0);
     CHECK(group->onMouseButtonDown(e));   // consumed (strip click)
     CHECK_FALSE(f.ui.isDragging());
@@ -345,12 +421,14 @@ TEST_CASE(test_tab_group_hover_tracks_strip) {
     group.addTab(makeCard("a").release());
     group.addTab(makeCard("b").release());
 
-    // Hover over tab 1's close x (rightmost 8px of its 200px-wide tab)
+    // Hover over the active tab's close x
     // → Hand cursor.
-    group.onMouseMove(UIMouseEvent(FVector2(396.0f, 13.0f), 0));
+    const FRectangle active = group.getTabRectWorld(1);
+    group.onMouseMove(UIMouseEvent(FVector2(active.maxX - 2.0f, 13.0f), 0));
     CHECK(group.getCursorHint() == UiCursorHint::Hand);
-    // Hover over strip away from the close x → default.
-    group.onMouseMove(UIMouseEvent(FVector2(250.0f, 13.0f), 0));
+    // The inactive tab's right edge has no close hit target.
+    const FRectangle inactive = group.getTabRectWorld(0);
+    group.onMouseMove(UIMouseEvent(FVector2(inactive.maxX - 2.0f, 13.0f), 0));
     CHECK(group.getCursorHint() == UiCursorHint::Default);
     group.onMouseLeave();
     CHECK(group.getCursorHint() == UiCursorHint::Default);
