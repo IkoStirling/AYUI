@@ -112,6 +112,31 @@ TEST_CASE(dragdrop_begin_drag_rejects_when_captured) {
     ui.shutdown();
 }
 
+TEST_CASE(dragdrop_begin_drag_promotes_same_source_capture) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(400.0f, 300.0f);
+
+    InteractiveWidget source;
+    source.setDraggable(true);
+    source.setSize(FVector2(80.0f, 30.0f));
+    source.setPosition(FVector2(10.0f, 10.0f));
+    DragPayload payload;
+    payload.kind = "asset";
+    source.setDragPayload(payload);
+    ui.getOverlayRoot()->addChildExternal(&source);
+
+    CHECK(ui.onMouseButtonDown(20.0f, 20.0f, 0));
+    CHECK(ui.isCapturing());
+    CHECK(ui.beginDrag(&source));
+    CHECK(ui.isDragging());
+    CHECK_FALSE(ui.isCapturing());
+
+    ui.cancelDrag();
+    ui.shutdown();
+}
+
 // -----------------------------------------------------------------------------
 // 3. updateDrag finds the nearest accepting ancestor
 // -----------------------------------------------------------------------------

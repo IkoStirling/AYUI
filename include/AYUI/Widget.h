@@ -145,11 +145,14 @@ public:
         // guard each frame re-dirties the whole subtree even when nothing
         // actually changed.
         if (_position.x == pos.x && _position.y == pos.y) {
+            // An explicit setter still takes ownership from an in-flight
+            // tween even when the supplied value equals this frame's sample.
+            cancelPositionAnimation(true);
             return;
         }
         // A direct set cancels any in-flight position tween — the caller
         // took over (mirrors setOpacity).
-        _posAnim.active = false;
+        cancelPositionAnimation(true);
         _position = pos;
         markBoundsDirty();
         // AYUI-DirtyRect-2026-08-26: position change can move our painted
@@ -323,6 +326,7 @@ public:
     // mirrors MockRenderer's animation handles (same easing).
     void animateOpacity(float to, float durationMs,
                         AnimationCurve curve = AnimationCurve::EaseOut);
+    void animateOpacity(float to, const AnimationOptions& options);
     bool isOpacityAnimating() const { return _opacityAnim.active; }
 
     // UI-anim cut 2: position tween. Tweens _position from its current
@@ -332,7 +336,19 @@ public:
     // performLayout(), so a position tween is a no-op there by design.
     void animatePositionTo(const math::FVector2& to, float durationMs,
                            AnimationCurve curve = AnimationCurve::EaseOut);
+    void animatePositionTo(const math::FVector2& to,
+                           const AnimationOptions& options);
     bool isPositionAnimating() const { return _posAnim.active; }
+
+    // Common playback controls for the built-in Widget tracks. Completion
+    // and cancellation callbacks are supplied through AnimationOptions.
+    void pauseAnimations();
+    void resumeAnimations();
+    void cancelAnimations(bool snapToEnd = false);
+    bool areAnimationsPaused() const {
+        return (_opacityAnim.active && _opacityAnim.paused)
+            || (_posAnim.active && _posAnim.paused);
+    }
 
     // Style
     void setStyleId(const std::string& id) {
@@ -632,10 +648,15 @@ protected:
     // AnimState is idle until animateOpacity starts a tween.
     float _opacity = 1.0f;
     AnimState<float> _opacityAnim;
+    AnimationCallbacks _opacityAnimationCallbacks;
 
     // UI-anim cut 2: position tween (popup slide-ins). Idle by default —
     // only popups start it; getWorldBounds self-heals on drift.
     AnimState<math::FVector2> _posAnim;
+    AnimationCallbacks _positionAnimationCallbacks;
+
+    void cancelOpacityAnimation(bool notify);
+    void cancelPositionAnimation(bool notify);
 
     std::string _styleId;
     std::string _id;

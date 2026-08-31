@@ -7,8 +7,9 @@
 // (Widget::_opacity / InteractiveWidget::_color), not in the state,
 // so a widget pays for the anim fields only while one is running.
 
-#include "AYUI/IRenderBackend.h"  // AnimationCurve
+#include "AYUI/Animation.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ayt::ui {
@@ -47,18 +48,24 @@ struct AnimState {
     float elapsed = 0.0f;
     float duration = 0.0f;                    // seconds
     AnimationCurve curve = AnimationCurve::EaseOut;
+    AnimationImportance importance = AnimationImportance::Decorative;
     bool active = false;
+    bool paused = false;
 
     // Starts a tween from `f` to `t` over ms milliseconds. Overwrites
     // any in-flight tween (from is the caller's current value).
-    void start(const T& f, const T& t, float durationMs, AnimationCurve c)
+    void start(const T& f, const T& t, float durationMs, AnimationCurve c,
+               AnimationImportance animationImportance =
+                   AnimationImportance::Decorative)
     {
         from = f;
         to = t;
         elapsed = 0.0f;
         duration = durationMs * 0.001f;       // ms -> s
         curve = c;
+        importance = animationImportance;
         active = true;
+        paused = false;
     }
 
     // Jumps to v and cancels the tween.
@@ -69,7 +76,11 @@ struct AnimState {
         elapsed = 0.0f;
         duration = 0.0f;
         active = false;
+        paused = false;
     }
+
+    void pause() { if (active) paused = true; }
+    void resume() { paused = false; }
 
     // Advances by dt seconds. Returns true while still running (outT is
     // the eased 0..1 factor); on completion returns false with outT = 1.0.
@@ -79,8 +90,21 @@ struct AnimState {
             outT = 1.0f;
             return false;
         }
-        elapsed += dt;
-        if (duration <= 0.0f || elapsed >= duration) {
+        if (paused) {
+            const float linear = duration > 0.0f
+                ? std::min(1.0f, elapsed / duration) : 1.0f;
+            outT = easeCurve(linear, curve);
+            return true;
+        }
+        if (!AnimationSettings::get().shouldAnimate(importance)) {
+            elapsed = duration;
+        } else {
+            elapsed += AnimationSettings::get().playbackDelta(dt, importance);
+        }
+        // Frame deltas such as 0.04 + 0.06 are not guaranteed to represent
+        // the authored 0.1 seconds exactly. Treat a sub-microsecond remainder
+        // as complete so callbacks fire on the intended boundary frame.
+        if (duration <= 0.0f || elapsed >= duration - 1e-6f) {
             active = false;
             outT = 1.0f;
             return false;

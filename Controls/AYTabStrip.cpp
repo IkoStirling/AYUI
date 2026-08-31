@@ -197,7 +197,9 @@ math::FVector2 TabStrip::indicatorTargetRect() const {
 //     re-ran) → retarget from the current rect
 //   - idle and the target moved → start the slide from here
 math::FVector2 TabStrip::resolveIndicatorRect(const math::FVector2& target) {
-    if (!_indicatorInitialized || _indicatorTweenMs <= 0.0f) {
+    if (!_indicatorInitialized || _indicatorTweenMs <= 0.0f
+        || !AnimationSettings::get().shouldAnimate(
+            AnimationImportance::Decorative)) {
         _indicatorInitialized = true;
         _indicatorAnim.snap(target);
         _indicatorRect = target;

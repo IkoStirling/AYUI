@@ -418,8 +418,24 @@ display-list；完成后停止无意义的命令重建。普通路径回到稳�
 回到单次像素层 composite，但 bgfx 可见内容仍按后端契约每帧提交。
 
 2026-08-31 tick 级联复扫已修复 ComboBox 与 SplitterHandle 漏调直接基类的问题，并增加本体
-opacity 回归测试。通用 timeline/keyframe、完成回调、暂停/串联、声明式 transition、全局动画倍率与
-reduced-motion 策略属于后续产品化扩展，本轮不扩大实现范围。
+opacity 回归测试。动画产品化层随后完成：
+
+- `AnimationSettings` 统一控制 duration scale 与 reduced-motion；倍率 `2` 表示动画耗时变为两倍，
+  `0` 表示有限 tween 立即完成。reduced-motion 默认关闭，开启后 `Decorative` 动画立即收尾，显式
+  标记为 `Essential` 的反馈仍播放并服从倍率。Widget tween、Timeline、Spinner、ProgressBar、
+  TabStrip、InteractiveWidget 状态颜色和滚动惯性共享这套策略。
+- `AnimationOptions` 为 Widget opacity/position 提供完成与取消回调、curve 和 importance；Widget
+  同时提供 pause/resume/cancel，取消可选择保持当前值或 snap 到终点。直接 retarget 会取消旧播放。
+- `AnimationTimeline` 在同一时钟上采样 float/FVector2/FVector4 多轨 keyframe；每段使用目标
+  keyframe 的 curve。`AnimationSequence::append().then()` 串行播放 Timeline，并提供序列级
+  完成/取消与 pause/resume。
+- Style JSON 支持 `states.normal/hovered/pressed/disabled.backgroundColor`（以及紧凑的
+  `stateColors` 写法）和 `transition.backgroundColor.{durationMs,curve}`。Button、CheckBox、
+  RadioButton 使用声明式状态色；Slider/MenuItem 等既有状态颜色继续复用同一颜色 tween。
+
+时间线和 Widget 动画都位于 CPU/UI 语义层，不依赖 `IRenderBackend::AnimationHandle`。后端句柄的
+默认空实现仍不构成生产调度器承诺；这样 retained display-list、即时兜底和 Production Layer 不需要
+分别维护动画状态。
 
 ## 11. 公共 API 与兼容性
 
@@ -469,13 +485,13 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 1022 个 `TEST_CASE`
 - Windows Debug：`4643 / 4643` 条断言通过
 
-2026-08-31 原生 SVG、连续 contour、设备输入桥接以及容器溢出/动画级联修复后的当前 Windows
-Debug 基线为 `4845 / 4845`；上面的 2026-08-29 数量保留为该轮审计快照。
+2026-08-31 原生 SVG、连续 contour、设备输入桥接、容器溢出修复以及动画产品化后的当前 Windows
+Debug 基线为 `4910 / 4910`；上面的 2026-08-29 数量保留为该轮审计快照。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
-设备输入和本轮容器/动画回归随后把当前基线增加到 `4845 / 4845`。
+设备输入、容器回归和动画产品化随后把当前基线增加到 `4910 / 4910`。
 
 审计覆盖：
 
@@ -560,9 +576,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
-7. 动画产品化延后：状态化 Style transition、更多控件状态过渡、timeline/keyframe、通用完成/取消/
-   串联 API、全局 animation scale 与 reduced-motion。当前 Widget CPU tween 保持主路径；
-   `IRenderBackend::AnimationHandle` 默认空实现不得被当作生产动画调度器承诺。
+7. 动画产品化第一阶段已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/
+   串联 API、全局 animation scale 与 reduced-motion。后续可选扩展是 repeat/yoyo、物理弹簧参数、
+   OS reduced-motion 偏好自动桥接和可视化时间线编辑器；这些不再要求修改 Widget tween 主路径。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

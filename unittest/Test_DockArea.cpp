@@ -32,6 +32,11 @@ TEST_CASE(test_dock_area_basic_construction) {
     DockArea dock;
     // The overlay is always present.
     CHECK(dock.getOverlay() != nullptr);
+    // DockArea is a DockCard transport target, not a generic drop sink.
+    // Unrelated payloads must keep walking to their own editor target.
+    CHECK(dock.isAcceptDrops());
+    CHECK(dock.acceptsKind("DockCard"));
+    CHECK_FALSE(dock.acceptsKind("EditorAsset"));
     // Slot weights default to non-zero per the header initialiser.
     CHECK(dock.getSlotWeight(DockArea::Slot::Left) > 0.0f);
     CHECK(dock.getSlotWeight(DockArea::Slot::Center) > 0.0f);

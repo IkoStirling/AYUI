@@ -86,12 +86,19 @@ void RadioButton::onRender(IRenderBackend& renderer) {
     // Outer circle — uses resolveStyle() pattern. Without a wired
     // stylesheet, falls back to state-aware dark grey with a slightly
     // lighter border (the "outline" of the radio button).
-    const ResolvedStyle style = resolveStyle(getStyleId(), this);
+    const ResolvedStyle style = resolveStyle(
+        getStyleId(), this,
+        interactionStyleState(isEnabled(), isMouseOver(), isPressed()));
     math::FVector4 outerBg;
     math::FVector4 outerBorderColor;
     float outerBorderWidth;
     if (style.hasStyle) {
         outerBg = style.backgroundColor;
+        if (style.backgroundTransition.enabled) {
+            outerBg = resolveTransitionColor(
+                outerBg, style.backgroundTransition.durationMs,
+                style.backgroundTransition.curve);
+        }
         outerBorderColor = style.borderColor;
         outerBorderWidth = style.borderWidth;
     } else {

@@ -159,6 +159,12 @@ void InteractiveWidget::animateColorTo(const math::FVector4& to, float durationM
         _color = to;
         return;
     }
+    if (durationMs <= 0.0f
+        || !AnimationSettings::get().shouldAnimate(
+            AnimationImportance::Decorative)) {
+        setColor(to);
+        return;
+    }
     _colorAnim.start(_color, to, durationMs, curve);
     // AYUI-DirtyRect-2026-08-26: tween armed — first frame must redraw.
     markDirty();
@@ -184,9 +190,17 @@ void InteractiveWidget::tick(float dt) {
 
 math::FVector4 InteractiveWidget::resolveTransitionColor(
     const math::FVector4& target) {
+    return resolveTransitionColor(target, _colorTweenMs,
+                                  AnimationCurve::EaseOut);
+}
+
+math::FVector4 InteractiveWidget::resolveTransitionColor(
+    const math::FVector4& target, float durationMs, AnimationCurve curve) {
     // First render or tween disabled: identity — snap to the target so
     // pre-animation semantics are byte-identical.
-    if (!_colorInitialized || _colorTweenMs <= 0.0f) {
+    if (!_colorInitialized || durationMs <= 0.0f
+        || !AnimationSettings::get().shouldAnimate(
+            AnimationImportance::Decorative)) {
         _colorInitialized = true;
         _colorAnim.snap(target);
         _color = target;
@@ -199,12 +213,12 @@ math::FVector4 InteractiveWidget::resolveTransitionColor(
             return _color;
         }
         // Target changed mid-flight — retarget from the current value.
-        _colorAnim.start(_color, target, _colorTweenMs, AnimationCurve::EaseOut);
+        _colorAnim.start(_color, target, durationMs, curve);
         return _color;
     }
     if (target != _color) {
         // Idle and the target moved — start the transition from here.
-        _colorAnim.start(_color, target, _colorTweenMs, AnimationCurve::EaseOut);
+        _colorAnim.start(_color, target, durationMs, curve);
     }
     return _color;
 }

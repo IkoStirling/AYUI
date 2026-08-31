@@ -84,7 +84,10 @@ void ProgressBar::tick(float dt) {
     // indeterminate scan phase when enabled.
     Widget::tick(dt);
     if (_indeterminate) {
-        _scanPhase += dt / 1.6f;   // one full sweep per 1.6s
+        const float motionDt = AnimationSettings::get().playbackDelta(
+            dt, AnimationImportance::Decorative);
+        if (motionDt <= 0.0f) return;
+        _scanPhase += motionDt / 1.6f;   // one full sweep per 1.6s
         if (_scanPhase > 1.0f) _scanPhase -= 1.0f;
         // The phase mutates without a setter; invalidate any future cached
         // presentation so the moving accent segment is never reused stale.

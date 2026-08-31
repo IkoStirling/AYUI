@@ -938,12 +938,16 @@ void Widget::tick(float dt) {
     const bool wasActive = _opacityAnim.active;
     const float prevOpacity = _opacity;
     float t;
+    std::function<void()> opacityCompleted;
+    std::function<void()> positionCompleted;
     if (_opacityAnim.advance(dt, t)) {
         _opacity = tweenLerp(_opacityAnim.from, _opacityAnim.to, t);
     } else if (wasActive) {
         // Tween completed this frame — snap to the exact target (the eased
         // path never runs on the completion frame).
         _opacity = _opacityAnim.to;
+        opacityCompleted = std::move(_opacityAnimationCallbacks.onCompleted);
+        _opacityAnimationCallbacks = {};
     }
     // AYUI-DirtyRect-2026-08-26 (rebase fix): opacity change → repaint.
     if (_opacity != prevOpacity) {
@@ -959,6 +963,8 @@ void Widget::tick(float dt) {
         _position = tweenLerp(_posAnim.from, _posAnim.to, pt);
     } else if (posActive) {
         _position = _posAnim.to;
+        positionCompleted = std::move(_positionAnimationCallbacks.onCompleted);
+        _positionAnimationCallbacks = {};
     }
     // AYUI-DirtyRect-2026-08-26 (rebase fix): position tween frames
     // must repaint each step (popup slide-ins etc.).
@@ -967,42 +973,125 @@ void Widget::tick(float dt) {
         markDescendantsBoundsDirty();
         markDirty();
     }
+    if (opacityCompleted) opacityCompleted();
+    if (positionCompleted) positionCompleted();
+}
+
+void Widget::cancelOpacityAnimation(bool notify) {
+    if (!_opacityAnim.active) return;
+    _opacityAnim.active = false;
+    _opacityAnim.paused = false;
+    auto callback = notify
+        ? std::move(_opacityAnimationCallbacks.onCancelled)
+        : std::function<void()>{};
+    _opacityAnimationCallbacks = {};
+    if (callback) callback();
+}
+
+void Widget::cancelPositionAnimation(bool notify) {
+    if (!_posAnim.active) return;
+    _posAnim.active = false;
+    _posAnim.paused = false;
+    auto callback = notify
+        ? std::move(_positionAnimationCallbacks.onCancelled)
+        : std::function<void()>{};
+    _positionAnimationCallbacks = {};
+    if (callback) callback();
 }
 
 void Widget::setOpacity(float opacity) {
     const float clamped = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
     if (_opacity == clamped) {
+        cancelOpacityAnimation(true);
         return;
     }
-    _opacity = clamped;
     // A direct set cancels any in-flight tween — the caller took over.
-    _opacityAnim.active = false;
+    cancelOpacityAnimation(true);
+    _opacity = clamped;
     // AYUI-DirtyRect-2026-08-26 (rebase fix): opacity changed; the
     // alpha pass on existing pixels must re-run.
     markDirty();
 }
 
 void Widget::animateOpacity(float to, float durationMs, AnimationCurve curve) {
+    AnimationOptions options;
+    options.durationMs = durationMs;
+    options.curve = curve;
+    animateOpacity(to, options);
+}
+
+void Widget::animateOpacity(float to, const AnimationOptions& options) {
     const float target = to < 0.0f ? 0.0f : (to > 1.0f ? 1.0f : to);
-    if (durationMs <= 0.0f) {
+    cancelOpacityAnimation(true);
+    if (options.durationMs <= 0.0f
+        || !AnimationSettings::get().shouldAnimate(options.importance)) {
         // Instant snap — same semantics as setOpacity.
-        _opacityAnim.active = false;
         setOpacity(target);
+        if (options.callbacks.onCompleted) options.callbacks.onCompleted();
         return;
     }
-    _opacityAnim.start(_opacity, target, durationMs, curve);
+    _opacityAnimationCallbacks = options.callbacks;
+    _opacityAnim.start(_opacity, target, options.durationMs, options.curve,
+                       options.importance);
 }
 
 void Widget::animatePositionTo(const math::FVector2& to, float durationMs,
                                AnimationCurve curve) {
-    if (durationMs <= 0.0f) {
+    AnimationOptions options;
+    options.durationMs = durationMs;
+    options.curve = curve;
+    animatePositionTo(to, options);
+}
+
+void Widget::animatePositionTo(const math::FVector2& to,
+                               const AnimationOptions& options) {
+    cancelPositionAnimation(true);
+    if (options.durationMs <= 0.0f
+        || !AnimationSettings::get().shouldAnimate(options.importance)) {
         // Instant snap — same semantics as setPosition (and it cancels any
         // in-flight tween the same way).
-        _posAnim.active = false;
         setPosition(to);
+        if (options.callbacks.onCompleted) options.callbacks.onCompleted();
         return;
     }
-    _posAnim.start(_position, to, durationMs, curve);
+    _positionAnimationCallbacks = options.callbacks;
+    _posAnim.start(_position, to, options.durationMs, options.curve,
+                   options.importance);
+}
+
+void Widget::pauseAnimations() {
+    _opacityAnim.pause();
+    _posAnim.pause();
+}
+
+void Widget::resumeAnimations() {
+    _opacityAnim.resume();
+    _posAnim.resume();
+}
+
+void Widget::cancelAnimations(bool snapToEnd) {
+    const bool opacityActive = _opacityAnim.active;
+    const bool positionActive = _posAnim.active;
+    const float opacityTarget = _opacityAnim.to;
+    const math::FVector2 positionTarget = _posAnim.to;
+    auto opacityCancelled = opacityActive
+        ? std::move(_opacityAnimationCallbacks.onCancelled)
+        : std::function<void()>{};
+    auto positionCancelled = positionActive
+        ? std::move(_positionAnimationCallbacks.onCancelled)
+        : std::function<void()>{};
+    _opacityAnimationCallbacks = {};
+    _positionAnimationCallbacks = {};
+    _opacityAnim.active = false;
+    _opacityAnim.paused = false;
+    _posAnim.active = false;
+    _posAnim.paused = false;
+    if (snapToEnd) {
+        setOpacity(opacityActive ? opacityTarget : _opacity);
+        if (positionActive) setPosition(positionTarget);
+    }
+    if (opacityCancelled) opacityCancelled();
+    if (positionCancelled) positionCancelled();
 }
 
 void Widget::renderChildren(IRenderBackend& renderer) {

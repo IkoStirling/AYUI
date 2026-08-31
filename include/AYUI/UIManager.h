@@ -436,10 +436,12 @@ public:
     // =================================================================
     // beginDrag is called BY a widget (typically from its own
     // onMouseButtonDown handler) AFTER deciding the user intent warrants
-    // a cross-widget drag. beginDrag early-returns if _capturedWidget is
-    // non-null (SplitterHandle / Slider / ScrollBar thumb / Window
-    // title-drag / TextInput drag-select own capture — they're separate
-    // channels and don't overlap with G12).
+    // a cross-widget drag. A source may temporarily own capture while it
+    // waits for pointer motion to cross its drag threshold; beginDrag
+    // releases that same-source capture when promoting the gesture into a
+    // G12 session. Capture owned by any other widget still rejects the drag
+    // (SplitterHandle / Slider / ScrollBar thumb / Window title-drag /
+    // TextInput drag-select remain separate channels).
     //
     // Once active, onMouseMove routes through updateDrag → drop target
     // detection; onMouseButtonUp fires endDrag(true) which calls

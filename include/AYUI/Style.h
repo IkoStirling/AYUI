@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYMath/MathTypes.h"
+#include "AYUI/Animation.h"
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,44 @@ struct FontStyle {
     bool italic;
 };
 
+enum class StyleState : uint8_t {
+    Normal,
+    Hovered,
+    Pressed,
+    Disabled,
+};
+
+inline StyleState interactionStyleState(bool enabled, bool hovered,
+                                        bool pressed) {
+    if (!enabled) return StyleState::Disabled;
+    if (pressed) return StyleState::Pressed;
+    return hovered ? StyleState::Hovered : StyleState::Normal;
+}
+
+struct StatefulColorStyle {
+    bool enabled = false;
+    math::FVector4 normal;
+    math::FVector4 hovered;
+    math::FVector4 pressed;
+    math::FVector4 disabled;
+
+    const math::FVector4& forState(StyleState state) const {
+        switch (state) {
+        case StyleState::Hovered: return hovered;
+        case StyleState::Pressed: return pressed;
+        case StyleState::Disabled: return disabled;
+        case StyleState::Normal:
+        default: return normal;
+        }
+    }
+};
+
+struct StyleTransition {
+    bool enabled = false;
+    float durationMs = 0.0f;
+    AnimationCurve curve = AnimationCurve::EaseOut;
+};
+
 // Complete style for a widget
 struct WidgetStyle {
     math::FVector4 backgroundColor;
@@ -63,6 +102,14 @@ struct WidgetStyle {
     std::string bgToken;
     std::string borderColorToken;
     std::string textColorToken;
+
+    // Declarative interaction states. JSON accepts either compact
+    // `stateColors: { hovered: [...] }` or CSS-like
+    // `states: { hovered: { backgroundColor: [...] } }`.
+    StatefulColorStyle backgroundStates;
+    // `transition.backgroundColor` describes how interactive controls move
+    // between the state colors above.
+    StyleTransition backgroundTransition;
 };
 
 class StyleSheet {
@@ -156,6 +203,7 @@ struct ResolvedStyle {
     math::FVector4 borderColor;
     float borderWidth = 0.0f;
     float cornerRadius = 0.0f;
+    StyleTransition backgroundTransition;
 };
 
 // Resolve a style id against the global StyleManager. Returns a populated
@@ -181,5 +229,10 @@ ResolvedStyle resolveStyle(const std::string& styleId);
 // styles (no $tokens) are unaffected. Pass nullptr to skip override
 // lookup (equivalent to the single-arg form).
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget);
+
+// Stateful overload used by InteractiveWidget-derived controls. Existing
+// callers keep resolving the Normal state through the overloads above.
+ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget,
+                           StyleState state);
 
 } // namespace ayt::ui

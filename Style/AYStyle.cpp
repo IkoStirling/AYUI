@@ -12,7 +12,8 @@ namespace ayt::ui {
 // AYUI-Perf-2026-08-26: forward-declare the no-widget overload so the
 // memoized public overload (above) can build the cache key before
 // dispatching. Implementation lives in the same TU.
-ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget);
+ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget,
+                               StyleState state);
 
 namespace {
 
@@ -60,6 +61,17 @@ math::FVector4 parseColorJson(const json& v) {
     return parseColorJson(v, dummy);
 }
 
+AnimationCurve parseAnimationCurve(const json& value) {
+    if (!value.is_string()) return AnimationCurve::EaseOut;
+    const std::string curve = value.get<std::string>();
+    if (curve == "linear") return AnimationCurve::Linear;
+    if (curve == "easeIn" || curve == "ease-in") return AnimationCurve::EaseIn;
+    if (curve == "easeInOut" || curve == "ease-in-out")
+        return AnimationCurve::EaseInOut;
+    if (curve == "spring") return AnimationCurve::Spring;
+    return AnimationCurve::EaseOut;
+}
+
 // Parse a single WidgetStyle from a JSON object. Tolerates missing keys
 // (StyleBuilder::makeDefault fills the rest). Malformed numeric arrays fall
 // back to the default (returns false so the caller can flag a partial parse).
@@ -93,6 +105,62 @@ bool parseWidgetStyle(const json& j, WidgetStyle& out) {
     }
     if (j.contains("placeholderColor")) {
         out.placeholderColor = parseColorJson(j["placeholderColor"]);
+    }
+
+    out.backgroundStates.normal = out.backgroundColor;
+    out.backgroundStates.hovered = out.backgroundColor;
+    out.backgroundStates.pressed = out.backgroundColor;
+    out.backgroundStates.disabled = out.backgroundColor;
+
+    auto parseStateColor = [&](const json& container, const char* name,
+                               math::FVector4& slot) {
+        if (!container.contains(name)) return;
+        const json& entry = container[name];
+        if (entry.is_object()) {
+            if (!entry.contains("backgroundColor")) return;
+            slot = parseColorJson(entry["backgroundColor"]);
+        } else if (entry.is_array() || entry.is_string()) {
+            slot = parseColorJson(entry);
+        } else {
+            return;
+        }
+        out.backgroundStates.enabled = true;
+    };
+    if (j.contains("stateColors") && j["stateColors"].is_object()) {
+        const json& states = j["stateColors"];
+        parseStateColor(states, "normal", out.backgroundStates.normal);
+        parseStateColor(states, "hovered", out.backgroundStates.hovered);
+        parseStateColor(states, "pressed", out.backgroundStates.pressed);
+        parseStateColor(states, "disabled", out.backgroundStates.disabled);
+    }
+    if (j.contains("states") && j["states"].is_object()) {
+        const json& states = j["states"];
+        parseStateColor(states, "normal", out.backgroundStates.normal);
+        parseStateColor(states, "hovered", out.backgroundStates.hovered);
+        parseStateColor(states, "pressed", out.backgroundStates.pressed);
+        parseStateColor(states, "disabled", out.backgroundStates.disabled);
+    }
+
+    const json* transition = nullptr;
+    if (j.contains("transition") && j["transition"].is_object())
+        transition = &j["transition"];
+    else if (j.contains("transitions") && j["transitions"].is_object())
+        transition = &j["transitions"];
+    if (transition != nullptr) {
+        const json* background = transition;
+        if (transition->contains("backgroundColor")
+            && (*transition)["backgroundColor"].is_object())
+            background = &(*transition)["backgroundColor"];
+        if (background->contains("durationMs")
+            && (*background)["durationMs"].is_number()) {
+            out.backgroundTransition.durationMs =
+                std::max(0.0f, (*background)["durationMs"].get<float>());
+            out.backgroundTransition.enabled =
+                out.backgroundTransition.durationMs > 0.0f;
+        }
+        if (background->contains("curve"))
+            out.backgroundTransition.curve =
+                parseAnimationCurve((*background)["curve"]);
     }
     return true;
 }
@@ -290,7 +358,7 @@ WidgetStyle StyleBuilder::makePanel() {
 }
 
 ResolvedStyle resolveStyle(const std::string& styleId) {
-    return resolveStyle(styleId, nullptr);
+    return resolveStyle(styleId, nullptr, StyleState::Normal);
 }
 
 namespace {
@@ -330,11 +398,16 @@ const WidgetStyle& defaultStyleCached() {
 } // namespace
 
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
+    return resolveStyle(styleId, widget, StyleState::Normal);
+}
+
+ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget,
+                           StyleState state) {
     // AYUI-Perf-2026-08-26: memoize the result by (styleId, themeVersion).
     // Memo only applies to the (widget == nullptr) path — a per-widget
     // override map would require keying by widget pointer too, which is
     // not worth the cache lookup cost for the rare override case.
-    if (widget == nullptr) {
+    if (widget == nullptr && state == StyleState::Normal) {
         StyleManager& mgr = StyleManager::get();
         const uint64_t version = mgr.getResolveCacheVersion();
         const ResolveCacheKey key{styleId, version};
@@ -344,14 +417,15 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
             return it->second;
         }
 
-        ResolvedStyle out = resolveStyleImpl(styleId, nullptr);
+        ResolvedStyle out = resolveStyleImpl(styleId, nullptr, state);
         cache[key] = out;
         return out;
     }
-    return resolveStyleImpl(styleId, widget);
+    return resolveStyleImpl(styleId, widget, state);
 }
 
-ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget) {
+ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget,
+                               StyleState state) {
     ResolvedStyle out;
     if (styleId.empty()) {
         return out;
@@ -367,7 +441,8 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget)
     // AYUI-Perf-2026-08-26: use the cached default style instead of
     // calling StyleBuilder::makeDefault() each time (~25 field copies).
     const WidgetStyle& def = defaultStyleCached();
-    const bool bgIsDefault = (s->backgroundColor.x == def.backgroundColor.x &&
+    const bool bgIsDefault = !s->backgroundStates.enabled
+                          && (s->backgroundColor.x == def.backgroundColor.x &&
                               s->backgroundColor.y == def.backgroundColor.y &&
                               s->backgroundColor.z == def.backgroundColor.z &&
                               s->backgroundColor.w == def.backgroundColor.w);
@@ -379,6 +454,7 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget)
     out.borderColor = s->border.color;
     out.borderWidth = s->border.width;
     out.cornerRadius = s->border.cornerRadius;
+    out.backgroundTransition = s->backgroundTransition;
 
     // G11 — re-expand captured $token slots against the active theme,
     // applying the widget's per-token overrides. Slot capture happens
@@ -403,6 +479,8 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget)
     if (!hasAnyToken) {
         // No tokens captured AND no overrides → the literal s-> values
         // are the final answer. Skip the theme lookup entirely.
+        if (s->backgroundStates.enabled)
+            out.backgroundColor = s->backgroundStates.forState(state);
         return out;
     }
     const Theme* theme = ThemeManager::get().getActiveTheme();
@@ -426,6 +504,8 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget)
     // For now, the StyleManager direct lookup (StyleManager::get().getStyle
     // -> WidgetStyle::textColor) still surfaces the value frozen at
     // load time — the same Sweep3-#6 caveat applies.
+    if (s->backgroundStates.enabled)
+        out.backgroundColor = s->backgroundStates.forState(state);
     return out;
 }
 

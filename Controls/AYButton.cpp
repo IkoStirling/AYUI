@@ -85,12 +85,20 @@ math::FVector2 Button::getPreferredSize() const {
 void Button::onRender(IRenderBackend& renderer) {
     math::FRectangle bounds = getWorldBounds();
 
-    const ResolvedStyle style = resolveStyle(getStyleId(), this);
+    const ResolvedStyle style = resolveStyle(
+        getStyleId(), this,
+        interactionStyleState(isEnabled(), isMouseOver(), isPressed()));
 
     if (style.hasStyle) {
         // B1: rounded fill matches the rounded border — a plain drawRect
         // left background-colored corners poking out inside the SDF ring.
-        renderer.drawRoundedRect(bounds, style.backgroundColor, style.cornerRadius);
+        math::FVector4 background = style.backgroundColor;
+        if (style.backgroundTransition.enabled) {
+            background = resolveTransitionColor(
+                background, style.backgroundTransition.durationMs,
+                style.backgroundTransition.curve);
+        }
+        renderer.drawRoundedRect(bounds, background, style.cornerRadius);
         renderer.drawBorderRect(bounds,
                                 math::FVector4(0.12f, 0.12f, 0.12f, 1.0f),
                                 style.borderWidth, style.cornerRadius);

@@ -79,6 +79,9 @@ protected:
     // starting / retargeting the tween as needed. Never modifies `target`
     // semantics — with the tween disabled it is the identity function.
     math::FVector4 resolveTransitionColor(const math::FVector4& target);
+    math::FVector4 resolveTransitionColor(const math::FVector4& target,
+                                          float durationMs,
+                                          AnimationCurve curve);
 
     ButtonState _state = ButtonState::Normal;
     bool _enabled = true;

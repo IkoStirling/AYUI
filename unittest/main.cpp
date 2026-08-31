@@ -89,6 +89,7 @@
 #include "Test_OpacityAnimation.cpp"       // PR-anim (renderer opacity stack + widget fade tweens)
 #include "Test_Tween.cpp"                  // UI-anim cut 1 (easeCurve table lock + AnimState)
 #include "Test_ColorAnimation.cpp"         // UI-anim cut 1 (InteractiveWidget color transitions)
+#include "Test_AnimationProductization.cpp" // timeline, callbacks, policy, declarative transition
 #include "Test_PopupFade.cpp"              // UI-anim cut 1 (popup fade in/out via pending-close queue)
 #include "Test_Spinner.cpp"                // UI-anim cut 2 (Spinner orbit dots + ProgressBar indeterminate)
 #include "Test_TextStyle_Fields.cpp"       // AYUI-Audit-2026-08-26: TextStyle field recording (MockRenderer drawText(styled))

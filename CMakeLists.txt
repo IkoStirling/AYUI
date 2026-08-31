@@ -7,6 +7,7 @@ project(AYUI
 set(MODULE_NAME AYUI)
 
 set(SRC_FILES
+    Controls/AYAnimation.cpp
     Controls/AYButton.cpp
     Controls/AYCheckBox.cpp
     Controls/AYRadioButton.cpp
@@ -79,6 +80,7 @@ set(SRC_FILES
 
 set(HEAD_FILES
     AYUI.h
+    include/AYUI/Animation.h
     include/AYUI/Event.h
     include/AYUI/Accessibility.h
     include/AYUI/AccessibilityAdapter.h

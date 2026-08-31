@@ -1,4 +1,5 @@
 #include "AYUI/ScrollableWidget.h"
+#include "AYUI/Animation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -89,6 +90,13 @@ bool ScrollableWidget::advanceMomentum(float dt,
                                        math::FVector2& outDelta) {
     outDelta = math::FVector2(0.0f, 0.0f);
     if (!_momentumActive) return false;
+    if (!AnimationSettings::get().shouldAnimate(
+            AnimationImportance::Decorative)) {
+        clearMomentum();
+        return false;
+    }
+    dt = AnimationSettings::get().playbackDelta(
+        dt, AnimationImportance::Decorative);
 
     // Exponential decay; park axes that have slowed below the stop speed.
     const float decay = std::pow(kMomentumFriction, dt);

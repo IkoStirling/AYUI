@@ -30,6 +30,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - RichText run 级 font family/weight/italic/language，以及 AYRenderer 多 face、多 atlas 一致测量/绘制
 - Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
+- 多轨 Timeline/Keyframe、Sequence 串联、完成/取消/暂停控制、全局动画倍率与 reduced-motion
+- 声明式 normal/hovered/pressed/disabled Style 状态色和 backgroundColor transition
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
 - 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
 - `IRenderBackend` 的 RenderTarget/UI Layer 生命周期、DPI、damage 与合成契约
@@ -38,7 +40,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery 与独立 Layout Editor
 
-2026-08-31 Windows Debug 当前基线为 `4845 / 4845` 条断言通过。2026-08-29 审计快照为
+2026-08-31 Windows Debug 当前基线为 `4910 / 4910` 条断言通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -122,6 +124,28 @@ ayt::ui::destroyWidgetTree(root);
 ```
 
 JSON 中的可执行逻辑不会被反序列化；`onClick` 等字段只用于匹配宿主通过 `bindEvent` 注册的回调。
+
+动画策略和时间线同样从 `AYUI.h` 暴露：
+
+```cpp
+AnimationSettings::get().setDurationScale(1.0f);
+AnimationSettings::get().setReducedMotion(userPrefersReducedMotion);
+
+AnimationTimeline fade;
+fade.addFloatTrack({{0, 0}, {160, 1, AnimationCurve::EaseOut}},
+                   [&panel](float alpha) { panel.setOpacity(alpha); });
+AnimationTimeline slide;
+slide.addVec2Track({{0, {0, -8}}, {160, {0, 0}, AnimationCurve::EaseOut}},
+                   [&panel](const math::FVector2& p) { panel.setPosition(p); });
+
+AnimationSequence intro;
+intro.append(std::move(fade)).then(std::move(slide));
+intro.play();
+// 在宿主或 Widget tick 中调用 intro.tick(deltaSeconds)。
+```
+
+Widget 的简单属性动画仍可直接使用 `animateOpacity/animatePositionTo`；传入 `AnimationOptions` 可设置
+完成/取消回调、importance，并通过 `pauseAnimations/resumeAnimations/cancelAnimations` 控制播放。
 
 ## 数据驱动约定
 

@@ -16,7 +16,10 @@ void Spinner::tick(float dt) {
     // Chain the base cascade (opacity/position tweens), then advance the
     // orbit phase.
     Widget::tick(dt);
-    _phase += dt / kPeriodSeconds;
+    const float motionDt = AnimationSettings::get().playbackDelta(
+        dt, AnimationImportance::Decorative);
+    if (motionDt <= 0.0f) return;
+    _phase += motionDt / kPeriodSeconds;
     if (_phase > 1.0f) _phase -= 1.0f;
     // The phase mutates without a setter; invalidate any future cached
     // presentation every animation frame.

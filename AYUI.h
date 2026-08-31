@@ -5,6 +5,7 @@
 #include "AYUI/Accessibility.h"
 #include "AYUI/AccessibilityAdapter.h"
 #include "AYUI/UnicodeText.h"
+#include "AYUI/Animation.h"
 
 #include "AYUI/Widget.h"
 #include "AYUI/DisplayList.h"

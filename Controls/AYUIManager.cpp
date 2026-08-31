@@ -2042,9 +2042,17 @@ bool UIManager::beginDrag(Widget* source) {
         return false;   // one session at a time
     }
     if (_capturedWidget != nullptr) {
-        // SplitterHandle/Slider/ScrollBar thumb/Window title-drag own
-        // the capture; their drags don't overlap with G12. Bail.
-        return false;
+        if (_capturedWidget != source) {
+            // SplitterHandle/Slider/ScrollBar thumb/Window title-drag own
+            // the capture; their drags don't overlap with G12. Bail.
+            return false;
+        }
+        // Threshold-based drag sources capture on press so they continue to
+        // receive motion even if a low-frequency pointer jumps directly over
+        // another widget. Promotion to the cross-widget drag channel transfers
+        // ownership away from ordinary mouse capture without synthesizing an
+        // early mouse-up on the source.
+        _capturedWidget = nullptr;
     }
     if (source->getParent() == nullptr) {
         // Host must wire source into the tree first; otherwise the ghost

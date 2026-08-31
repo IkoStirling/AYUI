@@ -927,6 +927,11 @@ DockArea::DockArea() {
     addChild(_overlay);
 
     setAcceptDrops(true);
+    // DockArea's callback only understands DockCard payloads. Advertising
+    // the legacy "accept any kind" contract here makes unrelated editor
+    // drags (for example Content Browser assets) stop at the outer dock and
+    // never reach their domain-specific target.
+    setAcceptDropKinds({"DockCard"});
     setOnDragLeave([this]() {
         _hoveredSlot = Slot::Count;
         _hoveredOverlay = false;
