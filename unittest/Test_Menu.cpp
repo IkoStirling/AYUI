@@ -184,6 +184,44 @@ TEST_CASE(menu_open_mounts_on_overlay) {
     delete host;
 }
 
+TEST_CASE(menu_long_popup_clamps_to_viewport_and_scrolls) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    ui.setClientSize(220.0f, 120.0f);
+
+    Widget host;
+    host.setSize(FVector2(40.0f, 20.0f));
+    Menu* menu = new Menu();
+    for (int i = 0; i < 10; ++i) {
+        menu->addItem(L"Item " + std::to_wstring(i));
+    }
+    menu->open(&host, FVector2(210.0f, 110.0f));
+    ui.update(0.20f);  // finish the popup position tween before bounds checks
+
+    CHECK(menu->getSize().y <= 120.0f);
+    CHECK_NOT_NULL(menu->getVerticalScrollBar());
+    CHECK(menu->getVerticalScrollBar()->isVisible());
+    const FRectangle popup = menu->getWorldBounds();
+    CHECK(popup.minX >= 0.0f);
+    CHECK(popup.minY >= 0.0f);
+    CHECK(popup.maxX <= 220.0f);
+    CHECK(popup.maxY <= 120.0f);
+
+    const float before = menu->getScrollOffset().y;
+    CHECK(menu->onMouseWheel(
+        UIMouseWheelEvent(FVector2(100.0f, 60.0f), 32.0f)));
+    CHECK(menu->getScrollOffset().y > before);
+
+    // Up from the fresh -1 highlight wraps to the last row and must reveal it.
+    CHECK(menu->onKeyDown(UIKey_Up));
+    CHECK(menu->getHoveredIndex() == 9);
+    CHECK(menu->getScrollOffset().y > 32.0f);
+
+    menu->close();
+    ui.shutdown();
+}
+
 // =============================================================================
 // Phase B (B3) — keyboard navigation tests
 // =============================================================================

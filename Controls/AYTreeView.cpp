@@ -11,6 +11,7 @@ TreeView::TreeView() {
     setSize(math::FVector2(240.0f, 240.0f));
     // Keep layoutPositionManaged=true so VBox/HBox can place the tree.
     ensureBarCreated();
+    _vbar->setVisible(false);
 }
 
 TreeView::~TreeView() {
@@ -32,14 +33,10 @@ void TreeView::setTree(const std::vector<TreeNodeData>& nodes) {
 void TreeView::clearTree() {
     _source.clear();
     _flatData.clear();
+    _flatToSrc.clear();
+    _pendingDepths.clear();
     _selectedIndex = -1;
-    for (TreeNode* n : _nodes) {
-        if (n != nullptr) {
-            removeChild(n);
-            delete n;
-        }
-    }
-    _nodes.clear();
+    rebuildNodes();
 }
 
 void TreeView::flatten() {
@@ -118,13 +115,25 @@ void TreeView::rebuildNodes() {
         _nodes.push_back(node);
     }
 
-    const float barW = (_vbar != nullptr) ? ScrollBar::kDefaultBarWidth : 0.0f;
+    const float contentH = static_cast<float>(_flatData.size()) * _itemHeight;
+    const bool showVbar = contentH > getHeight() + 0.5f;
+    if (_vbar != nullptr) {
+        _vbar->setVisible(showVbar);
+    }
+    const float barW = showVbar ? ScrollBar::kDefaultBarWidth : 0.0f;
     const float rowW = std::max(0.0f, getWidth() - barW);
     for (size_t i = 0; i < _flatData.size(); ++i) {
         TreeNode* node = _nodes[i];
         node->setLabel(_flatData[i].label);
         node->setIcon(_flatData[i].icon);
         node->setHasChildren(_flatData[i].hasChildren);
+        // A pooled node still owns the callback installed for its previous
+        // flat index. Programmatic model synchronisation must be silent:
+        // setExpanded() emits its callback when the value changes, which
+        // would otherwise re-enter toggleExpand()/rebuildNodes() while this
+        // rebuild is in progress (and can recurse until stack overflow when
+        // an inserted child shifts an expanded root to another pool slot).
+        node->setOnExpandToggled({});
         node->setExpanded(_flatData[i].expanded);
         // Depth from the parallel handoff vector.
         const int d = (i < _pendingDepths.size()) ? _pendingDepths[i] : 0;
@@ -139,15 +148,13 @@ void TreeView::rebuildNodes() {
     }
     _pendingDepths.clear();
 
-    _contentSize = math::FVector2(rowW, _flatData.size() * _itemHeight);
+    _contentSize = math::FVector2(rowW, contentH);
+    _scrollState.setContentSize(_contentSize);
+    // Content shrink/expand can invalidate the previous offset. Route it
+    // through the same clamp used by wheel and scrollbar input.
+    setScrollOffset(_scrollState.getScrollOffset());
     syncBarToOffset();
-    const float yOff = -_scrollState.getScrollOffset().y;
-    for (size_t i = 0; i < _nodes.size(); ++i) {
-        if (_nodes[i] != nullptr) {
-            _nodes[i]->setPosition(math::FVector2(
-                0.0f, static_cast<float>(i) * _itemHeight + yOff));
-        }
-    }
+    syncNodePositions();
 }
 
 void TreeView::setSelectedIndex(int idx) {
@@ -198,6 +205,40 @@ void TreeView::setScrollOffset(const math::FVector2& offset) {
         std::fabs(clamped.y - _scrollState.getScrollOffset().y) > 1e-5f) {
         _scrollState.setScrollOffset(clamped);
         syncBarToOffset();
+        syncNodePositions();
+        markDirty();
+    }
+}
+
+bool TreeView::scrollBy(float deltaY) {
+    const math::FVector2 vp(getWidth(), getHeight());
+    if (!_scrollState.scrollBy(math::FVector2(0.0f, deltaY), vp)) {
+        return false;
+    }
+    syncBarToOffset();
+    syncNodePositions();
+    markDirty();
+    return true;
+}
+
+bool TreeView::onMouseWheel(const UIMouseWheelEvent& e) {
+    const math::FVector2 vp(getWidth(), getHeight());
+    const bool changed = _scrollState.applyWheel(
+        math::FVector2(0.0f, e.deltaY), vp);
+    if (changed) {
+        syncBarToOffset();
+        syncNodePositions();
+        markDirty();
+    }
+    return changed;
+}
+
+void TreeView::tick(float dt) {
+    CompoundWidget::tick(dt);
+    math::FVector2 delta;
+    if (_scrollState.advanceMomentum(
+            dt, math::FVector2(getWidth(), getHeight()), delta)) {
+        scrollBy(delta.y);
     }
 }
 
@@ -219,6 +260,16 @@ void TreeView::syncBarToOffset() {
                     _scrollState.getScrollOffset().y);
 }
 
+void TreeView::syncNodePositions() {
+    const float yOff = -_scrollState.getScrollOffset().y;
+    for (size_t i = 0; i < _nodes.size(); ++i) {
+        if (_nodes[i] != nullptr) {
+            _nodes[i]->setPosition(math::FVector2(
+                0.0f, static_cast<float>(i) * _itemHeight + yOff));
+        }
+    }
+}
+
 void TreeView::performLayout() {
     const float barW = ScrollBar::kDefaultBarWidth;
     if (_vbar != nullptr) {
@@ -234,7 +285,8 @@ math::FRectangle TreeView::getClientRect() const {
     // the listBounds used in onRender() above and in hitTestSlot on
     // DockArea. Single source of truth for the visible (clipped) area.
     const math::FRectangle b = getWorldBounds();
-    const float barW = (_vbar != nullptr) ? ScrollBar::kDefaultBarWidth : 0.0f;
+    const float barW = (_vbar != nullptr && _vbar->isVisible())
+        ? ScrollBar::kDefaultBarWidth : 0.0f;
     return math::FRectangle(b.minX, b.minY, b.maxX - barW, b.maxY);
 }
 
@@ -293,10 +345,13 @@ Widget* TreeView::hitTest(const math::FVector2& worldPos) {
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 
-    // PR-Container-Contract-Cut2: defer to the shared clipped helper.
-    // _vbar is a child and gets first crack via reverse-order walk;
-    // the helper's clientRect gate (= getClientRect()) excludes the
-    // vbar gutter, so gutter clicks fall through to self.
+    // Scrollbar chrome sits outside getClientRect(), so it must get first
+    // crack before the clipped child descent.
+    if (_vbar != nullptr && _vbar->isVisible()) {
+        if (Widget* hit = _vbar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
     return compoundDescendHitTestClipped(this, worldPos);
 }
 

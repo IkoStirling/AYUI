@@ -67,6 +67,32 @@ TEST_CASE(treeview_expand_includes_children) {
     CHECK(tv.getNodeData(4).label == L"grand");
 }
 
+TEST_CASE(treeview_model_refresh_does_not_emit_expand_or_reenter) {
+    TreeView tv;
+    int expandEvents = 0;
+    tv.setOnExpandToggled(
+        [&](int, bool) { ++expandEvents; });
+
+    // Both pool slots initially represent expanded roots.
+    tv.setTree({
+        {L"Assets", L"folder", true, true, -1},
+        {L"Imported", L"folder", false, true, -1},
+    });
+
+    // Inserting a collapsed child at slot 1 reuses the widget that previously
+    // represented the expanded Imported root. This is model synchronisation,
+    // not a user expand/collapse action, and must not dispatch callbacks.
+    tv.setTree({
+        {L"Assets", L"folder", true, true, -1},
+        {L"Models", L"folder", false, false, 0},
+        {L"Imported", L"folder", false, true, -1},
+    });
+
+    CHECK(tv.getNodeCount() == 3u);
+    CHECK(tv.getNodeData(1).label == L"Models");
+    CHECK(expandEvents == 0);
+}
+
 TEST_CASE(treeview_selection_via_row_click) {
     TreeView tv;
     tv.setTree(makeSampleTree());
@@ -96,6 +122,52 @@ TEST_CASE(treeview_scroll_offset_updates_bar) {
     CHECK(tv.getVerticalScrollBar()->getValue() == tv.getScrollOffset().y);
     tv.setScrollOffset(FVector2(0.0f, 9999.0f));   // clamp
     CHECK(tv.getScrollOffset().y <= 32.0f);
+}
+
+TEST_CASE(treeview_vbar_auto_hides_and_wheel_scrolls_visible_rows) {
+    TreeView tv;
+    tv.setSize(FVector2(120.0f, 32.0f));
+    tv.setItemHeight(16.0f);
+
+    // Empty/fitting trees retain the managed bar object but reserve no
+    // gutter, matching ScrollView/ListView Auto visibility.
+    tv.performLayout();
+    CHECK_NOT_NULL(tv.getVerticalScrollBar());
+    CHECK_FALSE(tv.getVerticalScrollBar()->isVisible());
+    CHECK_FLOAT_EQ(tv.getClientRect().maxX, 120.0f, 1e-5f);
+
+    tv.setTree(makeSampleTree());  // 4 visible rows = 64px > 32px
+    tv.performLayout();
+    CHECK(tv.getVerticalScrollBar()->isVisible());
+    CHECK_FLOAT_EQ(tv.getClientRect().maxX,
+                   120.0f - ScrollBar::kDefaultBarWidth, 1e-5f);
+
+    // Scrollbar chrome must be directly hit-testable in its gutter.
+    const FRectangle barBounds = tv.getVerticalScrollBar()->getWorldBounds();
+    Widget* gutterHit = tv.hitTest(FVector2(
+        (barBounds.minX + barBounds.maxX) * 0.5f,
+        (barBounds.minY + barBounds.maxY) * 0.5f));
+    CHECK(gutterHit == tv.getVerticalScrollBar());
+
+    // Wheel input moves the shared scroll state and the actual node widgets.
+    TreeNode* first = nullptr;
+    for (Widget* child : tv.getChildren()) {
+        if (auto* node = dynamic_cast<TreeNode*>(child)) {
+            first = node;
+            break;
+        }
+    }
+    CHECK_NOT_NULL(first);
+    const float beforeY = first->getPosition().y;
+    CHECK(tv.onMouseWheel(UIMouseWheelEvent(FVector2(20.0f, 16.0f), 16.0f)));
+    CHECK_FLOAT_EQ(tv.getScrollOffset().y, 16.0f, 1e-5f);
+    CHECK_FLOAT_EQ(first->getPosition().y, beforeY - 16.0f, 1e-5f);
+
+    // Shrinking content hides the bar, restores full width and clamps offset.
+    tv.clearTree();
+    CHECK_FALSE(tv.getVerticalScrollBar()->isVisible());
+    CHECK_FLOAT_EQ(tv.getScrollOffset().y, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(tv.getClientRect().maxX, 120.0f, 1e-5f);
 }
 
 TEST_CASE(treeview_factory_and_serializer_roundtrip) {

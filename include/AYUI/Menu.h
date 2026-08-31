@@ -10,6 +10,8 @@
 #include "AYUI/CompoundFocusableWidget.h"
 #include "AYUI/Widget.h"
 #include "AYUI/MenuItem.h"
+#include "AYUI/ScrollBar.h"
+#include "AYUI/ScrollableWidget.h"
 #include "AYUI/TypeaheadBuffer.h"
 #include <functional>
 #include <string>
@@ -80,6 +82,13 @@ public:
     // had focus and restore it on close so Tab traversal is correct.
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onKeyDown(int keyCode) override;
+    bool onMouseWheel(const UIMouseWheelEvent& e) override;
+
+    const math::FVector2& getScrollOffset() const {
+        return _scrollState.getScrollOffset();
+    }
+    void setScrollOffset(const math::FVector2& offset);
+    ScrollBar* getVerticalScrollBar() const { return _vbar; }
 
     // Callbacks. setOnItemActivated fires with the index of whichever
     // item was activated (mouse click on a MenuItem OR keyboard Enter
@@ -105,6 +114,8 @@ public:
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    void renderChildren(IRenderBackend& renderer) override;
+    math::FRectangle getClientRect() const override;
 
     // PR-C3 — first-letter typeahead timer accumulator. Driven by the
     // CompoundFocusableWidget::tick cascade when Menu is in the tree.
@@ -112,6 +123,12 @@ public:
 
 private:
     void layoutItems();
+    void ensureScrollBar();
+    void syncScrollBar();
+    void syncItemPositions();
+    void scrollItemIntoView(int index);
+    bool scrollBy(float deltaY);
+    math::FVector2 getScrollViewportSize() const;
     void onItemClickedAny();
     // Invoke the same "row was activated" path that
     // MenuItem's onMouseButtonUp triggers — record index, fire
@@ -162,6 +179,12 @@ private:
 // (Windows listbox convention) as caller logic since ComboBox does
 // not use it.
     TypeaheadBuffer _typeaheadBuffer;
+
+    // Long-menu overflow state. The bar is created lazily and remains a
+    // child across opens; Auto visibility reserves no gutter while hidden.
+    ScrollBar* _vbar = nullptr;
+    ScrollableWidget _scrollState;
+    float _contentHeight = 0.0f;
 
     std::function<void(int)> _onItemActivated;
     std::function<void()>    _onClose;

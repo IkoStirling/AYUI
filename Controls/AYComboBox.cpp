@@ -512,6 +512,10 @@ bool ComboBox::onKeyDown(int keyCode) {
 }
 
 void ComboBox::tick(float dt) {
+    // Preserve the compound cascade: this advances Widget opacity/position
+    // tweens on the ComboBox itself and ticks the display child. Omitting
+    // it made animateOpacity/animatePositionTo silently stall on ComboBox.
+    CompoundFocusableWidget::tick(dt);
     // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
     // Driven by UIManager::update → _root->tick which recurses via
     // CompoundWidget::tick (see AYWidget.cpp:37).

@@ -932,9 +932,9 @@ void Widget::setDisplayListPolicy(DisplayListPolicy policy) {
 }
 
 void Widget::tick(float dt) {
-    // PR-anim: advance the opacity tween. compoundDescendTick forces this
-    // base implementation for every tree node, so a fade keeps running
-    // even under subclasses that override tick without chaining.
+    // PR-anim: advance the opacity tween. Compound containers invoke each
+    // child's virtual tick; every override therefore chains its direct base
+    // tick to preserve this common animation step.
     const bool wasActive = _opacityAnim.active;
     const float prevOpacity = _opacity;
     float t;

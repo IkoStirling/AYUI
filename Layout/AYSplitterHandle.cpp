@@ -247,6 +247,10 @@ void SplitterHandle::applyDrag(float mouseAxisPos) {
 }
 
 void SplitterHandle::tick(float dt) {
+    // SplitterHandle has custom time state, but it still participates in
+    // the common Widget animation contract. Advance opacity/position before
+    // any hover-specific early return.
+    Widget::tick(dt);
     // Self-heal: if hover was cleared, never keep a positive elapsed that
     // could be misread by a stale isRevealed caller.
     if (!_hover) {

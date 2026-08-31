@@ -411,11 +411,15 @@ Modal 打开后，UIManager 只向 active modal 子树路由输入；dimmer 吞�
 - Menu/ComboBox popup 淡入、位移和延迟销毁淡出
 - TabStrip indicator tween
 - Spinner phase 与 ProgressBar indeterminate
-- ScrollView/ListView 等滚动惯性
+- ScrollView/ListView/TreeView/Menu 等滚动惯性
 
 `tick()` override 必须先保持基类级联，再推进自身状态。动画中的 Widget 每帧标脏并重建自己的
 display-list；完成后停止无意义的命令重建。普通路径回到稳定 replay；启用 root Layer 后则进一步
 回到单次像素层 composite，但 bgfx 可见内容仍按后端契约每帧提交。
+
+2026-08-31 tick 级联复扫已修复 ComboBox 与 SplitterHandle 漏调直接基类的问题，并增加本体
+opacity 回归测试。通用 timeline/keyframe、完成回调、暂停/串联、声明式 transition、全局动画倍率与
+reduced-motion 策略属于后续产品化扩展，本轮不扩大实现范围。
 
 ## 11. 公共 API 与兼容性
 
@@ -465,13 +469,13 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 1022 个 `TEST_CASE`
 - Windows Debug：`4643 / 4643` 条断言通过
 
-2026-08-31 原生 SVG、连续 contour 与设备输入桥接扩展后的当前 Windows Debug 基线为
-`4810 / 4810`；上面的 2026-08-29 数量保留为该轮审计快照。
+2026-08-31 原生 SVG、连续 contour、设备输入桥接以及容器溢出/动画级联修复后的当前 Windows
+Debug 基线为 `4845 / 4845`；上面的 2026-08-29 数量保留为该轮审计快照。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
-数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path 与产品化
-能力测试随后把当前基线增加到 `4643 / 4643`。
+数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
+设备输入和本轮容器/动画回归随后把当前基线增加到 `4845 / 4845`。
 
 审计覆盖：
 
@@ -496,6 +500,9 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - Spinner serializer 类型缺口。
 - LayoutLoader 与 WidgetSerializer 的 UTF-8 无损转换。
 - TreeView 复用 row widget pool，避免重复 allocator churn。
+- TreeView scrollbar 改为无溢出自动隐藏，补齐 gutter 命中、滚轮/惯性、实际 row 位移和内容收缩夹紧。
+- Menu popup 按 viewport 限高、翻转/夹紧，长菜单提供自动隐藏垂直 scrollbar、滚轮/惯性和键盘项滚入可视区。
+- ComboBox 与 SplitterHandle 的 tick override 恢复直接基类级联，避免本体 opacity/position 动画停滞。
 - 23 个测试文件中的循环内断言改为失败计数汇总；静态复扫结果为 0 个循环内 `CHECK`。
 - AYUI 单测试采用单 translation unit include 模式；CMake 显式声明全部 `Test_*.cpp` 为
   `main.cpp` 的对象依赖，防止 MSVC/Ninja 漏记 include 后运行陈旧测试二进制。
@@ -553,6 +560,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
+7. 动画产品化延后：状态化 Style transition、更多控件状态过渡、timeline/keyframe、通用完成/取消/
+   串联 API、全局 animation scale 与 reduced-motion。当前 Widget CPU tween 保持主路径；
+   `IRenderBackend::AnimationHandle` 默认空实现不得被当作生产动画调度器承诺。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

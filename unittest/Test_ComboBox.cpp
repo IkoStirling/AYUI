@@ -725,6 +725,20 @@ TEST_CASE(combobox_typeahead_buffer_resets_after_timeout) {
     ui.shutdown();
 }
 
+TEST_CASE(combobox_tick_preserves_base_widget_animation) {
+    ComboBox cb;
+    cb.animateOpacity(0.0f, 200.0f, AnimationCurve::EaseOut);
+    CHECK(cb.isOpacityAnimating());
+
+    cb.tick(0.10f);
+    CHECK(cb.getOpacity() > 0.0f);
+    CHECK(cb.getOpacity() < 1.0f);
+
+    cb.tick(0.10f);
+    CHECK_FALSE(cb.isOpacityAnimating());
+    CHECK_FLOAT_EQ(cb.getOpacity(), 0.0f, 1e-5f);
+}
+
 // PR-C2.5 — arrow keys / Enter / Escape invalidate the typeahead buffer
 // (the user switched to navigation or committed/dismissed).
 TEST_CASE(combobox_typeahead_invalidated_by_navigation_keys) {

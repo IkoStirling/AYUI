@@ -85,8 +85,14 @@ public:
         return _scrollState.getScrollOffset();
     }
     void setScrollOffset(const math::FVector2& offset);
+    bool scrollBy(float deltaY);
 
     ScrollBar* getVerticalScrollBar() const { return _vbar; }
+
+    // Wheel input follows ListView/ScrollView: move immediately, then
+    // continue through the shared momentum state from tick().
+    bool onMouseWheel(const UIMouseWheelEvent& e) override;
+    void tick(float dt) override;
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
@@ -113,6 +119,7 @@ private:
     void flatten();
     void ensureBarCreated();
     void syncBarToOffset();
+    void syncNodePositions();
     void handleNodeClick(int flatIndex);
 
     std::vector<TreeNodeData> _source;          // caller-supplied model

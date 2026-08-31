@@ -4,7 +4,7 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 
 - CMake 目标版本：`1.0.0`
 - 当前功能里程碑：v1.6 已实现
-- 最近全模块审计：2026-08-29
+- 最近全模块审计：2026-08-31
 - 权威架构文档：[design.md](design.md)
 - 变更记录：[CHANGELOG.md](CHANGELOG.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
@@ -38,8 +38,9 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery 与独立 Layout Editor
 
-2026-08-29 Windows Debug 基线为 `4643 / 4643` 条断言通过。旧基线中的循环内重复
-`CHECK` 已改为循环累计失败数、循环结束统一判断；测试用例和输入迭代覆盖没有减少。
+2026-08-31 Windows Debug 当前基线为 `4845 / 4845` 条断言通过。2026-08-29 审计快照为
+`4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
+测试用例和输入迭代覆盖没有减少。
 
 重要渲染契约：AYUI 现在默认保留每个 Widget 自己的高层 display-list。dirty Widget 调用
 `onRender()` 重建本地命令；clean Widget 不再重跑控件绘制逻辑，而是按原 painter order 每帧向

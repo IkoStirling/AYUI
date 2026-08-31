@@ -3,8 +3,11 @@
 #include "AYUI/Separator.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/DockTrace.h"
+#include "AYUI/PopupAnchor.h"
+#include "AYUI/ScrollBarSync.h"
 #include "AYUI/UIKeyCode.h"
 #include <algorithm>
+#include <cmath>
 
 namespace ayt::ui {
 
@@ -35,6 +38,7 @@ Menu::~Menu() {
     }
     _items.clear();
     _submenus.clear();
+    _vbar = nullptr;
 }
 
 MenuItem* Menu::addItem(const std::wstring& text) {
@@ -94,7 +98,7 @@ void Menu::clearItems() {
     // Copy first: getChildren() returns a reference; removeChild mutates it.
     std::vector<Widget*> kids = getChildren();
     for (auto* kid : kids) {
-        if (kid != nullptr) {
+        if (kid != nullptr && kid != _vbar) {
             removeChild(kid);
             delete kid;
         }
@@ -138,6 +142,16 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     ui.setFocus(this);
     performLayout();
 
+    // Clamp the fully-laid-out popup to the viewport. `anchorPos` is the
+    // preferred below position; the matching above position puts the
+    // popup's bottom edge at the anchor when below does not fit.
+    const math::FVector2 popupSize = getSize();
+    const math::FVector2 finalPos = popupAnchorPlacement(
+        anchorPos,
+        math::FVector2(anchorPos.x, anchorPos.y - popupSize.y),
+        popupSize,
+        ui.getClientSize());
+
     // PR-anim: pop-in fade. The menu tree renders at full alpha a frame
     // later (Widget::render pushes the tweened opacity), so first paint
     // is already the start of the fade — no first-frame pop. Fade-out on
@@ -150,8 +164,8 @@ void Menu::open(Widget* host, const math::FVector2& anchorPos) {
     // overshoots past the target, so no out-of-viewport risk). Only for
     // overlay-mounted menus: position tweens are overwritten by layout for
     // in-tree widgets, which is exactly the no-op we want.
-    setPosition(anchorPos + math::FVector2(0.0f, -6.0f));
-    animatePositionTo(anchorPos, 160.0f, AnimationCurve::Spring);
+    setPosition(finalPos + math::FVector2(0.0f, -6.0f));
+    animatePositionTo(finalPos, 160.0f, AnimationCurve::Spring);
     if (ayuiTraceInputEnabled()) {
         dockTrace("[MenuTrace] open host=%s fade-in started (opacity=0->1, 140ms)\n",
                   host ? typeid(*host).name() : "-");
@@ -250,23 +264,145 @@ Widget* Menu::hitTest(const math::FVector2& worldPos) {
     if (!_open) return nullptr;
     const math::FRectangle b = getWorldBounds();
     if (!b.contains(worldPos)) return nullptr;
-    // Descend into children the normal way — CompoundFocusableWidget::hitTest
-    // does this for us.
-    return CompoundFocusableWidget::hitTest(worldPos);
+    if (_vbar != nullptr && _vbar->isVisible()) {
+        if (Widget* hit = _vbar->hitTest(worldPos)) {
+            return hit;
+        }
+    }
+    return compoundDescendHitTestClipped(this, worldPos);
 }
 
 void Menu::layoutItems() {
     const float h = kDefaultHeight;
-    const float w = kDefaultWidth - 2.0f * kDefaultPad;
-    float y = kDefaultPad;
-    for (size_t i = 0; i < _items.size(); ++i) {
-        if (_items[i] != nullptr) {
-            _items[i]->setPosition(math::FVector2(kDefaultPad, y));
-            _items[i]->setSize(math::FVector2(w, h));
-            y += h;
+    _contentHeight = static_cast<float>(_items.size()) * h;
+    const float naturalHeight = _contentHeight + 2.0f * kDefaultPad;
+
+    float popupHeight = naturalHeight;
+    if (_open) {
+        if (UIManager* ui = UIManager::tryGet()) {
+            const float viewportH = ui->getClientSize().y;
+            if (viewportH > 0.0f) {
+                popupHeight = std::min(popupHeight, viewportH);
+            }
         }
     }
-    setSize(math::FVector2(kDefaultWidth, y + kDefaultPad));
+    popupHeight = std::max(1.0f, popupHeight);
+    setSize(math::FVector2(kDefaultWidth, popupHeight));
+
+    const float itemViewportH = std::max(0.0f, popupHeight - 2.0f * kDefaultPad);
+    const bool overflow = _contentHeight > itemViewportH + 0.5f;
+    if (overflow) ensureScrollBar();
+    if (_vbar != nullptr) _vbar->setVisible(overflow);
+
+    const float barW = overflow ? ScrollBar::kDefaultBarWidth : 0.0f;
+    const float w = std::max(
+        0.0f, kDefaultWidth - 2.0f * kDefaultPad - barW);
+
+    _scrollState.setContentSize(math::FVector2(w, _contentHeight));
+    const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+        _scrollState.getScrollOffset(), getScrollViewportSize(),
+        _scrollState.getContentSize());
+    _scrollState.setScrollOffset(clamped);
+
+    for (size_t i = 0; i < _items.size(); ++i) {
+        if (_items[i] != nullptr) {
+            _items[i]->setSize(math::FVector2(w, h));
+        }
+    }
+    syncItemPositions();
+
+    if (_vbar != nullptr) {
+        _vbar->setPosition(math::FVector2(
+            kDefaultWidth - kDefaultPad - ScrollBar::kDefaultBarWidth,
+            kDefaultPad));
+        _vbar->setSize(math::FVector2(
+            ScrollBar::kDefaultBarWidth, itemViewportH));
+    }
+    syncScrollBar();
+}
+
+void Menu::ensureScrollBar() {
+    if (_vbar != nullptr) return;
+    _vbar = new ScrollBar();
+    _vbar->setOrientation(ScrollBar::Orientation::Vertical);
+    _vbar->setOnValueChanged([this](float value) {
+        _scrollState.clearMomentum();
+        setScrollOffset(math::FVector2(0.0f, value));
+    });
+    addChild(_vbar);
+}
+
+math::FVector2 Menu::getScrollViewportSize() const {
+    const float barW = (_vbar != nullptr && _vbar->isVisible())
+        ? ScrollBar::kDefaultBarWidth : 0.0f;
+    return math::FVector2(
+        std::max(0.0f, getWidth() - 2.0f * kDefaultPad - barW),
+        std::max(0.0f, getHeight() - 2.0f * kDefaultPad));
+}
+
+void Menu::syncScrollBar() {
+    if (_vbar == nullptr) return;
+    syncVerticalBar(_vbar, _contentHeight, getScrollViewportSize().y,
+                    _scrollState.getScrollOffset().y);
+}
+
+void Menu::syncItemPositions() {
+    const float yOffset = _scrollState.getScrollOffset().y;
+    for (size_t i = 0; i < _items.size(); ++i) {
+        if (_items[i] != nullptr) {
+            _items[i]->setPosition(math::FVector2(
+                kDefaultPad,
+                kDefaultPad + static_cast<float>(i) * kDefaultHeight - yOffset));
+        }
+    }
+}
+
+void Menu::setScrollOffset(const math::FVector2& offset) {
+    const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+        offset, getScrollViewportSize(), _scrollState.getContentSize());
+    const math::FVector2 before = _scrollState.getScrollOffset();
+    if (std::fabs(clamped.y - before.y) <= 1e-5f) return;
+    _scrollState.setScrollOffset(clamped);
+    syncItemPositions();
+    syncScrollBar();
+    markDirty();
+}
+
+bool Menu::scrollBy(float deltaY) {
+    if (!_scrollState.scrollBy(
+            math::FVector2(0.0f, deltaY), getScrollViewportSize())) {
+        return false;
+    }
+    syncItemPositions();
+    syncScrollBar();
+    markDirty();
+    return true;
+}
+
+bool Menu::onMouseWheel(const UIMouseWheelEvent& e) {
+    const bool changed = _scrollState.applyWheel(
+        math::FVector2(0.0f, e.deltaY), getScrollViewportSize());
+    if (changed) {
+        syncItemPositions();
+        syncScrollBar();
+        markDirty();
+    }
+    return changed;
+}
+
+void Menu::scrollItemIntoView(int index) {
+    if (index < 0 || index >= static_cast<int>(_items.size())) return;
+    const float viewportH = getScrollViewportSize().y;
+    if (viewportH <= 0.0f) return;
+    const float itemTop = static_cast<float>(index) * kDefaultHeight;
+    const float itemBottom = itemTop + kDefaultHeight;
+    float target = _scrollState.getScrollOffset().y;
+    if (itemTop < target) {
+        target = itemTop;
+    } else if (itemBottom > target + viewportH) {
+        target = itemBottom - viewportH;
+    }
+    setScrollOffset(math::FVector2(0.0f, target));
 }
 
 // PR-C3 feedback — single mutation point for _hoveredIndex so the
@@ -295,6 +431,7 @@ void Menu::setHoveredIndex(int index) {
             next->setKeyboardHovered(true);
         }
     }
+    scrollItemIntoView(_hoveredIndex);
     if (_onHoverChanged) {
         _onHoverChanged(_hoveredIndex);
     }
@@ -352,6 +489,26 @@ void Menu::onRender(IRenderBackend& renderer) {
     constexpr float kRadius = 3.0f;
     renderer.drawRoundedRect(b, math::FVector4(0.13f, 0.14f, 0.17f, 0.96f), kRadius);
     renderer.drawBorderRect(b, math::FVector4(0.35f, 0.35f, 0.40f, 1.0f), 1.0f, kRadius);
+}
+
+math::FRectangle Menu::getClientRect() const {
+    const math::FRectangle bounds = getWorldBounds();
+    const float barW = (_vbar != nullptr && _vbar->isVisible())
+        ? ScrollBar::kDefaultBarWidth : 0.0f;
+    return math::FRectangle(
+        bounds.minX + kDefaultPad,
+        bounds.minY + kDefaultPad,
+        std::max(bounds.minX + kDefaultPad,
+                 bounds.maxX - kDefaultPad - barW),
+        std::max(bounds.minY + kDefaultPad,
+                 bounds.maxY - kDefaultPad));
+}
+
+void Menu::renderChildren(IRenderBackend& renderer) {
+    compoundDescendClippedRender(this, renderer, {_vbar});
+    if (_vbar != nullptr && _vbar->isVisible()) {
+        _vbar->render(renderer);
+    }
 }
 
 Widget* createMenuWidget() { return new Menu(); }
@@ -495,6 +652,10 @@ void Menu::tick(float dt) {
     // PR-TypeaheadBuffer: timer + auto-clear live on the struct.
     // Driven by UIManager::update's overlay cascade while the Menu is open.
     _typeaheadBuffer.tick(dt);
+    math::FVector2 delta;
+    if (_scrollState.advanceMomentum(dt, getScrollViewportSize(), delta)) {
+        scrollBy(delta.y);
+    }
 }
 
 void Menu::activateItem(int index) {

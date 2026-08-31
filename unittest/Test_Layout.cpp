@@ -518,6 +518,21 @@ TEST_CASE(splitter_hover_reveal_delay_threshold) {
     delete split;
 }
 
+TEST_CASE(splitter_tick_preserves_base_widget_animation) {
+    SplitterHandle split;
+    split.animateOpacity(0.0f, 200.0f, AnimationCurve::EaseOut);
+    CHECK(split.isOpacityAnimating());
+
+    // No hover is active, so this also covers the old early-return path.
+    split.tick(0.10f);
+    CHECK(split.getOpacity() > 0.0f);
+    CHECK(split.getOpacity() < 1.0f);
+
+    split.tick(0.10f);
+    CHECK_FALSE(split.isOpacityAnimating());
+    CHECK_FLOAT_EQ(split.getOpacity(), 0.0f, 1e-5f);
+}
+
 // SplitterHandle leave path via tick-only (no leave call): the UIManager
 // drives tick() every frame, but the cursor may stop moving for a while.
 // After leave, the only way for the splitter to forget _hover is via

@@ -303,11 +303,10 @@ public:
     virtual void performLayout() {}
 
     // Per-frame tick. UIManager::update(dt) drives the root widget which
-    // cascades into CompoundWidget children (compoundDescendTick forces
-    // the BASE implementation via self->Widget::tick, so the animation
-    // advance below runs for every tree node even when a subclass
-    // overrides tick without chaining). Widgets with time-based behavior
-    // (SplitterHandle's hover reveal delay) override.
+    // cascades into CompoundWidget children. A subclass override MUST call
+    // its direct base tick before advancing custom state; virtual dispatch
+    // reaches the override from the parent cascade, so omitting that call
+    // would stall common opacity/position animation and child traversal.
     virtual void tick(float dt);
 
     // ---------------------------------------------------------------------

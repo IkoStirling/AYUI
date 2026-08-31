@@ -866,11 +866,10 @@ void UIManager::update(float dt) {
     // reset window). Tooltips get an explicit driver loop below; menus
     // get the cascade here. PR-anim: compoundDescendTick, NOT
     // _overlayRoot->tick() — the overlay root is a plain Widget whose
-    // default tick returns immediately without walking children, so a
-    // bare tick() never reaches popups: no fade advance for the menu
-    // pop-in animation, no typeahead auto-clear. The compound helper
-    // walks children and forces the BASE Widget::tick on each node
-    // (fade tweens live there).
+    // default tick does not walk children, so a bare tick() never reaches
+    // popups: no fade advance for the menu pop-in animation, no typeahead
+    // auto-clear. The compound helper advances the overlay root and invokes
+    // each popup's virtual tick; popup overrides keep their base chain.
     if (_overlayRoot != nullptr) {
         compoundDescendTick(_overlayRoot, dt);
     }
