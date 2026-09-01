@@ -83,7 +83,8 @@ bool simulateTitleBarClick(DockCard* card, FVector2 worldPos) {
 // often Top-slot chrome once empty slots keep their configured weight.
 FVector2 titleBarPoint(DockCard* card) {
     const FRectangle b = card->getWorldBounds();
-    return FVector2((b.minX + b.maxX) * 0.5f, b.minY + 4.0f);
+    return FVector2(b.minX + std::min(60.0f, (b.maxX - b.minX) * 0.5f),
+                    b.minY + 4.0f);
 }
 
 } // namespace
@@ -782,8 +783,8 @@ TEST_CASE(test_center_card_drag_via_uimanager_hit) {
     CHECK_FALSE(f.ui.isDragging());
 }
 
-// Center card must fill the slot (no dead band under the title). VBox
-// Center reflowed the card to content height and left undraggable chrome.
+// Center leaf must fill the slot. The card starts four pixels below the leaf
+// because the 26px tab strip covers its 22px legacy header.
 TEST_CASE(test_center_card_fills_slot_height) {
     DockFixture f;
 
@@ -804,8 +805,8 @@ TEST_CASE(test_center_card_fills_slot_height) {
 
     const FRectangle slot = dock->getSlotRect(DockArea::Slot::Center);
     const FRectangle cb = card->getWorldBounds();
-    CHECK(std::fabs((cb.maxY - cb.minY) - (slot.maxY - slot.minY)) < 1.0f);
-    CHECK(std::fabs(cb.minY - slot.minY) < 1.0f);
+    CHECK(std::fabs(cb.maxY - slot.maxY) < 1.0f);
+    CHECK(std::fabs(cb.minY - (slot.minY + 4.0f)) < 1.0f);
 }
 
 // Nested dock (Gallery page padding) — world mouse must map through

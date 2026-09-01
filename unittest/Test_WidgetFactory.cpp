@@ -85,6 +85,7 @@ TEST_CASE(test_widget_factory_all_registered_types_create_non_null) {
         "ScrollBar",
         "ScrollView",
         "ListView",
+        "TileView",
         "ComboBox",
         "TabControl",
         "TreeNode",
@@ -146,7 +147,7 @@ TEST_CASE(test_widget_factory_isRegistered_matches_create) {
     static const std::vector<std::string> kKnownTypes = {
         "Widget", "Button", "TextLabel", "CheckBox", "RadioButton",
         "Slider", "ProgressBar", "Spinner", "TextInput", "TextArea",
-        "ScrollBar", "ScrollView", "ListView", "ComboBox",
+        "ScrollBar", "ScrollView", "ListView", "TileView", "ComboBox",
         "TabControl", "TreeNode", "TreeView", "RichText", "Tooltip",
         "Separator", "MenuItem", "Menu", "MenuBar", "ToolBar",
         "ToolBarSeparator", "StatusBar", "Image", "Window", "Panel",

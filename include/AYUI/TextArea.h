@@ -55,6 +55,14 @@ public:
     static constexpr float kPaddingX        = 6.0f;
     static constexpr float kPaddingY        = 4.0f;
 
+    struct SyntaxSpan {
+        size_t start = 0;
+        size_t length = 0;
+        math::FVector4 color{0.92f, 0.92f, 0.94f, 1.0f};
+    };
+    using SyntaxHighlighter = std::function<std::vector<SyntaxSpan>(
+        size_t lineIndex, const std::wstring& line)>;
+
     TextArea();
     ~TextArea() override;
 
@@ -112,6 +120,28 @@ public:
         markDirty();
     }
     bool isWordWrap() const { return _wordWrap; }
+
+    // Code-editor presentation. The gutter participates in the same measured
+    // geometry as text, selection, hit testing and the caret, so enabling line
+    // numbers cannot reintroduce a text/caret offset.
+    void setLineNumbersVisible(bool visible);
+    bool areLineNumbersVisible() const { return _showLineNumbers; }
+    void setSyntaxHighlighter(SyntaxHighlighter highlighter);
+    bool hasSyntaxHighlighter() const {
+        return static_cast<bool>(_syntaxHighlighter);
+    }
+
+    // When enabled, the inner document opts out of UIManager focus traversal.
+    // Tab indents and Shift+Tab unindents the current line or selected lines.
+    void setTabInsertsIndent(bool enabled);
+    bool doesTabInsertIndent() const { return _tabInsertsIndent; }
+    void setTabWidth(size_t spaces);
+    size_t getTabWidth() const { return _tabWidth; }
+
+    // UIManager uses this narrow query before applying normal Tab focus
+    // traversal. It deliberately recognizes only this TextArea's private
+    // document widget, leaving single-line TextInput behavior unchanged.
+    static bool focusedDocumentAcceptsTab(const Widget* focused);
 
     void setOnTextChanged(std::function<void(const std::wstring&)> cb) {
         _onTextChanged = std::move(cb);
@@ -192,9 +222,14 @@ private:
     void syncDocumentSizeToContent();
     void syncTextToDocument();
     void fireTextChanged();
-    std::vector<VisualLine> buildVisualLines(float availableWidth) const;
+    std::vector<VisualLine> buildVisualLines(
+        float availableWidth, IRenderBackend* backend = nullptr) const;
     void hitTestDocumentPosition(const math::FVector2& local,
                                  int& line, int& col) const;
+    int effectiveFontSize() const noexcept;
+    float gutterWidth(IRenderBackend* backend = nullptr) const;
+    float textStartX(IRenderBackend* backend = nullptr) const;
+    bool applyIndent(bool unindent);
     void setCaretExtendingSelection(int line, int col);
     void selectWordAt(int line, int col);
     void deleteSelectionWithoutHistory();
@@ -231,6 +266,10 @@ private:
     bool _readOnly = false;
     float _lineHeight = kDefaultLineHeight;
     bool _wordWrap = false;       // Phase C (C6)
+    bool _showLineNumbers = false;
+    bool _tabInsertsIndent = false;
+    size_t _tabWidth = 4u;
+    SyntaxHighlighter _syntaxHighlighter;
 
     std::function<void(const std::wstring&)> _onTextChanged;
 };

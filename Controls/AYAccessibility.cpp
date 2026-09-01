@@ -8,6 +8,7 @@
 #include "AYUI/Image.h"
 #include "AYUI/InteractiveWidget.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/Menu.h"
 #include "AYUI/MenuBar.h"
 #include "AYUI/MenuItem.h"
@@ -120,6 +121,12 @@ uint32_t inferStates(const Widget* widget, const UIManager& manager) {
     }
     if (dynamic_cast<const FocusableWidget*>(widget)) states |= AccessibilityState_Focusable;
     if (manager.getFocusedWidget() == widget) states |= AccessibilityState_Focused;
+    if (const auto* tile = dynamic_cast<const TileCell*>(widget)) {
+        states |= AccessibilityState_Focusable;
+        if (tile->isCurrent() && manager.getFocusedWidget() == tile->getParent()) {
+            states |= AccessibilityState_Focused;
+        }
+    }
     if (const auto* check = dynamic_cast<const CheckBox*>(widget); check && check->isChecked()) {
         states |= AccessibilityState_Checked;
     }
@@ -161,6 +168,9 @@ uint32_t inferStates(const Widget* widget, const UIManager& manager) {
 uint32_t inferActions(const Widget* widget) {
     uint32_t actions = 0;
     if (dynamic_cast<const FocusableWidget*>(widget)) {
+        actions |= accessibilityActionMask(AccessibilityAction::Focus);
+    }
+    if (dynamic_cast<const TileCell*>(widget)) {
         actions |= accessibilityActionMask(AccessibilityAction::Focus);
     }
     if (dynamic_cast<const InteractiveWidget*>(widget)

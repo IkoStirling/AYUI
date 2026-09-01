@@ -371,8 +371,11 @@ private:
     // Remove empty non-pinned leaves (and their adjacent splitters)
     // until the tree is stable, unwrap single-panel nests, ensure every
     // box has a visible fill panel, and hide an empty Center. This is
-    // the hole-eradication choke point after structure edits.
-    void pruneEmptySplitNodes();
+    // the hole-eradication choke point after structure edits. A close
+    // callback cannot synchronously destroy its dispatching tab group;
+    // in that case pruning is queued for the next layout pass.
+    void pruneEmptySplitNodes(bool requestLayout = true);
+    void handleLeafCloseRequest(DockCard* card);
     DockTabGroup* hitTestTreeRec(Widget* node, const math::FVector2& p) const;
 
     // ---- Phase 4: tree (de)serialization helpers ----
@@ -398,6 +401,8 @@ private:
     int _structureEpoch = 0;     // >0 once any split/prune changed the
                                  // tree — template geometry turns sticky
     bool _pruning = false;       // re-entrancy guard for pruneEmptySplitNodes
+    int _tabCloseDispatchDepth = 0;
+    bool _prunePendingAfterClose = false;
 
     // Push weight-derived slot sizes into the root template, but only
     // while the template is still "pristine": structure untouched AND

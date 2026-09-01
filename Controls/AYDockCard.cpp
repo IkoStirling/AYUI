@@ -21,6 +21,44 @@ namespace {
 constexpr float kPromoteDragThreshold = 8.0f;
 constexpr float kCloseButtonWidth = 22.0f;
 constexpr float kMaximizeButtonWidth = 22.0f;
+constexpr float kMinimizeButtonWidth = 22.0f;
+
+const SvgDocument::Ptr& fallbackMinimizeIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 19H19"/></svg>)");
+    return icon;
+}
+
+const SvgDocument::Ptr& fallbackMaximizeIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 5H19V19H5Z"/></svg>)");
+    return icon;
+}
+
+const SvgDocument::Ptr& fallbackRestoreIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 8H19V19H8Z M5 16V5H16"/></svg>)");
+    return icon;
+}
+
+const SvgDocument::Ptr& fallbackCloseIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6L18 18"/></svg>)");
+    return icon;
+}
+
+void drawChromeIcon(IRenderBackend& renderer,
+                    const SvgDocument::Ptr& preferred,
+                    const SvgDocument::Ptr& fallback,
+                    const math::FRectangle& buttonRect,
+                    const math::FVector4& color) {
+    const SvgDocument::Ptr& document = preferred != nullptr ? preferred : fallback;
+    if (document == nullptr) return;
+    const math::FRectangle iconRect(
+        buttonRect.minX + 4.0f, buttonRect.minY + 4.0f,
+        buttonRect.maxX - 4.0f, buttonRect.maxY - 4.0f);
+    document->draw(renderer, iconRect, color);
+}
 
 } // namespace
 
@@ -50,6 +88,22 @@ math::FRectangle DockCard::maximizeButtonRect() const {
         bounds.minY,
         right,
         bounds.minY + _headerHeight);
+}
+
+math::FRectangle DockCard::minimizeButtonRect() const {
+    if (!_showMinimizeButton || _headerHeight <= 0.0f) {
+        return math::FRectangle();
+    }
+    const math::FRectangle bounds = getWorldBounds();
+    const math::FRectangle maximize = maximizeButtonRect();
+    const math::FRectangle close = closeButtonRect();
+    const float right = (maximize.maxX > maximize.minX)
+        ? maximize.minX
+        : ((close.maxX > close.minX) ? close.minX : bounds.maxX);
+    const float w = std::min(kMinimizeButtonWidth,
+                             std::max(0.0f, right - bounds.minX));
+    return math::FRectangle(right - w, bounds.minY,
+                            right, bounds.minY + _headerHeight);
 }
 
 DockCard::DockCard() {
@@ -319,12 +373,16 @@ void DockCard::onRender(IRenderBackend& renderer) {
 
     const math::FRectangle closeRect = closeButtonRect();
     const math::FRectangle maxRect = maximizeButtonRect();
+    const math::FRectangle minRect = minimizeButtonRect();
     float titleRight = header.maxX - 6.0f;
     if (_closable && closeRect.maxX > closeRect.minX) {
         titleRight = closeRect.minX - 2.0f;
     }
     if (_showMaximizeButton && maxRect.maxX > maxRect.minX) {
         titleRight = maxRect.minX - 2.0f;
+    }
+    if (_showMinimizeButton && minRect.maxX > minRect.minX) {
+        titleRight = minRect.minX - 2.0f;
     }
 
     if (!_title.empty()) {
@@ -337,38 +395,34 @@ void DockCard::onRender(IRenderBackend& renderer) {
         renderer.drawText(textBounds, _title, 12, math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
     }
 
+    const math::FVector4 iconColor(0.92f, 0.92f, 0.94f, 1.0f);
+
+    if (_showMinimizeButton && minRect.maxX > minRect.minX) {
+        if (_minimizeHover) {
+            renderer.drawRect(minRect,
+                              math::FVector4(0.28f, 0.28f, 0.32f, 1.0f));
+        }
+        drawChromeIcon(renderer, _minimizeIcon, fallbackMinimizeIcon(),
+                       minRect, iconColor);
+    }
+
     if (_showMaximizeButton && maxRect.maxX > maxRect.minX) {
         if (_maximizeHover) {
             renderer.drawRect(maxRect, math::FVector4(0.28f, 0.28f, 0.32f, 1.0f));
         }
-        // Title-bar 口 (maximize) / overlapping squares (restore). Drawn as
-        // geometry so we don't depend on CJK glyphs in the UI font.
-        const math::FVector4 iconColor(0.92f, 0.92f, 0.94f, 1.0f);
-        const float pad = 6.0f;
-        if (_maximizedVisual) {
-            const math::FRectangle back(
-                maxRect.minX + pad + 2.0f, maxRect.minY + pad,
-                maxRect.maxX - pad, maxRect.maxY - pad - 2.0f);
-            const math::FRectangle front(
-                maxRect.minX + pad, maxRect.minY + pad + 2.0f,
-                maxRect.maxX - pad - 2.0f, maxRect.maxY - pad);
-            renderer.drawBorderRect(back, iconColor, 1.0f, 0.0f);
-            renderer.drawRect(front, math::FVector4(0.20f, 0.20f, 0.20f, 1.0f));
-            renderer.drawBorderRect(front, iconColor, 1.0f, 0.0f);
-        } else {
-            const math::FRectangle box(
-                maxRect.minX + pad, maxRect.minY + pad,
-                maxRect.maxX - pad, maxRect.maxY - pad);
-            renderer.drawBorderRect(box, iconColor, 1.0f, 0.0f);
-        }
+        drawChromeIcon(renderer,
+                       _maximizedVisual ? _restoreIcon : _maximizeIcon,
+                       _maximizedVisual ? fallbackRestoreIcon()
+                                        : fallbackMaximizeIcon(),
+                       maxRect, iconColor);
     }
 
     if (_closable && closeRect.maxX > closeRect.minX) {
         if (_closeHover) {
             renderer.drawRect(closeRect, math::FVector4(0.55f, 0.18f, 0.18f, 1.0f));
         }
-        renderer.drawText(closeRect, L"x", 12,
-                          math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
+        drawChromeIcon(renderer, _closeIcon, fallbackCloseIcon(),
+                       closeRect, iconColor);
     }
 
     // SE grip — resize affordance for promoted OS hosts only.
@@ -435,16 +489,26 @@ bool DockCard::onMouseButtonDown(const UIMouseEvent& e) {
         dockTrace("[dock] closeArm card=%s\n", getId().c_str());
         _closeArmed = true;
         _maximizeArmed = false;
+        _minimizeArmed = false;
         return true;
     }
     if (_showMaximizeButton && maximizeButtonRect().contains(e.mousePos)) {
         dockTrace("[dock] maximizeArm card=%s\n", getId().c_str());
         _maximizeArmed = true;
         _closeArmed = false;
+        _minimizeArmed = false;
+        return true;
+    }
+    if (_showMinimizeButton && minimizeButtonRect().contains(e.mousePos)) {
+        dockTrace("[dock] minimizeArm card=%s\n", getId().c_str());
+        _minimizeArmed = true;
+        _maximizeArmed = false;
+        _closeArmed = false;
         return true;
     }
     _closeArmed = false;
     _maximizeArmed = false;
+    _minimizeArmed = false;
 
     // K-INV-D3-2 — non-floatable cards short-circuit drag.
     if (!_floatable) {
@@ -485,7 +549,18 @@ bool DockCard::onMouseButtonUp(const UIMouseEvent& e) {
     if (e.mouseButton != 0) {
         _closeArmed = false;
         _maximizeArmed = false;
+        _minimizeArmed = false;
         return false;
+    }
+    if (_minimizeArmed) {
+        _minimizeArmed = false;
+        if (_showMinimizeButton && minimizeButtonRect().contains(e.mousePos)) {
+            dockTrace("[dock] minimizeClick card=%s\n", getId().c_str());
+            if (_minimizeFn != nullptr) {
+                _minimizeFn(_minimizeUser, this);
+            }
+        }
+        return true;
     }
     if (_maximizeArmed) {
         _maximizeArmed = false;
@@ -510,6 +585,17 @@ bool DockCard::onMouseButtonUp(const UIMouseEvent& e) {
     // up — safe to destroy from the close callback.
     if (_onCloseRequested) {
         _onCloseRequested(this);
+    } else {
+        // A plain floating card may not have an explicit host callback. Walk
+        // back to its owning DockArea so the same host-aware close policy as
+        // the tab strip applies (persistent editor panels can be parked).
+        for (Widget* parent = getParent(); parent != nullptr;
+             parent = parent->getParent()) {
+            if (auto* dock = dynamic_cast<DockArea*>(parent)) {
+                dock->requestCloseCard(this);
+                break;
+            }
+        }
     }
     return true;
 }
@@ -525,7 +611,10 @@ bool DockCard::onMouseMove(const UIMouseEvent& e) {
     _closeHover = _closable && closeButtonRect().contains(e.mousePos);
     _maximizeHover = !_closeHover && _showMaximizeButton
         && maximizeButtonRect().contains(e.mousePos);
-    _titleBarHover = titleBar.contains(e.mousePos) && !_closeHover && !_maximizeHover;
+    _minimizeHover = !_closeHover && !_maximizeHover && _showMinimizeButton
+        && minimizeButtonRect().contains(e.mousePos);
+    _titleBarHover = titleBar.contains(e.mousePos) && !_closeHover
+        && !_maximizeHover && !_minimizeHover;
     // No-op behaviour; return false so UIManager keeps tracking hover
     // propagation (mirrors the Widget::onMouseMove default).
     return false;
@@ -535,8 +624,10 @@ void DockCard::onMouseLeave() {
     _titleBarHover = false;
     _closeHover = false;
     _maximizeHover = false;
+    _minimizeHover = false;
     _closeArmed = false;
     _maximizeArmed = false;
+    _minimizeArmed = false;
     // Inherited leave propagation walks children — same pattern as
     // Window::onMouseLeave (AYWindow.cpp). Widget base handles the
     // call to compoundDescendLeave when applicable.
@@ -544,7 +635,9 @@ void DockCard::onMouseLeave() {
 }
 
 UiCursorHint DockCard::getCursorHint() const {
-    if ((_closeHover && _closable) || (_maximizeHover && _showMaximizeButton)) {
+    if ((_closeHover && _closable)
+        || (_maximizeHover && _showMaximizeButton)
+        || (_minimizeHover && _showMinimizeButton)) {
         return UiCursorHint::Hand;
     }
     // Mirror Window::getCursorHint: when hovering the drag handle, the

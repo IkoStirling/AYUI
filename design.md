@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-08-29
+**文档修订：** 2026-08-31
 
 **CMake 目标版本：** 1.0.0
 
@@ -95,7 +95,7 @@ Widget
 │     └─ FocusableWidget derivatives such as TextInput
 └─ CompoundWidget / CompoundFocusableWidget
    ├─ Panel / Window / VBox / HBox / GridPanel
-   ├─ ScrollView / ListView / TreeView / ComboBox / TabControl
+   ├─ ScrollView / ListView / TileView / TreeView / ComboBox / TabControl
    ├─ Menu / MenuBar / ToolBar / StatusBar
    ├─ Modal / ModalDialog / TabStrip
    └─ DockArea / DockCard / DockOverlay / DockTabGroup
@@ -287,6 +287,41 @@ backing。Additive/Multiply/Screen 只改变 RGB blend 方程，alpha 一律独�
 
 拖放使用 `DragPayload`、drop target 和 overlay ghost。DockArea 在拖动期间计算 slot/leaf 引导，提交后重新布局 dock tree。
 
+### 6.1 TileView：二维虚拟集合
+
+`TileView` 是面向编辑器资产、缩略图浏览和大数据图块的二维虚拟集合控件。它不为 N 个 item
+建立 N 个 Widget，而只维护
+`(可见行 + 2 * overscanRows) * 当前列数` 个 `TileCell`。列数由 client width、tile size、
+spacing、padding 和自动垂直 scrollbar 共同求解；窗口宽度改变后逻辑行会重排，选择仍由逻辑 index
+保存，不依赖 cell 地址。滚动只更新 first pooled row 并重绑池中 cell；`CellBinder` 只访问当前池，
+因此宿主可投影复杂模型，但不得长期保存 `TileCell*` 与数据项的一一对应关系。
+
+焦点游标 `_focusedIndex` 与 `_selectedIndices` 分离：普通方向键移动焦点并选择，Ctrl+方向键只移动
+焦点，Shift+方向键从 anchor 扩展连续范围；左右按 1、上下按当前列数移动，Home/End 和
+PageUp/PageDown 使用同一网格映射。F2 只发出 rename request，不在 AYUI 内创建编辑器；Enter 发出
+activate。双击识别由 `TileCell::HitRegion` 固定为 `Thumbnail / Label / Body`，宿主无需
+根据像素重复推断区域；安装 region-aware callback 后由它独占该手势，否则回退到 item activate。
+
+TileCell 在按下时完成选择，移动超过 DIP 阈值后提升到 UIManager 通用 drag session。默认
+`DragPayload.kind` 为 `AYUI.TileItems`，宿主可提供 payload builder 改为 FileList/EditorAssets 等
+领域类型。拖拽会话活动期间，TileView 用 UIManager 的最后指针位置做上下边缘自动滚动；池可继续
+重绑，但 drag payload 已在 beginDrag 时复制，不会因源 cell 改绑而改变。滚轮、惯性、scrollbar
+drag、keyboard ensure-visible 与 edge auto-scroll 最终都经过同一 offset clamp/rebind/bar-sync
+路径。
+
+TileView 统一持有 `infoStripHeight`、`cornerMarkerSize` 和 `thumbnailAspectRatio`，保证所有池化 cell
+采用相同的“按比例预览 → InfoStrip → 文件名”几何。`InfoStrip` 只承载宿主提供的文字与颜色，
+`CornerMarker` 只承载可见性与颜色；AYUI 不定义资源类型、类别或编辑器标记语义。角标通过通用
+vector path 绘制并位于预览之上，cell 的 focus/selection border 始终最后绘制。InfoStrip 按 Body
+命中；可见角标覆盖处也按 Body 命中，不增加专用 HitRegion。`resetPresentation()` 在每次 binder
+之前清空 InfoStrip、角标、缩略图、Badge、辅助文字及其余瞬态展示状态，防止池化复用串项。
+
+TileView 的 cell pool 和 scrollbar 是运行时内部子节点，不写入 `children[]`。Serializer 持久化
+items、选择/焦点、网格尺寸、InfoStrip/角标/缩略图布局参数、overscan、drag 开关和 scroll offset；
+单 item 的 InfoStrip 文本/颜色、CornerMarker 状态/颜色、binder、回调、hover、press 和 drag
+session 都是瞬态。每个可见 TileCell 发布 ListItem 语义及 Select/Press/Focus 动作，TileView 发布
+List 语义。
+
 ## 7. Style、Theme 与 I18n
 
 ### 7.1 样式
@@ -352,7 +387,7 @@ Factory 是唯一的 `type` → constructor 注册表。默认注册覆盖普通
 
 Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证分层：
 
-- 40 个公共注册类型都具有明确 type 决策和往返测试；通用位置、尺寸、可见性、style、opacity、
+- 41 个公共注册类型都具有明确 type 决策和往返测试；通用位置、尺寸、可见性、style、opacity、
   layout-managed flags、style override 与 accessibility 元数据可往返。
 - 核心叶控件、列表/树、Box、Panel、Window、Spinner 的视觉和行为字段有类型覆盖。
 - UTF-8 文本必须无损往返。
@@ -485,13 +520,14 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 1022 个 `TEST_CASE`
 - Windows Debug：`4643 / 4643` 条断言通过
 
-2026-08-31 原生 SVG、连续 contour、设备输入桥接、容器溢出修复以及动画产品化后的当前 Windows
-Debug 基线为 `4910 / 4910`；上面的 2026-08-29 数量保留为该轮审计快照。
+2026-08-31 原生 SVG、连续 contour、设备输入桥接、容器溢出修复、动画产品化以及虚拟化
+TileView 后，InfoStrip/CornerMarker 装饰与复用清理回归纳入当前 Windows Debug 基线：
+`5049 / 5049`；上面的 2026-08-29 数量保留为该轮审计快照。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
-设备输入、容器回归和动画产品化随后把当前基线增加到 `4910 / 4910`。
+设备输入、容器回归、动画产品化和 TileView 随后把当前基线增加到 `5049 / 5049`。
 
 审计覆盖：
 
@@ -540,7 +576,7 @@ Debug 基线为 `4910 / 4910`；上面的 2026-08-29 数量保留为该轮审计
   保持逻辑 Layer handle、同帧 immediate fallback，并通过统一统计暴露命中、重绘面积和降级。
 - UIManager 的 Production Layer 状态放在 out-of-line sidecar，不改变既有对象布局；ActiveScope
   不会在 shutdown 或 host 显式切换 active slot 后恢复陈旧上下文。
-- 40 个注册 Widget 的 serializer type/字段往返，Grid cell 和复合控件结构化 payload。
+- 41 个注册 Widget 的 serializer type/字段往返，Grid cell、TileView 和复合控件结构化 payload。
 - backend-independent retained path recipe；AYRenderer 凹多边形/曲线 tessellation、winding 孔洞、
   miter stroke、嵌套 stencil path clip 和排序屏障。
 - 逻辑 DIP/物理 framebuffer 分离、无障碍语义 snapshot/action、Theme 与 Widget token 继承、
@@ -600,7 +636,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    Preserve 字节精确，通常最多差 1 LSB，RGBA8 group opacity 因双重量化最多 2 LSB。下一阶段是
    adaptive cost model、分级预算；滤镜、背景模糊、多 viewport 以及未来
    `UIPlane` / 世界空间 UI 均建立在该能力之上。
-3. **Serializer 完整化（完成）**：40 个公共注册类型均有 type 决策；Grid cell、ScrollView、
+3. **Serializer 完整化（完成）**：41 个公共注册类型均有 type 决策；Grid cell、ScrollView、TileView、
    Menu/StatusBar、Tab、Modal 和 Dock 复合结构具有专用 wire contract 与往返测试。运行时瞬态明确排除。
 4. **高级裁剪和矢量路径（图标 SVG 阶段完成）**：DisplayList 保留 backend-independent path
    recipe；AYRenderer 共享一套 tessellation/submit 路径实现凹多边形、曲线、连续 contour、

@@ -20,6 +20,7 @@
 #include "AYUI/ScrollBar.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/Window.h"
 #include "AYUI/Panel.h"
@@ -69,6 +70,7 @@ static std::string toUtf8(const std::wstring& str) {
 static bool hasStructuredChildPayload(Widget* widget) {
     return dynamic_cast<ScrollView*>(widget) != nullptr
         || dynamic_cast<ListView*>(widget) != nullptr
+        || dynamic_cast<TileView*>(widget) != nullptr
         || dynamic_cast<ComboBox*>(widget) != nullptr
         || dynamic_cast<TreeView*>(widget) != nullptr
         || dynamic_cast<MenuItem*>(widget) != nullptr
@@ -395,6 +397,70 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
             if (j.contains("itemHeight")) {
                 lv->setItemHeight(j["itemHeight"].get<float>());
+            }
+        }
+
+        if (TileView* tv = dynamic_cast<TileView*>(widget)) {
+            if (j.contains("tileSize") && j["tileSize"].is_object()) {
+                tv->setTileSize(math::FVector2(
+                    j["tileSize"].value("w", tv->getTileSize().x),
+                    j["tileSize"].value("h", tv->getTileSize().y)));
+            }
+            if (j.contains("tileSpacing")) {
+                tv->setTileSpacing(j["tileSpacing"].get<float>());
+            }
+            if (j.contains("contentPadding")) {
+                tv->setContentPadding(j["contentPadding"].get<float>());
+            }
+            if (j.contains("labelHeight")) {
+                tv->setLabelHeight(j["labelHeight"].get<float>());
+            }
+            if (j.contains("infoStripHeight")) {
+                tv->setInfoStripHeight(j["infoStripHeight"].get<float>());
+            }
+            if (j.contains("cornerMarkerSize")) {
+                tv->setCornerMarkerSize(j["cornerMarkerSize"].get<float>());
+            }
+            if (j.contains("thumbnailAspectRatio")) {
+                tv->setThumbnailAspectRatio(
+                    j["thumbnailAspectRatio"].get<float>());
+            }
+            if (j.contains("overscanRows")) {
+                tv->setOverscanRows(j["overscanRows"].get<int>());
+            }
+            if (j.contains("dragEnabled")) {
+                tv->setDragEnabled(j["dragEnabled"].get<bool>());
+            }
+            if (j.contains("items") && j["items"].is_array()) {
+                std::vector<std::wstring> items;
+                items.reserve(j["items"].size());
+                for (const auto& s : j["items"]) {
+                    items.push_back(toWstring(s.get<std::string>()));
+                }
+                tv->setItems(items);
+            }
+            if (j.contains("selectionMode")) {
+                tv->setSelectionMode(j["selectionMode"].get<int>() == 1
+                    ? TileView::SelectionMode::Extended
+                    : TileView::SelectionMode::Single);
+            }
+            if (j.contains("selectedIndices")
+                && j["selectedIndices"].is_array()) {
+                std::vector<int> indices;
+                for (const auto& value : j["selectedIndices"]) {
+                    indices.push_back(value.get<int>());
+                }
+                tv->setSelectedIndices(indices);
+            } else if (j.contains("selectedIndex")) {
+                tv->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("focusedIndex")) {
+                tv->setFocusedIndex(j["focusedIndex"].get<int>(), false);
+            }
+            if (j.contains("scrollOffset")
+                && j["scrollOffset"].is_object()) {
+                tv->setScrollOffset(math::FVector2(
+                    0.0f, j["scrollOffset"].value("y", 0.0f)));
             }
         }
 
@@ -1214,6 +1280,32 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         for (int idx : lv->getSelectedIndices()) {
             j["selectedIndices"].push_back(idx);
         }
+    }
+    else if (TileView* tv = dynamic_cast<TileView*>(widget)) {
+        j["type"] = "TileView";
+        j["items"] = json::array();
+        for (const auto& item : tv->getItemsRef()) {
+            j["items"].push_back(toUtf8(item));
+        }
+        j["selectedIndex"] = tv->getSelectedIndex();
+        j["selectionMode"] = static_cast<int>(tv->getSelectionMode());
+        j["selectedIndices"] = json::array();
+        for (int index : tv->getSelectedIndices()) {
+            j["selectedIndices"].push_back(index);
+        }
+        j["focusedIndex"] = tv->getFocusedIndex();
+        const math::FVector2 tileSize = tv->getTileSize();
+        j["tileSize"] = {{"w", tileSize.x}, {"h", tileSize.y}};
+        j["tileSpacing"] = tv->getTileSpacing();
+        j["contentPadding"] = tv->getContentPadding();
+        j["labelHeight"] = tv->getLabelHeight();
+        j["infoStripHeight"] = tv->getInfoStripHeight();
+        j["cornerMarkerSize"] = tv->getCornerMarkerSize();
+        j["thumbnailAspectRatio"] = tv->getThumbnailAspectRatio();
+        j["overscanRows"] = tv->getOverscanRows();
+        j["dragEnabled"] = tv->isDragEnabled();
+        const math::FVector2 offset = tv->getScrollOffset();
+        j["scrollOffset"] = {{"x", offset.x}, {"y", offset.y}};
     }
     else if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
         j["type"] = "ComboBox";

@@ -22,6 +22,7 @@
 #include "AYUI/ScrollBar.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/TabControl.h"
 #include "AYUI/GridPanel.h"
@@ -363,6 +364,7 @@ static void ensureBuiltInFactoriesRegistered() {
     if (!f.isRegistered("ScrollBar")) f.registerCreator("ScrollBar", createScrollBarWidget);
     if (!f.isRegistered("ScrollView")) f.registerCreator("ScrollView", createScrollViewWidget);
     if (!f.isRegistered("ListView")) f.registerCreator("ListView", createListViewWidget);
+    if (!f.isRegistered("TileView")) f.registerCreator("TileView", createTileViewWidget);
     if (!f.isRegistered("ComboBox")) f.registerCreator("ComboBox", createComboBoxWidget);
     if (!f.isRegistered("TabControl")) f.registerCreator("TabControl", createTabControlWidget);
     if (!f.isRegistered("Window"))    f.registerCreator("Window",    createWindowWidget);
@@ -2443,6 +2445,13 @@ bool UIManager::onKeyDown(int keyCode) {
     }
 
     if (keyCode == UIKey_Tab) {
+        // Give text editors one chance to consume Tab (for indentation).
+        // Ordinary TextInput returns false and keeps focus traversal; the
+        // TextArea document only consumes it when code indentation is on.
+        if (TextArea::focusedDocumentAcceptsTab(_focusedWidget)
+            && _focusedWidget->onKeyDown(keyCode)) {
+            return true;
+        }
         if (_modifiers & (1u << (UIKey_Shift - UIKey_Shift))) focusPrev();
         else                                                  focusNext();
         return true;

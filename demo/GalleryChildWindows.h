@@ -62,6 +62,9 @@ public:
         int  dragGrabY = 0;
         int  dragStartScreenX = 0;
         int  dragStartScreenY = 0;
+        int  dragLastScreenX = 0;
+        int  dragLastScreenY = 0;
+        int  dragTravel = 0;
     };
     const std::vector<Entry>& entries() const { return _entries; }
 
@@ -70,16 +73,19 @@ private:
 
     bool tryRedock(const std::shared_ptr<ayt::ui::UIManager>& ui);
 
-    bool cursorToPrimaryWorld(ayt::math::FVector2& out) const;
-    // True when the OS cursor is over the primary client area and the
-    // topmost HWND is either the primary or the child currently being
-    // G12-dragged (so follow-cursor tear-offs can redock).
-    bool cursorOverPrimaryWindow() const;
+    bool screenToPrimaryWorld(int screenX, int screenY,
+                              ayt::math::FVector2& out) const;
+    // True when the tracked mouse-message screen point is over the primary
+    // client area and the topmost HWND is either the primary or the child
+    // currently being G12-dragged (so follow-cursor tear-offs can redock).
+    bool screenPointOverPrimaryWindow(int screenX, int screenY) const;
 
-    void beginDragMove(void* handle);
-    void updateDragMove(void* handle);
+    void beginDragMove(void* handle, float clientX, float clientY);
+    void updateDragMove(void* handle, float clientX, float clientY);
     void endDragMove(void* handle);
     void updateRedockHover();
+    void configurePromotedCardChrome(ayt::ui::DockCard* card);
+    void resetPromotedCardChrome(ayt::ui::DockCard* card);
 
     Entry* findEntryByHandle(void* handle);
     Entry* findEntryByUi(const ayt::ui::UIManager* ui);

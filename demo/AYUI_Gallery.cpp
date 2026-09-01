@@ -39,6 +39,7 @@
 #include "AYUI/TabStrip.h"
 #include "AYUI/Spinner.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/MenuBar.h"
 #include "AYUI/Menu.h"
@@ -893,6 +894,65 @@ void wireGallery(GalleryState& state)
     }
 
     // --- Collections ---
+    if (auto* tiles = dynamic_cast<ayt::ui::TileView*>(
+            ui.findById("tiles_demo"))) {
+        std::vector<std::wstring> items;
+        items.reserve(2500);
+        for (int index = 0; index < 2500; ++index) {
+            items.push_back(L"Asset_" + std::to_wstring(index));
+        }
+        tiles->setSelectionMode(ayt::ui::TileView::SelectionMode::Extended);
+        tiles->setCellBinder([](ayt::ui::TileCell& cell, int index,
+                                const std::wstring&) {
+            const std::wstring type = (index % 3) == 0 ? L"IMAGE"
+                : ((index % 3) == 1 ? L"SURFACE" : L"SCENE");
+            const ayt::math::FVector4 categoryColor = (index % 3) == 0
+                ? ayt::math::FVector4(0.30f, 0.65f, 0.92f, 1.0f)
+                : ((index % 3) == 1
+                    ? ayt::math::FVector4(0.76f, 0.48f, 0.92f, 1.0f)
+                    : ayt::math::FVector4(0.38f, 0.78f, 0.52f, 1.0f));
+            cell.setInfoStrip(type, categoryColor,
+                ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+            cell.setCornerMarkerVisible((index % 7) == 0);
+            cell.setBadgeText((index % 11) == 0 ? L"NEW" : L"");
+            cell.setAccentColor(categoryColor);
+        });
+        tiles->setItems(items);
+        tiles->setOnSelectionChanged([&ui, tiles](int index) {
+            if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                    ui.findById("lbl_selection"))) {
+                wchar_t text[128];
+                std::swprintf(text, 128,
+                    L"selection: tile[%d], visible pool=%zu",
+                    index, tiles->getCellPoolSize());
+                label->setText(text);
+            }
+        });
+        tiles->setOnRenameRequested([&ui](int index) {
+            if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                    ui.findById("lbl_selection"))) {
+                wchar_t text[96];
+                std::swprintf(text, 96, L"F2 rename requested: tile[%d]", index);
+                label->setText(text);
+            }
+        });
+        tiles->setOnItemDoubleClicked(
+            [&ui](int index, ayt::ui::TileCell::HitRegion region) {
+                if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                        ui.findById("lbl_selection"))) {
+                    const wchar_t* regionName = L"body";
+                    if (region == ayt::ui::TileCell::HitRegion::Thumbnail) {
+                        regionName = L"thumbnail";
+                    } else if (region == ayt::ui::TileCell::HitRegion::Label) {
+                        regionName = L"label";
+                    }
+                    wchar_t text[128];
+                    std::swprintf(text, 128,
+                        L"double click: tile[%d] / %ls", index, regionName);
+                    label->setText(text);
+                }
+            });
+    }
     if (auto* list = dynamic_cast<ayt::ui::ListView*>(ui.findById("lst_demo"))) {
         list->addItem(L"Alpha");
         list->addItem(L"Bravo");

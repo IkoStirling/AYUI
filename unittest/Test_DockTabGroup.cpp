@@ -1,10 +1,9 @@
 // =============================================================================
 // Dock-tree Phase 2 — DockTabGroup leaf + DockArea tree-ification.
 //
-// DockTabGroup is the leaf node of the dock tree: single card = full
-// bleed (its own title bar is the only chrome, legacy geometry); ≥2
-// cards = tab strip on top, active card slid up beneath it, inactive
-// cards hidden. Cards are never freed here (detach-only).
+// DockTabGroup is the leaf node of the dock tree: every non-empty leaf has
+// an editor-width tab strip; the active card is slid beneath it and inactive
+// cards are hidden. Cards are never freed here (detach-only).
 //
 // The DockArea back-compat gate lives in the existing
 // Test_DockArea / Test_DockFloat / Test_DockAreaLoader suites — this
@@ -72,23 +71,26 @@ TEST_CASE(test_tab_group_render_clips_cards) {
     CHECK(r.getClipDepth() == 0);
 }
 
-TEST_CASE(test_tab_group_single_card_full_bleed) {
+TEST_CASE(test_tab_group_single_card_keeps_editor_tab_width) {
     DockTabGroup group;
     group.setSize(FVector2(400.0f, 300.0f));
     group.addTab(makeCard("a").release());
     group.performLayout();
 
-    // Single card: full-bleed — legacy 5-slot geometry (its own title
-    // bar is the only chrome, no strip).
+    // A single tab follows the same strip geometry as a multi-tab leaf.
     CHECK(group.getTabCount() == 1);
     DockCard* a = group.getTab(0);
     CHECK_NOT_NULL(a);
     if (a == nullptr) return;
     CHECK(a->isVisible());
     CHECK_FLOAT_EQ(a->getPosition().x, 0.0f, 1e-5f);
-    CHECK_FLOAT_EQ(a->getPosition().y, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(a->getPosition().y, 4.0f, 1e-5f);
     CHECK_FLOAT_EQ(a->getSize().x, 400.0f, 1e-5f);
-    CHECK_FLOAT_EQ(a->getSize().y, 300.0f, 1e-5f);
+    CHECK_FLOAT_EQ(a->getSize().y, 296.0f, 1e-5f);
+    const FRectangle tab = group.getTabRectWorld(0);
+    CHECK_FLOAT_EQ(tab.maxX - tab.minX,
+                   DockTabGroup::kPreferredTabWidth, 1e-5f);
+    CHECK(tab.maxX < group.getWorldBounds().maxX);
 }
 
 TEST_CASE(test_tab_group_add_activates_new_card) {
@@ -311,18 +313,18 @@ TEST_CASE(test_tab_group_strip_claims_hits_above_card) {
     CHECK(group.hitTest(FVector2(200.0f, 100.0f)) == b);
 }
 
-TEST_CASE(test_tab_group_single_card_no_strip_hits) {
+TEST_CASE(test_tab_group_single_card_strip_claims_only_header_band) {
     DockTabGroup group;
     group.setSize(FVector2(400.0f, 300.0f));
     group.addTab(makeCard("a").release());
     group.performLayout();
 
-    // Single card: everything resolves to the card (its own title bar
-    // is draggable — legacy behaviour).
+    // Single card still has a real tab strip; body hits continue to reach the
+    // live card below it.
     DockCard* a = group.getTab(0);
     CHECK_NOT_NULL(a);
     if (a == nullptr) return;
-    CHECK(group.hitTest(FVector2(200.0f, 10.0f)) == a);
+    CHECK(group.hitTest(FVector2(70.0f, 10.0f)) == &group);
     CHECK(group.hitTest(FVector2(200.0f, 200.0f)) == a);
 }
 
@@ -347,6 +349,8 @@ TEST_CASE(test_tab_group_close_x_fires_callback) {
     const FRectangle active = group.getTabRectWorld(0);
     const FVector2 closePt(active.maxX - 2.0f, 13.0f);
     CHECK(group.onMouseButtonDown(UIMouseEvent(closePt, 0)));
+    CHECK(closed == nullptr);
+    CHECK(group.onMouseButtonUp(UIMouseEvent(closePt, 0)));
     CHECK(closed == group.getTab(0));
 }
 
@@ -361,20 +365,20 @@ TEST_CASE(test_tab_group_paints_close_only_for_active_tab) {
 
     const FRectangle inactive = group.getTabRectWorld(0);
     const FRectangle active = group.getTabRectWorld(1);
-    int inactiveCloseGlyphs = 0;
-    int activeCloseGlyphs = 0;
+    int inactiveCloseIcons = 0;
+    int activeCloseIcons = 0;
     for (const auto& call : renderer.getDrawCalls()) {
-        if (call.type != MockRenderer::DrawCall::Text || call.text != L"x") continue;
+        if (call.type != MockRenderer::DrawCall::Path) continue;
         const float centerX = (call.bounds.minX + call.bounds.maxX) * 0.5f;
         if (centerX >= inactive.minX && centerX <= inactive.maxX) {
-            ++inactiveCloseGlyphs;
+            ++inactiveCloseIcons;
         }
         if (centerX >= active.minX && centerX <= active.maxX) {
-            ++activeCloseGlyphs;
+            ++activeCloseIcons;
         }
     }
-    CHECK(inactiveCloseGlyphs == 0);
-    CHECK(activeCloseGlyphs == 1);
+    CHECK(inactiveCloseIcons == 0);
+    CHECK(activeCloseIcons == 1);
 }
 
 TEST_CASE(test_tab_group_active_tab_press_begins_drag) {
@@ -548,8 +552,8 @@ TEST_CASE(test_dock_area_first_real_size_layout_pushes_geometry) {
 
     const FRectangle slot = dock.getSlotRect(DockArea::Slot::Center);
     const FRectangle cb = dock.getCard(DockArea::Slot::Center, 0)->getWorldBounds();
-    CHECK(std::fabs((cb.maxY - cb.minY) - (slot.maxY - slot.minY)) < 1.0f);
-    CHECK(std::fabs(cb.minY - slot.minY) < 1.0f);
+    CHECK(std::fabs(cb.maxY - slot.maxY) < 1.0f);
+    CHECK(std::fabs(cb.minY - (slot.minY + 4.0f)) < 1.0f);
     CHECK(std::fabs(cb.minX - slot.minX) < 1.0f);
 }
 

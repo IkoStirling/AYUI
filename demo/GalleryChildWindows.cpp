@@ -16,6 +16,7 @@
 #  include <Windows.h>
 #endif
 
+#include <algorithm>
 #include <cmath>
 #include <codecvt>
 #include <cstdio>
@@ -118,39 +119,76 @@ bool GalleryChildWindows::closeCardHost(ayt::ui::DockCard* card) {
     return true;
 }
 
-bool GalleryChildWindows::cursorToPrimaryWorld(ayt::math::FVector2& out) const {
+void GalleryChildWindows::configurePromotedCardChrome(
+    ayt::ui::DockCard* card) {
+    if (card == nullptr) return;
+    card->setShowResizeGrip(true);
+    card->setShowMinimizeButton(true);
+    card->setShowMaximizeButton(true);
+    card->setMinimizeHandler(
+        [](void* user, ayt::ui::DockCard* requested) {
+            auto* self = static_cast<GalleryChildWindows*>(user);
+            Entry* entry = self != nullptr
+                ? self->findEntryByCard(requested) : nullptr;
+            if (entry != nullptr && entry->handle != nullptr) {
+                self->_wm.minimizeTopLevelWindow(entry->handle);
+            }
+        },
+        this);
+    card->setMaximizeHandler(
+        [](void* user, ayt::ui::DockCard* requested) {
+            auto* self = static_cast<GalleryChildWindows*>(user);
+            Entry* entry = self != nullptr
+                ? self->findEntryByCard(requested) : nullptr;
+            if (entry != nullptr && entry->handle != nullptr) {
+                self->_wm.toggleTopLevelMaximized(entry->handle);
+                requested->setMaximizedVisual(
+                    self->_wm.isTopLevelMaximized(entry->handle));
+            }
+        },
+        this);
+}
+
+void GalleryChildWindows::resetPromotedCardChrome(
+    ayt::ui::DockCard* card) {
+    if (card == nullptr) return;
+    card->clearMinimizeHandler();
+    card->clearMaximizeHandler();
+    card->setShowMinimizeButton(false);
+    card->setShowMaximizeButton(false);
+    card->setShowResizeGrip(false);
+    card->setMaximizedVisual(false);
+}
+
+bool GalleryChildWindows::screenToPrimaryWorld(
+    int screenX, int screenY, ayt::math::FVector2& out) const {
 #if defined(_WIN32)
     HWND primaryHwnd = static_cast<HWND>(_wm.getWindowHandle());
     if (primaryHwnd == nullptr) {
-        return false;
-    }
-    int screenX = 0;
-    int screenY = 0;
-    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
         return false;
     }
     POINT pt{static_cast<LONG>(screenX), static_cast<LONG>(screenY)};
     if (!::ScreenToClient(primaryHwnd, &pt)) {
         return false;
     }
-    out = ayt::math::FVector2(static_cast<float>(pt.x),
-                              static_cast<float>(pt.y));
+    // Match UIManager's regular input boundary: Win32 reports physical client
+    // pixels but DockArea hit-testing consumes logical coordinates.
+    out = _primary.physicalToLogical(ayt::math::FVector2(
+        static_cast<float>(pt.x), static_cast<float>(pt.y)));
     return true;
 #else
+    (void)screenX;
+    (void)screenY;
     (void)out;
     return false;
 #endif
 }
 
-bool GalleryChildWindows::cursorOverPrimaryWindow() const {
+bool GalleryChildWindows::screenPointOverPrimaryWindow(
+    int screenX, int screenY) const {
 #if defined(_WIN32)
     HWND primaryHwnd = static_cast<HWND>(_wm.getWindowHandle());
     if (primaryHwnd == nullptr) {
-        return false;
-    }
-    int screenX = 0;
-    int screenY = 0;
-    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
         return false;
     }
     POINT pt{static_cast<LONG>(screenX), static_cast<LONG>(screenY)};
@@ -189,35 +227,43 @@ bool GalleryChildWindows::cursorOverPrimaryWindow() const {
     }
     return false;
 #else
+    (void)screenX;
+    (void)screenY;
     return false;
 #endif
 }
 
-void GalleryChildWindows::beginDragMove(void* handle) {
+void GalleryChildWindows::beginDragMove(void* handle, float clientX,
+                                        float clientY) {
 #if defined(_WIN32)
     Entry* e = findEntryByHandle(handle);
     if (e == nullptr || e->handle == nullptr) {
         return;
     }
     HWND hwnd = static_cast<HWND>(e->handle);
-    int screenX = 0;
-    int screenY = 0;
+    POINT cursorPoint{static_cast<LONG>(std::lround(clientX)),
+                      static_cast<LONG>(std::lround(clientY))};
     RECT wr{};
-    if (!_wm.getCursorScreenPosition(screenX, screenY)
-        || !::GetWindowRect(hwnd, &wr)) {
+    if (!::ClientToScreen(hwnd, &cursorPoint) || !::GetWindowRect(hwnd, &wr)) {
         return;
     }
-    e->dragGrabX = screenX - static_cast<int>(wr.left);
-    e->dragGrabY = screenY - static_cast<int>(wr.top);
-    e->dragStartScreenX = screenX;
-    e->dragStartScreenY = screenY;
+    e->dragGrabX = static_cast<int>(cursorPoint.x - wr.left);
+    e->dragGrabY = static_cast<int>(cursorPoint.y - wr.top);
+    e->dragStartScreenX = static_cast<int>(cursorPoint.x);
+    e->dragStartScreenY = static_cast<int>(cursorPoint.y);
+    e->dragLastScreenX = e->dragStartScreenX;
+    e->dragLastScreenY = e->dragStartScreenY;
+    e->dragTravel = 0;
     e->dragMoveActive = true;
 #else
     (void)handle;
+    (void)clientX;
+    (void)clientY;
 #endif
 }
 
-void GalleryChildWindows::updateDragMove(void* handle) {
+void GalleryChildWindows::updateDragMove(void* handle, float clientX,
+                                         float clientY) {
 #if defined(_WIN32)
     Entry* e = findEntryByHandle(handle);
     if (e == nullptr || !e->dragMoveActive || e->handle == nullptr) {
@@ -227,16 +273,26 @@ void GalleryChildWindows::updateDragMove(void* handle) {
         e->dragMoveActive = false;
         return;
     }
-    int screenX = 0;
-    int screenY = 0;
-    if (!_wm.getCursorScreenPosition(screenX, screenY)) {
+    HWND hwnd = static_cast<HWND>(e->handle);
+    POINT cursorPoint{static_cast<LONG>(std::lround(clientX)),
+                      static_cast<LONG>(std::lround(clientY))};
+    if (!::ClientToScreen(hwnd, &cursorPoint)) {
         return;
     }
-    ::SetWindowPos(static_cast<HWND>(e->handle), nullptr,
-                   screenX - e->dragGrabX, screenY - e->dragGrabY,
+    e->dragLastScreenX = static_cast<int>(cursorPoint.x);
+    e->dragLastScreenY = static_cast<int>(cursorPoint.y);
+    e->dragTravel = std::max(
+        e->dragTravel,
+        std::abs(e->dragLastScreenX - e->dragStartScreenX)
+            + std::abs(e->dragLastScreenY - e->dragStartScreenY));
+    ::SetWindowPos(hwnd, nullptr,
+                   e->dragLastScreenX - e->dragGrabX,
+                   e->dragLastScreenY - e->dragGrabY,
                    0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 #else
     (void)handle;
+    (void)clientX;
+    (void)clientY;
 #endif
 }
 
@@ -295,25 +351,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
     card->setPosition(ayt::math::FVector2(0.0f, 0.0f));
     card->setSize(ayt::math::FVector2(static_cast<float>(w),
                                       static_cast<float>(h)));
-    card->setShowResizeGrip(true);
-    card->setShowMaximizeButton(true);
-    card->setMaximizeHandler(
-        [](void* user, ayt::ui::DockCard* c) {
-            auto* self = static_cast<GalleryChildWindows*>(user);
-            if (self == nullptr || c == nullptr) {
-                return;
-            }
-            for (const auto& ent : self->entries()) {
-                if (ent.card != c || ent.handle == nullptr) {
-                    continue;
-                }
-                self->_wm.toggleTopLevelMaximized(ent.handle);
-                c->setMaximizedVisual(
-                    self->_wm.isTopLevelMaximized(ent.handle));
-                break;
-            }
-        },
-        this);
+    configurePromotedCardChrome(card);
     e.ui->root()->addChild(card);
     e.ui->layout();
 
@@ -339,7 +377,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
         ui->onMouseMove(x, y);
         // G12 title-drag moves the OS window with the cursor so the
         // user can park it back over the primary DockArea.
-        this->updateDragMove(handle);
+        this->updateDragMove(handle, x, y);
     };
     cbs.onMouseLeave = [ui]() {
         ayt::ui::UIManager::ActiveScope guard(ui.get());
@@ -355,7 +393,7 @@ bool GalleryChildWindows::promoteCard(ayt::ui::DockCard* card,
         if (pressed) {
             const bool handled = ui->onMouseButtonDown(x, y, button);
             if (button == 0 && ui->isDragging()) {
-                this->beginDragMove(handle);
+                this->beginDragMove(handle, x, y);
             }
             return handled;
         }
@@ -424,7 +462,10 @@ void GalleryChildWindows::updateRedockHover() {
     for (const auto& e : _entries) {
         if (e.ui && e.ui->isDragging()) {
             ayt::math::FVector2 world;
-            if (cursorOverPrimaryWindow() && cursorToPrimaryWorld(world)) {
+            if (screenPointOverPrimaryWindow(e.dragLastScreenX,
+                                             e.dragLastScreenY)
+                && screenToPrimaryWorld(e.dragLastScreenX,
+                                        e.dragLastScreenY, world)) {
                 _dock->setExternalDropPos(world);
             } else {
                 _dock->clearExternalDropPos();
@@ -448,28 +489,25 @@ bool GalleryChildWindows::tryRedock(
 
 #if defined(_WIN32)
     // Title-click / tiny nudge must not redock.
-    int screenX = 0;
-    int screenY = 0;
-    if (_wm.getCursorScreenPosition(screenX, screenY)) {
-        const int moved = std::abs(screenX - entry->dragStartScreenX)
-                        + std::abs(screenY - entry->dragStartScreenY);
-        if (moved < 12) {
-            ayt::ui::dockTrace("[child] tryRedock skip moved=%d\n", moved);
-            return false;
-        }
+    if (entry->dragTravel < 12) {
+        ayt::ui::dockTrace("[child] tryRedock skip moved=%d\n",
+                           entry->dragTravel);
+        return false;
     }
 #endif
 
     // Cursor must be over the primary client. The dragging child HWND
     // is allowed to sit on top (follow-cursor); hit-testing uses the
     // cursor's primary-client coordinates, not WindowFromPoint ownership.
-    if (!cursorOverPrimaryWindow()) {
+    if (!screenPointOverPrimaryWindow(entry->dragLastScreenX,
+                                      entry->dragLastScreenY)) {
         ayt::ui::dockTrace("[child] tryRedock skip (cursor outside primary client)\n");
         return false;
     }
 
     ayt::math::FVector2 world;
-    if (!cursorToPrimaryWorld(world)) {
+    if (!screenToPrimaryWorld(entry->dragLastScreenX,
+                              entry->dragLastScreenY, world)) {
         return false;
     }
 
@@ -504,6 +542,7 @@ bool GalleryChildWindows::tryRedock(
     ui->cancelDrag();
 
     ui->root()->removeChild(card);
+    resetPromotedCardChrome(card);
     // redockAt / adoptCard / requestRelayout must see the primary
     // UIManager via tryGet() — not the child that still owns
     // ActiveScope from the mouse-up handler.
@@ -512,7 +551,9 @@ bool GalleryChildWindows::tryRedock(
         if (!_dock->redockAt(card, world)) {
             ayt::ui::dockTrace("[child] tryRedock redockAt FAILED card=%s\n",
                                cardId.c_str());
+            configurePromotedCardChrome(card);
             ui->root()->addChild(card);
+            ui->layout();
             return false;
         }
         _dock->clearExternalDropPos();

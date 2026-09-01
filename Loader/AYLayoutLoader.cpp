@@ -14,6 +14,7 @@
 #include "AYUI/Image.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/Slider.h"
 #include "AYUI/CheckBox.h"
@@ -790,6 +791,61 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             }
             if (j.contains("itemHeight")) {
                 lv->setItemHeight(j["itemHeight"].get<float>());
+            }
+        } else if (TileView* tv = dynamic_cast<TileView*>(widget)) {
+            if (j.contains("tileSize") && j["tileSize"].is_object()) {
+                tv->setTileSize(math::FVector2(
+                    j["tileSize"].value("w", tv->getTileSize().x),
+                    j["tileSize"].value("h", tv->getTileSize().y)));
+            }
+            if (j.contains("tileSpacing")) {
+                tv->setTileSpacing(j["tileSpacing"].get<float>());
+            }
+            if (j.contains("contentPadding")) {
+                tv->setContentPadding(j["contentPadding"].get<float>());
+            }
+            if (j.contains("labelHeight")) {
+                tv->setLabelHeight(j["labelHeight"].get<float>());
+            }
+            if (j.contains("infoStripHeight")) {
+                tv->setInfoStripHeight(j["infoStripHeight"].get<float>());
+            }
+            if (j.contains("cornerMarkerSize")) {
+                tv->setCornerMarkerSize(j["cornerMarkerSize"].get<float>());
+            }
+            if (j.contains("thumbnailAspectRatio")) {
+                tv->setThumbnailAspectRatio(
+                    j["thumbnailAspectRatio"].get<float>());
+            }
+            if (j.contains("overscanRows")) {
+                tv->setOverscanRows(j["overscanRows"].get<int>());
+            }
+            if (j.contains("dragEnabled")) {
+                tv->setDragEnabled(j["dragEnabled"].get<bool>());
+            }
+            tv->setItems(items);
+            if (j.contains("selectionMode")) {
+                tv->setSelectionMode(j["selectionMode"].get<int>() == 1
+                    ? TileView::SelectionMode::Extended
+                    : TileView::SelectionMode::Single);
+            }
+            if (j.contains("selectedIndices")
+                && j["selectedIndices"].is_array()) {
+                std::vector<int> selected;
+                for (const auto& value : j["selectedIndices"]) {
+                    selected.push_back(value.get<int>());
+                }
+                tv->setSelectedIndices(selected);
+            } else if (j.contains("selectedIndex")) {
+                tv->setSelectedIndex(j["selectedIndex"].get<int>());
+            }
+            if (j.contains("focusedIndex")) {
+                tv->setFocusedIndex(j["focusedIndex"].get<int>(), false);
+            }
+            if (j.contains("scrollOffset")
+                && j["scrollOffset"].is_object()) {
+                tv->setScrollOffset(math::FVector2(
+                    0.0f, j["scrollOffset"].value("y", 0.0f)));
             }
         }
     }

@@ -3,6 +3,7 @@
 #include "AYUI/UIManager.h"
 #include "AYUI/DockTrace.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/SvgIcon.h"
 #include "AYUI/TextMeasure.h"
 
 #include <algorithm>
@@ -13,6 +14,12 @@ namespace ayt::ui {
 namespace {
 
 constexpr int kDockTabFontSize = 12;
+
+const SvgDocument::Ptr& closeIconDocument() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6L18 18"/></svg>)");
+    return icon;
+}
 
 std::wstring ellipsizeTabTitle(const std::wstring& title,
                                float availableWidth,
@@ -102,6 +109,7 @@ bool DockTabGroup::removeTab(DockCard* card) {
         }
         _hoveredTab = -1;
         _hoveredClose = -1;
+        _armedClose = -1;
         return true;
     }
     return false;
@@ -176,17 +184,17 @@ void DockTabGroup::performLayout() {
     }
     math::FVector2 cardPos(0.0f, 0.0f);
     math::FVector2 cardSz = sz;
-    if (_tabs.size() >= 2) {
-        // Tab strip covers the active card's own title bar: slide the
-        // card up by (stripH - cardHeaderHeight) so the strip region
-        // (0..stripH) exactly overlays the title bar and the card body
-        // starts below the strip. Render order (strip paints last) and
-        // hitTest (strip claims hits) keep the overlap invisible.
-        const float headerH = std::max(0.0f, active->getHeaderHeight());
-        const float offsetY = kTabStripHeight - headerH;
-        cardPos = math::FVector2(0.0f, offsetY);
-        cardSz = math::FVector2(sz.x, std::max(0.0f, sz.y - offsetY));
-    }
+    // Every leaf has a real tab strip, including a leaf with one card. This
+    // keeps the title at the editor tab width instead of stretching the
+    // DockCard's legacy full-width header across the entire panel.
+    //
+    // The strip covers the active card's own title bar: slide the card up by
+    // (stripH - cardHeaderHeight) so its body still begins directly below the
+    // strip. Render order and hit testing keep the covered header invisible.
+    const float headerH = std::max(0.0f, active->getHeaderHeight());
+    const float offsetY = kTabStripHeight - headerH;
+    cardPos = math::FVector2(0.0f, offsetY);
+    cardSz = math::FVector2(sz.x, std::max(0.0f, sz.y - offsetY));
     // Size every tab (including hidden ones) so a later activateTab does
     // not reveal a card still holding pre-join geometry.
     for (DockCard* card : _tabs) {
@@ -224,8 +232,8 @@ math::FRectangle DockTabGroup::getTabRectWorld(size_t index) const {
 
 math::FRectangle DockTabGroup::closeRectWorld(size_t index) const {
     const math::FRectangle tab = getTabRectWorld(index);
-    constexpr float kCloseHalfWidth = 8.0f;
-    return math::FRectangle(tab.maxX - kCloseHalfWidth, tab.minY,
+    constexpr float kCloseButtonWidth = 22.0f;
+    return math::FRectangle(tab.maxX - kCloseButtonWidth, tab.minY,
                             tab.maxX, tab.maxY);
 }
 
@@ -249,7 +257,7 @@ Widget* DockTabGroup::hitTest(const math::FVector2& worldPos) {
     if (!bounds.contains(worldPos)) {
         return nullptr;
     }
-    if (_tabs.size() >= 2 && stripRectWorld().contains(worldPos)) {
+    if (!_tabs.empty() && stripRectWorld().contains(worldPos)) {
         // The tab strip claims hits before the active card's title bar
         // (which the strip covers visually and interactively).
         return this;
@@ -261,10 +269,6 @@ Widget* DockTabGroup::hitTest(const math::FVector2& worldPos) {
 
 bool DockTabGroup::onMouseButtonDown(const UIMouseEvent& e) {
     if (e.mouseButton != 0) {
-        return false;
-    }
-    if (_tabs.size() < 2) {
-        // No strip — the single card's own title-bar path runs.
         return false;
     }
     if (!stripRectWorld().contains(e.mousePos)) {
@@ -279,18 +283,18 @@ bool DockTabGroup::onMouseButtonDown(const UIMouseEvent& e) {
         return false;
     }
 
-    // Close x fires before activate/drag (mirrors DockCard's
-    // close-first rule for its own title bar).
+    // Close is armed before activate/drag, then committed on mouse-up so
+    // UIManager can clear capture before the host destroys or parks a card.
     if (static_cast<size_t>(idx) == _activeIndex
         && tab->isClosable()
         && closeRectWorld(static_cast<size_t>(idx)).contains(e.mousePos)) {
-        dockTrace("[dock] tabGroup close x card=%s leaf=%s\n",
+        dockTrace("[dock] tabGroup close arm card=%s leaf=%s\n",
                   tab->getId().c_str(), _leafId.c_str());
-        if (_onCloseTab) {
-            _onCloseTab(tab);
-        }
+        _armedClose = idx;
         return true;
     }
+
+    _armedClose = -1;
 
     if (static_cast<size_t>(idx) == _activeIndex) {
         // Pressing the ACTIVE tab tears the card off — same G12 path
@@ -311,10 +315,32 @@ bool DockTabGroup::onMouseButtonDown(const UIMouseEvent& e) {
     return true;
 }
 
+bool DockTabGroup::onMouseButtonUp(const UIMouseEvent& e) {
+    if (e.mouseButton != 0) {
+        _armedClose = -1;
+        return false;
+    }
+    const int armed = _armedClose;
+    _armedClose = -1;
+    if (armed < 0 || static_cast<size_t>(armed) >= _tabs.size()) {
+        return false;
+    }
+    DockCard* tab = _tabs[static_cast<size_t>(armed)];
+    if (tab == nullptr || static_cast<size_t>(armed) != _activeIndex
+        || !tab->isClosable()
+        || !closeRectWorld(static_cast<size_t>(armed)).contains(e.mousePos)) {
+        return true;
+    }
+    dockTrace("[dock] tabGroup close commit card=%s leaf=%s\n",
+              tab->getId().c_str(), _leafId.c_str());
+    if (_onCloseTab) _onCloseTab(tab);
+    return true;
+}
+
 bool DockTabGroup::onMouseMove(const UIMouseEvent& e) {
     _hoveredTab = -1;
     _hoveredClose = -1;
-    if (_tabs.size() >= 2 && stripRectWorld().contains(e.mousePos)) {
+    if (!_tabs.empty() && stripRectWorld().contains(e.mousePos)) {
         const int idx = tabIndexAt(e.mousePos);
         if (idx >= 0) {
             _hoveredTab = idx;
@@ -366,9 +392,7 @@ void DockTabGroup::render(IRenderBackend& renderer) {
     // paint into a neighboring panel). The strip paints AFTER popClip
     // so it still covers the active card's own title bar.
     compoundDescendClippedRender(this, renderer);
-    if (_tabs.size() >= 2) {
-        paintStrip(renderer);
-    }
+    paintStrip(renderer);
 }
 
 void DockTabGroup::paintStrip(IRenderBackend& renderer) {
@@ -415,8 +439,14 @@ void DockTabGroup::paintStrip(IRenderBackend& renderer) {
             if (static_cast<int>(i) == _hoveredClose) {
                 renderer.drawRect(close, math::FVector4(0.55f, 0.18f, 0.18f, 1.0f));
             }
-            renderer.drawText(close, L"x", kDockTabFontSize,
-                              math::FVector4(0.90f, 0.90f, 0.92f, 1.0f));
+            const math::FRectangle iconBounds(
+                close.minX + 5.0f, close.minY + 7.0f,
+                close.maxX - 5.0f, close.maxY - 7.0f);
+            const SvgDocument::Ptr& icon = closeIconDocument();
+            if (icon != nullptr) {
+                icon->draw(renderer, iconBounds,
+                           math::FVector4(0.90f, 0.90f, 0.92f, 1.0f));
+            }
         }
     }
 }

@@ -439,14 +439,16 @@ TEST_CASE(textarea_drag_select_extends_selection_across_lines) {
     doc->onMouseButtonDown(UIMouseEvent(FVector2(20.0f, 0.5f * lh), 0));
     CHECK(doc->hasFocus());
 
-    doc->onMouseMove(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
+    doc->onMouseMove(UIMouseEvent(
+        FVector2(30.0f, TextArea::kPaddingY + 2.0f * lh + 0.5f), 0));
     CHECK(ta.hasSelection());
     CHECK(ta.getCaretLine() == 2);
     // Pixel hit-testing uses measured glyph advances. x=30, padding=6
     // lands near the third ASCII caret stop with the fallback metrics.
     CHECK(ta.getCaretCol() == 3);
 
-    doc->onMouseButtonUp(UIMouseEvent(FVector2(30.0f, 2.0f * lh + 0.5f), 0));
+    doc->onMouseButtonUp(UIMouseEvent(
+        FVector2(30.0f, TextArea::kPaddingY + 2.0f * lh + 0.5f), 0));
     CHECK(ta.hasSelection());
 
     um.shutdown();
@@ -622,6 +624,106 @@ TEST_CASE(textarea_lowered_max_length_replacement_reduces_existing_text) {
     CHECK(ta.getText() == L"abefghij");
     ta.undo();
     CHECK(ta.getText() == L"abcdefghij");
+}
+
+TEST_CASE(textarea_code_gutter_draws_line_numbers_and_separator) {
+    TextArea ta;
+    ta.setSize(FVector2(240.0f, 120.0f));
+    ta.setText(L"first\nsecond\nthird");
+    ta.setLineNumbersVisible(true);
+    ta.performLayout();
+
+    MockRenderer renderer;
+    ta.render(renderer);
+    int lineNumbers = 0;
+    int separators = 0;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type == MockRenderer::DrawCall::Text
+            && (call.text == L"1" || call.text == L"2"
+                || call.text == L"3")) {
+            ++lineNumbers;
+        }
+        if (call.type == MockRenderer::DrawCall::Rect
+            && std::abs(call.color.x - 0.25f) < 0.01f
+            && std::abs(call.color.y - 0.27f) < 0.01f
+            && std::abs((call.bounds.maxX - call.bounds.minX) - 1.0f)
+                < 0.01f) {
+            ++separators;
+        }
+    }
+    CHECK(lineNumbers == 3);
+    CHECK(separators == 1);
+}
+
+TEST_CASE(textarea_syntax_highlighter_colors_only_declared_span) {
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 80.0f));
+    ta.setText(L"script Demo");
+    const FVector4 keyword(0.78f, 0.48f, 0.96f, 1.0f);
+    ta.setSyntaxHighlighter([keyword](size_t, const std::wstring&) {
+        return std::vector<TextArea::SyntaxSpan>{{0u, 6u, keyword}};
+    });
+    ta.performLayout();
+
+    MockRenderer renderer;
+    ta.render(renderer);
+    int keywordDraws = 0;
+    int ordinaryDraws = 0;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type != MockRenderer::DrawCall::Text) continue;
+        if (call.text == L"script"
+            && std::abs(call.color.x - keyword.x) < 0.01f) {
+            ++keywordDraws;
+        }
+        if (call.text == L" Demo"
+            && std::abs(call.color.x - 0.92f) < 0.01f) {
+            ++ordinaryDraws;
+        }
+    }
+    CHECK(keywordDraws == 1);
+    CHECK(ordinaryDraws == 1);
+}
+
+TEST_CASE(textarea_tab_indents_and_shift_tab_unindents_selected_lines) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    TextArea ta;
+    ta.setText(L"alpha\nbeta");
+    ta.setTabInsertsIndent(true);
+    ta.setTabWidth(4u);
+    ta.setSelection(0, 0, 1, 4);
+    ui.root()->addChildExternal(&ta);
+    ui.setFocus(ta.getDocumentAsFocusable());
+
+    CHECK(ui.onKeyDown(UIKey_Tab));
+    CHECK(ta.getText() == L"    alpha\n    beta");
+    CHECK(ui.getFocusedWidget() == ta.getDocumentAsFocusable());
+
+    CHECK(ui.onKeyDown(UIKey_Shift));
+    CHECK(ui.onKeyDown(UIKey_Tab));
+    CHECK(ui.onKeyUp(UIKey_Shift));
+    CHECK(ta.getText() == L"alpha\nbeta");
+    CHECK(ui.getFocusedWidget() == ta.getDocumentAsFocusable());
+    ui.shutdown();
+}
+
+TEST_CASE(textarea_tab_without_selection_advances_to_next_tab_stop) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    TextArea ta;
+    ta.setText(L"ab");
+    ta.setCaret(0, 2);
+    ta.setTabInsertsIndent(true);
+    ta.setTabWidth(4u);
+    ui.root()->addChildExternal(&ta);
+    ui.setFocus(ta.getDocumentAsFocusable());
+
+    CHECK(ui.onKeyDown(UIKey_Tab));
+    CHECK(ta.getText() == L"ab  ");
+    CHECK(ta.getCaretCol() == 4);
+    ui.shutdown();
 }
 
 TEST_SUITE_END

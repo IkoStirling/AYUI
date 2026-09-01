@@ -213,6 +213,58 @@ TEST_CASE(test_dock_card_maximize_only_when_host_chrome) {
     CHECK(maxClicks == 1);
 }
 
+TEST_CASE(test_dock_card_host_chrome_uses_three_vector_buttons) {
+    auto card = std::make_unique<DockCard>();
+    card->setTitle(L"Detached");
+    card->setSize(FVector2(240.0f, 160.0f));
+    card->setHeaderHeight(22.0f);
+    card->setClosable(true);
+    card->setFloatable(false);
+    card->setShowMinimizeButton(true);
+    card->setShowMaximizeButton(true);
+
+    int minimizeClicks = 0;
+    int maximizeClicks = 0;
+    card->setMinimizeHandler(
+        [](void* user, DockCard*) {
+            *static_cast<int*>(user) += 1;
+        },
+        &minimizeClicks);
+    card->setMaximizeHandler(
+        [](void* user, DockCard*) {
+            *static_cast<int*>(user) += 1;
+        },
+        &maximizeClicks);
+    card->performLayout();
+
+    const FRectangle bounds = card->getWorldBounds();
+    const FVector2 minimizePoint(
+        bounds.maxX - 55.0f, bounds.minY + 10.0f);
+    const FVector2 maximizePoint(
+        bounds.maxX - 33.0f, bounds.minY + 10.0f);
+    CHECK(card->onMouseButtonDown(UIMouseEvent(minimizePoint, 0)));
+    CHECK(card->onMouseButtonUp(UIMouseEvent(minimizePoint, 0)));
+    CHECK(card->onMouseButtonDown(UIMouseEvent(maximizePoint, 0)));
+    CHECK(card->onMouseButtonUp(UIMouseEvent(maximizePoint, 0)));
+    CHECK(minimizeClicks == 1);
+    CHECK(maximizeClicks == 1);
+
+    MockRenderer renderer;
+    card->render(renderer);
+    int vectorIcons = 0;
+    bool usedTextGlyph = false;
+    for (const auto& call : renderer.getDrawCalls()) {
+        if (call.type == MockRenderer::DrawCall::Path) ++vectorIcons;
+        if (call.type == MockRenderer::DrawCall::Text
+            && (call.text == L"x" || call.text == L"X"
+                || call.text == L"-" || call.text == L"□")) {
+            usedTextGlyph = true;
+        }
+    }
+    CHECK(vectorIcons >= 3);
+    CHECK_FALSE(usedTextGlyph);
+}
+
 TEST_CASE(test_dock_card_clips_content_to_body) {
     MockRenderer r;
     auto card = std::make_unique<DockCard>();

@@ -14,14 +14,16 @@
 namespace ayt::ui {
 
 namespace {
-float measureRangeWidth(const std::wstring& text, size_t start, size_t end) {
+float measureRangeWidth(const std::wstring& text, size_t start, size_t end,
+                        int fontSize, IRenderBackend* backend = nullptr) {
     if (end <= start || start >= text.size()) return 0.0f;
     end = std::min(end, text.size());
     const std::wstring range = text.substr(start, end - start);
-    return measurePrefixWidth(range, range.size());
+    return measurePrefixWidth(range, range.size(), backend, fontSize);
 }
 
-int columnFromRangeX(const std::wstring& text, int start, int end, float x) {
+int columnFromRangeX(const std::wstring& text, int start, int end, float x,
+                     int fontSize, IRenderBackend* backend = nullptr) {
     start = std::clamp(start, 0, static_cast<int>(text.size()));
     end = std::clamp(end, start, static_cast<int>(text.size()));
     if (x <= 0.0f || start == end) return start;
@@ -35,7 +37,8 @@ int columnFromRangeX(const std::wstring& text, int start, int end, float x) {
         if (clusterStart >= end) break;
         const int clampedBoundary = std::min(boundary, end);
         const float boundaryX = measureRangeWidth(
-            text, static_cast<size_t>(start), static_cast<size_t>(clampedBoundary));
+            text, static_cast<size_t>(start), static_cast<size_t>(clampedBoundary),
+            fontSize, backend);
         if (x < (previousX + boundaryX) * 0.5f) return previous;
         previous = clampedBoundary;
         previousX = boundaryX;
@@ -85,11 +88,15 @@ public:
     // gate (UIManager::onTextEditingFocusChanged) flips when focus
     // shifts into / out of a TextArea's body.
     bool isTextEditingWidget() const override { return true; }
-
     // Phase C: state query — true between Start and End. Exposed so
     // TextArea::isComposing() can delegate; tests use the public
     // TextArea::isComposing() surface rather than poking here.
     bool isComposing() const { return _composing; }
+
+    bool acceptsEditorTab() const {
+        return _owner != nullptr && _owner->doesTabInsertIndent()
+            && !_owner->isReadOnly();
+    }
 
     bool onMouseButtonDown(const UIMouseEvent& e) override {
         if (e.mouseButton != 0) return false;
@@ -234,8 +241,10 @@ public:
         }
         int line = _owner->_caretLine;
         int col  = _owner->_caretCol;
+        const int fontSize = _owner->effectiveFontSize();
         const float availableWidth = std::max(
-            1.0f, _owner->getSize().x - 2.0f * TextArea::kPaddingX);
+            1.0f, _owner->getSize().x - _owner->textStartX()
+                - TextArea::kPaddingX);
         const std::vector<TextArea::VisualLine> visual =
             _owner->buildVisualLines(availableWidth);
         auto currentVisualIndex = [&]() -> int {
@@ -278,10 +287,11 @@ public:
                     0, static_cast<int>(visual.size()) - 1);
                 const float x = measureRangeWidth(_owner->_lines[line],
                     static_cast<size_t>(visual[current].startCol),
-                    static_cast<size_t>(col));
+                    static_cast<size_t>(col), fontSize);
                 line = visual[target].logicalLine;
                 col = columnFromRangeX(_owner->_lines[line],
-                    visual[target].startCol, visual[target].endCol, x);
+                    visual[target].startCol, visual[target].endCol, x,
+                    fontSize);
             }
             break;
         }
@@ -299,10 +309,8 @@ public:
         case UIKey_Backspace: _owner->deleteLeft(); return true;
         case UIKey_Delete:    _owner->deleteRight(); return true;
         case UIKey_Tab:
-            // UIManager.onKeyDown intercepts Tab BEFORE delegating; swallow
-            // defensively if a host bypassed UIManager so caret does not
-            // jump unexpectedly.
-            return true;
+            return _owner->doesTabInsertIndent()
+                ? _owner->applyIndent(shift) : true;
         default: return false;
         }
         if (shift) _owner->setCaretExtendingSelection(line, col);
@@ -392,11 +400,14 @@ public:
         const auto& lines = _owner->_lines;
         const float lh = _owner->getLineHeight();
         const math::FVector2 origin = getWorldBounds().getMin();
-        const float fontSize = lh - 4.0f;     // rough visual mapping
+        const int fontSize = _owner->effectiveFontSize();
+        const float gutter = _owner->gutterWidth(&renderer);
+        const float textOriginX = origin.x + _owner->textStartX(&renderer);
         const float availableWidth = std::max(
-            1.0f, getSize().x - 2.0f * TextArea::kPaddingX);
+            1.0f, getSize().x - _owner->textStartX(&renderer)
+                - TextArea::kPaddingX);
         const std::vector<TextArea::VisualLine> visual =
-            _owner->buildVisualLines(availableWidth);
+            _owner->buildVisualLines(availableWidth, &renderer);
 
         // PR-Container-Shared-Contract: pushClip(pushClip(getClientRect()))).
         // TextDocument has no chrome of its own so getClientRect() ==
@@ -406,6 +417,20 @@ public:
         // bleeds into neighbouring widgets).
         const math::FRectangle docBounds = getClientRect();
         renderer.pushClip(docBounds);
+
+        // Code-editor gutter. It scrolls with the document vertically, while
+        // remaining a distinct column with a one-pixel separator.
+        if (_owner->areLineNumbersVisible() && gutter > 0.0f) {
+            const float separatorX = origin.x + gutter - 1.0f;
+            renderer.drawRect(
+                math::FRectangle(origin.x, docBounds.minY,
+                                 origin.x + gutter, docBounds.maxY),
+                math::FVector4(0.105f, 0.108f, 0.12f, 1.0f));
+            renderer.drawRect(
+                math::FRectangle(separatorX, docBounds.minY,
+                                 separatorX + 1.0f, docBounds.maxY),
+                math::FVector4(0.25f, 0.27f, 0.31f, 1.0f));
+        }
 
         // Selection highlight, projected across every affected visual row.
         if (_owner->hasSelection()) {
@@ -427,14 +452,21 @@ public:
                 const int a = std::max(segment.startCol, selectionStart);
                 const int b = std::min(segment.endCol, selectionEnd);
                 if (a >= b) continue;
-                const float x0 = origin.x + TextArea::kPaddingX
+                const float x0 = textOriginX
                     + measureRangeWidth(lines[segment.logicalLine],
-                        static_cast<size_t>(segment.startCol), static_cast<size_t>(a));
-                const float x1 = origin.x + TextArea::kPaddingX
+                        static_cast<size_t>(segment.startCol), static_cast<size_t>(a),
+                        fontSize, &renderer);
+                const float x1 = textOriginX
                     + measureRangeWidth(lines[segment.logicalLine],
-                        static_cast<size_t>(segment.startCol), static_cast<size_t>(b));
-                const float y = origin.y + static_cast<float>(row) * lh;
-                renderer.drawRect({{x0, y}, {x1 - x0, lh}},
+                        static_cast<size_t>(segment.startCol), static_cast<size_t>(b),
+                        fontSize, &renderer);
+                const float y = origin.y + TextArea::kPaddingY
+                    + static_cast<float>(row) * lh;
+                // FRectangle's two-vector constructor is (min, max), not
+                // (position, size). Passing width/height as the second vector
+                // inverted every translated selection rectangle.
+                renderer.drawRect(
+                    math::FRectangle(x0, y, x1, y + lh),
                                   math::FVector4(0.30f, 0.45f, 0.78f, 0.35f));
             }
         }
@@ -442,15 +474,66 @@ public:
         // Visual lines. Soft wraps never mutate the logical line buffer.
         for (size_t i = 0; i < visual.size(); ++i) {
             const TextArea::VisualLine& segment = visual[i];
-            math::FVector2 p(origin.x + TextArea::kPaddingX,
-                             origin.y + static_cast<float>(i) * lh + TextArea::kPaddingY);
+            math::FVector2 p(textOriginX,
+                             origin.y + static_cast<float>(i) * lh
+                                 + TextArea::kPaddingY);
+            const bool firstVisualRow = i == 0u
+                || visual[i - 1u].logicalLine != segment.logicalLine;
+            if (_owner->areLineNumbersVisible() && firstVisualRow) {
+                const std::wstring number = std::to_wstring(
+                    static_cast<unsigned long long>(segment.logicalLine + 1));
+                const float numberWidth = measurePrefixWidth(
+                    number, number.size(), &renderer, fontSize);
+                const float right = origin.x + gutter - 7.0f;
+                renderer.drawText(
+                    math::FRectangle(right - numberWidth, p.y,
+                                     right, p.y + lh),
+                    number, fontSize,
+                    math::FVector4(0.48f, 0.51f, 0.58f, 1.0f));
+            }
             if (segment.endCol > segment.startCol) {
-                const std::wstring text = lines[segment.logicalLine].substr(
-                    static_cast<size_t>(segment.startCol),
-                    static_cast<size_t>(segment.endCol - segment.startCol));
-                math::FRectangle bounds{p, {segment.width, lh}};
-                renderer.drawText(bounds, text, static_cast<int>(fontSize),
-                                  math::FVector4(0.92f, 0.92f, 0.94f, 1.0f));
+                const std::wstring& line = lines[segment.logicalLine];
+                const math::FVector4 defaultColor(
+                    0.92f, 0.92f, 0.94f, 1.0f);
+                std::vector<TextArea::SyntaxSpan> spans;
+                if (_owner->_syntaxHighlighter) {
+                    spans = _owner->_syntaxHighlighter(
+                        static_cast<size_t>(segment.logicalLine), line);
+                    std::stable_sort(spans.begin(), spans.end(),
+                        [](const TextArea::SyntaxSpan& a,
+                           const TextArea::SyntaxSpan& b) {
+                            return a.start < b.start;
+                        });
+                }
+                const size_t rowStart = static_cast<size_t>(segment.startCol);
+                const size_t rowEnd = static_cast<size_t>(segment.endCol);
+                size_t cursor = rowStart;
+                const auto drawRange = [&](size_t start, size_t end,
+                                           const math::FVector4& color) {
+                    if (end <= start) return;
+                    const float x = p.x + measureRangeWidth(
+                        line, rowStart, start, fontSize, &renderer);
+                    const float width = measureRangeWidth(
+                        line, start, end, fontSize, &renderer);
+                    renderer.drawText(
+                        math::FRectangle(x, p.y, x + width, p.y + lh),
+                        line.substr(start, end - start), fontSize, color);
+                };
+                for (const TextArea::SyntaxSpan& span : spans) {
+                    const size_t spanEnd = span.start + span.length;
+                    if (span.length == 0u || spanEnd <= rowStart
+                        || span.start >= rowEnd) {
+                        continue;
+                    }
+                    const size_t a = std::max({rowStart, cursor, span.start});
+                    const size_t b = std::min(rowEnd, spanEnd);
+                    if (a > cursor) drawRange(cursor, a, defaultColor);
+                    if (b > a) {
+                        drawRange(a, b, span.color);
+                        cursor = b;
+                    }
+                }
+                if (cursor < rowEnd) drawRange(cursor, rowEnd, defaultColor);
             }
         }
 
@@ -468,12 +551,14 @@ public:
                 }
             }
             const TextArea::VisualLine& segment = visual[caretRow];
-            const float x = origin.x + TextArea::kPaddingX
+            const float x = textOriginX
                 + measureRangeWidth(lines[segment.logicalLine],
                     static_cast<size_t>(segment.startCol),
-                    static_cast<size_t>(_owner->_caretCol));
-            const float y = origin.y + static_cast<float>(caretRow) * lh + 1.0f;
-            renderer.drawRect({{x, y}, {1.0f, lh - 2.0f}},
+                    static_cast<size_t>(_owner->_caretCol), fontSize, &renderer);
+            const float y = origin.y + TextArea::kPaddingY
+                + static_cast<float>(caretRow) * lh + 1.0f;
+            renderer.drawRect(
+                math::FRectangle(x, y, x + 1.0f, y + lh - 2.0f),
                               math::FVector4(1.0f, 1.0f, 1.0f, 0.95f));
         }
 
@@ -504,11 +589,13 @@ public:
             const float caretX = measureRangeWidth(
                 lines[caretSegment.logicalLine],
                 static_cast<size_t>(caretSegment.startCol),
-                static_cast<size_t>(_owner->_caretCol));
+                static_cast<size_t>(_owner->_caretCol), fontSize, &renderer);
             const float ulW = measurePrefixWidth(_compositionPreview,
-                                                 _compositionPreview.size());
-            const float ulX = origin.x + TextArea::kPaddingX + caretX;
-            const float ulY = origin.y + static_cast<float>(caretRow) * lh + lh - 3.0f;
+                                                 _compositionPreview.size(),
+                                                 &renderer, fontSize);
+            const float ulX = textOriginX + caretX;
+            const float ulY = origin.y + TextArea::kPaddingY
+                + static_cast<float>(caretRow) * lh + lh - 3.0f;
             constexpr float ulH = 1.5f;
             renderer.drawRect(math::FRectangle(ulX, ulY, ulX + ulW, ulY + ulH),
                               ulColor);
@@ -534,6 +621,11 @@ private:
     int _lastClickLine = 0;
     int _lastClickCol = 0;
 };
+
+bool TextArea::focusedDocumentAcceptsTab(const Widget* focused) {
+    const auto* document = dynamic_cast<const TextDocument*>(focused);
+    return document != nullptr && document->acceptsEditorTab();
+}
 
 // =============================================================================
 // TextArea
@@ -865,16 +957,150 @@ void TextArea::setLineHeight(float h) {
     invalidateDocument();
 }
 
+void TextArea::setLineNumbersVisible(bool visible) {
+    if (_showLineNumbers == visible) return;
+    _showLineNumbers = visible;
+    syncDocumentSizeToContent();
+    markBoundsDirty();
+    invalidateDocument();
+}
+
+void TextArea::setSyntaxHighlighter(SyntaxHighlighter highlighter) {
+    _syntaxHighlighter = std::move(highlighter);
+    invalidateDocument();
+}
+
+void TextArea::setTabInsertsIndent(bool enabled) {
+    _tabInsertsIndent = enabled;
+}
+
+void TextArea::setTabWidth(size_t spaces) {
+    _tabWidth = std::clamp<size_t>(spaces, 1u, 16u);
+}
+
+float TextArea::gutterWidth(IRenderBackend* backend) const {
+    if (!_showLineNumbers) return 0.0f;
+    const std::wstring largest = std::to_wstring(
+        static_cast<unsigned long long>(std::max<size_t>(1u, _lines.size())));
+    const float digits = measurePrefixWidth(
+        largest, largest.size(), backend, effectiveFontSize());
+    return std::max(32.0f, digits + 14.0f);
+}
+
+float TextArea::textStartX(IRenderBackend* backend) const {
+    return gutterWidth(backend) + kPaddingX;
+}
+
+bool TextArea::applyIndent(bool unindent) {
+    if (_readOnly || !_tabInsertsIndent) return true;
+    const int width = static_cast<int>(std::max<size_t>(1u, _tabWidth));
+
+    if (!hasSelection()) {
+        if (!unindent) {
+            const int count = width - (_caretCol % width);
+            return insertText(std::wstring(static_cast<size_t>(count), L' '));
+        }
+        std::wstring& line = _lines[static_cast<size_t>(_caretLine)];
+        int remove = 0;
+        if (!line.empty() && line.front() == L'\t') {
+            remove = 1;
+        } else {
+            while (remove < width
+                   && remove < static_cast<int>(line.size())
+                   && line[static_cast<size_t>(remove)] == L' ') {
+                ++remove;
+            }
+        }
+        if (remove == 0) return true;
+        pushUndo();
+        line.erase(0u, static_cast<size_t>(remove));
+        _caretCol = std::max(0, _caretCol - remove);
+        clearSelection();
+        syncDocumentSizeToContent();
+        _textCacheDirty = true;
+        fireTextChanged();
+        invalidateDocument();
+        return true;
+    }
+
+    int first = _selStartLine;
+    int last = _selEndLine;
+    int normalizedEndCol = _selEndCol;
+    if (first > last || (first == last && _selStartCol > _selEndCol)) {
+        std::swap(first, last);
+        normalizedEndCol = _selStartCol;
+    }
+    // A selection ending at column zero conventionally excludes that final
+    // line from block indentation.
+    if (last > first && normalizedEndCol == 0) --last;
+
+    std::vector<int> deltas(_lines.size(), 0);
+    size_t added = 0u;
+    for (int lineIndex = first; lineIndex <= last; ++lineIndex) {
+        const std::wstring& line = _lines[static_cast<size_t>(lineIndex)];
+        if (!unindent) {
+            deltas[static_cast<size_t>(lineIndex)] = width;
+            added += static_cast<size_t>(width);
+            continue;
+        }
+        int remove = 0;
+        if (!line.empty() && line.front() == L'\t') {
+            remove = 1;
+        } else {
+            while (remove < width
+                   && remove < static_cast<int>(line.size())
+                   && line[static_cast<size_t>(remove)] == L' ') {
+                ++remove;
+            }
+        }
+        deltas[static_cast<size_t>(lineIndex)] = -remove;
+    }
+    if (!unindent && _maxLength > 0
+        && getText().size() + added > _maxLength) {
+        return true;
+    }
+    if (unindent && std::none_of(
+            deltas.begin(), deltas.end(), [](int delta) { return delta != 0; })) {
+        return true;
+    }
+
+    pushUndo();
+    const std::wstring indent(static_cast<size_t>(width), L' ');
+    for (int lineIndex = first; lineIndex <= last; ++lineIndex) {
+        std::wstring& line = _lines[static_cast<size_t>(lineIndex)];
+        const int delta = deltas[static_cast<size_t>(lineIndex)];
+        if (delta > 0) {
+            line.insert(0u, indent);
+        } else if (delta < 0) {
+            line.erase(0u, static_cast<size_t>(-delta));
+        }
+    }
+    const auto adjust = [&deltas](int line, int col) {
+        if (line < 0 || line >= static_cast<int>(deltas.size())) return col;
+        return std::max(0, col + deltas[static_cast<size_t>(line)]);
+    };
+    _selStartCol = adjust(_selStartLine, _selStartCol);
+    _selEndCol = adjust(_selEndLine, _selEndCol);
+    _caretLine = _selEndLine;
+    _caretCol = _selEndCol;
+    syncDocumentSizeToContent();
+    _textCacheDirty = true;
+    fireTextChanged();
+    invalidateDocument();
+    return true;
+}
+
 std::vector<TextArea::VisualLine> TextArea::buildVisualLines(
-    float availableWidth) const {
+    float availableWidth, IRenderBackend* backend) const {
     std::vector<VisualLine> result;
     availableWidth = std::max(1.0f, availableWidth);
+    const int fontSize = effectiveFontSize();
     for (size_t logical = 0; logical < _lines.size(); ++logical) {
         const std::wstring& line = _lines[logical];
         if (!_wordWrap || line.empty()) {
             result.push_back(VisualLine{
                 static_cast<int>(logical), 0, static_cast<int>(line.size()),
-                measureRangeWidth(line, 0, line.size())});
+                measureRangeWidth(line, 0, line.size(), fontSize, backend)});
             continue;
         }
 
@@ -886,7 +1112,8 @@ std::vector<TextArea::VisualLine> TextArea::buildVisualLines(
             for (const UnicodeTextCluster& cluster : analysis.clusters) {
                 const size_t clusterEnd = cluster.textStart + cluster.textLength;
                 if (clusterEnd <= start) continue;
-                const float candidateWidth = measureRangeWidth(line, start, clusterEnd);
+                const float candidateWidth = measureRangeWidth(
+                    line, start, clusterEnd, fontSize, backend);
                 if (candidateWidth > availableWidth && end > start) break;
                 end = clusterEnd;
                 if (cluster.softBreakAfter) lastSoftBreak = clusterEnd;
@@ -896,7 +1123,8 @@ std::vector<TextArea::VisualLine> TextArea::buildVisualLines(
             if (end < line.size() && lastSoftBreak > start) end = lastSoftBreak;
             result.push_back(VisualLine{
                 static_cast<int>(logical), static_cast<int>(start),
-                static_cast<int>(end), measureRangeWidth(line, start, end)});
+                static_cast<int>(end),
+                measureRangeWidth(line, start, end, fontSize, backend)});
             start = end;
         }
     }
@@ -906,14 +1134,22 @@ std::vector<TextArea::VisualLine> TextArea::buildVisualLines(
 
 void TextArea::hitTestDocumentPosition(const math::FVector2& local,
                                        int& line, int& col) const {
-    const float availableWidth = std::max(1.0f, getSize().x - 2.0f * kPaddingX);
+    const float availableWidth = std::max(
+        1.0f, getSize().x - textStartX() - kPaddingX);
     const std::vector<VisualLine> visual = buildVisualLines(availableWidth);
-    int row = static_cast<int>(local.y / _lineHeight);
+    int row = static_cast<int>((local.y - kPaddingY) / _lineHeight);
     row = std::clamp(row, 0, static_cast<int>(visual.size()) - 1);
     const VisualLine& segment = visual[static_cast<size_t>(row)];
     line = segment.logicalLine;
     col = columnFromRangeX(_lines[line], segment.startCol, segment.endCol,
-                           local.x - kPaddingX);
+                           local.x - textStartX(), effectiveFontSize());
+}
+
+int TextArea::effectiveFontSize() const noexcept {
+    // Keep the historical line-height-to-font-size mapping used by drawing,
+    // but make it the single source of truth for rendering, wrapping,
+    // hit-testing, selection, caret placement and content sizing.
+    return std::max(1, static_cast<int>(_lineHeight - 4.0f));
 }
 
 void TextArea::setCaretExtendingSelection(int line, int col) {
@@ -979,7 +1215,8 @@ void TextArea::invalidateDocument() {
 
 void TextArea::syncDocumentSizeToContent() {
     if (_document == nullptr) return;
-    const float wrapWidthPx = std::max(1.0f, getSize().x - 2.0f * kPaddingX);
+    const float wrapWidthPx = std::max(
+        1.0f, getSize().x - textStartX() - kPaddingX);
     const std::vector<VisualLine> visual = buildVisualLines(wrapWidthPx);
     const float h = static_cast<float>(visual.size()) * _lineHeight
         + 2.0f * kPaddingY;
@@ -987,8 +1224,9 @@ void TextArea::syncDocumentSizeToContent() {
     // hint that allows the longest line to fit if hbar were enabled.
     float maxLineW = 0.0f;
     for (const auto& l : _lines) {
-        const float w = measurePrefixWidth(l, l.size());
-        maxLineW = std::max(maxLineW, w + 2.0f * kPaddingX);
+        const float w = measurePrefixWidth(
+            l, l.size(), nullptr, effectiveFontSize());
+        maxLineW = std::max(maxLineW, w + textStartX() + kPaddingX);
     }
     const float contentWidth = _wordWrap ? getSize().x
                                          : std::max(maxLineW, getSize().x);

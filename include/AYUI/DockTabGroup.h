@@ -12,13 +12,12 @@ class DockCard;
 // DockTabGroup — the leaf node of the dock tree. Hosts 1..N DockCards
 // as tabs.
 //
-//   * Single card: the card is laid out full-bleed (its own title bar
-//     is the only chrome — legacy 5-slot geometry, byte-identical;
-//     test_center_card_fills_slot_height pins the exact bounds).
-//   * ≥2 cards: a custom-painted tab strip (kTabStripHeight) appears at
-//     the top. The active card is slid up by (stripH - cardHeaderHeight)
-//     so the strip exactly covers the card's own title bar and the card
-//     body starts below the strip. Inactive cards are setVisible(false).
+//   * Every non-empty leaf paints a custom tab strip, including a leaf with
+//     one card. This keeps a lone editor tab at kPreferredTabWidth instead of
+//     stretching its label across the panel.
+//   * The active card is slid up by (stripH - cardHeaderHeight) so the strip
+//     exactly covers the card's own title bar and its body starts below the
+//     strip. Inactive cards are setVisible(false).
 //   * The strip's close x routes through setOnCloseTab (DockArea injects
 //     DockArea::closeCard); pressing an inactive tab activates it;
 //     pressing the ACTIVE tab starts a G12 tear-off drag of that card
@@ -68,12 +67,13 @@ public:
     void setOnCloseTab(CloseCallback cb) { _onCloseTab = std::move(cb); }
 
     void performLayout() override;
-    // Cards render first; the tab strip paints AFTER so it covers the
-    // active card's own title bar (slid up beneath it).
+    // Cards render first; the tab strip paints AFTER so it covers the active
+    // card's own title bar (slid up beneath it), even for one tab.
     void render(IRenderBackend& renderer) override;
     // Strip region claims hits before the active card's title bar.
     Widget* hitTest(const math::FVector2& worldPos) override;
     bool onMouseButtonDown(const UIMouseEvent& e) override;
+    bool onMouseButtonUp(const UIMouseEvent& e) override;
     bool onMouseMove(const UIMouseEvent& e) override;
     void onMouseLeave() override;
     UiCursorHint getCursorHint() const override;
@@ -90,6 +90,7 @@ private:
     size_t _activeIndex = 0;
     int _hoveredTab = -1;     // strip tab under the cursor, or -1
     int _hoveredClose = -1;   // close x under the cursor, or -1
+    int _armedClose = -1;     // close commits on mouse-up (capture-safe)
     CloseCallback _onCloseTab;
 };
 

@@ -35,6 +35,7 @@ set(SRC_FILES
     Controls/AYToolBarSeparator.cpp
     Controls/AYStatusBar.cpp
     Controls/AYListView.cpp
+    Controls/AYTileView.cpp
     Controls/AYComboBox.cpp
     Controls/AYTabControl.cpp
     Controls/AYTypeaheadBuffer.cpp
@@ -109,6 +110,7 @@ set(HEAD_FILES
     include/AYUI/InteractiveWidget.h
     include/AYUI/LeafWidget.h
     include/AYUI/ListView.h
+    include/AYUI/TileView.h
     include/AYUI/ComboBox.h
     include/AYUI/TabControl.h
     include/AYUI/TypeaheadBuffer.h

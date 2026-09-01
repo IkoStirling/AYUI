@@ -24,6 +24,7 @@
 #include "AYUI/ScrollView.h"
 #include "AYUI/Slider.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/SelectableWidget.h"
 #include "AYUI/CompoundFocusableWidget.h"

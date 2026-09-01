@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYUI/Panel.h"
+#include "AYUI/SvgIcon.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -151,6 +152,12 @@ public:
         markDirty();
     }
     bool showMaximizeButton() const { return _showMaximizeButton; }
+    void setShowMinimizeButton(bool show) {
+        if (_showMinimizeButton == show) return;
+        _showMinimizeButton = show;
+        markDirty();
+    }
+    bool showMinimizeButton() const { return _showMinimizeButton; }
     // Visual only — host keeps this in sync with OS IsZoomed.
     void setMaximizedVisual(bool maximized) {
         if (_maximizedVisual == maximized) return;
@@ -158,6 +165,20 @@ public:
         markDirty();
     }
     bool maximizedVisual() const { return _maximizedVisual; }
+
+    // Editor-owned semantic icon selection, AYUI-owned vector drawing. When
+    // any document is null DockCard uses its built-in vector fallback, never
+    // a font glyph, so promoted chrome is stable across installed fonts.
+    void setHostChromeIcons(SvgDocument::Ptr minimize,
+                            SvgDocument::Ptr maximize,
+                            SvgDocument::Ptr restore,
+                            SvgDocument::Ptr close) {
+        _minimizeIcon = std::move(minimize);
+        _maximizeIcon = std::move(maximize);
+        _restoreIcon = std::move(restore);
+        _closeIcon = std::move(close);
+        markDirty();
+    }
 
     // Raw handler (not std::function): promote runs mid-drag while the
     // card still holds a CloseCallback; assigning another std::function
@@ -170,6 +191,15 @@ public:
     void clearMaximizeHandler() {
         _maximizeFn = nullptr;
         _maximizeUser = nullptr;
+    }
+    using MinimizeHandler = void (*)(void* user, DockCard* card);
+    void setMinimizeHandler(MinimizeHandler fn, void* user) {
+        _minimizeFn = fn;
+        _minimizeUser = user;
+    }
+    void clearMinimizeHandler() {
+        _minimizeFn = nullptr;
+        _minimizeUser = nullptr;
     }
 
 private:
@@ -186,17 +216,27 @@ private:
     bool _titleBarHover = false;
     bool _closeHover = false;
     bool _maximizeHover = false;
+    bool _minimizeHover = false;
     // Close affordance: armed on LMB-down over X, fired on LMB-up.
     bool _closeArmed = false;
     bool _maximizeArmed = false;
+    bool _minimizeArmed = false;
     bool _showResizeGrip = false;
     bool _showMaximizeButton = false;
+    bool _showMinimizeButton = false;
     bool _maximizedVisual = false;
     MaximizeHandler _maximizeFn = nullptr;
     void* _maximizeUser = nullptr;
+    MinimizeHandler _minimizeFn = nullptr;
+    void* _minimizeUser = nullptr;
+    SvgDocument::Ptr _minimizeIcon;
+    SvgDocument::Ptr _maximizeIcon;
+    SvgDocument::Ptr _restoreIcon;
+    SvgDocument::Ptr _closeIcon;
 
     math::FRectangle closeButtonRect() const;
     math::FRectangle maximizeButtonRect() const;
+    math::FRectangle minimizeButtonRect() const;
 
     // PR-Dock-TearOff — press position of the last accepted title-bar
     // drag. The void-drop promote path (onDragEnd) compares it against

@@ -93,17 +93,15 @@ TEST_CASE(textarea_caret_position_uses_backend_width) {
     // The fallback would be 5 * 7 + 6 = 41. We assert the caret x is in
     // the band [60, 75] to prove the backend path was used.
     //
-    // PR-A1 R3 fix: identify the caret by its height (lineHeight - 2 ≈ 16)
-    // and Y position (first line, so minY ≈ 1). The drawRect call
-    // `{{x, y}, {1, lh-2}}` produces a degenerate negative-width rect
-    // through the MockRenderer (an [ay-renderer-known-gaps] issue), so
-    // we cannot use width as a filter — but the minX value is correct
-    // (verified against the dumped draw calls).
+    // Identify the caret by its 1px width, lineHeight - 2 height and first-row
+    // Y position. FRectangle stores min/max coordinates, so this also locks
+    // the translated rectangle contract used by the real renderer.
     float caretX = -1.0f;
     bool found = false;
     for (const auto& dc : backend.getDrawCalls()) {
         if (dc.type == MockRenderer::DrawCall::Type::Rect &&
-            dc.bounds.minY >= 0.5f && dc.bounds.minY <= 2.0f &&
+            dc.bounds.width() >= 0.9f && dc.bounds.width() <= 1.1f &&
+            dc.bounds.minY >= 4.5f && dc.bounds.minY <= 5.5f &&
             dc.bounds.height() >= 14.0f && dc.bounds.height() <= 18.0f) {
             caretX = dc.bounds.minX;
             found = true;
@@ -113,6 +111,38 @@ TEST_CASE(textarea_caret_position_uses_backend_width) {
     CHECK(found);
     CHECK(caretX >= 60.0f);
     CHECK(caretX <= 75.0f);
+    ui.shutdown();
+}
+
+TEST_CASE(textarea_caret_uses_same_font_size_and_padding_as_text) {
+    UIManager ui;
+    MockRenderer backend;
+    ui.initialize(&backend);
+    TextArea ta;
+    ta.setPosition(FVector2(240.0f, 130.0f));
+    ta.setSize(FVector2(360.0f, 160.0f));
+    ta.setLineHeight(17.0f); // DSL source editor: effective font size is 13.
+    ta.setText(L"abcd");
+    ta.setCaret(0, 4);
+    ta.performLayout();
+    ta.getDocumentAsFocusable()->setFocus(true);
+    ta.render(backend);
+
+    bool found = false;
+    for (const auto& dc : backend.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Type::Rect
+            || dc.bounds.width() < 0.9f || dc.bounds.width() > 1.1f
+            || dc.bounds.height() < 14.9f || dc.bounds.height() > 15.1f) {
+            continue;
+        }
+        found = true;
+        // MockRenderer: 4 glyphs * 13px * 0.6 + 6px horizontal padding.
+        CHECK_FLOAT_EQ(dc.bounds.minX, 240.0f + 37.2f, 1e-3f);
+        // Text, hit-testing and caret all begin after the same 4px top pad.
+        CHECK_FLOAT_EQ(dc.bounds.minY, 130.0f + 5.0f, 1e-3f);
+        break;
+    }
+    CHECK(found);
     ui.shutdown();
 }
 
@@ -130,19 +160,13 @@ TEST_CASE(textarea_selection_rect_uses_backend_width) {
 
     // The selection rect should have minX = 6 * 12 + 6 = 78 (with backend
     // width 12px/char + kPaddingX). Fallback would give 6 * 7 + 6 = 48.
-    // We identify the selection by its colour band (alpha < 1) and
-    // height (lh). MockRenderer's w = maxX - minX is computed at the
-    // drawRect site using the actual emitted size, but the recorder
-    // stores the min/max verbatim so minX is the trustworthy signal.
+    // We identify the selection by its measured start and positive extent.
     float selMinX = -1.0f;
     bool found = false;
     for (const auto& dc : backend.getDrawCalls()) {
-        // Selection rect: minX=78 (backend path), full line height, w
-        // negative because of the MockRenderer [ay-renderer-known-gaps]
-        // issue. minX is the trustworthy signal.
         if (dc.type == MockRenderer::DrawCall::Type::Rect &&
             dc.bounds.height() >= 16.0f && dc.bounds.height() <= 20.0f &&
-            dc.bounds.minX >= 70.0f) {
+            dc.bounds.width() > 0.0f && dc.bounds.minX >= 70.0f) {
             selMinX = dc.bounds.minX;
             found = true;
             break;
@@ -152,6 +176,33 @@ TEST_CASE(textarea_selection_rect_uses_backend_width) {
     // Backend x0 = 6*12 + 6 = 78. Allow ±2px for floating-point.
     CHECK(selMinX >= 76.0f);
     CHECK(selMinX <= 80.0f);
+    ui.shutdown();
+}
+
+TEST_CASE(textarea_translated_text_bounds_use_absolute_max_coordinates) {
+    UIManager ui;
+    WideMockRenderer backend;
+    ui.initialize(&backend);
+    TextArea ta;
+    ta.setPosition(FVector2(240.0f, 130.0f));
+    ta.setSize(FVector2(360.0f, 160.0f));
+    ta.setText(L"translated");
+    ta.performLayout();
+    ta.render(backend);
+
+    bool found = false;
+    for (const auto& dc : backend.getDrawCalls()) {
+        if (dc.type != MockRenderer::DrawCall::Type::Text
+            || dc.text != L"translated") {
+            continue;
+        }
+        found = true;
+        CHECK(dc.bounds.minX >= 240.0f);
+        CHECK(dc.bounds.minY >= 130.0f);
+        CHECK(dc.bounds.maxX > dc.bounds.minX);
+        CHECK(dc.bounds.maxY > dc.bounds.minY);
+    }
+    CHECK(found);
     ui.shutdown();
 }
 

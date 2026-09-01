@@ -17,10 +17,10 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 
 - Widget 树、命中测试、事件冒泡、焦点、鼠标捕获、拖放和多窗口 `UIManager`
 - VBox/HBox、GridPanel、ScrollView、Splitter 与约束辅助
-- Button、输入框、列表、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
+- Button、输入框、ListView、虚拟化 TileView、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
 - DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
-- 40 个注册类型的 Serializer wire contract，含 Grid cell、复合内容、Menu/Dock/Modal 专用结构
+- 41 个注册类型的 Serializer wire contract，含 Grid cell、虚拟化 TileView、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 逻辑 DIP 坐标、独立 DPI/UI scale、物理输入换算与按缩放倍率栅格化字体
 - 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断、增量 diff 及 Serializer 元数据
@@ -40,7 +40,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery 与独立 Layout Editor
 
-2026-08-31 Windows Debug 当前基线为 `4910 / 4910` 条断言通过。2026-08-29 审计快照为
+2026-08-31 Windows Debug 当前基线为 `5009 / 5009` 条断言通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -146,6 +146,40 @@ intro.play();
 
 Widget 的简单属性动画仍可直接使用 `animateOpacity/animatePositionTo`；传入 `AnimationOptions` 可设置
 完成/取消回调、importance，并通过 `pauseAnimations/resumeAnimations/cancelAnimations` 控制播放。
+
+大数据网格使用 `TileView`。控件只分配“可见行 + overscan”的 `TileCell`，滚动时重绑逻辑索引；
+宿主通过 binder 把自己的数据模型投影到这些临时 cell，不应保存某个 index 对应的 `TileCell*`：
+
+```cpp
+TileView tiles;
+tiles.setTileSize({104.0f, 150.0f});
+tiles.setInfoStripHeight(16.0f);
+tiles.setCornerMarkerSize(12.0f);
+tiles.setThumbnailAspectRatio(1.0f);              // width / height
+tiles.setSelectionMode(TileView::SelectionMode::Extended);
+tiles.setItems(assetDisplayNames);               // 1 万项也只保留少量 cell
+tiles.setCellBinder([&](TileCell& cell, int index, const std::wstring&) {
+    const auto presentation = assetPresenter.present(index);
+    cell.setText(presentation.name);
+    cell.setInfoStrip(presentation.type, presentation.categoryColor,
+                      math::FVector4(1, 1, 1, 1));
+    cell.setCornerMarkerVisible(presentation.marked);
+    cell.setAccentColor(presentation.categoryColor);
+});
+tiles.setOnRenameRequested([](int index) { /* F2 */ });
+tiles.setOnItemDoubleClicked([](int index, TileCell::HitRegion region) {
+    // region 精确区分 Thumbnail / Label / Body。
+});
+```
+
+方向键按当前列数导航，Home/End/PageUp/PageDown、Ctrl+A、Shift 范围选择和 Ctrl 焦点移动均由
+TileView 处理。拖拽默认产生 `AYUI.TileItems` payload；文件浏览器等宿主可用
+`setDragPayloadBuilder()` 替换 payload。拖拽靠近视口上下边缘时会自动滚动。
+
+`InfoStrip` 与 `CornerMarker` 是无业务语义的展示接口：AYUI 不解释横条文本、类别或标记含义。
+横条固定在缩略图与文件名之间，角标用 vector path 绘制在缩略图右上角；二者均不引入新的
+`HitRegion`。虚拟池每次重绑会在调用 binder 前清除横条、角标、缩略图、Badge 和辅助文字，
+因此 binder 只需设置当前 item 实际拥有的状态，不能保存 `TileCell*`。
 
 ## 数据驱动约定
 
@@ -328,7 +362,7 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
   fill-rule 选择和独立边缘 AA fringe 尚未实现。粒子、后端资源生命周期和显式 pass 仍走即时兜底。
 - POSIX Clipboard 按 macOS `pbcopy/pbpaste`、Wayland `wl-copy/wl-paste`、X11 `xclip/xsel`
   的顺序选择可用后端；无可用 helper 或 headless session 时返回 `false`，不会阻塞或回退到私有剪贴板。
-- `WidgetSerializer` 已覆盖全部 40 个公共注册类型；Grid、ScrollView、Menu、StatusBar、Tab、
+- `WidgetSerializer` 已覆盖全部 41 个公共注册类型；Grid、ScrollView、TileView、Menu、StatusBar、Tab、
   Modal 和 Dock 使用各自的结构化 payload。回调、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时
   临时状态不属于持久化格式。
 - Windows UI Automation adapter 已实现 Fragment tree、常用 control pattern、跨线程动作封送和

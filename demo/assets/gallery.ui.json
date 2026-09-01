@@ -231,7 +231,9 @@
               "spacing": 8,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
-                { "type": "TextLabel", "id": "coll_hdr", "text": "Collections - ListView / ComboBox (items filled in C++)", "size": { "w": 640, "h": 24 } },
+                { "type": "TextLabel", "id": "coll_hdr", "text": "Collections - TileView / ListView / ComboBox (items filled in C++)", "size": { "w": 760, "h": 24 } },
+                { "type": "TextLabel", "id": "lbl_tiles", "text": "TileView - 2500 logical items, visible-cell pool only; try Ctrl/Shift, F2, double click and drag", "size": { "w": 900, "h": 20 } },
+                { "type": "TileView", "id": "tiles_demo", "size": { "w": 760, "h": 260 }, "items": [], "selectionMode": 1, "tileSize": { "w": 104, "h": 150 }, "tileSpacing": 8, "infoStripHeight": 16, "cornerMarkerSize": 12, "thumbnailAspectRatio": 1.0, "labelHeight": 28, "overscanRows": 1 },
                 { "type": "TextLabel", "id": "lbl_list", "text": "ListView", "size": { "w": 120, "h": 20 } },
                 { "type": "ListView", "id": "lst_demo", "size": { "w": 320, "h": 128 } },
                 { "type": "TextLabel", "id": "lbl_combo", "text": "ComboBox", "size": { "w": 120, "h": 20 } },

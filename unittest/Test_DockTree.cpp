@@ -1788,10 +1788,13 @@ TEST_CASE(test_dock_card_close_x_via_uimanager_defers_destroy) {
     CHECK_NOT_NULL(card);
     if (card == nullptr) return;
 
-    const FRectangle b = card->getWorldBounds();
-    // Close button is the rightmost ~22px of the title strip.
-    const float closeX = b.maxX - 8.0f;
-    const float closeY = b.minY + 8.0f;
+    auto* leaf = dynamic_cast<DockTabGroup*>(card->getParent());
+    CHECK_NOT_NULL(leaf);
+    if (leaf == nullptr) return;
+    const FRectangle tab = leaf->getTabRectWorld(0);
+    // Close button is the rightmost 22px of the fixed-width selected tab.
+    const float closeX = tab.maxX - 8.0f;
+    const float closeY = tab.minY + 8.0f;
 
     CHECK(f.ui.onMouseButtonDown(closeX, closeY, 0));
     // Must still be alive after down — destroy waits for up.
@@ -1817,6 +1820,80 @@ TEST_CASE(test_dock_card_close_x_via_uimanager_defers_destroy) {
         covered += (wb.maxX - wb.minX);
     }
     CHECK(covered >= (mb.maxX - mb.minX) - 8.0f);
+}
+
+// -------------------------------------------------------------------------
+// 24b. Closing a persistent card from a split-created tab must not prune
+//      the dispatching DockTabGroup synchronously. AYEditor repro:
+//      redock Hierarchy into g_N -> click selected tab X -> process exits.
+// -------------------------------------------------------------------------
+TEST_CASE(test_split_leaf_persistent_close_defers_prune_past_input_dispatch) {
+    TreeFixture f;
+    auto dock = makeDock(f);
+
+    auto outlinerOwned = treeMakeCard("outliner", L"Hierarchy");
+    outlinerOwned->setClosable(true);
+    DockCard* outliner = outlinerOwned.get();
+    dock->addCard(DockArea::Slot::Left, std::move(outlinerOwned));
+    dock->addCard(DockArea::Slot::Center,
+                  treeMakeCard("viewport", L"Scene View"));
+    dock->performLayout();
+
+    DockTabGroup* center = leafAt(dock.get(), FVector2(400.0f, 300.0f));
+    CHECK_NOT_NULL(center);
+    if (center == nullptr) return;
+    const FRectangle cb = center->getWorldBounds();
+    const FVector2 eastPt(cb.maxX - 15.0f,
+                          (cb.minY + cb.maxY) * 0.5f);
+    CHECK(dock->resolveTreeDropZone(center, eastPt) ==
+          DockArea::TreeDropZone::East);
+    CHECK(dragCardTo(f, outliner, eastPt));
+    dock->performLayout();
+
+    DockTabGroup* splitLeaf = findLeafById(rootBox(dock.get()), "g_0");
+    CHECK_NOT_NULL(splitLeaf);
+    if (splitLeaf == nullptr) return;
+    CHECK(splitLeaf->containsCard(outliner));
+
+    dock->setOnCardCloseRequested([dock = dock.get()](DockCard* requested) {
+        if (requested == nullptr || requested->getId() != "outliner") {
+            return false;
+        }
+        return dock->setCardVisible("outliner", false,
+                                    DockArea::Slot::Left);
+    });
+
+    const FRectangle tab = splitLeaf->getTabRectWorld(0);
+    const float closeX = tab.maxX - 8.0f;
+    const float closeY = tab.minY + 8.0f;
+    CHECK(f.ui.onMouseButtonDown(closeX, closeY, 0));
+    CHECK(f.ui.onMouseButtonUp(closeX, closeY, 0));
+
+    // Mouse-up returned successfully. The live persistent card is parked,
+    // while the event target remains alive until a later layout pass.
+    CHECK(dock->findCard("outliner") == outliner);
+    CHECK_FALSE(outliner->isVisible());
+    CHECK(outliner->getParent() == dock.get());
+    splitLeaf = findLeafById(rootBox(dock.get()), "g_0");
+    CHECK_NOT_NULL(splitLeaf);
+    if (splitLeaf == nullptr) return;
+    CHECK(splitLeaf->getTabCount() == 0);
+
+    // The next layout is outside input dispatch: prune g_0, clear the old
+    // hover pointer, then prove subsequent input and Window-menu reopen work.
+    dock->performLayout();
+    CHECK(findLeafById(rootBox(dock.get()), "g_0") == nullptr);
+    (void)f.ui.onMouseMove(400.0f, 300.0f);
+    f.ui.update(1.0f / 60.0f);
+
+    CHECK(dock->setCardVisible("outliner", true,
+                               DockArea::Slot::Left));
+    dock->performLayout();
+    CHECK(outliner->isVisible());
+    auto* restoredLeaf = dynamic_cast<DockTabGroup*>(outliner->getParent());
+    CHECK_NOT_NULL(restoredLeaf);
+    if (restoredLeaf == nullptr) return;
+    CHECK(restoredLeaf->getLeafId() == "Left");
 }
 
 // -------------------------------------------------------------------------

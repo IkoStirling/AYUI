@@ -211,6 +211,39 @@ void collectLeafCards(Widget* node, std::vector<DockCard*>& out) {
     }
 }
 
+// Dock structure edits can destroy a leaf/splitter that UIManager still
+// remembers as hover, capture, or focus. Widget::~Widget intentionally does
+// not know about UIManager, so clear those non-owning slots for the complete
+// subtree before freeing it. This is no-dispatch cleanup: callbacks on a
+// widget that is already being torn down would be another UAF path.
+void clearUiTransientPointersForTree(Widget* root) {
+    UIManager* ui = UIManager::tryGet();
+    if (root == nullptr || ui == nullptr) {
+        return;
+    }
+    std::vector<Widget*> pending{root};
+    while (!pending.empty()) {
+        Widget* current = pending.back();
+        pending.pop_back();
+        if (current == nullptr) {
+            continue;
+        }
+        for (Widget* child : current->getChildren()) {
+            if (child != nullptr) {
+                pending.push_back(child);
+            }
+        }
+        ui->clearCaptureNoDispatch(current);
+        ui->clearHoverNoDispatch(current);
+        ui->clearFocusNoDispatch(current);
+    }
+}
+
+void destroyDockWidgetTree(Widget* root) {
+    clearUiTransientPointersForTree(root);
+    destroyWidgetTree(root);
+}
+
 // Remove `leaf` (a heap object owned by the dock tree) from `box`
 // together with any directly adjacent splitter handles, then free them.
 // Adjacency MUST use BoxBase::_slots order (slotIndexOf) — getChildren()
@@ -234,7 +267,7 @@ void removeLeafAndNeighborSplitters(BoxBase* box, Widget* leaf) {
     toRemove.push_back(leaf);
     for (Widget* w : toRemove) {
         box->removeWidget(w);
-        destroyWidgetTree(w);
+        destroyDockWidgetTree(w);
     }
 }
 
@@ -260,7 +293,7 @@ void detachLeafKeepAlive(BoxBase* box, Widget* leaf) {
     }
     for (Widget* s : splitters) {
         box->removeWidget(s);
-        destroyWidgetTree(s);
+        destroyDockWidgetTree(s);
     }
     box->removeWidget(leaf);
 }
@@ -691,7 +724,7 @@ bool unwrapSinglePanelBoxes(BoxBase* box, BoxBase* parent, Widget* dockRoot) {
     // before promoting the sole panel.
     for (Widget* s : straySplitters) {
         box->removeWidget(s);
-        destroyWidgetTree(s);
+        destroyDockWidgetTree(s);
         changed = true;
     }
 
@@ -711,7 +744,7 @@ bool unwrapSinglePanelBoxes(BoxBase* box, BoxBase* parent, Widget* dockRoot) {
         parent->insertWidget(insertAt++, h, 0.0f);
     }
     parent->rebindSplitters();
-    destroyWidgetTree(box);
+    destroyDockWidgetTree(box);
     return true;
 }
 
@@ -773,16 +806,16 @@ bool pruneVacantBoxes(BoxBase* box, BoxBase* parent, Widget* dockRoot) {
             } else if (id == "Center") {
                 reinsertCenterIntoMid(dockRoot, lf);
             } else {
-                destroyWidgetTree(h);
+                destroyDockWidgetTree(h);
             }
         } else {
-            destroyWidgetTree(h);
+            destroyDockWidgetTree(h);
         }
         changed = true;
     }
     for (Widget* s : straySplitters) {
         box->removeWidget(s);
-        destroyWidgetTree(s);
+        destroyDockWidgetTree(s);
         changed = true;
     }
     // Nest shell is empty — drop it and neighbor splitters from parent.
@@ -1198,6 +1231,29 @@ bool DockArea::requestCloseCard(DockCard* card) {
     return closeCard(card->getId());
 }
 
+void DockArea::handleLeafCloseRequest(DockCard* card) {
+    if (card == nullptr) {
+        return;
+    }
+
+    // requestCloseCard may hide or destroy the last card in this leaf. Keep
+    // the leaf alive until DockTabGroup::onMouseButtonUp and UIManager's
+    // post-handler hover update have both returned. pruneEmptySplitNodes
+    // observes this depth and only records a pending prune.
+    ++_tabCloseDispatchDepth;
+    (void)requestCloseCard(card);
+    --_tabCloseDispatchDepth;
+
+    if (_prunePendingAfterClose) {
+        markBoundsDirty();
+        if (UIManager* ui = UIManager::tryGet()) {
+            // Invalidate only. Calling layout() here would still be inside
+            // DockTabGroup's close callback and would recreate the UAF.
+            ui->invalidateLayout();
+        }
+    }
+}
+
 bool DockArea::setCardVisible(const std::string& cardId,
                               bool visible,
                               Slot restoreSlot) {
@@ -1405,6 +1461,15 @@ void DockArea::render(IRenderBackend& renderer) {
 }
 
 void DockArea::performLayout() {
+    // A close request from a tab-group mouse handler parks/destroys the card
+    // immediately but defers deletion of the now-empty g_N leaf. This is the
+    // first safe point after input dispatch. Avoid requesting a nested layout
+    // while already in UIManager::layout(); the rest of this pass lays out the
+    // pruned tree authoritatively below.
+    if (_prunePendingAfterClose && _tabCloseDispatchDepth == 0) {
+        pruneEmptySplitNodes(false);
+    }
+
     // First descend into children so the overlay + root node get a
     // layout pass (with their previous sizes). The authoritative pass
     // happens below after the root is sized to the DockArea.
@@ -1977,7 +2042,7 @@ DockTabGroup* DockArea::makePinnedLeaf(Slot slot) {
     leaf->setPinned(true);
     leaf->setOnCloseTab([this](DockCard* card) {
         if (card != nullptr) {
-            requestCloseCard(card);
+            handleLeafCloseRequest(card);
         }
     });
     _rootLeaves[(int)slot] = leaf;
@@ -2212,7 +2277,7 @@ void DockArea::splitLeaf(DockTabGroup* leaf, TreeDropZone zone,
     newLeaf->setPinned(false);
     newLeaf->setOnCloseTab([this](DockCard* c) {
         if (c != nullptr) {
-            requestCloseCard(c);
+            handleLeafCloseRequest(c);
         }
     });
 
@@ -2346,10 +2411,19 @@ void DockArea::splitLeaf(DockTabGroup* leaf, TreeDropZone zone,
     pruneEmptySplitNodes();
 }
 
-void DockArea::pruneEmptySplitNodes() {
+void DockArea::pruneEmptySplitNodes(bool requestLayout) {
     if (_rootNode == nullptr || _pruning) {
         return;
     }
+    if (_tabCloseDispatchDepth > 0) {
+        _prunePendingAfterClose = true;
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->invalidateLayout();
+        }
+        return;
+    }
+
+    _prunePendingAfterClose = false;
     _pruning = true;
     bool any = false;
     bool changed = true;
@@ -2402,7 +2476,9 @@ void DockArea::pruneEmptySplitNodes() {
         // bumps made the weight template sticky after every float/join.
         _structureEpoch++;
         markBoundsDirty();
-        requestRelayout();
+        if (requestLayout) {
+            requestRelayout();
+        }
     }
     _pruning = false;
 }
@@ -3064,7 +3140,7 @@ Widget* DockArea::buildNodeFromJson(
             leaf->setPinned(false);
             leaf->setOnCloseTab([this](DockCard* c) {
                 if (c != nullptr) {
-                    requestCloseCard(c);
+                    handleLeafCloseRequest(c);
                 }
             });
         }

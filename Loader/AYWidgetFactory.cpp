@@ -18,6 +18,7 @@
 #include "AYUI/ScrollBar.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/TreeNode.h"
@@ -83,6 +84,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("ScrollBar", createScrollBarWidget);
         WidgetFactory::get().registerCreator("ScrollView", createScrollViewWidget);
         WidgetFactory::get().registerCreator("ListView", createListViewWidget);
+        WidgetFactory::get().registerCreator("TileView", createTileViewWidget);
         WidgetFactory::get().registerCreator("ComboBox", createComboBoxWidget);
         WidgetFactory::get().registerCreator("TabControl", createTabControlWidget);
         WidgetFactory::get().registerCreator("TreeNode", createTreeNodeWidget);

@@ -68,6 +68,7 @@ static const std::vector<TypePayload> kPayloads = {
     {"ComboBox",       R"({"type":"ComboBox","items":["a","b","c"],"selectedIndex":1,"maxPopupItems":5})", true},
     // ListView: items[] + selectedIndex + selectionMode + selectedIndices + itemHeight.
     {"ListView",       R"({"type":"ListView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"itemHeight":24.0})", true},
+    {"TileView",       R"({"type":"TileView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"tileSize":{"w":104.0,"h":150.0},"tileSpacing":8.0,"infoStripHeight":16.0,"cornerMarkerSize":12.0,"thumbnailAspectRatio":1.0,"labelHeight":28.0})", true},
     // Menu: minimal.
     {"Menu",           R"({"type":"Menu","open":false})", true},
     // MenuBar: needs menus[] but accepts empty list.
@@ -150,8 +151,8 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
         }
         destroyWidgetTree(widget);
     }
-    // Pin the current factory surface: the table covers all 40 built-ins.
-    CHECK(covered == 40);
+    // Pin the current factory surface: the table covers all 41 built-ins.
+    CHECK(covered == 41);
     CHECK(deserializeFailureCount == 0);
     CHECK(typeMismatchCount == 0);
     CHECK(roundTripFailureCount == 0);
