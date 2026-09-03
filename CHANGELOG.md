@@ -18,6 +18,8 @@
 - UI 离屏调度扩展到 view 26–249：每帧最多 224 次 pass，第 225 次确定回退，下一帧恢复。
 - UI RenderTarget 采样方式进入共享 pool 精确键；同尺寸 Layer 使用 point sampling，FrameGraph 默认
   线性目标不受影响。Layer 透明复合改为正确 coverage alpha + premultiplied-over。
+- `AnimationTimeline` 增加有限/永久 repeat、yoyo 和每关键帧物理弹簧参数；累计时钟保证大帧间隔
+  跨周期稳定，`AnimationSequence` 会把跨步骤后的剩余帧时间继续交给下一步。
 
 ### Fixed
 
@@ -29,7 +31,7 @@
 
 ### Validation
 
-- Windows Debug：AYUI `4609 / 4609` 条断言通过。
+- Windows Debug：AYUI `5147 / 5147` 条断言通过。
 - AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

@@ -2,7 +2,9 @@
 #include "LayoutEditorSession.h"
 
 #include "AYUI/LayoutLoader.h"
+#include "AYUI/MenuBar.h"
 #include "AYUI/Theme.h"
+#include "AYUI/UIKeyCode.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/Widget.h"
 #include "AYUI/WidgetFactory.h"
@@ -26,12 +28,33 @@ int main() {
         std::fprintf(stderr, "attach failed\n");
         return 2;
     }
+    auto* menuBar = dynamic_cast<ayt::ui::MenuBar*>(
+        ui.findById("designer_menubar"));
+    if (menuBar == nullptr || menuBar->getMenuCount() != 2u) {
+        std::fprintf(stderr, "designer menu regression: count=%zu\n",
+            menuBar != nullptr ? menuBar->getMenuCount() : 0u);
+        return 9;
+    }
     if (!session.open("assets/sample_blank.ui.json")) {
         std::fprintf(stderr, "open failed\n");
         return 3;
     }
 
     session.selectById("btn_hello");
+    ayt::ui::Widget* button = session.selected();
+    if (button == nullptr) {
+        std::fprintf(stderr, "button selection failed\n");
+        return 10;
+    }
+    const ayt::math::FVector2 buttonBeforeNudge = button->getPosition();
+    if (!session.onKeyDown(ayt::ui::UIKey_Right) ||
+        button->getPosition().x != buttonBeforeNudge.x + 1.0f ||
+        button->getPosition().y != buttonBeforeNudge.y) {
+        std::fprintf(stderr, "arrow nudge regression\n");
+        return 11;
+    }
+    session.onKeyDown(ayt::ui::UIKey_Left);
+
     // Regression: child then Shift-select root must not nest ancestor+child.
     session.select(session.documentRoot(), true);
     if (session.selection().size() != 1 ||
@@ -41,6 +64,18 @@ int main() {
             session.selection().size());
         return 8;
     }
+
+    const ayt::math::FVector2 rootBeforeInput =
+        session.documentRoot()->getPosition();
+    session.applyProperty("x", L"96");
+    session.onKeyDown(ayt::ui::UIKey_Right);
+    session.setViewZoom(1.1f, {420.0f, 320.0f});
+    if (session.documentRoot()->getPosition().x != rootBeforeInput.x ||
+        session.documentRoot()->getPosition().y != rootBeforeInput.y) {
+        std::fprintf(stderr, "document root moved through editor input\n");
+        return 12;
+    }
+    session.setViewZoom(1.0f, {420.0f, 320.0f});
 
     session.selectById("btn_hello");
     session.applyProperty("text", L"RoundTrip");

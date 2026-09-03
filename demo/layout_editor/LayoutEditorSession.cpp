@@ -12,7 +12,11 @@
 #include "AYUI/TextInput.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/ListView.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuBar.h"
+#include "AYUI/MenuItem.h"
 #include "AYUI/ScrollBar.h"
+#include "AYUI/SvgIcon.h"
 #include "AYUI/Widget.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/UIKeyCode.h"
@@ -24,6 +28,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <locale>
 #include <sstream>
 
@@ -150,6 +155,152 @@ math::FVector2 defaultSizeForType(const std::string& typeName) {
     return math::FVector2(120.0f, 28.0f);
 }
 
+SvgDocument::Ptr paletteIconDocument(const std::string& typeName) {
+    struct IconSource {
+        const char* type;
+        const char* path;
+    };
+    static constexpr IconSource kSources[] = {
+        {"Button", "M4 7h16v10H4z M8 12h8"},
+        {"TextLabel", "M5 6h14 M12 6v12 M8 18h8"},
+        {"TextInput", "M3 6h18v12H3z M7 9v6"},
+        {"CheckBox", "M4 5h15v15H4z M7 12l3 3 6-7"},
+        {"Slider", "M4 8h10 M18 8h2 M4 16h3 M11 16h9 M14 5v6 M7 13v6"},
+        {"Panel", "M4 4h16v16H4z M4 9h16"},
+        {"VBox", "M5 4h14v4H5z M5 10h14v4H5z M5 16h14v4H5z"},
+        {"HBox", "M4 5h4v14H4z M10 5h4v14h-4z M16 5h4v14h-4z"},
+        {"ScrollView", "M4 4h16v16H4z M17 7v7 M17 17h.01"},
+    };
+    struct CachedIcon {
+        std::string type;
+        SvgDocument::Ptr document;
+    };
+    static const std::vector<CachedIcon> kIcons = []() {
+        std::vector<CachedIcon> result;
+        result.reserve(std::size(kSources));
+        for (const IconSource& source : kSources) {
+            std::string svg =
+                "<svg viewBox=\"0 0 24 24\" fill=\"none\" "
+                "stroke=\"currentColor\" stroke-width=\"1.7\" "
+                "stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+                "<path d=\"";
+            svg += source.path;
+            svg += "\"/></svg>";
+            result.push_back({source.type, SvgDocument::parse(svg)});
+        }
+        return result;
+    }();
+    for (const CachedIcon& icon : kIcons) {
+        if (icon.type == typeName) return icon.document;
+    }
+    return nullptr;
+}
+
+void installLayoutEditorChromeStyles() {
+    StyleSheet* sheet = StyleManager::get().getStyleSheet();
+    if (sheet == nullptr) return;
+
+    auto surface = [](const math::FVector4& background,
+                      const math::FVector4& border,
+                      float borderWidth = 0.0f,
+                      float radius = 0.0f) {
+        WidgetStyle style = StyleBuilder::makeDefault();
+        style.backgroundColor = background;
+        style.borderColor = border;
+        style.border.color = border;
+        style.border.width = borderWidth;
+        style.border.cornerRadius = radius;
+        return style;
+    };
+    auto text = [](int size, const math::FVector4& color, bool bold) {
+        WidgetStyle style = StyleBuilder::makeTextLabel();
+        style.textColor = color;
+        style.font.color = color;
+        style.font.fontSize = size;
+        style.font.bold = bold;
+        return style;
+    };
+
+    sheet->setStyle("__le_root", surface(
+        math::FVector4(0.055f, 0.061f, 0.075f, 1.0f),
+        math::FVector4(0.055f, 0.061f, 0.075f, 1.0f)));
+    sheet->setStyle("__le_titlebar", surface(
+        math::FVector4(0.082f, 0.090f, 0.108f, 1.0f),
+        math::FVector4(0.16f, 0.18f, 0.22f, 1.0f), 0.0f));
+    sheet->setStyle("__le_commandbar", surface(
+        math::FVector4(0.070f, 0.077f, 0.093f, 1.0f),
+        math::FVector4(0.15f, 0.17f, 0.20f, 1.0f), 0.0f));
+    sheet->setStyle("__le_sidebar", surface(
+        math::FVector4(0.073f, 0.080f, 0.096f, 1.0f),
+        math::FVector4(0.15f, 0.17f, 0.20f, 1.0f), 1.0f));
+    sheet->setStyle("__le_canvas", surface(
+        math::FVector4(0.105f, 0.115f, 0.135f, 1.0f),
+        math::FVector4(0.20f, 0.23f, 0.28f, 1.0f), 1.0f, 5.0f));
+    sheet->setStyle("__le_statusbar", surface(
+        math::FVector4(0.060f, 0.067f, 0.080f, 1.0f),
+        math::FVector4(0.14f, 0.16f, 0.19f, 1.0f), 0.0f));
+
+    WidgetStyle command = StyleBuilder::makeButton();
+    command.backgroundColor = math::FVector4(0.14f, 0.15f, 0.18f, 1.0f);
+    command.borderColor = math::FVector4(0.24f, 0.27f, 0.32f, 1.0f);
+    command.border.color = command.borderColor;
+    command.border.width = 1.0f;
+    command.border.cornerRadius = 5.0f;
+    command.textColor = math::FVector4(0.88f, 0.90f, 0.94f, 1.0f);
+    command.font.color = command.textColor;
+    command.backgroundStates.enabled = true;
+    command.backgroundStates.normal = command.backgroundColor;
+    command.backgroundStates.hovered = math::FVector4(0.20f, 0.22f, 0.27f, 1.0f);
+    command.backgroundStates.pressed = math::FVector4(0.10f, 0.31f, 0.55f, 1.0f);
+    command.backgroundStates.disabled = math::FVector4(0.10f, 0.11f, 0.13f, 0.7f);
+    command.backgroundTransition.enabled = true;
+    command.backgroundTransition.durationMs = 90.0f;
+    sheet->setStyle("__le_command", command);
+
+    WidgetStyle primary = command;
+    primary.backgroundColor = math::FVector4(0.10f, 0.36f, 0.66f, 1.0f);
+    primary.backgroundStates.normal = primary.backgroundColor;
+    primary.backgroundStates.hovered = math::FVector4(0.13f, 0.44f, 0.78f, 1.0f);
+    primary.backgroundStates.pressed = math::FVector4(0.07f, 0.29f, 0.55f, 1.0f);
+    primary.borderColor = math::FVector4(0.22f, 0.52f, 0.86f, 1.0f);
+    primary.border.color = primary.borderColor;
+    sheet->setStyle("__le_primary", primary);
+
+    WidgetStyle palette = command;
+    palette.backgroundColor = math::FVector4(0.095f, 0.105f, 0.125f, 1.0f);
+    palette.backgroundStates.normal = palette.backgroundColor;
+    palette.backgroundStates.hovered = math::FVector4(0.15f, 0.18f, 0.23f, 1.0f);
+    palette.backgroundStates.pressed = math::FVector4(0.10f, 0.32f, 0.58f, 1.0f);
+    sheet->setStyle("__le_palette", palette);
+
+    WidgetStyle menuAnchor = command;
+    menuAnchor.backgroundColor = math::FVector4(0.082f, 0.090f, 0.108f, 1.0f);
+    menuAnchor.backgroundStates.normal = menuAnchor.backgroundColor;
+    menuAnchor.backgroundStates.hovered = math::FVector4(0.15f, 0.18f, 0.23f, 1.0f);
+    menuAnchor.backgroundStates.pressed = math::FVector4(0.10f, 0.32f, 0.58f, 1.0f);
+    menuAnchor.border.width = 0.0f;
+    sheet->setStyle("__le_menu_anchor", menuAnchor);
+
+    WidgetStyle input = surface(
+        math::FVector4(0.050f, 0.055f, 0.067f, 1.0f),
+        math::FVector4(0.20f, 0.23f, 0.28f, 1.0f), 1.0f, 4.0f);
+    input.textColor = math::FVector4(0.88f, 0.90f, 0.94f, 1.0f);
+    input.font.color = input.textColor;
+    input.font.fontSize = 12;
+    sheet->setStyle("__le_input", input);
+
+    sheet->setStyle("__le_heading", text(
+        13, math::FVector4(0.92f, 0.94f, 0.98f, 1.0f), true));
+    sheet->setStyle("__le_title", text(
+        16, math::FVector4(0.94f, 0.96f, 1.0f, 1.0f), true));
+    sheet->setStyle("__le_label", text(
+        12, math::FVector4(0.70f, 0.74f, 0.80f, 1.0f), false));
+    sheet->setStyle("__le_muted", text(
+        11, math::FVector4(0.48f, 0.53f, 0.61f, 1.0f), false));
+    sheet->setStyle("__le_accent", text(
+        12, math::FVector4(0.36f, 0.68f, 1.0f, 1.0f), true));
+}
+
 } // namespace
 
 LayoutEditorSession::~LayoutEditorSession() {
@@ -157,11 +308,17 @@ LayoutEditorSession::~LayoutEditorSession() {
 }
 
 bool LayoutEditorSession::attach(UIManager& ui) {
+    return attach(ui, nullptr);
+}
+
+bool LayoutEditorSession::attach(UIManager& ui, Widget* chromeRoot) {
     detach();
+    installLayoutEditorChromeStyles();
     _ui = &ui;
+    _chromeRoot = chromeRoot;
     _ui->disableLayoutHotReload();
 
-    _canvasHost = ui.findById("canvas_host");
+    _canvasHost = findChromeById("canvas_host");
     if (_canvasHost == nullptr) {
         std::fprintf(stderr,
             "[LayoutEditorSession] canvas_host not found — load layout_editor.ui.json first\n");
@@ -202,6 +359,24 @@ bool LayoutEditorSession::attach(UIManager& ui) {
     setStatus(L"Ready — Ctrl multi-select | C/V/D | arrows | G snap | Ctrl+wheel zoom | MMB pan | empty-drag marquee");
     refreshWindowTitle();
     return true;
+}
+
+Widget* LayoutEditorSession::findChromeById(const std::string& id) const {
+    if (id.empty()) {
+        return nullptr;
+    }
+    if (_chromeRoot == nullptr) {
+        return _ui != nullptr ? _ui->findById(id) : nullptr;
+    }
+    std::function<Widget*(Widget*)> find = [&](Widget* node) -> Widget* {
+        if (node == nullptr) return nullptr;
+        if (node->getId() == id) return node;
+        for (Widget* child : node->getChildren()) {
+            if (Widget* match = find(child)) return match;
+        }
+        return nullptr;
+    };
+    return find(_chromeRoot);
 }
 
 void LayoutEditorSession::detach() {
@@ -288,7 +463,7 @@ void LayoutEditorSession::pumpDeferred() {
 
 void LayoutEditorSession::bindPropField(const char* id, const char* field,
                                         TextInput*& slot, bool numericScrub) {
-    slot = dynamic_cast<TextInput*>(_ui->findById(id));
+    slot = dynamic_cast<TextInput*>(findChromeById(id));
     if (slot == nullptr) {
         return;
     }
@@ -334,10 +509,39 @@ void LayoutEditorSession::wireChrome() {
     }
 
     auto bindBtn = [this](const char* id, std::function<void()> fn) {
-        if (auto* b = dynamic_cast<Button*>(_ui->findById(id))) {
+        if (auto* b = dynamic_cast<Button*>(findChromeById(id))) {
             b->setOnClicked(std::move(fn));
         }
     };
+
+    auto bindMenuItem = [this](const wchar_t* menuTitle,
+                               const wchar_t* itemText,
+                               std::function<void()> fn) {
+        auto* bar = dynamic_cast<MenuBar*>(findChromeById("designer_menubar"));
+        if (bar == nullptr) return false;
+        for (size_t menuIndex = 0; menuIndex < bar->getMenuCount(); ++menuIndex) {
+            if (bar->getMenuTitle(menuIndex) != menuTitle) continue;
+            Menu* menu = bar->getMenu(menuIndex);
+            if (menu == nullptr) return false;
+            for (size_t itemIndex = 0; itemIndex < menu->getItemCount(); ++itemIndex) {
+                MenuItem* item = menu->getItem(itemIndex);
+                if (item != nullptr && item->getText() == itemText) {
+                    item->setOnActivate(std::move(fn));
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    if (auto* bar = dynamic_cast<MenuBar*>(findChromeById("designer_menubar"))) {
+        for (Widget* child : bar->getChildren()) {
+            if (auto* anchor = dynamic_cast<Button*>(child)) {
+                anchor->setStyleId("__le_menu_anchor");
+                anchor->setPadding(10.0f, 4.0f, 10.0f, 4.0f);
+            }
+        }
+    }
 
     bindBtn("btn_open", [this]() { _deferred = DeferredAction::Open; });
     bindBtn("btn_save", [this]() { _deferred = DeferredAction::Save; });
@@ -345,6 +549,19 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_undo", [this]() { undo(); });
     bindBtn("btn_redo", [this]() { redo(); });
     bindBtn("btn_delete", [this]() { deleteSelected(); });
+
+    bindMenuItem(L"File", L"Open", [this]() { _deferred = DeferredAction::Open; });
+    bindMenuItem(L"File", L"Save", [this]() { _deferred = DeferredAction::Save; });
+    bindMenuItem(L"File", L"Save As", [this]() { _deferred = DeferredAction::SaveAs; });
+    bindMenuItem(L"Edit", L"Undo", [this]() { undo(); });
+    bindMenuItem(L"Edit", L"Redo", [this]() { redo(); });
+    bindMenuItem(L"Edit", L"Copy", [this]() { copySelection(); });
+    bindMenuItem(L"Edit", L"Paste", [this]() { pasteClipboard(); });
+    bindMenuItem(L"Edit", L"Duplicate", [this]() { duplicateSelection(); });
+    bindMenuItem(L"Edit", L"Delete", [this]() { deleteSelected(); });
+    bindMenuItem(L"Edit", L"Select All", [this]() { selectAll(); });
+    bindMenuItem(L"Edit", L"Move Up", [this]() { reorderSelected(-1); });
+    bindMenuItem(L"Edit", L"Move Down", [this]() { reorderSelected(1); });
 
     // Palette buttons are driven by onPointer* (click + drag-create).
     // Keep click handlers as a fallback if pointer routing misses them.
@@ -358,6 +575,30 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_add_vbox", [this]() { addWidget("VBox"); });
     bindBtn("btn_add_hbox", [this]() { addWidget("HBox"); });
 
+    static constexpr struct {
+        const char* id;
+        const char* type;
+    } kPaletteEntries[] = {
+        {"btn_add_button", "Button"},
+        {"btn_add_label", "TextLabel"},
+        {"btn_add_input", "TextInput"},
+        {"btn_add_checkbox", "CheckBox"},
+        {"btn_add_slider", "Slider"},
+        {"btn_add_panel", "Panel"},
+        {"btn_add_vbox", "VBox"},
+        {"btn_add_hbox", "HBox"},
+        {"btn_add_scroll", "ScrollView"},
+    };
+    for (const auto& entry : kPaletteEntries) {
+        auto* button = dynamic_cast<Button*>(findChromeById(entry.id));
+        if (button == nullptr) continue;
+        button->setIconDocument(paletteIconDocument(entry.type));
+        button->setIconSize(17.0f);
+        button->setIconGap(10.0f);
+        button->setIconColor(math::FVector4(0.50f, 0.74f, 1.0f, 1.0f));
+        button->setPadding(12.0f, 6.0f, 10.0f, 6.0f);
+    }
+
     bindBtn("btn_align_left", [this]() { alignSelection(AlignMode::Left); });
     bindBtn("btn_align_hcenter", [this]() { alignSelection(AlignMode::HCenter); });
     bindBtn("btn_align_right", [this]() { alignSelection(AlignMode::Right); });
@@ -370,9 +611,11 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_move_down", [this]() { reorderSelected(1); });
     bindBtn("btn_snap", [this]() { toggleSnap(); });
 
-    _hierarchyCol = _ui->findById("hierarchy_col");
-    _chromeRoot = _ui->findById("layout_editor_root");
-    _hierarchy = dynamic_cast<ListView*>(_ui->findById("list_hierarchy"));
+    _hierarchyCol = findChromeById("hierarchy_col");
+    if (_chromeRoot == nullptr) {
+        _chromeRoot = findChromeById("layout_editor_root");
+    }
+    _hierarchy = dynamic_cast<ListView*>(findChromeById("list_hierarchy"));
     if (_hierarchy == nullptr) {
         std::fprintf(stderr,
             "[LayoutEditorSession] list_hierarchy not found\n");
@@ -402,7 +645,8 @@ void LayoutEditorSession::wireChrome() {
     bindPropField("prop_pad_r", "padR", _propPadR, true);
     bindPropField("prop_pad_b", "padB", _propPadB, true);
 
-    _propStyleCombo = dynamic_cast<ComboBox*>(_ui->findById("prop_style_combo"));
+    _propStyleCombo = dynamic_cast<ComboBox*>(
+        findChromeById("prop_style_combo"));
     if (_propStyleCombo != nullptr) {
         _propStyleCombo->setOnSelectionChanged([this](int index) {
             if (_suppressStyleCombo || _suppressProp || index < 0 ||
@@ -415,8 +659,10 @@ void LayoutEditorSession::wireChrome() {
         syncStyleCombo();
     }
 
-    _propTextHAlign = dynamic_cast<ComboBox*>(_ui->findById("prop_text_halign"));
-    _propTextVAlign = dynamic_cast<ComboBox*>(_ui->findById("prop_text_valign"));
+    _propTextHAlign = dynamic_cast<ComboBox*>(
+        findChromeById("prop_text_halign"));
+    _propTextVAlign = dynamic_cast<ComboBox*>(
+        findChromeById("prop_text_valign"));
     if (_propTextHAlign != nullptr) {
         _propTextHAlign->setItems({L"Left", L"Center", L"Right"});
         _propTextHAlign->setOnSelectionChanged([this](int index) {
@@ -445,7 +691,7 @@ void LayoutEditorSession::wireChrome() {
     bindBoolCombo(_propReadOnly, "prop_readonly", "readOnly");
     bindGravityCombo();
 
-    _status = dynamic_cast<TextLabel*>(_ui->findById("lbl_status"));
+    _status = dynamic_cast<TextLabel*>(findChromeById("lbl_status"));
 }
 
 void LayoutEditorSession::clearDocument() {
@@ -720,7 +966,7 @@ void LayoutEditorSession::syncSelectionChrome() {
     }
 
     const math::FRectangle host = _canvasHost->getWorldBounds();
-    constexpr float kOutset = 3.0f;
+    constexpr float kOutset = 2.0f;
 
     // Per-widget outlines for multi-select; primary uses handles.
     ensureSelOutlines(_selection.size());
@@ -733,27 +979,38 @@ void LayoutEditorSession::syncSelectionChrome() {
             outline->setVisible(false);
             continue;
         }
+        if (_selection[i] == _selected) {
+            // The primary already has the stronger selection ring. Drawing
+            // both rings at slightly different offsets produced a fuzzy,
+            // stair-stepped edge in the GDI-hosted Designer.
+            outline->setVisible(false);
+            continue;
+        }
         const math::FRectangle wb = _selection[i]->getWorldBounds();
+        const float minX = std::round(wb.minX - host.minX);
+        const float minY = std::round(wb.minY - host.minY);
+        const float maxX = std::round(wb.maxX - host.minX);
+        const float maxY = std::round(wb.maxY - host.minY);
         outline->setPosition(math::FVector2(
-            wb.minX - host.minX - kOutset,
-            wb.minY - host.minY - kOutset));
+            minX - kOutset, minY - kOutset));
         outline->setSize(math::FVector2(
-            wb.width() + kOutset * 2.0f,
-            wb.height() + kOutset * 2.0f));
+            maxX - minX + kOutset * 2.0f,
+            maxY - minY + kOutset * 2.0f));
         outline->setVisible(true);
     }
 
     // Keep legacy selBox as primary highlight (slightly thicker).
     if (_selected != nullptr && isUnderCanvas(_selected)) {
         const math::FRectangle wb = _selected->getWorldBounds();
-        const float px = wb.minX - host.minX;
-        const float py = wb.minY - host.minY;
-        const float pw = wb.width();
-        const float ph = wb.height();
-        _selBox->setPosition(math::FVector2(px - kOutset - 1.0f,
-                                            py - kOutset - 1.0f));
-        _selBox->setSize(math::FVector2(pw + (kOutset + 1.0f) * 2.0f,
-                                        ph + (kOutset + 1.0f) * 2.0f));
+        const float px = std::round(wb.minX - host.minX);
+        const float py = std::round(wb.minY - host.minY);
+        const float right = std::round(wb.maxX - host.minX);
+        const float bottom = std::round(wb.maxY - host.minY);
+        const float pw = right - px;
+        const float ph = bottom - py;
+        _selBox->setPosition(math::FVector2(px - kOutset, py - kOutset));
+        _selBox->setSize(math::FVector2(pw + kOutset * 2.0f,
+                                        ph + kOutset * 2.0f));
         _selBox->setVisible(true);
         // No resize handles on document root — full-canvas handles fight
         // selection chrome and are easy to mis-hit after Shift-select.
@@ -1076,6 +1333,12 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             return;
         }
         setStatus(L"gravity: only VBox/HBox");
+        return;
+    }
+
+    if (_selected == _docRoot && (field == "x" || field == "y")) {
+        setStatus(L"Document root position is fixed");
+        syncPropertyStrip();
         return;
     }
 
@@ -1613,7 +1876,7 @@ void LayoutEditorSession::ensureSelectionChrome() {
 
     if (auto* sheet = StyleManager::get().getStyleSheet()) {
         WidgetStyle box{};
-        box.backgroundColor = math::FVector4(0.20f, 0.55f, 0.95f, 0.12f);
+        box.backgroundColor = math::FVector4(0.20f, 0.55f, 0.95f, 0.0f);
         box.borderColor = math::FVector4(0.35f, 0.75f, 1.0f, 1.0f);
         box.border.color = box.borderColor;
         box.border.width = 2.0f;
@@ -1672,7 +1935,7 @@ UiCursorHint LayoutEditorSession::canvasCursorHint(
             break;
         }
     }
-    if (_selected != nullptr) {
+    if (_selected != nullptr && _selected != _docRoot) {
         switch (hitTestResizeHandle(_selected, worldPos)) {
         case DragMode::ResizeE:
         case DragMode::ResizeW:
@@ -1692,7 +1955,8 @@ UiCursorHint LayoutEditorSession::canvasCursorHint(
             break;
         }
     }
-    if (pickDocumentWidget(worldPos) != nullptr) {
+    Widget* picked = pickDocumentWidget(worldPos);
+    if (picked != nullptr && picked != _docRoot) {
         return UiCursorHint::Move;
     }
     return UiCursorHint::Default;
@@ -1810,7 +2074,7 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
     }
 
     if (hit == _docRoot || (_selected == _docRoot && _selection.size() == 1)) {
-        setStatus(L"Document root selected");
+        setStatus(L"Document root selected — position is fixed");
         _dragMode = DragMode::None;
         _dragTarget = nullptr;
         _consumeNextPointerUp = true;
@@ -2164,13 +2428,14 @@ void LayoutEditorSession::setChromeVisible(const char* id, bool visible) {
     if (_ui == nullptr || id == nullptr) {
         return;
     }
-    if (Widget* w = _ui->findById(id)) {
+    if (Widget* w = findChromeById(id)) {
         w->setVisible(visible);
     }
 }
 
 void LayoutEditorSession::updatePropPanelVisibility() {
     const bool hasSel = _selected != nullptr;
+    const bool isDocumentRoot = hasSel && _selected == _docRoot;
     const bool isLabel = dynamic_cast<TextLabel*>(_selected) != nullptr;
     const bool isButton = dynamic_cast<Button*>(_selected) != nullptr;
     const bool isInput = dynamic_cast<TextInput*>(_selected) != nullptr;
@@ -2178,7 +2443,7 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     const bool isBox = dynamic_cast<BoxBase*>(_selected) != nullptr;
     const bool hasText = isLabel || isButton || isInput || isCheck;
     // Free position: hide x/y for box-managed children (layout owns them).
-    bool showPos = hasSel;
+    bool showPos = hasSel && !isDocumentRoot;
     if (hasSel && _selected->getParent() != nullptr &&
         dynamic_cast<BoxBase*>(_selected->getParent()) != nullptr) {
         showPos = false;
@@ -2187,7 +2452,7 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     // Never leave focus on a prop control we are about to hide.
     if (_ui != nullptr) {
         if (Widget* focused = _ui->getFocusedWidget()) {
-            Widget* propsCol = _ui->findById("props_col");
+            Widget* propsCol = findChromeById("props_col");
             if (propsCol != nullptr) {
                 for (Widget* w = focused; w != nullptr; w = w->getParent()) {
                     if (w == propsCol) {
@@ -2201,33 +2466,58 @@ void LayoutEditorSession::updatePropPanelVisibility() {
 
     setChromeVisible("lbl_prop_empty", !hasSel);
 
-    auto row = [this](const char* lbl, const char* ctrl, bool on) {
-        setChromeVisible(lbl, on);
-        setChromeVisible(ctrl, on);
+    auto row = [this](const char* container, const char* lbl,
+                      const char* ctrl, bool on) {
+        // Modern chrome groups each label/control pair into one compact row.
+        // Keep the child fallback so older standalone chrome resources remain
+        // compatible with the shared editor session.
+        if (findChromeById(container) != nullptr) {
+            setChromeVisible(container, on);
+        } else {
+            setChromeVisible(lbl, on);
+            setChromeVisible(ctrl, on);
+        }
     };
 
-    row("lbl_prop_id", "prop_id", hasSel);
-    row("lbl_prop_x", "prop_x", showPos);
-    row("lbl_prop_y", "prop_y", showPos);
-    row("lbl_prop_w", "prop_w", hasSel);
-    row("lbl_prop_h", "prop_h", hasSel);
-    row("lbl_prop_text", "prop_text", hasText);
-    row("lbl_prop_text_halign", "prop_text_halign", isLabel || isInput);
-    row("lbl_prop_text_valign", "prop_text_valign", isLabel);
-    row("lbl_prop_style", "prop_style_combo", hasSel);
-    row("lbl_prop_checked", "prop_checked", isCheck);
-    row("lbl_prop_password", "prop_password", isInput);
-    row("lbl_prop_readonly", "prop_readonly", isInput);
-    row("lbl_prop_gravity", "prop_gravity", isBox);
-    row("lbl_prop_spacing", "prop_spacing", isBox);
-    setChromeVisible("lbl_prop_pad", isBox);
-    setChromeVisible("prop_pad_l", isBox);
-    setChromeVisible("prop_pad_t", isBox);
-    setChromeVisible("prop_pad_r", isBox);
-    setChromeVisible("prop_pad_b", isBox);
+    const bool canArrange = hasSel && !isDocumentRoot;
+    setChromeVisible("section_arrange", canArrange);
+    setChromeVisible("row_arrange_horizontal", canArrange);
+    setChromeVisible("row_arrange_vertical", canArrange);
+    setChromeVisible("row_arrange_distribute", canArrange);
+    setChromeVisible("section_identity", hasSel);
+    setChromeVisible("section_transform", hasSel);
+    setChromeVisible("section_content", hasText);
+    setChromeVisible("section_appearance", hasSel);
+    setChromeVisible("section_layout", isBox);
+
+    row("row_prop_id", "lbl_prop_id", "prop_id", hasSel);
+    row("row_prop_x", "lbl_prop_x", "prop_x", showPos);
+    row("row_prop_y", "lbl_prop_y", "prop_y", showPos);
+    row("row_prop_w", "lbl_prop_w", "prop_w", hasSel);
+    row("row_prop_h", "lbl_prop_h", "prop_h", hasSel);
+    row("row_prop_text", "lbl_prop_text", "prop_text", hasText);
+    row("row_prop_text_halign", "lbl_prop_text_halign",
+        "prop_text_halign", isLabel || isInput);
+    row("row_prop_text_valign", "lbl_prop_text_valign",
+        "prop_text_valign", isLabel);
+    row("row_prop_style", "lbl_prop_style", "prop_style_combo", hasSel);
+    row("row_prop_checked", "lbl_prop_checked", "prop_checked", isCheck);
+    row("row_prop_password", "lbl_prop_password", "prop_password", isInput);
+    row("row_prop_readonly", "lbl_prop_readonly", "prop_readonly", isInput);
+    row("row_prop_gravity", "lbl_prop_gravity", "prop_gravity", isBox);
+    row("row_prop_spacing", "lbl_prop_spacing", "prop_spacing", isBox);
+    if (findChromeById("row_prop_padding") != nullptr) {
+        setChromeVisible("row_prop_padding", isBox);
+    } else {
+        setChromeVisible("lbl_prop_pad", isBox);
+        setChromeVisible("prop_pad_l", isBox);
+        setChromeVisible("prop_pad_t", isBox);
+        setChromeVisible("prop_pad_r", isBox);
+        setChromeVisible("prop_pad_b", isBox);
+    }
 
     if (auto* title = dynamic_cast<TextLabel*>(_ui != nullptr
-            ? _ui->findById("lbl_props") : nullptr)) {
+            ? findChromeById("lbl_props") : nullptr)) {
         if (!hasSel) {
             title->setText(L"Properties");
         } else {
@@ -2282,6 +2572,10 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPadR, L"");
         setField(_propPadB, L"");
         _suppressProp = false;
+        if (_ui != nullptr) {
+            _ui->invalidateLayout();
+            _ui->layout();
+        }
         return;
     }
     setField(_propId, utf8ToWide(_selected->getId()));
@@ -2322,11 +2616,21 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPadB, L"");
     }
     _suppressProp = false;
+    if (_ui != nullptr) {
+        // Visibility and field values are one Inspector transaction. Flush
+        // once before returning so rapid canvas/outline selection cannot
+        // expose a frame with old row positions and new field contents.
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
 }
 
 void LayoutEditorSession::markDirty(bool dirty) {
     _dirty = dirty;
     refreshWindowTitle();
+    if (_documentStateUpdater) {
+        _documentStateUpdater(_documentPath, _dirty);
+    }
     if (_dirty && !_documentPath.empty()) {
         setStatus(utf8ToWide("Modified — " + _documentPath));
     } else if (_dirty) {
@@ -2473,7 +2777,7 @@ bool LayoutEditorSession::hitPaletteType(const math::FVector2& worldPos,
         {"btn_add_hbox", "HBox"},
     };
     for (const auto& e : kEntries) {
-        Widget* w = _ui->findById(e.id);
+        Widget* w = findChromeById(e.id);
         if (w != nullptr && w->isVisible() &&
             w->getWorldBounds().contains(worldPos)) {
             outType = e.type;
@@ -2889,7 +3193,7 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
 
 void LayoutEditorSession::ensureHierDropChrome() {
     if (_hierarchyCol == nullptr) {
-        _hierarchyCol = _ui != nullptr ? _ui->findById("hierarchy_col") : nullptr;
+        _hierarchyCol = findChromeById("hierarchy_col");
     }
     if (_hierarchyCol == nullptr) {
         return;
@@ -3028,7 +3332,7 @@ bool LayoutEditorSession::stillOnPaletteSource(
 
 void LayoutEditorSession::ensurePaletteGhost() {
     if (_chromeRoot == nullptr && _ui != nullptr) {
-        _chromeRoot = _ui->findById("layout_editor_root");
+        _chromeRoot = findChromeById("layout_editor_root");
     }
     if (_chromeRoot == nullptr || _paletteGhost != nullptr) {
         return;
@@ -3277,12 +3581,15 @@ void LayoutEditorSession::nudgeSelection(float dx, float dy) {
         pos.x += dx;
         pos.y += dy;
         w->setPosition(pos);
-        snapWidgetPosition(w);
         moved = true;
     }
     endMutation();
     if (!moved) {
-        setStatus(L"Nudge: no free-position widgets in selection");
+        if (_selected == _docRoot && _selection.size() == 1u) {
+            setStatus(L"Document root position is fixed");
+        } else {
+            setStatus(L"Nudge: no free-position widgets in selection");
+        }
         return;
     }
     markDirty(true);
@@ -3302,7 +3609,7 @@ void LayoutEditorSession::toggleSnap() {
 }
 
 void LayoutEditorSession::setViewZoom(float zoom,
-                                      const math::FVector2& pivotWorld) {
+                                      const math::FVector2& /*pivotWorld*/) {
     zoom = (std::max)(0.25f, (std::min)(4.0f, zoom));
     if (_docRoot == nullptr || std::fabs(zoom - _viewZoom) < 0.0001f) {
         _viewZoom = zoom;
@@ -3311,20 +3618,11 @@ void LayoutEditorSession::setViewZoom(float zoom,
     const float factor = zoom / _viewZoom;
     _viewZoom = zoom;
 
-    // Keep pivot stable: scale free positions around canvas-local pivot.
-    const math::FRectangle host = _canvasHost != nullptr
-                                      ? _canvasHost->getWorldBounds()
-                                      : math::FRectangle();
-    const math::FVector2 pivotLocal(pivotWorld.x - host.minX,
-                                    pivotWorld.y - host.minY);
-
+    // The document root is the immutable authoring origin. Scaling around
+    // the pointer used to rewrite its X/Y values, so every wheel notch made
+    // a selected root drift diagonally. Keep the root's top-left anchor
+    // fixed; only document extents and descendants participate in zoom.
     scaleDocumentTree(_docRoot, factor);
-    if (_docRoot != nullptr && !_docRoot->isLayoutPositionManaged()) {
-        math::FVector2 p = _docRoot->getPosition();
-        p.x = pivotLocal.x + (p.x - pivotLocal.x) * factor;
-        p.y = pivotLocal.y + (p.y - pivotLocal.y) * factor;
-        _docRoot->setPosition(p);
-    }
 
     markDirty(true);
     syncSelectionChrome();
@@ -3399,7 +3697,7 @@ void LayoutEditorSession::bindBoolCombo(ComboBox*& slot, const char* id,
     if (_ui == nullptr) {
         return;
     }
-    slot = dynamic_cast<ComboBox*>(_ui->findById(id));
+    slot = dynamic_cast<ComboBox*>(findChromeById(id));
     if (slot == nullptr) {
         return;
     }
@@ -3418,7 +3716,7 @@ void LayoutEditorSession::bindGravityCombo() {
     if (_ui == nullptr) {
         return;
     }
-    _propGravity = dynamic_cast<ComboBox*>(_ui->findById("prop_gravity"));
+    _propGravity = dynamic_cast<ComboBox*>(findChromeById("prop_gravity"));
     if (_propGravity == nullptr) {
         return;
     }
@@ -3605,7 +3903,7 @@ void LayoutEditorSession::ensureSelOutlines(size_t count) {
     }
     if (auto* sheet = StyleManager::get().getStyleSheet()) {
         WidgetStyle outline{};
-        outline.backgroundColor = math::FVector4(0.20f, 0.55f, 0.95f, 0.06f);
+        outline.backgroundColor = math::FVector4(0.20f, 0.55f, 0.95f, 0.0f);
         outline.borderColor = math::FVector4(0.45f, 0.80f, 1.0f, 0.85f);
         outline.border.color = outline.borderColor;
         outline.border.width = 1.0f;

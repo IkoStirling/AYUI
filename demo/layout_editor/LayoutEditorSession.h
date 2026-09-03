@@ -21,6 +21,8 @@ class LayoutEditorSession {
 public:
     using PathPicker = std::function<std::string()>;
     using TitleUpdater = std::function<void(const std::wstring& title)>;
+    using DocumentStateUpdater =
+        std::function<void(const std::string& path, bool dirty)>;
 
     enum class AlignMode {
         Left, HCenter, Right,
@@ -35,6 +37,7 @@ public:
     LayoutEditorSession& operator=(const LayoutEditorSession&) = delete;
 
     bool attach(UIManager& ui);
+    bool attach(UIManager& ui, Widget* chromeRoot);
     void detach();
     void pumpDeferred();
 
@@ -90,6 +93,9 @@ public:
     void setOpenPathPicker(PathPicker picker) { _openPicker = std::move(picker); }
     void setSavePathPicker(PathPicker picker) { _savePicker = std::move(picker); }
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
+    void setDocumentStateUpdater(DocumentStateUpdater updater) {
+        _documentStateUpdater = std::move(updater);
+    }
 
 private:
     enum class DeferredAction { None, Open, Save, SaveAs };
@@ -121,6 +127,7 @@ private:
     };
 
     void wireChrome();
+    Widget* findChromeById(const std::string& id) const;
     void clearDocument();
     void setDocumentRoot(Widget* root);
     void ensureEmptyDocument();
@@ -294,6 +301,7 @@ private:
     PathPicker _openPicker;
     PathPicker _savePicker;
     TitleUpdater _titleUpdater;
+    DocumentStateUpdater _documentStateUpdater;
     UILayoutLoader _docLoader;
 };
 

@@ -30,7 +30,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - RichText run 级 font family/weight/italic/language，以及 AYRenderer 多 face、多 atlas 一致测量/绘制
 - Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
-- 多轨 Timeline/Keyframe、Sequence 串联、完成/取消/暂停控制、全局动画倍率与 reduced-motion
+- 多轨 Timeline/Keyframe、Sequence 串联、repeat/yoyo、物理弹簧、完成/取消/暂停控制、全局动画倍率与 reduced-motion
 - 声明式 normal/hovered/pressed/disabled Style 状态色和 backgroundColor transition
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
 - 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
@@ -38,9 +38,9 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 可选的 Production root UI Layer：静态主树复用离屏像素，overlay/drag visual 保持即时绘制
 - AYRenderer 共享 RenderTargetPool：FrameGraph 与 UI Layer 复用同一套 FBO 生命周期和预算，窗口
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
-- Gallery 与独立 Layout Editor
+- Gallery，以及由独立工具和 AYEditor 独立 Designer 窗口共享的 Layout Editor core
 
-2026-08-31 Windows Debug 当前基线为 `5009 / 5009` 条断言通过。2026-08-29 审计快照为
+2026-09-01 Windows Debug 当前基线为 `5163 / 5163` 条断言通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -138,11 +138,27 @@ AnimationTimeline slide;
 slide.addVec2Track({{0, {0, -8}}, {160, {0, 0}, AnimationCurve::EaseOut}},
                    [&panel](const math::FVector2& p) { panel.setPosition(p); });
 
+SpringParameters spring;
+spring.stiffness = 120.0f;
+spring.damping = 13.0f;
+spring.clampOvershoot = true;
+AnimationTimeline pulse;
+pulse.addFloatTrack(
+    {AnimationKeyframe<float>(0, 0), AnimationKeyframe<float>(650, 1, spring)},
+    [&progress](float value) { progress.setValue(value); });
+pulse.setRepeatCount(3).setYoyo(true); // 首轮 + 3 次，方向交替
+
 AnimationSequence intro;
 intro.append(std::move(fade)).then(std::move(slide));
 intro.play();
 // 在宿主或 Widget tick 中调用 intro.tick(deltaSeconds)。
 ```
+
+`repeatCount` 表示首轮之后的额外次数；`AnimationTimeline::RepeatForever` 表示持续播放，直到取消。
+时间线以总播放时钟求当前轮次，因此一次 `tick` 跨越多个周期不会丢时间；Sequence 也会把跨步骤终点的
+剩余帧时间继续交给下一步。带 `SpringParameters` 的关键帧使用 mass/stiffness/damping/initialVelocity
+二阶响应，`clampOvershoot` 可将插值因子限制在 `[0, 1]`。未提供参数的 `AnimationCurve::Spring`
+继续保留原来的轻量曲线，Widget tween 和 renderer 兼容路径不受影响。
 
 Widget 的简单属性动画仍可直接使用 `animateOpacity/animatePositionTo`；传入 `AnimationOptions` 可设置
 完成/取消回调、importance，并通过 `pauseAnimations/resumeAnimations/cancelAnimations` 控制播放。

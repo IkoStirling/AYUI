@@ -6,6 +6,8 @@
 #include "AYUI/TextInput.h"
 #include "AYUI/TextArea.h"
 #include "AYUI/Tooltip.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuBar.h"
 #include "AYUI/MenuItem.h"
 #include "AYUI/Window.h"
 #include "AYUI/Box.h"
@@ -749,6 +751,66 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             scroll->setScrollOffset(math::FVector2(
                 j["scrollOffset"].value("x", 0.0f),
                 j["scrollOffset"].value("y", 0.0f)));
+        }
+    }
+
+    // MenuBar/Menu structured content. WidgetSerializer already supported
+    // this wire format, but production layouts go through UILayoutLoader;
+    // keeping the two loaders in parity avoids a visible-but-empty menubar.
+    if (MenuBar* menuBar = dynamic_cast<MenuBar*>(widget)) {
+        if (j.contains("anchorSpacing")) {
+            menuBar->setAnchorSpacing(j["anchorSpacing"].get<float>());
+        }
+        if (j.contains("anchorWidth")) {
+            menuBar->setAnchorWidth(j["anchorWidth"].get<float>());
+        }
+        if (j.contains("anchorAutoWidth")) {
+            menuBar->setAnchorAutoWidth(j["anchorAutoWidth"].get<bool>());
+        }
+        if (j.contains("menus") && j["menus"].is_array()) {
+            for (const auto& menuJson : j["menus"]) {
+                Menu* menu = menuBar->addMenu(utf8ToWide(
+                    menuJson.value("title", std::string())));
+                const json* payload = &menuJson;
+                if (menuJson.contains("menu")
+                    && menuJson["menu"].is_object()) {
+                    payload = &menuJson["menu"];
+                }
+                if (!payload->contains("items")
+                    || !(*payload)["items"].is_array()) {
+                    continue;
+                }
+                for (const auto& itemJson : (*payload)["items"]) {
+                    MenuItem* item = menu->addItem(utf8ToWide(
+                        itemJson.value("text", std::string())));
+                    if (itemJson.contains("shortcut")) {
+                        item->setShortcut(utf8ToWide(
+                            itemJson["shortcut"].get<std::string>()));
+                    }
+                    if (itemJson.contains("submenu")
+                        && itemJson["submenu"].is_object()) {
+                        Widget* submenuWidget = buildWidgetTree(
+                            itemJson["submenu"]);
+                        Menu* submenu = dynamic_cast<Menu*>(submenuWidget);
+                        if (submenu != nullptr) {
+                            menu->attachSubmenu(item, submenu);
+                        } else {
+                            destroyWidgetTree(submenuWidget);
+                        }
+                    }
+                }
+            }
+        }
+    } else if (Menu* menu = dynamic_cast<Menu*>(widget)) {
+        if (j.contains("items") && j["items"].is_array()) {
+            for (const auto& itemJson : j["items"]) {
+                MenuItem* item = menu->addItem(utf8ToWide(
+                    itemJson.value("text", std::string())));
+                if (itemJson.contains("shortcut")) {
+                    item->setShortcut(utf8ToWide(
+                        itemJson["shortcut"].get<std::string>()));
+                }
+            }
         }
     }
 

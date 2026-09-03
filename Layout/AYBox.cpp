@@ -1,5 +1,7 @@
 #include "AYUI/Box.h"
+#include "AYUI/IRenderBackend.h"
 #include "AYUI/SplitterHandle.h"
+#include "AYUI/Style.h"
 #include "AYUI/Window.h"
 
 #include <algorithm>
@@ -272,6 +274,27 @@ void BoxBase::render(IRenderBackend& renderer) {
     const bool fading = _opacity < (1.0f - 1e-5f);
     if (fading) {
         renderer.pushOpacity(_opacity);
+    }
+
+    // Boxes are layout-only by default. A non-empty explicit style opts into
+    // surface rendering, allowing application chrome to use VBox/HBox as a
+    // modern toolbar/sidebar without adding a redundant Panel wrapper.
+    if (!getStyleId().empty()) {
+        const ResolvedStyle style = resolveStyle(getStyleId(), this);
+        if (style.hasStyle) {
+            const math::FRectangle bounds = getWorldBounds();
+            if (style.cornerRadius > 0.0f) {
+                renderer.drawRoundedRect(
+                    bounds, style.backgroundColor, style.cornerRadius);
+            } else {
+                renderer.drawRect(bounds, style.backgroundColor);
+            }
+            if (style.borderWidth > 0.0f) {
+                renderer.drawBorderRect(
+                    bounds, style.borderColor, style.borderWidth,
+                    style.cornerRadius);
+            }
+        }
     }
 
     // Slots first (insertion order — splitters sit between panels).

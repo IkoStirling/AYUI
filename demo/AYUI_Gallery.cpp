@@ -308,6 +308,7 @@ struct GalleryState {
     // the other knobs; lives here, not in a button lambda, so the state
     // is not destroyed with the JSON tree).
     bool panelVisible = true;
+    std::unique_ptr<ayt::ui::AnimationTimeline> showcaseTimeline;
     std::unique_ptr<ayt::ui::ModalDialog> modal;
     std::unique_ptr<ayt::ui::TextLabel> modalBody;
 
@@ -811,6 +812,49 @@ void wireGallery(GalleryState& state)
                 panel->animateOpacity(state.panelVisible ? 1.0f : 0.0f, 200.0f,
                                       ayt::ui::AnimationCurve::EaseOut);
             }
+        });
+    }
+    // Productized timeline demo: one physical spring segment is repeated
+    // four times and alternates direction. GalleryState owns the clock so a
+    // JSON hot reload can explicitly tear it down before replacing the tree.
+    if (auto* btn = dynamic_cast<ayt::ui::Button*>(
+            ui.findById("btn_timeline_yoyo"))) {
+        btn->setOnClicked([&state]() {
+            ayt::ui::SpringParameters spring;
+            spring.mass = 1.0f;
+            spring.stiffness = 120.0f;
+            spring.damping = 13.0f;
+            spring.clampOvershoot = true;
+
+            auto timeline = std::make_unique<ayt::ui::AnimationTimeline>();
+            timeline->addFloatTrack(
+                {ayt::ui::AnimationKeyframe<float>(0.0f, 0.0f),
+                 ayt::ui::AnimationKeyframe<float>(650.0f, 1.0f, spring)},
+                [&state](float value) {
+                    if (auto* progress = dynamic_cast<ayt::ui::ProgressBar*>(
+                            state.ui->findById("anim_timeline_progress"))) {
+                        progress->setValue(value);
+                    }
+                    if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                            state.ui->findById("anim_timeline_state"))) {
+                        wchar_t text[96];
+                        std::swprintf(text, 96,
+                            L"Timeline sample: %.3f (physical spring)", value);
+                        label->setText(text);
+                    }
+                });
+            timeline->setRepeatCount(3).setYoyo(true);
+            ayt::ui::AnimationCallbacks callbacks;
+            callbacks.onCompleted = [&state]() {
+                if (auto* label = dynamic_cast<ayt::ui::TextLabel*>(
+                        state.ui->findById("anim_timeline_state"))) {
+                    label->setText(
+                        L"Completed: 4 iterations, yoyo returned to start");
+                }
+            };
+            timeline->setCallbacks(std::move(callbacks));
+            state.showcaseTimeline = std::move(timeline);
+            state.showcaseTimeline->play();
         });
     }
     // Indeterminate scan toggle: the ProgressBar sweeps a 30% accent
@@ -2565,6 +2609,7 @@ void bindReload(GalleryState& state)
 {
     if (auto* btn = dynamic_cast<ayt::ui::Button*>(state.ui->findById("btn_reload"))) {
         btn->setOnClicked([&state]() {
+            state.showcaseTimeline.reset();
             state.modal.reset();
             state.modalBody.reset();
             // Capabilities overlay widgets MUST be torn down BEFORE
@@ -3070,6 +3115,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
             // (each child updates + GDI-renders under its own ActiveScope,
             // then the primary takes the active slot back).
             if (capture.layerProbeScenario.empty()) {
+                if (state.showcaseTimeline != nullptr
+                    && state.showcaseTimeline->isRunning()) {
+                    state.showcaseTimeline->tick(dt);
+                }
                 state.childWindows->tickAll(dt);
                 ui.update(dt); // caret blink, hover revalidate, hot-reload
             }

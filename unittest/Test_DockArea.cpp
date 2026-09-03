@@ -160,6 +160,34 @@ TEST_CASE(test_dock_area_layout_distributes_slots) {
     CHECK(centerBounds.minX < rightBounds.minX);
 }
 
+TEST_CASE(test_dock_area_pristine_bottom_band_keeps_center_as_vertical_fill) {
+    DockArea dock;
+    dock.setSize(FVector2(1000.0f, 600.0f));
+    dock.setSlotWeight(DockArea::Slot::Top, 1.0e-6f);
+    dock.setSlotWeight(DockArea::Slot::Bottom, 0.25f);
+    dock.setSlotMinSize(DockArea::Slot::Center, 300.0f);
+    dock.setSlotMinSize(DockArea::Slot::Bottom, 100.0f);
+
+    // The first card lazily builds a tree while Bottom is still empty and
+    // collapsed. Adding Bottom later must not leave Bottom as the fill slot.
+    dock.addCard(DockArea::Slot::Center, makeCard("center", L"Center"));
+    dock.addCard(DockArea::Slot::Bottom, makeCard("bottom", L"Bottom"));
+    dock.performLayout();
+    dock.performLayout();
+
+    DockCard* center = dock.findCard("center");
+    DockCard* bottom = dock.findCard("bottom");
+    CHECK(center != nullptr);
+    CHECK(bottom != nullptr);
+    if (center == nullptr || bottom == nullptr) return;
+
+    const float centerHeight = center->getWorldBounds().height();
+    const float bottomHeight = bottom->getWorldBounds().height();
+    CHECK(centerHeight >= 300.0f);
+    CHECK(bottomHeight >= 100.0f);
+    CHECK(bottomHeight < centerHeight);
+}
+
 TEST_CASE(test_dock_card_basic) {
     auto card = std::make_unique<DockCard>();
     card->setId("c");

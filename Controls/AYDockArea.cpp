@@ -408,9 +408,13 @@ bool ensureAllBoxesHaveVisibleFill(Widget* node) {
                         continue;
                     }
                     Widget* w = box->slotAt(fi);
-                    const float keep = (w != nullptr)
-                        ? std::max(BoxBase::kMinPanelSize, w->getWidth())
-                        : BoxBase::kMinPanelSize;
+                    const bool vertical =
+                        dynamic_cast<VBox*>(box) != nullptr;
+                    const float currentMain = w != nullptr
+                        ? (vertical ? w->getHeight() : w->getWidth())
+                        : 0.0f;
+                    const float keep = std::max(
+                        BoxBase::kMinPanelSize, currentMain);
                     box->setSlotSize(fi, keep);
                     any = true;
                 }
@@ -1480,14 +1484,16 @@ void DockArea::performLayout() {
     // drags). The first real-size pass always pushes geometry.
     ensureRootTree();
     const math::FVector2 sz = getSize();
-    syncTemplateIfPristine(sz);
 
-    // Self-heal: every dock box must have a visible fill panel so
-    // fixed-only leftover can never paint as a black hole. Cheap walk;
-    // only mutates when a box is actually fill-less.
+    // Self-heal before restoring pristine template sizes. Loading cards can
+    // temporarily expose two zero-sized fill slots (the middle row and a
+    // formerly collapsed Bottom leaf). If repair runs after template sync it
+    // turns the middle row into a fixed 120 px band, then the next pass treats
+    // that accidental repair as user-authored sticky geometry.
     if (_rootNode != nullptr) {
         ensureAllBoxesHaveVisibleFill(_rootNode);
     }
+    syncTemplateIfPristine(sz);
 
     if (_rootNode) {
         _rootNode->setPosition(math::FVector2(0.0f, 0.0f));
@@ -2717,7 +2723,7 @@ void DockArea::applyTemplateGeometry(const math::FVector2& size) {
         root->setSlotSize(idx++, r.topH);
         ++idx;   // vertical splitter under Top
     }
-    ++idx;   // mid fill slot stays 0
+    root->setSlotSize(idx++, 0.0f);   // mid is the vertical fill slot
     if (_rootLeaves[(int)Slot::Bottom] != nullptr) {
         ++idx;   // vertical splitter above Bottom
         root->setSlotSize(idx++, r.botH);
@@ -2728,7 +2734,7 @@ void DockArea::applyTemplateGeometry(const math::FVector2& size) {
         mid->setSlotSize(idx++, r.leftW);
         ++idx;   // horizontal splitter after Left
     }
-    ++idx;   // Center fill slot stays 0
+    mid->setSlotSize(idx++, 0.0f);   // Center is the horizontal fill slot
     if (_rootLeaves[(int)Slot::Right] != nullptr) {
         ++idx;   // horizontal splitter before Right
         mid->setSlotSize(idx++, r.rightW);

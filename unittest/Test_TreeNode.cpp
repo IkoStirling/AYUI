@@ -128,16 +128,27 @@ TEST_CASE(treenode_render_columns) {
 
     MockRenderer renderer;
     node.render(renderer);
-    // Expected drawText calls: 1 arrow ("▶") + 1 icon ("📁") + 1 label ("Assets")
-    // = 3 drawText calls. Plus selection band rect + (no hover rect).
+    // The disclosure arrow is vector geometry so it cannot become a tofu
+    // square when the active font lacks triangle glyphs. Text remains only
+    // for the optional item icon and label.
     int textCount = 0;
     int rectCount = 0;
+    int pathCount = 0;
+    bool usedDisclosureTextGlyph = false;
     for (const auto& dc : renderer.getDrawCalls()) {
-        if (dc.type == MockRenderer::DrawCall::Text) textCount++;
+        if (dc.type == MockRenderer::DrawCall::Text) {
+            textCount++;
+            if (dc.text == L"▶" || dc.text == L"▼") {
+                usedDisclosureTextGlyph = true;
+            }
+        }
         if (dc.type == MockRenderer::DrawCall::Rect) rectCount++;
+        if (dc.type == MockRenderer::DrawCall::Path) pathCount++;
     }
-    CHECK(textCount == 3);
+    CHECK(textCount == 2);
     CHECK(rectCount == 1);
+    CHECK(pathCount == 1);
+    CHECK_FALSE(usedDisclosureTextGlyph);
 }
 
 TEST_SUITE_END

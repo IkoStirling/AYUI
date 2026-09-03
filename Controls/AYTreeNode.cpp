@@ -1,8 +1,25 @@
 #include "AYUI/TreeNode.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/SvgIcon.h"
 #include <algorithm>
 
 namespace ayt::ui {
+
+namespace {
+
+const SvgDocument::Ptr& collapsedDisclosureIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5L10.5 8L6 12.5"/></svg>)");
+    return icon;
+}
+
+const SvgDocument::Ptr& expandedDisclosureIcon() {
+    static const SvgDocument::Ptr icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 6L8 10.5L12.5 6"/></svg>)");
+    return icon;
+}
+
+} // namespace
 
 TreeNode::TreeNode() {
     setSize(math::FVector2(kDefaultWidth, kDefaultHeight));
@@ -63,15 +80,19 @@ void TreeNode::onRender(IRenderBackend& renderer) {
     const float iconMinX  = arrowMinX + kArrowColPx;
     const float labelMinX = iconMinX + kIconColPx;
 
-    // Arrow glyph — ▶ when collapsed, ▼ when expanded, blank if leaf.
+    // Disclosure icon. Do not use font glyphs here: the editor's compact
+    // UI font does not guarantee U+25B6/U+25BC and rendered a tofu square on
+    // Windows when the fallback font was unavailable.
     if (_hasChildren) {
         const math::FRectangle arrowBounds(
-            arrowMinX, b.minY, arrowMinX + kArrowColPx, b.maxY);
-        const wchar_t* arrow = _expanded ? L"▼" : L"▶";
+            arrowMinX + 3.0f, b.minY + 3.0f,
+            arrowMinX + kArrowColPx - 3.0f, b.maxY - 3.0f);
         const math::FVector4 arrowColor = isEnabled()
             ? math::FVector4(0.85f, 0.85f, 0.90f, 1.0f)
             : math::FVector4(0.55f, 0.55f, 0.55f, 1.0f);
-        renderer.drawText(arrowBounds, std::wstring(arrow), 12, arrowColor);
+        const SvgDocument::Ptr& icon = _expanded
+            ? expandedDisclosureIcon() : collapsedDisclosureIcon();
+        if (icon != nullptr) icon->draw(renderer, arrowBounds, arrowColor);
     }
 
     // Icon glyph (if any).

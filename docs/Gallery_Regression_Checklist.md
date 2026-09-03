@@ -32,6 +32,7 @@
 | BK6 | 7. Backend | 纹理拉伸 | LINEAR 无马赛克 |
 | BK7 | 7. Backend | 9-patch | 四角锐利不畸变不渗色 |
 | BK8 | 7. Backend | 生命周期 | 滚动 / reload / 退出不崩 |
+| A1 | 9. Animation | Timeline | 物理弹簧 + 四轮 yoyo |
 
 ---
 
@@ -98,11 +99,20 @@
 
 ---
 
+## D. Animation（页签 **9. Animation**）
+
+| ID | 操作 | 期望视觉 | 期望状态 | 状态 | 日期 | 备注 |
+|----|------|----------|----------|------|------|------|
+| A1 | 点击 **Play timeline + yoyo**，完整观察约 2.6 秒；播放中再次点击重启 | ProgressBar 以物理弹簧速度前进/后退，共四轮，边界不跳帧、不超出槽位 | 标签最终显示完成，数值回到 0；reload 后可再次播放且无旧时间线残留 | ☐ PASS / ☐ FAIL | ____-__-__ | reduced-motion 开启时应直接落到最终 0；永久装饰循环由 UT 验证落到结束姿态并完成 |
+
+---
+
 ## 跑表节奏
 
 - **改容器 / 焦点 / 滚动 / 弹层**：Capabilities 相关 2–3 条 + 对应 UT  
 - **改 Dock 树 / 分割条 / 裁剪 / 持久化**：Dock D1–D8（至少 D3/D7/D8）  
 - **改渲染后端 / shader / 纹理路径**：Backend BK1–BK8（至少 BK3/BK4/BK6/BK7）  
+- **改动画 / tick / 时间线**：Animation A1 + `AYUI_AnimationProductization` UT
 - **AYUI 发版前**：整表（Capabilities + Dock + Backend，约 30–45 分钟）  
 - **新语义 bug**：先加场景 UT，再改代码  
 

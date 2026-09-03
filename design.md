@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-08-31
+**文档修订：** 2026-09-01
 
 **CMake 目标版本：** 1.0.0
 
@@ -435,7 +435,37 @@ Modal 打开后，UIManager 只向 active modal 子树路由输入；dimmer 吞�
 - card 同一时刻只能位于一个 leaf 或 overlay。
 - 移动 card 时先从旧容器安全解绑，再加入新容器；不能让两个父节点同时持有。
 - 空 leaf 应被 prune；split tree 必须保留至少一个可见 fill panel。
+- 模板树的 self-heal 必须先于 pristine weight 同步；同步时 root-mid 和 Center 显式恢复为
+  `size=0` 的 fill slot。临时折叠/恢复 Bottom 不能把 Bottom 误设为 fill 并把 Center 压到最小值。
 - 保存格式记录 dock topology、slot weight/min size 和 floating frame，而不是序列化内部临时 hover/drag 状态。
+
+### 9.4 Layout Editor 宿主边界
+
+`LayoutEditorSession` 是 AYUI 通用布局编辑核心，独立 `AYUI_LayoutEditor` 与 AYEditor 的独立
+Designer 工具窗复用同一实现。`attach(UIManager&)` 支持完整窗口 chrome；
+`attach(UIManager&, Widget* chromeRoot)` 支持通用 View fallback，使 `canvas_host`、Palette、
+Hierarchy 和属性栏 id 只在给定子树内解析。文档状态回调只发布路径/dirty，不引入 AYEditor
+文档类型、Scene、资源或原生窗口语义。
+
+Session 仍负责画布手势、undo/redo 和 `UILayoutLoader`/Serializer 往返；owner window、
+渲染 backend、资源身份、关闭提示和工作区命令路由由上层宿主负责。AYEditor 通过一个共享
+Controller 适配 Session，正常路径不再嵌入 Scene Center；AYUI 不知道自己运行在 standalone、
+Dock fallback 还是 AYDevice 顶层窗口中，也不复制第二套布局编辑状态机。
+
+Chrome 本身采用 File/Edit 菜单栏、单列 Widget Library + Document Outline、Canvas、滚动
+Inspector、状态栏布局。`UILayoutLoader` 与 Serializer 都支持 MenuBar 的结构化 `menus/items`
+声明及 shortcut/submenu；命令不再依赖一排临时按钮。Widget Library 行绑定类型专属 SVG，点击
+和拖放共享同一创建语义；对齐、分布与 Snap 属于 Inspector 的选择上下文。
+
+画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
+必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section
+显隐并执行一次 invalidate/layout，保证 Inspector 不会短暂保留上一类型的行结构。VBox 的可伸缩
+子区只声明主轴 `h=0`，不同时固定 `w/h`；这是 `UILayoutLoader` 的 layout-managed 契约。属性
+面板以 row container 为显隐单位，旧的无 row 资源仍通过 label/control fallback 兼容。
+
+Document root 是固定的 authoring origin：画布拖动、方向键、X/Y 属性和排列命令都不能改变其
+位置，Ctrl+滚轮缩放也保持根的左上锚点不变。普通 free-position Widget 使用方向键做 1px 微调，
+Shift+方向键使用当前 grid step；方向键微调不再被 Snap 立即吸回原网格点。
 
 ## 10. 动画与时间推进
 
@@ -462,8 +492,14 @@ opacity 回归测试。动画产品化层随后完成：
 - `AnimationOptions` 为 Widget opacity/position 提供完成与取消回调、curve 和 importance；Widget
   同时提供 pause/resume/cancel，取消可选择保持当前值或 snap 到终点。直接 retarget 会取消旧播放。
 - `AnimationTimeline` 在同一时钟上采样 float/FVector2/FVector4 多轨 keyframe；每段使用目标
-  keyframe 的 curve。`AnimationSequence::append().then()` 串行播放 Timeline，并提供序列级
-  完成/取消与 pause/resume。
+  keyframe 的 curve。时间线支持有限 repeat、`RepeatForever` 和逐轮反向的 yoyo；当前轮次从累计
+  播放时钟直接求值，因此单帧跨越多个周期时不依赖逐周期循环，也不会丢失时间。reduced-motion
+  对有限循环落到其真实最终方向，永久装饰循环落到作者结束姿态后完成。
+- `SpringParameters` 为 Timeline 的目标 keyframe 提供 mass/stiffness/damping/initialVelocity 二阶
+  响应和可选 overshoot clamp。参数只影响该段 Timeline；原有轻量 `AnimationCurve::Spring`、Widget
+  tween 与 renderer handle 的点一致兼容路径保持不变。
+- `AnimationSequence::append().then()` 串行播放 Timeline，并提供序列级完成/取消与 pause/resume；
+  一帧越过步骤终点时，未消费的 `dt` 会继续推进后续步骤，避免低帧率下序列被人为拉长。
 - Style JSON 支持 `states.normal/hovered/pressed/disabled.backgroundColor`（以及紧凑的
   `stateColors` 写法）和 `transition.backgroundColor.{durationMs,curve}`。Button、CheckBox、
   RadioButton 使用声明式状态色；Slider/MenuItem 等既有状态颜色继续复用同一颜色 tween。
@@ -502,8 +538,8 @@ AYUI 静态库公开依赖基础数学、字体、设备接口和公共 headers�
 
 Gallery 当前包含 Basics、Images、Input、Collections、Overlay、Layout、Capabilities、Backend、
 Animation 和 Productization 十页；Images 页覆盖共享 `TextureRegistry` 纹理、UV crop、透明图片层
-和控件/图片叠加，Productization 页可交互验证 UI scale、Windows UIA 语义、父主题、Tab overflow、
-Unicode/Bidi 多字体 RichText 和 Clipboard。
+和控件/图片叠加，Animation 页包含可重放的物理弹簧 + 四轮 yoyo Timeline，Productization 页可交互
+验证 UI scale、Windows UIA 语义、父主题、Tab overflow、Unicode/Bidi 多字体 RichText 和 Clipboard。
 
 AYRenderer 的 `UIRenderBackend` 实现 `IRenderBackend`，UIPass 在 3D pass 后合成 UI；当前支持
 display-list replay、Production root UI Layer，以及 CPU path tessellation + stencil path fill/clip。
@@ -520,9 +556,9 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 - 1022 个 `TEST_CASE`
 - Windows Debug：`4643 / 4643` 条断言通过
 
-2026-08-31 原生 SVG、连续 contour、设备输入桥接、容器溢出修复、动画产品化以及虚拟化
-TileView 后，InfoStrip/CornerMarker 装饰与复用清理回归纳入当前 Windows Debug 基线：
-`5049 / 5049`；上面的 2026-08-29 数量保留为该轮审计快照。
+2026-09-01 原生 SVG、连续 contour、设备输入桥接、容器溢出修复、虚拟化 TileView、
+InfoStrip/CornerMarker，以及 Timeline repeat/yoyo、物理弹簧和跨步骤时间守恒回归纳入当前
+Windows Debug 基线：`5147 / 5147`；上面的 2026-08-29 数量保留为该轮审计快照。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
@@ -612,9 +648,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
-7. 动画产品化第一阶段已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/
-   串联 API、全局 animation scale 与 reduced-motion。后续可选扩展是 repeat/yoyo、物理弹簧参数、
-   OS reduced-motion 偏好自动桥接和可视化时间线编辑器；这些不再要求修改 Widget tween 主路径。
+7. 动画产品化已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/串联 API、
+   全局 animation scale、reduced-motion、repeat/yoyo、物理弹簧参数与跨 Sequence 步骤的时间守恒。
+   后续可选扩展只剩 OS reduced-motion 偏好自动桥接和可视化时间线编辑器；它们不要求修改
+   Widget tween 主路径。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

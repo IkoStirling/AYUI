@@ -6,6 +6,7 @@
 #include "AYUI/Style.h"
 #include "AYUI/Widget.h"
 
+#include <cmath>
 #include <cstring>
 
 using namespace ayt::math;
@@ -177,6 +178,163 @@ TEST_CASE(sequence_then_plays_timelines_serially) {
     CHECK_FLOAT_EQ(value, 3.0f, 1e-5f);
     CHECK(sequence.getState() == AnimationPlaybackState::Completed);
     CHECK(completed == 1);
+}
+
+TEST_CASE(timeline_repeat_and_yoyo_preserve_direction_and_callbacks) {
+    AnimationSettings::get().reset();
+    float value = -1.0f;
+    int completed = 0;
+    AnimationTimeline timeline;
+    timeline.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 10.0f, AnimationCurve::Linear}},
+        [&](float v) { value = v; });
+    timeline.setRepeatCount(1).setYoyo(true);
+    AnimationCallbacks callbacks;
+    callbacks.onCompleted = [&] { ++completed; };
+    timeline.setCallbacks(std::move(callbacks));
+
+    CHECK(timeline.getRepeatCount() == 1);
+    CHECK(timeline.isYoyo());
+    CHECK_FLOAT_EQ(timeline.getTotalDurationMs(), 200.0f, 1e-5f);
+    timeline.play();
+    timeline.tick(0.10f);
+    CHECK(timeline.getCurrentIteration() == 1u);
+    CHECK(timeline.isPlayingReverse());
+    CHECK_FLOAT_EQ(value, 10.0f, 1e-5f);
+    timeline.tick(0.025f);
+    CHECK_FLOAT_EQ(value, 7.5f, 1e-5f);
+    timeline.tick(0.075f);
+    CHECK(timeline.getState() == AnimationPlaybackState::Completed);
+    CHECK_FLOAT_EQ(value, 0.0f, 1e-5f);
+    CHECK(completed == 1);
+    timeline.tick(1.0f);
+    CHECK(completed == 1);
+}
+
+TEST_CASE(timeline_large_delta_crosses_repeats_without_losing_time) {
+    AnimationSettings::get().reset();
+    float value = -1.0f;
+    AnimationTimeline timeline;
+    timeline.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 1.0f, AnimationCurve::Linear}},
+        [&](float v) { value = v; });
+    timeline.setRepeatCount(2);
+    timeline.play();
+    timeline.tick(0.25f);
+    CHECK(timeline.getCurrentIteration() == 2u);
+    CHECK_FALSE(timeline.isPlayingReverse());
+    CHECK_FLOAT_EQ(value, 0.5f, 1e-5f);
+    CHECK(timeline.getState() == AnimationPlaybackState::Running);
+    timeline.tick(0.05f);
+    CHECK(timeline.getState() == AnimationPlaybackState::Completed);
+    CHECK_FLOAT_EQ(value, 1.0f, 1e-5f);
+}
+
+TEST_CASE(infinite_yoyo_timeline_runs_until_cancelled) {
+    AnimationSettings::get().reset();
+    float value = -1.0f;
+    int cancelled = 0;
+    AnimationTimeline timeline;
+    timeline.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 1.0f, AnimationCurve::Linear}},
+        [&](float v) { value = v; });
+    timeline.setRepeatCount(AnimationTimeline::RepeatForever).setYoyo(true);
+    AnimationCallbacks callbacks;
+    callbacks.onCancelled = [&] { ++cancelled; };
+    timeline.setCallbacks(std::move(callbacks));
+
+    timeline.play();
+    CHECK(std::isinf(timeline.getTotalDurationMs()));
+    timeline.tick(0.225f);
+    CHECK(timeline.getCurrentIteration() == 2u);
+    CHECK_FALSE(timeline.isPlayingReverse());
+    CHECK_FLOAT_EQ(value, 0.25f, 1e-5f);
+    timeline.cancel();
+    CHECK(timeline.getState() == AnimationPlaybackState::Cancelled);
+    CHECK(cancelled == 1);
+}
+
+TEST_CASE(reduced_motion_uses_stable_final_pose_for_looping_timelines) {
+    AnimationSettings::get().reset();
+    AnimationSettings::get().setReducedMotion(true);
+    float finiteValue = -1.0f;
+    AnimationTimeline finite;
+    finite.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 1.0f, AnimationCurve::Linear}},
+        [&](float v) { finiteValue = v; });
+    finite.setRepeatCount(1).setYoyo(true);
+    finite.play();
+    CHECK(finite.getState() == AnimationPlaybackState::Completed);
+    CHECK_FLOAT_EQ(finiteValue, 0.0f, 1e-5f);
+
+    float infiniteValue = -1.0f;
+    AnimationTimeline infinite;
+    infinite.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 1.0f, AnimationCurve::Linear}},
+        [&](float v) { infiniteValue = v; });
+    infinite.setRepeatCount(AnimationTimeline::RepeatForever).setYoyo(true);
+    infinite.play();
+    CHECK(infinite.getState() == AnimationPlaybackState::Completed);
+    CHECK_FLOAT_EQ(infiniteValue, 1.0f, 1e-5f);
+    AnimationSettings::get().reset();
+}
+
+TEST_CASE(physical_spring_parameters_control_overshoot) {
+    AnimationSettings::get().reset();
+    SpringParameters loose;
+    loose.mass = 1.0f;
+    loose.stiffness = 100.0f;
+    loose.damping = 1.0f;
+
+    SpringParameters clamped = loose;
+    clamped.clampOvershoot = true;
+
+    float looseValue = 0.0f;
+    float clampedValue = 0.0f;
+    AnimationTimeline looseTimeline;
+    looseTimeline.addFloatTrack(
+        {AnimationKeyframe<float>(0.0f, 0.0f),
+         AnimationKeyframe<float>(500.0f, 1.0f, loose)},
+        [&](float v) { looseValue = v; });
+    AnimationTimeline clampedTimeline;
+    clampedTimeline.addFloatTrack(
+        {AnimationKeyframe<float>(0.0f, 0.0f),
+         AnimationKeyframe<float>(500.0f, 1.0f, clamped)},
+        [&](float v) { clampedValue = v; });
+
+    looseTimeline.play();
+    clampedTimeline.play();
+    looseTimeline.tick(0.25f);
+    clampedTimeline.tick(0.25f);
+    CHECK(looseValue > 1.0f);
+    CHECK_FLOAT_EQ(clampedValue, 1.0f, 1e-5f);
+    looseTimeline.tick(0.25f);
+    clampedTimeline.tick(0.25f);
+    CHECK_FLOAT_EQ(looseValue, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(clampedValue, 1.0f, 1e-5f);
+}
+
+TEST_CASE(sequence_carries_large_delta_into_the_next_step) {
+    AnimationSettings::get().reset();
+    float value = -1.0f;
+    AnimationTimeline first;
+    first.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 1.0f, AnimationCurve::Linear}},
+        [&](float v) { value = v; });
+    AnimationTimeline second;
+    second.addFloatTrack(
+        {{0.0f, 1.0f}, {100.0f, 3.0f, AnimationCurve::Linear}},
+        [&](float v) { value = v; });
+
+    AnimationSequence sequence;
+    sequence.append(std::move(first)).then(std::move(second));
+    sequence.play();
+    sequence.tick(0.15f);
+    CHECK(sequence.getCurrentIndex() == 1u);
+    CHECK_FLOAT_EQ(value, 2.0f, 1e-5f);
+    sequence.tick(0.05f);
+    CHECK(sequence.getState() == AnimationPlaybackState::Completed);
+    CHECK_FLOAT_EQ(value, 3.0f, 1e-5f);
 }
 
 TEST_CASE(timeline_and_sequence_pause_cancel_callbacks_fire_once) {

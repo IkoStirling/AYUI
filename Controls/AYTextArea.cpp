@@ -320,6 +320,11 @@ public:
 
     bool onTextInput(wchar_t ch) override {
         if (ch == L'\r') ch = L'\n';
+        // Win32 can emit WM_CHAR('\t') after the already-consumed Tab
+        // key-down. Code-editor TextAreas handle that key in applyIndent();
+        // accepting the text event as well inserted a literal tab that the
+        // font displayed as a tofu square.
+        if (ch == L'\t' && acceptsEditorTab()) return true;
         return _owner->insertChar(ch);
     }
 
@@ -337,6 +342,13 @@ public:
                     continue;
                 }
                 previousWasCr = false;
+                if (ch == L'\t' && acceptsEditorTab()) {
+                    // The matching key-down already inserted indentation.
+                    // Ctrl+V bypasses this path and is normalized by
+                    // TextArea::insertText, so pasted tabs are retained as
+                    // indentation rather than dropped.
+                    continue;
+                }
                 if (ch >= 0x20 || ch == L'\n' || ch == L'\t') {
                     normalized.push_back(ch);
                 }
@@ -709,12 +721,23 @@ void TextArea::setText(const std::wstring& text) {
     pushUndo();
     std::wstring normalized;
     normalized.reserve(text.size());
+    size_t lineColumn = 0u;
+    const size_t tabWidth = std::max<size_t>(1u, _tabWidth);
     for (size_t i = 0; i < text.size(); ++i) {
         if (text[i] == L'\r') {
             normalized.push_back(L'\n');
+            lineColumn = 0u;
             if (i + 1u < text.size() && text[i + 1u] == L'\n') ++i;
+        } else if (text[i] == L'\n') {
+            normalized.push_back(L'\n');
+            lineColumn = 0u;
+        } else if (text[i] == L'\t' && _tabInsertsIndent) {
+            const size_t spaces = tabWidth - (lineColumn % tabWidth);
+            normalized.append(spaces, L' ');
+            lineColumn += spaces;
         } else {
             normalized.push_back(text[i]);
+            ++lineColumn;
         }
     }
     if (_maxLength > 0 && normalized.size() > _maxLength) {
@@ -750,18 +773,41 @@ bool TextArea::insertChar(wchar_t ch) {
 
 bool TextArea::insertText(const std::wstring& text) {
     if (_readOnly || text.empty()) return false;
+    const bool replacingSelection = hasSelection();
+    int insertionColumn = _caretCol;
+    if (replacingSelection) {
+        int startLine = _selStartLine;
+        int startCol = _selStartCol;
+        int endLine = _selEndLine;
+        int endCol = _selEndCol;
+        if (startLine > endLine || (startLine == endLine && startCol > endCol)) {
+            std::swap(startLine, endLine);
+            std::swap(startCol, endCol);
+        }
+        insertionColumn = startCol;
+    }
     std::wstring normalized;
     normalized.reserve(text.size());
+    size_t lineColumn = static_cast<size_t>(std::max(0, insertionColumn));
+    const size_t tabWidth = std::max<size_t>(1u, _tabWidth);
     for (size_t i = 0; i < text.size(); ++i) {
         if (text[i] == L'\r') {
             normalized.push_back(L'\n');
+            lineColumn = 0u;
             if (i + 1u < text.size() && text[i + 1u] == L'\n') ++i;
+        } else if (text[i] == L'\n') {
+            normalized.push_back(L'\n');
+            lineColumn = 0u;
+        } else if (text[i] == L'\t' && _tabInsertsIndent) {
+            const size_t spaces = tabWidth - (lineColumn % tabWidth);
+            normalized.append(spaces, L' ');
+            lineColumn += spaces;
         } else {
             normalized.push_back(text[i]);
+            ++lineColumn;
         }
     }
 
-    const bool replacingSelection = hasSelection();
     if (_maxLength > 0) {
         const size_t selectedLength = replacingSelection ? getSelectedText().size() : 0u;
         const size_t retainedLength = getText().size() - selectedLength;

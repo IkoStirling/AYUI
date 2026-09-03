@@ -7,6 +7,8 @@
 #include "AYUI/TextInput.h"
 #include "AYUI/TextArea.h"
 #include "AYUI/Tooltip.h"
+#include "AYUI/Menu.h"
+#include "AYUI/MenuBar.h"
 #include "AYUI/Image.h"
 #include "AYUI/ImageTexture.h"
 #include "AYUI/GridPanel.h"
@@ -588,6 +590,36 @@ TEST_CASE(test_layout_loader_gravity_default_fallback) {
     auto* vbox = dynamic_cast<VBox*>(root);
     CHECK(vbox != nullptr);
     CHECK(vbox->getGravity() == BoxBase::Gravity::TopLeft);
+    destroyWidgetTree(root);
+}
+
+TEST_CASE(layout_loader_builds_structured_menubar_items_and_shortcuts) {
+    UILayoutLoader loader;
+    Widget* root = loader.loadFromString(R"json({
+        "type": "MenuBar",
+        "id": "menu",
+        "anchorWidth": 52,
+        "menus": [
+            { "title": "File", "items": [
+                { "text": "Save", "shortcut": "Ctrl+S" }
+            ] },
+            { "title": "Edit", "items": [
+                { "text": "Undo", "shortcut": "Ctrl+Z" },
+                { "text": "Delete", "shortcut": "Delete" }
+            ] }
+        ]
+    })json");
+
+    auto* bar = dynamic_cast<MenuBar*>(root);
+    CHECK(bar != nullptr);
+    CHECK(bar != nullptr && bar->getMenuCount() == 2u);
+    CHECK(bar != nullptr && bar->getMenuTitle(0) == L"File");
+    CHECK(bar != nullptr && bar->getMenuTitle(1) == L"Edit");
+    Menu* edit = bar != nullptr ? bar->getMenu(1) : nullptr;
+    CHECK(edit != nullptr);
+    CHECK(edit != nullptr && edit->getItemCount() == 2u);
+    CHECK(edit == nullptr || edit->getItem(0) == nullptr
+          || edit->getItem(0)->getShortcut() == L"Ctrl+Z");
     destroyWidgetTree(root);
 }
 

@@ -726,4 +726,38 @@ TEST_CASE(textarea_tab_without_selection_advances_to_next_tab_stop) {
     ui.shutdown();
 }
 
+TEST_CASE(textarea_editor_tab_ignores_duplicate_text_commit) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+    TextArea ta;
+    ta.setTabInsertsIndent(true);
+    ta.setTabWidth(4u);
+    ui.root()->addChildExternal(&ta);
+    ui.setFocus(ta.getDocumentAsFocusable());
+
+    CHECK(ui.onKeyDown(UIKey_Tab));
+    CHECK(ta.getText() == L"    ");
+    // Win32 normally follows VK_TAB with a committed tab character. It is
+    // the same keystroke, not a second edit operation.
+    CHECK(ui.onDeviceChar("\t", 1));
+    CHECK(ta.getText() == L"    ");
+    CHECK(ta.getText().find(L'\t') == std::wstring::npos);
+    ui.shutdown();
+}
+
+TEST_CASE(textarea_code_editor_normalizes_loaded_and_pasted_tabs) {
+    TextArea ta;
+    ta.setTabInsertsIndent(true);
+    ta.setTabWidth(4u);
+    ta.setText(L"\talpha\nxy\tbeta");
+    CHECK(ta.getText() == L"    alpha\nxy  beta");
+    CHECK(ta.getText().find(L'\t') == std::wstring::npos);
+
+    ta.setText(L"xy");
+    ta.setCaret(0, 2);
+    CHECK(ta.insertText(L"\tbeta"));
+    CHECK(ta.getText() == L"xy  beta");
+}
+
 TEST_SUITE_END

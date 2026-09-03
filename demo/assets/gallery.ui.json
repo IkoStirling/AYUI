@@ -393,7 +393,7 @@
               "spacing": 10,
               "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
               "children": [
-                { "type": "TextLabel", "id": "anim_hdr", "text": "Animation - hover transitions / popup fade + slide-in / opacity / scroll momentum / indeterminate scan / spinner", "size": { "w": 920, "h": 24 } },
+                { "type": "TextLabel", "id": "anim_hdr", "text": "Animation - state transitions / timelines / repeat + yoyo / physical spring / reduced motion", "size": { "w": 920, "h": 24 } },
                 { "type": "TextLabel", "id": "anim_hint", "text": "Buttons below tween their fill on hover/press. Menus, ComboBox popups, Modals and Tooltips fade in on open and fade out on close.", "size": { "w": 900, "h": 20 } },
 
                 { "type": "Separator", "id": "anim_sep_demo", "size": { "w": 900, "h": 6 } },
@@ -413,6 +413,12 @@
                     { "type": "TextLabel", "id": "fade_panel_lbl", "text": "I fade in and out (200ms)", "size": { "w": 380, "h": 24 } }
                   ]
                 },
+
+                { "type": "Separator", "id": "anim_sep_timeline", "size": { "w": 900, "h": 6 } },
+                { "type": "TextLabel", "id": "anim_timeline_hint", "text": "Timeline: 650ms physical spring, four iterations with alternating yoyo direction", "size": { "w": 900, "h": 20 } },
+                { "type": "Button", "id": "btn_timeline_yoyo", "text": "Play timeline + yoyo", "size": { "w": 200, "h": 28 } },
+                { "type": "ProgressBar", "id": "anim_timeline_progress", "size": { "w": 420, "h": 16 }, "value": 0 },
+                { "type": "TextLabel", "id": "anim_timeline_state", "text": "Ready", "size": { "w": 900, "h": 20 } },
 
                 { "type": "Separator", "id": "anim_sep_scan", "size": { "w": 900, "h": 6 } },
                 { "type": "TextLabel", "id": "anim_scan_lbl", "text": "Indeterminate scan (1.6s sweep) + Spinner orbit (0.9s/rev)", "size": { "w": 900, "h": 20 } },
