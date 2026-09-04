@@ -7,6 +7,9 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/DockTrace.h"
+#include "../Controls/DockJsonImpl.h"
+
+using nlohmann::json;
 
 #include <algorithm>
 #include <cmath>
@@ -2889,14 +2892,14 @@ bool DockArea::dockCardAsTab(const std::string& cardId, Slot target) {
 // ---- Phase 4: dock-tree persistence ----------------------------------------
 
 std::string DockArea::serializeDockTree() const {
-    ayt::ui::json root;
+    json root;
     root["version"] = 1;
     if (_rootNode != nullptr) {
-        ayt::ui::json tree;
-        serializeNode(_rootNode, tree);
+        json tree;
+        serializeNode(_rootNode, JsonHandle(&tree));
         root["dockTree"] = tree;
     }
-    ayt::ui::json floating = ayt::ui::json::array();
+    json floating = json::array();
     if (_overlay != nullptr) {
         const size_t n = _overlay->getFloatingCardCount();
         for (size_t i = 0; i < n; ++i) {
@@ -2912,7 +2915,7 @@ std::string DockArea::serializeDockTree() const {
         }
     }
     root["floating"] = floating;
-    ayt::ui::json hidden = ayt::ui::json::array();
+    json hidden = json::array();
     for (const auto& entry : _hiddenCardSlots) {
         hidden.push_back({
             {"id", entry.first},
@@ -2922,13 +2925,14 @@ std::string DockArea::serializeDockTree() const {
     return root.dump();
 }
 
-void DockArea::serializeNode(const Widget* node, ayt::ui::json& out) const {
+void DockArea::serializeNode(const Widget* node, JsonHandle out) const {
+    json& o = jsonRef(out);
     if (node == nullptr) {
         return;
     }
     if (const auto* leaf = dynamic_cast<const DockTabGroup*>(node)) {
-        out["leaf"] = leaf->getLeafId();
-        ayt::ui::json tabs = ayt::ui::json::array();
+        o["leaf"] = leaf->getLeafId();
+        json tabs = json::array();
         const size_t n = leaf->getTabCount();
         for (size_t i = 0; i < n; ++i) {
             const DockCard* c = leaf->getTab(i);
@@ -2936,16 +2940,16 @@ void DockArea::serializeNode(const Widget* node, ayt::ui::json& out) const {
                 tabs.push_back(c->getId());
             }
         }
-        out["tabs"] = tabs;
+        o["tabs"] = tabs;
         const std::string act = leaf->getActiveTabId();
-        out["active"] = act.empty() ? ayt::ui::json(nullptr) : ayt::ui::json(act);
+        o["active"] = act.empty() ? json(nullptr) : json(act);
         return;
     }
     if (const auto* box = dynamic_cast<const BoxBase*>(node)) {
-        out["orientation"] =
+        o["orientation"] =
             (dynamic_cast<const VBox*>(box) != nullptr) ? "V" : "H";
-        ayt::ui::json children = ayt::ui::json::array();
-        ayt::ui::json weights = ayt::ui::json::array();
+        json children = json::array();
+        json weights = json::array();
         // children order diverges from _slots order after insertWidget
         // (insertWidget inserts into _slots while addChild appends to
         // the children vector — see BoxBase::slotIndexOf). Layout walks
@@ -2965,20 +2969,20 @@ void DockArea::serializeNode(const Widget* node, ayt::ui::json& out) const {
             // slotIndexOf gives the _slots order; slotSize must read
             // that index.
             const int si = box->slotIndexOf(c);
-            ayt::ui::json childJson;
-            serializeNode(c, childJson);
+            json childJson;
+            serializeNode(c, JsonHandle(&childJson));
             children.push_back(childJson);
             weights.push_back(si >= 0 ? box->slotSize(si) : 0.0f);
         }
-        out["children"] = children;
-        out["weights"] = weights;
+        o["children"] = children;
+        o["weights"] = weights;
     }
 }
 
 bool DockArea::applyDockTree(const std::string& jsonStr) {
-    ayt::ui::json j;
+    json j;
     try {
-        j = ayt::ui::json::parse(jsonStr);
+        j = json::parse(jsonStr);
     } catch (...) {
         return false;
     }
@@ -3002,7 +3006,7 @@ bool DockArea::applyDockTree(const std::string& jsonStr) {
     }
 
     if (j.contains("dockTree") && j["dockTree"].is_object()) {
-        _rootNode = buildNodeFromJson(j["dockTree"], pool);
+        _rootNode = buildNodeFromJson(JsonHandle(&j["dockTree"]), pool);
         if (_rootNode != nullptr) {
             addChild(_rootNode);
             // Overlay must stay the topmost child (K-INV-D3-4).
@@ -3130,8 +3134,9 @@ void DockArea::poolAllCards(
 }
 
 Widget* DockArea::buildNodeFromJson(
-    const ayt::ui::json& j,
+    JsonHandle h,
     std::unordered_map<std::string, DockCard*>& pool) {
+    const json& j = jsonRefConst(h);
     if (j.contains("leaf")) {
         const std::string id = j.value("leaf", "");
         DockTabGroup* leaf = nullptr;
@@ -3179,12 +3184,12 @@ Widget* DockArea::buildNodeFromJson(
     const SplitterHandle::Orientation so = (orient == "V")
         ? SplitterHandle::Orientation::Vertical
         : SplitterHandle::Orientation::Horizontal;
-    const ayt::ui::json kids =
+    const json kids =
         j.contains("children") && j["children"].is_array()
-            ? j["children"] : ayt::ui::json::array();
-    const ayt::ui::json wts =
+            ? j["children"] : json::array();
+    const json wts =
         j.contains("weights") && j["weights"].is_array()
-            ? j["weights"] : ayt::ui::json::array();
+            ? j["weights"] : json::array();
     bool first = true;
     int wi = 0;
     for (const auto& kj : kids) {
@@ -3199,7 +3204,7 @@ Widget* DockArea::buildNodeFromJson(
             w = wts[wi].get<float>();
         }
         ++wi;
-        Widget* child = buildNodeFromJson(kj, pool);
+        Widget* child = buildNodeFromJson(JsonHandle(const_cast<json*>(&kj)), pool);
         if (child != nullptr) {
             box->addWidget(child, w);
         }

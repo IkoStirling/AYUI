@@ -1,6 +1,7 @@
 #include "AYUI/MenuItem.h"
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/Menu.h"
+#include "AYUI/Style.h"
 #include "AYUI/TextMeasure.h"
 #include "AYUI/UIKeyCode.h"
 #include <algorithm>
@@ -201,14 +202,14 @@ void MenuItem::onRender(IRenderBackend& renderer) {
     const bool barFadingOut = _colorInitialized && _color.w > 0.001f;
     if (highlighted || _colorAnim.active || barFadingOut) {
         const math::FVector4 target = highlighted
-            ? math::FVector4(0.18f, 0.45f, 0.78f, 0.55f)
-            : math::FVector4(0.18f, 0.45f, 0.78f, 0.0f);
+            ? resolveAccentColor(0.55f)
+            : resolveAccentColor(0.0f);
         renderer.drawRect(b, resolveTransitionColor(target));
     } else if (!_colorInitialized) {
         // Prime the transition state without painting (alpha-0 target
         // snaps in) so the FIRST hover fades in from transparent instead
         // of jumping to full highlight.
-        resolveTransitionColor(math::FVector4(0.18f, 0.45f, 0.78f, 0.0f));
+        resolveTransitionColor(resolveAccentColor(0.0f));
     }
 
     const float padL = 16.0f;

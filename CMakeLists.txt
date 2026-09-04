@@ -60,6 +60,7 @@ set(SRC_FILES
     Controls/AYDockCard.cpp
     Controls/AYDockOverlay.cpp
     Controls/AYDockTabGroup.cpp
+    Controls/AYDockTrace.cpp
     Controls/AYUIManager.cpp
     Controls/AYDeviceInputBridge.cpp
     Controls/AYAccessibility.cpp
@@ -186,9 +187,9 @@ target_include_directories(${MODULE_NAME}
 )
 
 if(nlohmann_json_FOUND)
-    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont AYDevice PRIVATE nlohmann_json::nlohmann_json)
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYFont AYDevice PRIVATE nlohmann_json::nlohmann_json)
 else()
-    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYTest AYFont AYDevice)
+    target_link_libraries(${MODULE_NAME} PUBLIC AYMath AYFont AYDevice)
     message(STATUS "AYUI: using bundled nlohmann/json from ${AYUI_NLOHMANN_DIR}")
 endif()
 

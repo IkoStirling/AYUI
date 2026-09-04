@@ -278,18 +278,27 @@ ThemeManager& ThemeManager::get() {
 void ThemeManager::registerTheme(const std::string& name, const Theme& t) {
     if (name.empty()) return;
     _themes[name] = t;
-    // G11 — registerTheme no longer auto-applies. Hosts decide when to
-    // activate by calling setActiveTheme(). This avoids overwriting a
-    // host-installed StyleSheet when the first theme gets registered.
-    if (_activeName.empty()) {
-        _activeName = name;
-    }
+    // H-3 follow-up: registerTheme no longer auto-fills _activeName either.
+    // Hosts must call setActiveTheme() explicitly. The previous
+    // "first registered = active" convenience caused resolveAccentColor
+    // and similar token-aware call sites to silently change color the
+    // first time any module initialised a default theme — a hard
+    // coupling between theme registry state and every widget's draw
+    // output. Activating now requires an explicit host decision, which
+    // keeps the historical literal-colour baseline stable until a
+    // host opts into theming.
 }
 
 void ThemeManager::setActiveTheme(const std::string& name) {
     auto it = _themes.find(name);
     if (it == _themes.end()) return;
     _activeName = name;
+    // H-3 follow-up: latch explicit-activation so resolveAccentColor
+    // can distinguish "the host asked for theming" from "the default
+    // theme happens to be registered". Without this latch, widgets
+    // would silently change color the moment any code path triggers
+    // ensureDefaultThemes() — a coupling nobody signed off on.
+    _explicitActiveSet = true;
     applyActiveToStyleManager();
     for (auto& cb : _listeners) {
         cb(name);
@@ -338,12 +347,13 @@ void ThemeManager::ensureDefaultThemes() {
         light.setFloatToken("radius.lg", 8.0f);
         _themes["light"] = std::move(light);
     }
-    if (_activeName.empty()) {
-        _activeName = "dark";
-        // G11 — no longer auto-applies. Hosts call setActiveTheme("dark")
-        // (or any registered theme name) explicitly to install the
-        // composed sheet into the StyleManager.
-    }
+    // H-3 follow-up: ensureDefaultThemes no longer auto-activates the
+    // "dark" theme. Auto-activation made resolveAccentColor return the
+    // theme's token value (0.30, 0.55, 0.95) even when the host never
+    // asked for theming, which silently broke the historical visual
+    // baseline (0.18, 0.45, 0.78). Hosts must now call
+    // setActiveTheme("dark") explicitly to opt into token-driven
+    // accent color.
 }
 
 const Theme* ThemeManager::getActiveTheme() const {
@@ -372,7 +382,63 @@ void ThemeManager::applyActiveToStyleManager() {
     StyleManager::get().setStyleSheet(sheet);
 }
 
+void ThemeManager::clearActiveThemeForTest() {
+    // H-3 follow-up: tests that call setActiveTheme() (G11 / Gallery /
+    // Productization) used to leak that state into every later suite,
+    // because ThemeManager is a process-wide singleton and there was
+    // no teardown hook. Now suites that mutate the active theme are
+    // expected to clear it at teardown so subsequent suites — and any
+    // widget that resolves a token via resolveAccentColor() — observe
+    // the same baseline they would have before the test ran.
+    _activeName.clear();
+    _explicitActiveSet = false;
+}
+
 // --- Free helper ---
+
+// H-3: resolveAccentColor. The audit found 11 control files hard-coding
+// FVector4(0.18f, 0.45f, 0.78f, ..) as the accent color, defeating Theme
+// swap. This wrapper routes every such call site through the active
+// theme's "color.accent" token. Fallback policy:
+//   * No active theme at all -> bit-identical historical default (so
+//     first-boot screenshots stay stable; existing visual baselines are
+//     unaffected when the host never installs a Theme).
+//   * Active theme present but no "color.accent" key -> same fallback
+//     (preserves behaviour for themes that don't define the token).
+//   * Active theme defines the token -> token value (the whole point).
+math::FVector4 resolveAccentColor(float alpha) {
+    // H-3 follow-up: consult the active theme's "color.accent" token
+    // when one has been registered AND explicitly activated via
+    // setActiveTheme(). Without the explicit-activation latch, the
+    // first module to call ensureDefaultThemes() would flip every
+    // accent fill from the historical (0.18, 0.45, 0.78) to the
+    // default "dark" theme's (0.30, 0.55, 0.95) — a silent visual
+    // regression nobody asked for. The historical literal stays in
+    // effect until a host opts into theming by calling
+    // setActiveTheme().
+    //
+    // Tests: ThemeManager is a process-wide singleton, so a suite
+    // that activates a theme will leak the active state into later
+    // suites. Tests that depend on the historical literal must call
+    // ThemeManager::clearActiveThemeForTest() at setup; tests that
+    // depend on token resolution must call setActiveTheme("dark") (or
+    // similar) at setup. resetG11State() handles this for the G11 /
+    // Gallery / Productization suites; visual-baseline suites in the
+    // unittest/ folder do not currently need the cleanup because none
+    // of them touches the theme registry, but the latch exists so
+    // that contract stays true if new tests do.
+    ThemeManager& mgr = ThemeManager::get();
+    mgr.ensureDefaultThemes();
+    math::FVector4 c(0.18f, 0.45f, 0.78f, alpha);
+    if (mgr.hasExplicitActiveTheme()) {
+        const Theme* active = mgr.getActiveTheme();
+        if (active != nullptr && active->hasColorToken("color.accent")) {
+            c = active->getColorToken("color.accent");
+            c.w = alpha;
+        }
+    }
+    return c;
+}
 
 math::FVector4 expandColorToken(
     const std::string& tokenOrLiteral,
@@ -384,9 +450,20 @@ math::FVector4 expandColorToken(
     // module's static init).
     ThemeManager& mgr = ThemeManager::get();
     mgr.ensureDefaultThemes();
+    // H-3 follow-up: same explicit-activation latch as resolveAccentColor.
+    // When no theme has been explicitly activated via setActiveTheme(),
+    // we honour only literal color strings; $token refs resolve to the
+    // empty-theme fallback so StyleSheet::loadFromString of a JSON
+    // fragment that references "color.bg.surface" returns (0,0,0,1)
+    // instead of silently adopting the default theme's value. This
+    // keeps hosts that haven't opted into theming on a deterministic
+    // baseline.
+    if (!mgr.hasExplicitActiveTheme()) {
+        Theme empty;
+        return empty.resolveColor(tokenOrLiteral, overrides);
+    }
     const Theme* active = mgr.getActiveTheme();
     if (active == nullptr) {
-        // No theme → fall back to literal-only parse.
         Theme empty;
         return empty.resolveColor(tokenOrLiteral, overrides);
     }

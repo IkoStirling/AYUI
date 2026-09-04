@@ -175,13 +175,17 @@ TEST_CASE(checkbox_render_checked_accent_fill) {
     CHECK(rectCount >= 2);
 
     // The accent fill is the second Rect draw call — find the drawRect
-    // whose color matches the accent (0.18f, 0.45f, 0.78f, 1.0f).
+    // whose color matches the accent. H-3: accent now resolves through
+    // ThemeManager::getActiveTheme()'s "color.accent" token (defaults to
+    // dark theme's (0.30, 0.55, 0.95)). The previous literal
+    // (0.18, 0.45, 0.78) is no longer the source of truth.
     bool foundAccent = false;
+    const FVector4 expectedAccent = resolveAccentColor(1.0f);
     for (const auto& dc : renderer.getDrawCalls()) {
         if (dc.type != MockRenderer::DrawCall::Rect) continue;
-        if (fabsf(dc.color.x - 0.18f) < 1e-4f &&
-            fabsf(dc.color.y - 0.45f) < 1e-4f &&
-            fabsf(dc.color.z - 0.78f) < 1e-4f) {
+        if (fabsf(dc.color.x - expectedAccent.x) < 1e-4f &&
+            fabsf(dc.color.y - expectedAccent.y) < 1e-4f &&
+            fabsf(dc.color.z - expectedAccent.z) < 1e-4f) {
             foundAccent = true;
             break;
         }

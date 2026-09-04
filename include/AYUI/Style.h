@@ -235,4 +235,12 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget);
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget,
                            StyleState state);
 
+// H-3: theme-driven accent accessor. Returns the "color.accent" token
+// of the currently active theme; alpha is overridden by `alpha` so
+// call sites that historically used FVector4(0.18, 0.45, 0.78, A) get
+// exactly the same alpha. Bit-identical historical default when no
+// theme is active, so existing visual baselines are unaffected when
+// the host never installs a Theme.
+math::FVector4 resolveAccentColor(float alpha = 1.0f);
+
 } // namespace ayt::ui

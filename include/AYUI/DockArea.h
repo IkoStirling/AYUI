@@ -7,9 +7,7 @@
 #include "AYUI/DockCard.h"
 #include "AYUI/DockTrace.h"
 #include "AYUI/DockTabGroup.h"
-// Provides the `ayt::ui::json` alias used by the Phase-4 persistence
-// helpers (serializeNode / buildNodeFromJson signatures).
-#include "AYUI/WidgetSerializer.h"
+#include "AYUI/DockJsonHandle.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -381,8 +379,10 @@ private:
     // ---- Phase 4: tree (de)serialization helpers ----
     // Recursive writers/readers; shared builder for pinned-vs-g_N
     // leaves so applyDockTree and ensureRootTree stay in lockstep.
-    void serializeNode(const Widget* node, ayt::ui::json& out) const;
-    Widget* buildNodeFromJson(const ayt::ui::json& j,
+    // B-3: opaque JsonHandle instead of nlohmann::json& so this header
+    // does not pull <nlohmann/json.hpp> into consumer TUs.
+    void serializeNode(const Widget* node, JsonHandle out) const;
+    Widget* buildNodeFromJson(JsonHandle j,
                               std::unordered_map<std::string, DockCard*>& pool);
     // Pool every card the dock owns (docked tabs + floating) into
     // `pool` (id → card), detaching each WITHOUT deleting (UI-OWN-1).

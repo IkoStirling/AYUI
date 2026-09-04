@@ -38,6 +38,13 @@ void resetG11State() {
     // resolve to (0,0,0,1).
     ThemeManager::get().ensureDefaultThemes();
     ThemeManager::get().setActiveTheme("dark");
+    // H-3 follow-up: G11 cases intentionally want token resolution
+    // (e.g. $color.bg.surface → (0.10, 0.10, 0.12, 1)) so they need an
+    // explicitly active theme. The setActiveTheme call above satisfies
+    // that. The cleanup happens per-case at the bottom of any case
+    // that explicitly activates a NON-default theme (Productization
+    // pattern); the G11 cases all settle on "dark" so the suite
+    // doesn't pollute the next.
 }
 
 } // anon

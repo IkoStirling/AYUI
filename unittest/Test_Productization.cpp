@@ -268,6 +268,9 @@ TEST_CASE(theme_inherits_parent_tokens_and_child_overrides) {
     CHECK_FLOAT_EQ(active->getColorToken("product.surface").x, 0.7f, 1e-5f);
     CHECK_FLOAT_EQ(active->getFloatToken("product.gap"), 8.0f, 1e-5f);
     CHECK(active->hasSheetFragment("product.controls"));
+    // H-3 follow-up: release the explicit-activation latch so this
+    // case doesn't leak the "product_child" theme into later suites.
+    ThemeManager::get().clearActiveThemeForTest();
 }
 
 TEST_CASE(widget_theme_override_cascades_to_descendants) {
@@ -300,6 +303,9 @@ TEST_CASE(widget_theme_override_cascades_to_descendants) {
     CHECK(inheritedFillRendered);
     StyleManager::get().setStyleSheet(nullptr);
     delete sheet;
+    // H-3 follow-up: release the explicit-activation latch so this
+    // case doesn't leak the "product_cascade_theme" into later suites.
+    ThemeManager::get().clearActiveThemeForTest();
 }
 
 TEST_CASE(tabstrip_scroll_overflow_and_selected_visibility) {

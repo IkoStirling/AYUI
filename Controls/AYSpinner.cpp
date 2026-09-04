@@ -1,5 +1,6 @@
 #include "AYUI/Spinner.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYMath/MathUtils.h"
 
 #include <cmath>
@@ -51,7 +52,7 @@ void Spinner::onRender(IRenderBackend& renderer) {
                              cy + dy - half,
                              cx + dx + half,
                              cy + dy + half),
-            math::FVector4(0.18f, 0.45f, 0.78f, kAlphas[i]),
+            math::FVector4(resolveAccentColor(kAlphas[i])),
             2.0f);
     }
 }

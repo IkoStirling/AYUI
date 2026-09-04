@@ -1,4 +1,5 @@
 #include "AYUI/LayoutLoader.h"
+#include "../Controls/DockJsonImpl.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/I18n.h"
 #include "AYUI/Button.h"
@@ -13,6 +14,8 @@
 #include "AYUI/Box.h"
 #include "AYUI/GridPanel.h"
 #include "AYUI/SplitterHandle.h"
+
+using nlohmann::json;
 #include "AYUI/Image.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/ListView.h"
@@ -184,7 +187,8 @@ UILayoutLoader::UILayoutLoader()
 UILayoutLoader::~UILayoutLoader() {
 }
 
-DockCard* UILayoutLoader::buildDockCardFromJson(const json& cj) {
+DockCard* UILayoutLoader::buildDockCardFromJson(JsonHandle h) {
+    const json& cj = jsonRefConst(h);
     if (!cj.is_object()) return nullptr;
     auto card = std::make_unique<DockCard>();
     std::string id;
@@ -207,7 +211,7 @@ DockCard* UILayoutLoader::buildDockCardFromJson(const json& cj) {
     }
     Widget* content = nullptr;
     if (cj.contains("content") && cj["content"].is_object()) {
-        content = buildWidgetTree(cj["content"]);
+        content = buildWidgetTree(JsonHandle(const_cast<json*>(&cj["content"])));
     }
     if (content != nullptr) {
         card->setContent(content);
@@ -317,7 +321,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     try {
         json j = json::parse(jsonStr);
         LOADER_HEAP_CHECK("after_json_parse");
-        Widget* root = buildWidgetTree(j);
+        Widget* root = buildWidgetTree(JsonHandle(&j));
         LOADER_HEAP_CHECK("after_build_widget_tree");
         // Success: the new tree's buildWidgetTree path already populated
         // _widgetsById during recursion (the early-swap above restored
@@ -446,7 +450,8 @@ Widget* UILayoutLoader::findWidgetById(const std::string& id) const {
     return (it != _widgetsById.end()) ? it->second : nullptr;
 }
 
-Widget* UILayoutLoader::buildWidgetTree(const json& j) {
+Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
+    const json& j = jsonRefConst(h);
     if (!j.is_object()) return nullptr;
 
     std::string type = j.value("type", "Widget");
@@ -743,7 +748,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 j["contentSize"].value("h", 0.0f)));
         }
         if (j.contains("content") && j["content"].is_object()) {
-            if (Widget* content = buildWidgetTree(j["content"])) {
+            if (Widget* content = buildWidgetTree(JsonHandle(const_cast<json*>(&j["content"])))) {
                 scroll->setContentOwned(content);
             }
         }
@@ -790,7 +795,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                     if (itemJson.contains("submenu")
                         && itemJson["submenu"].is_object()) {
                         Widget* submenuWidget = buildWidgetTree(
-                            itemJson["submenu"]);
+                            JsonHandle(const_cast<json*>(&itemJson["submenu"])));
                         Menu* submenu = dynamic_cast<Menu*>(submenuWidget);
                         if (submenu != nullptr) {
                             menu->attachSubmenu(item, submenu);
@@ -994,7 +999,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         const char* parentId = id.empty() ? type.c_str() : id.c_str();
         if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
             for (const auto& childJson : j["children"]) {
-                Widget* child = buildWidgetTree(childJson);
+                Widget* child = buildWidgetTree(JsonHandle(const_cast<json*>(&childJson)));
                 if (!child) continue;
                 if (child->isSplitterHandle()) {
                     // Mirror HBox: pin thin-axis size so a missed
@@ -1016,7 +1021,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             vbox->rebindSplitters();
         } else if (HBox* hbox = dynamic_cast<HBox*>(widget)) {
             for (const auto& childJson : j["children"]) {
-                Widget* child = buildWidgetTree(childJson);
+                Widget* child = buildWidgetTree(JsonHandle(const_cast<json*>(&childJson)));
                 if (!child) continue;
                 if (child->isSplitterHandle()) {
                     hbox->addWidget(child, SplitterHandle::kDefaultWidth);
@@ -1034,7 +1039,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
             // sibling to VBox/HBox so it runs without a `children` array.
         } else {
             for (const auto& childJson : j["children"]) {
-                Widget* child = buildWidgetTree(childJson);
+                Widget* child = buildWidgetTree(JsonHandle(const_cast<json*>(&childJson)));
                 if (child) {
                     widget->addChild(child);
                     LOADER_HEAP_CHECK_ATTACH(parentId, child->getId().empty() ? "child" : child->getId().c_str());
@@ -1076,7 +1081,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                     || !cellJson["content"].is_object()) {
                     continue;
                 }
-                Widget* cellChild = buildWidgetTree(cellJson["content"]);
+                Widget* cellChild = buildWidgetTree(JsonHandle(const_cast<json*>(&cellJson["content"])));
                 if (cellChild == nullptr) continue;
                 const int rowSpan = cellJson.value("rowSpan", 1);
                 const int colSpan = cellJson.value("colSpan", 1);
@@ -1104,7 +1109,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         if (j.contains("children") && j["children"].is_array()) {
             const char* parentId = id.empty() ? type.c_str() : id.c_str();
             for (const auto& childJson : j["children"]) {
-                Widget* child = buildWidgetTree(childJson);
+                Widget* child = buildWidgetTree(JsonHandle(const_cast<json*>(&childJson)));
                 if (!child) continue;
                 findNextCell();
                 if (nextRow >= grid->getRowCount()) break;
@@ -1149,7 +1154,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
                 if (!DockArea::parseSlot(cj["slot"].get<std::string>(), slot)) {
                     continue;
                 }
-                DockCard* card = buildDockCardFromJson(cj);
+                DockCard* card = buildDockCardFromJson(JsonHandle(const_cast<json*>(&cj)));
                 if (card == nullptr) continue;
                 dock->addCard(slot, std::unique_ptr<DockCard>(card));
             }
@@ -1157,7 +1162,7 @@ Widget* UILayoutLoader::buildWidgetTree(const json& j) {
         if (j.contains("floating") && j["floating"].is_array()) {
             DockOverlay* overlay = dock->getOverlay();
             for (const auto& cj : j["floating"]) {
-                DockCard* card = buildDockCardFromJson(cj);
+                DockCard* card = buildDockCardFromJson(JsonHandle(const_cast<json*>(&cj)));
                 if (card == nullptr) continue;
                 // Apply the floating frame (if present). Cards without
                 // an explicit frame are positioned at (0, 0) — keep

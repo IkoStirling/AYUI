@@ -463,9 +463,11 @@ public:
     // Valid during onDragEnd (and until the next beginDrag): true if the
     // just-ended drag had an accepting drop target. DockCard uses this so
     // void-drop promote does not re-float a card that DockArea::onDrop
-    // already handled (including same-slot no-op). Stored out-of-line so
-    // adding the flag does not shift UIManager member layout (stale
-    // Gallery/AYUI mix would AV in registerTooltip's _tooltips).
+    // already handled (including same-slot no-op). Memberised (was a
+    // process-global `g_lastDragHadDropTarget`) so multi-window hosts
+    // running one UIManager per native window don't read another
+    // window's drag-end state (audit H-2). Reset by drop start, set
+    // when the drag commits to a non-null drop target.
     bool        lastDragHadDropTarget() const;
 
     // G12 R3-safe parallel of clearFocus/Capture/HoverNoDispatch. If
@@ -499,6 +501,10 @@ private:
 
     IRenderBackend* _backend = nullptr;
     Widget* _root = nullptr;
+    // H-2: memberised cross-window-safe drag-end sentinel (was a
+    // process-global `g_lastDragHadDropTarget`). Reset on drag start,
+    // set when a drop commits to a non-null target.
+    bool _lastDragHadDropTarget = false;
     // Phase A: popup overlay layer (sibling of _root). Spawned in
     // initialize(), sized by setClientSize, torn down in shutdown().
     // Popups mounted via the PopupLayer API will be reparented here.

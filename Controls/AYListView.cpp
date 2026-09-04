@@ -48,7 +48,7 @@ void ListView::Row::onRender(IRenderBackend& renderer) {
 
     // Selection band — full row, accent color when selected.
     if (_selected) {
-        renderer.drawRect(bounds, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
+        renderer.drawRect(bounds, resolveAccentColor(0.55f));
     } else if (isMouseOver() && isEnabled()) {
         renderer.drawRect(bounds, math::FVector4(0.30f, 0.30f, 0.32f, 0.5f));
     }

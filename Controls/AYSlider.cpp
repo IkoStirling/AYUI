@@ -239,7 +239,7 @@ void Slider::onRender(IRenderBackend& renderer) {
     filled.maxX = fillMaxX;
     if (filled.maxX > filled.minX) {
         renderer.drawRect(filled,
-            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f));
+            resolveAccentColor(1.0f));
     }
     // Unfilled portion — from fillMaxX to track trailing edge.
     math::FRectangle unfilled = track;

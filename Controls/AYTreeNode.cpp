@@ -1,5 +1,6 @@
 #include "AYUI/TreeNode.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYUI/SvgIcon.h"
 #include <algorithm>
 
@@ -70,7 +71,7 @@ void TreeNode::onRender(IRenderBackend& renderer) {
 
     // Selection band — full row, accent color when selected.
     if (_selected) {
-        renderer.drawRect(b, math::FVector4(0.18f, 0.45f, 0.78f, 0.55f));
+        renderer.drawRect(b, resolveAccentColor(0.55f));
     } else if (isMouseOver() && isEnabled()) {
         renderer.drawRect(b, math::FVector4(0.30f, 0.30f, 0.32f, 0.5f));
     }

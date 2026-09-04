@@ -1,6 +1,7 @@
 #include "AYUI/TreeView.h"
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/ScrollBarSync.h"
+#include "AYUI/UIManager.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -15,8 +16,23 @@ TreeView::TreeView() {
 }
 
 TreeView::~TreeView() {
-    // Nodes were added via addChild; CompoundWidget destructor will free
-    // them. Null our pointers so the dtor runs cleanly.
+    // R3 landmine: nodes were added via addChild; CompoundWidget dtor
+    // frees them. BEFORE that, drop any UIManager transient pointers
+    // that may be tracking this TreeView (or its scrollbar) so the
+    // next updateHoverWidget / setFocus call doesn't dispatch into
+    // a destroyed widget. Pattern mirrors TileView::~TileView, the
+    // other container widget that owns child rows — TreeView was the
+    // only sibling missing these calls (audit H-1).
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearHoverNoDispatch(this);
+        ui->clearCaptureNoDispatch(this);
+        ui->clearFocusNoDispatch(this);
+        if (_vbar != nullptr) {
+            ui->clearHoverNoDispatch(_vbar);
+            ui->clearCaptureNoDispatch(_vbar);
+            ui->clearFocusNoDispatch(_vbar);
+        }
+    }
     _nodes.clear();
     _vbar = nullptr;
 }

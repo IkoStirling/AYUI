@@ -124,6 +124,23 @@ public:
     // StyleManager. Called automatically by setActiveTheme().
     void applyActiveToStyleManager();
 
+    // H-3 follow-up: returns true when an active theme has been
+    // explicitly selected via setActiveTheme(). Used by
+    // resolveAccentColor() to decide whether the token value or the
+    // historical literal (0.18, 0.45, 0.78) is the source of truth.
+    // Without this flag, the first ThemeManager::ensureDefaultThemes()
+    // call (from any module's static init) would silently flip every
+    // accent-filled widget from the legacy blue to the "dark" theme's
+    // brighter blue — a breaking visual change nobody asked for.
+    bool hasExplicitActiveTheme() const { return _explicitActiveSet; }
+
+    // Reset the manager to "no active theme" — test-only helper.
+    // Production code should not need this; ThemeManager is a
+    // process-wide singleton and tests that poke setActiveTheme()
+    // should restore the previous state at teardown so other suites
+    // don't observe a stale theme.
+    void clearActiveThemeForTest();
+
 private:
     ThemeManager() = default;
     ThemeManager(const ThemeManager&) = delete;
@@ -131,6 +148,11 @@ private:
 
     std::unordered_map<std::string, Theme> _themes;
     std::string _activeName;
+    // H-3 follow-up: latched true by setActiveTheme() and reset by
+    // clearActiveThemeForTest(). Read by hasExplicitActiveTheme()
+    // (and through it, by resolveAccentColor) to decide whether the
+    // historical literal default is still in effect.
+    bool _explicitActiveSet = false;
     std::vector<ThemeChangedCallback> _listeners;
 };
 

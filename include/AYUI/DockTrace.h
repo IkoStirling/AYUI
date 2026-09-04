@@ -2,23 +2,16 @@
 
 // Lightweight DockArea drag/drop trace. Always appends to
 // %TEMP%\ay_dock_trace.log (and stderr). Delete the file between repros.
+//
+// This header is PUBLIC (transitively included from AYUI.h via
+// DockArea.h). It deliberately does NOT include <windows.h> so consumer
+// TUs do not pick up HANDLE/HWND/DWORD into their global namespace —
+// the Win32 path lookup lives in Controls/AYDockTrace.cpp (audit B-1).
+// See Clipboard.h for the same discipline.
 
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-
-// MUST be outside any namespace: including windows.h inside ayt::ui nests
-// HANDLE/DWORD/HWND into that namespace and trips the SDK include guard, so
-// later global #include <windows.h> (FileWatcher, Gallery GDI) sees no types.
-#if defined(_WIN32)
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <windows.h>
-#endif
 
 namespace ayt::ui {
 
@@ -35,24 +28,9 @@ inline bool ayuiTraceInputEnabled()
     return cached != 0;
 }
 
-inline const char* dockTracePath() {
-    static char path[512] = {};
-    if (path[0] != '\0') {
-        return path;
-    }
-#if defined(_WIN32)
-    char tmp[MAX_PATH];
-    const DWORD n = GetTempPathA(MAX_PATH, tmp);
-    if (n == 0 || n >= MAX_PATH - 32) {
-        std::snprintf(path, sizeof(path), "ay_dock_trace.log");
-    } else {
-        std::snprintf(path, sizeof(path), "%say_dock_trace.log", tmp);
-    }
-#else
-    std::snprintf(path, sizeof(path), "/tmp/ay_dock_trace.log");
-#endif
-    return path;
-}
+// Resolves the absolute log file path (Win32: %TEMP%\ay_dock_trace.log,
+// POSIX: /tmp/ay_dock_trace.log). Definition in Controls/AYDockTrace.cpp.
+const char* dockTracePath();
 
 inline void dockTrace(const char* fmt, ...) {
     char line[1024];

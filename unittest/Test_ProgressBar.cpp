@@ -178,13 +178,18 @@ TEST_CASE(progressbar_factory_and_serializer_round_trip) {
 
 // Blue accent rounded-rect draw calls (the scan segment is the only
 // accent-filled RoundedRect; the track is dark grey, the border thin).
+// H-3: accent is now resolved through ThemeManager::getActiveTheme()'s
+// "color.accent" token (defaults to dark theme's (0.30, 0.55, 0.95)
+// via ThemeManager::ensureDefaultThemes()). The previous literal
+// (0.18, 0.45, 0.78) is no longer the source of truth.
 static std::vector<FRectangle> accentSegmentRects(const MockRenderer& r) {
     std::vector<FRectangle> rects;
+    const FVector4 expected = resolveAccentColor(1.0f);
     for (const auto& dc : r.getDrawCalls()) {
         if (dc.type != MockRenderer::DrawCall::Rect) continue;
-        if (fabsf(dc.color.x - 0.18f) < 1e-4f &&
-            fabsf(dc.color.y - 0.45f) < 1e-4f &&
-            fabsf(dc.color.z - 0.78f) < 1e-4f &&
+        if (fabsf(dc.color.x - expected.x) < 1e-4f &&
+            fabsf(dc.color.y - expected.y) < 1e-4f &&
+            fabsf(dc.color.z - expected.z) < 1e-4f &&
             fabsf(dc.floatParam1 - 2.0f) < 1e-4f) {
             rects.push_back(dc.bounds);
         }

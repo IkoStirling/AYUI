@@ -1,12 +1,12 @@
 #pragma once
 
 #include "AYUI/Widget.h"
+#include "AYUI/DockJsonHandle.h"
 #include <string>
 #include <memory>
 #include <unordered_map>
 #include <functional>
 #include <vector>
-#include <nlohmann/json.hpp>
 
 namespace ayt::io {
 class FileWatcher;
@@ -14,7 +14,6 @@ struct FileWatchEvent;
 }
 
 namespace ayt::ui {
-using json = nlohmann::json;
 
 class Widget;
 class WidgetFactory;
@@ -60,8 +59,8 @@ public:
     Widget* findWidgetById(const std::string& id) const;
 
 private:
-    Widget* buildWidgetTree(const json& j);
-    DockCard* buildDockCardFromJson(const json& cj);
+    Widget* buildWidgetTree(JsonHandle j);
+    DockCard* buildDockCardFromJson(JsonHandle cj);
     // Drain the watcher queue and update _dirty. Returns _dirty after the poll.
     // R-4: const-ness relaxed vs the old mtime-based design because FileWatcher
     // pollPending mutates internal queues. Callers that only check the flag

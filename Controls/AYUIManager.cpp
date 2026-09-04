@@ -238,9 +238,10 @@ struct RootLayerState {
 
 std::unordered_map<const UIManager*, RootLayerState> g_rootLayerStates;
 
-// Out-of-line so UIManager's sizeof/layout stays stable across rebuilds
-// of dependents (see lastDragHadDropTarget() docstring).
-bool g_lastDragHadDropTarget = false;
+// H-2: removed process-global `g_lastDragHadDropTarget`. The flag is now
+// an instance member (`_lastDragHadDropTarget`), so multi-window hosts
+// running one UIManager per native window don't read another window's
+// drag-end state.
 } // namespace
 
 UIManager* UIManager::tryGet() {
@@ -248,7 +249,7 @@ UIManager* UIManager::tryGet() {
 }
 
 bool UIManager::lastDragHadDropTarget() const {
-    return g_lastDragHadDropTarget;
+    return _lastDragHadDropTarget;
 }
 
 // =============================================================================
@@ -2066,7 +2067,7 @@ bool UIManager::beginDrag(Widget* source) {
     _dragSession.source        = source;
     _dragSession.currentTarget = nullptr;
     _dragSession.lastMousePos  = math::FVector2(0.0f, 0.0f);
-    g_lastDragHadDropTarget    = false;
+    _lastDragHadDropTarget = false;
 
     if (source->_onDragStart) {
         source->_onDragStart();
@@ -2177,7 +2178,7 @@ bool UIManager::endDrag(bool accepted) {
     Widget*     target = _dragSession.currentTarget;
     DragPayload payload = _dragSession.payload;
     const bool  hadTarget = (target != nullptr);
-    g_lastDragHadDropTarget = hadTarget;
+    _lastDragHadDropTarget = hadTarget;
 
     if (target != nullptr) {
         target->setCurrentDropTarget(false);

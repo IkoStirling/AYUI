@@ -114,7 +114,7 @@ void Button::onRender(IRenderBackend& renderer) {
                      : math::FVector4(0.36f, 0.38f, 0.42f, 1.0f);
             break;
         case ButtonState::Pressed:
-            bg = math::FVector4(0.18f, 0.45f, 0.78f, 1.0f);
+            bg = resolveAccentColor();
             break;
         case ButtonState::Disabled:
             bg = math::FVector4(0.20f, 0.20f, 0.20f, 1.0f);

@@ -1,5 +1,6 @@
 #include "AYUI/TabStrip.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/Style.h"
 #include "AYUI/UIKeyCode.h"
 #include <algorithm>
 
@@ -257,7 +258,7 @@ void TabStrip::onRender(IRenderBackend& renderer) {
                          bottom - thickness,
                          r.x + r.y,
                          bottom),
-        math::FVector4(0.18f, 0.45f, 0.78f, 1.0f));
+        resolveAccentColor(1.0f));
 }
 
 bool TabStrip::onKeyDown(int keyCode) {

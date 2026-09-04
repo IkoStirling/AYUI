@@ -39,7 +39,7 @@
 #include "AYUI/Modal.h"
 #include "AYUI/ModalDialog.h"
 #include "AYUI/TabStrip.h"
-#include <nlohmann/json.hpp>
+#include "../Controls/DockJsonImpl.h"
 #include <codecvt>
 #include <locale>
 #include <memory>
@@ -91,7 +91,7 @@ std::string WidgetSerializer::serialize(Widget* root, bool pretty) {
     if (!root) return "{}";
 
     json j;
-    serializeWidgetToJson(root, j);
+    serializeWidgetToJson(root, JsonHandle(&j));
 
     if (pretty) {
         return j.dump(4);
@@ -103,7 +103,7 @@ std::string WidgetSerializer::serializeWidget(Widget* widget) {
     if (!widget) return "{}";
 
     json j;
-    serializeWidgetToJson(widget, j);
+    serializeWidgetToJson(widget, JsonHandle(&j));
     return j.dump(4);
 }
 
@@ -1102,7 +1102,8 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
     }
 }
 
-void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
+void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
+    json& j = jsonRef(h);
     if (!widget) return;
 
     // R-8 (B11 fix): the previous version wrote `j["type"] = widget->getStyleId()`
@@ -1258,7 +1259,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["scrollOffset"] = {{"x", offset.x}, {"y", offset.y}};
         if (Widget* content = scroll->getContent()) {
             json contentJson;
-            serializeWidgetToJson(content, contentJson);
+            serializeWidgetToJson(content, JsonHandle(&contentJson));
             j["content"] = contentJson;
         }
     }
@@ -1325,7 +1326,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             Widget* content = tc->getTabContent(i);
             if (content != nullptr) {
                 json contentJson;
-                serializeWidgetToJson(content, contentJson);
+                serializeWidgetToJson(content, JsonHandle(&contentJson));
                 tabJson["content"] = contentJson;
             }
             j["tabs"].push_back(tabJson);
@@ -1361,7 +1362,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         if (Widget* body = dialog->getBodyContent()) {
             json bodyJson;
-            serializeWidgetToJson(body, bodyJson);
+            serializeWidgetToJson(body, JsonHandle(&bodyJson));
             j["bodyContent"] = bodyJson;
         }
     }
@@ -1378,7 +1379,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         }
         if (Widget* content = modal->getContent()) {
             json contentJson;
-            serializeWidgetToJson(content, contentJson);
+            serializeWidgetToJson(content, JsonHandle(&contentJson));
             j["content"] = contentJson;
         }
     }
@@ -1439,7 +1440,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         // subtree doesn't double-emit.
         if (card->getContent() != nullptr) {
             json contentJson;
-            serializeWidgetToJson(card->getContent(), contentJson);
+            serializeWidgetToJson(card->getContent(), JsonHandle(&contentJson));
             j["content"] = contentJson;
         }
     }
@@ -1508,7 +1509,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                 const GridPanel::CellInfo* cell = gp->findCell(row, col);
                 if (cell == nullptr || cell->widget == nullptr) continue;
                 json contentJson;
-                serializeWidgetToJson(cell->widget, contentJson);
+                serializeWidgetToJson(cell->widget, JsonHandle(&contentJson));
                 j["cells"].push_back({
                     {"row", row}, {"col", col},
                     {"rowSpan", cell->rowSpan}, {"colSpan", cell->colSpan},
@@ -1556,7 +1557,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["hasSubmenu"] = mi->hasSubmenu();
         if (Menu* submenu = mi->getSubmenu()) {
             json submenuJson;
-            serializeWidgetToJson(submenu, submenuJson);
+            serializeWidgetToJson(submenu, JsonHandle(&submenuJson));
             j["submenu"] = submenuJson;
         }
     }
@@ -1567,7 +1568,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             MenuItem* item = menu->getItem(i);
             if (item == nullptr) continue;
             json itemJson;
-            serializeWidgetToJson(item, itemJson);
+            serializeWidgetToJson(item, JsonHandle(&itemJson));
             j["items"].push_back(itemJson);
         }
     }
@@ -1582,7 +1583,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             mj["title"] = toUtf8(mb->getMenuTitle(i));
             if (Menu* menu = mb->getMenu(i)) {
                 json menuJson;
-                serializeWidgetToJson(menu, menuJson);
+                serializeWidgetToJson(menu, JsonHandle(&menuJson));
                 mj["menu"] = menuJson;
             }
             j["menus"].push_back(mj);
@@ -1599,7 +1600,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             Widget* p = sb->getPanelWidget(i);
             if (p != nullptr) {
                 json pj;
-                serializeWidgetToJson(p, pj);
+                serializeWidgetToJson(p, JsonHandle(&pj));
                 j["panels"].push_back(pj);
             }
         }
@@ -1709,7 +1710,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
             DockCard* card = overlay->getFloatingCard(i);
             if (card == nullptr) continue;
             json cardJson;
-            serializeWidgetToJson(card, cardJson);
+            serializeWidgetToJson(card, JsonHandle(&cardJson));
             const auto pos = card->getPosition();
             const auto size = card->getSize();
             cardJson["x"] = pos.x;
@@ -1758,7 +1759,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                 DockCard* c = dock->getCard((DockArea::Slot)i, k);
                 if (c == nullptr) continue;
                 json cj;
-                serializeWidgetToJson(c, cj);
+                serializeWidgetToJson(c, JsonHandle(&cj));
                 cj["slot"] = slotNames[i];
                 j["cards"].push_back(cj);
             }
@@ -1773,7 +1774,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
                     DockCard* c = overlay->getFloatingCard(k);
                     if (c == nullptr) continue;
                     json cj;
-                    serializeWidgetToJson(c, cj);
+                    serializeWidgetToJson(c, JsonHandle(&cj));
                     const math::FVector2 pos = c->getPosition();
                     const math::FVector2 sz  = c->getSize();
                     cj["x"] = pos.x;
@@ -1808,7 +1809,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, json& j) {
         j["children"] = json::array();
         for (Widget* child : children) {
             json childJson;
-            serializeWidgetToJson(child, childJson);
+            serializeWidgetToJson(child, JsonHandle(&childJson));
             j["children"].push_back(childJson);
         }
     }

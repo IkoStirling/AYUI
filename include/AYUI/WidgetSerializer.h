@@ -1,12 +1,11 @@
 #pragma once
 
 #include "AYUI/Widget.h"
-#include <nlohmann/json.hpp>
+#include "AYUI/DockJsonHandle.h"
 #include <string>
 #include <vector>
 
 namespace ayt { namespace ui {
-using json = nlohmann::json;
 
 class WidgetSerializer {
 public:
@@ -15,7 +14,7 @@ public:
     static Widget* deserialize(const std::string& jsonStr);
 
 private:
-    static void serializeWidgetToJson(Widget* widget, json& j);
+    static void serializeWidgetToJson(Widget* widget, JsonHandle j);
 };
 
 } } // namespace ayt::ui

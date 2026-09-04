@@ -21,12 +21,14 @@ namespace {
 // PR-B2 fixture — mirrors Test_Theme_G11::resetG11State() so the suite
 // stays order-independent. The ThemeManager doesn't expose a full reset
 // (intentional — callers shouldn't blow away every registered theme
-// from afar), so we ensure defaults + activate "dark" + clear listeners.
+// from afar), so we ensure defaults + clear listeners.
 void resetB2State() {
     StyleManager::get().setStyleSheet(nullptr);
     ThemeManager::get().clearOnThemeChangedListeners();
+    // H-3 follow-up: release the explicit-activation latch so this
+    // suite doesn't leak its "dark" activation into later suites.
+    ThemeManager::get().clearActiveThemeForTest();
     ThemeManager::get().ensureDefaultThemes();
-    ThemeManager::get().setActiveTheme("dark");
 }
 
 } // anon

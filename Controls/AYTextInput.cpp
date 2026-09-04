@@ -694,7 +694,7 @@ void TextInput::onRender(IRenderBackend& renderer) {
     } else {
         bg = math::FVector4(0.12f, 0.12f, 0.13f, 1.0f);
         borderColor = _hasFocus
-            ? math::FVector4(0.18f, 0.45f, 0.78f, 1.0f)
+            ? resolveAccentColor(1.0f)
             : math::FVector4(0.4f, 0.4f, 0.45f, 1.0f);
         borderWidth = 1.0f;
     }
@@ -730,7 +730,7 @@ void TextInput::onRender(IRenderBackend& renderer) {
             renderer.drawRect(
                 math::FRectangle(selX0, bounds.minY + pad,
                                  selX1, bounds.maxY - pad),
-                math::FVector4(0.18f, 0.45f, 0.78f, 0.45f));
+                resolveAccentColor(0.45f));
         }
         const math::FVector4 textColor = _readOnly
             ? math::FVector4(0.55f, 0.55f, 0.55f, 1.0f)

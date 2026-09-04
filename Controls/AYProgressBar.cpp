@@ -129,7 +129,7 @@ void ProgressBar::onRender(IRenderBackend& renderer) {
         renderer.pushClip(bar);
         renderer.drawRoundedRect(
             math::FRectangle(x0, bar.minY, x0 + segW, bar.maxY),
-            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f), 2.0f);
+            resolveAccentColor(1.0f), 2.0f);
         renderer.popClip();
         renderer.drawBorderRect(bar, unfilledBorder, unfilledBorderWidth, 2.0f);
         return;
@@ -139,7 +139,7 @@ void ProgressBar::onRender(IRenderBackend& renderer) {
     // tiny non-zero value still shows a visible bar.
     if (filled.maxX > filled.minX + 0.5f) {
         renderer.drawRoundedRect(filled,
-            math::FVector4(0.18f, 0.45f, 0.78f, 1.0f), 2.0f);
+            resolveAccentColor(1.0f), 2.0f);
     }
     renderer.drawBorderRect(bar, unfilledBorder, unfilledBorderWidth, 2.0f);
 
