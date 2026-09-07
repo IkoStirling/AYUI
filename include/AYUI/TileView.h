@@ -241,6 +241,12 @@ public:
         _onScroll = std::move(cb);
     }
 
+    // Explorer-style rubber-band selection. It starts only from empty grid
+    // space in Extended mode, so dragging a tile keeps the existing drag/drop
+    // contract. Ctrl/Shift preserve the selection that existed at press time.
+    bool isMarqueeSelecting() const { return _marqueeActive; }
+    math::FRectangle getMarqueeBounds() const;
+
     void performLayout() override;
     void layoutChildren() override;
     math::FRectangle getClientRect() const override;
@@ -248,6 +254,7 @@ public:
     void renderChildren(IRenderBackend& renderer) override;
     Widget* hitTest(const math::FVector2& worldPos) override;
 
+    bool onMouseMove(const UIMouseEvent& e) override;
     bool onMouseButtonDown(const UIMouseEvent& e) override;
     bool onMouseButtonUp(const UIMouseEvent& e) override;
     bool onMouseWheel(const UIMouseWheelEvent& e) override;
@@ -280,6 +287,7 @@ private:
     void handleDragFinished(TileCell* cell, bool accepted);
     bool performAccessibilityAction(TileCell* cell, AccessibilityAction action);
     void applyPointerSelection(int index, uint32_t modifiers);
+    void updateMarqueeSelection(const math::FVector2& worldPos);
     void applyKeyboardMove(int next, bool shift, bool ctrl);
     void activateIndex(int index);
     void updateEdgeAutoScroll(float dt);
@@ -323,6 +331,12 @@ private:
     bool _deferPlainCollapse = false;
     std::vector<int> _activeDragIndices;
     DragPayloadBuilder _dragPayloadBuilder;
+
+    bool _marqueePending = false;
+    bool _marqueeActive = false;
+    math::FVector2 _marqueeStart{0.0f, 0.0f};
+    math::FVector2 _marqueeCurrent{0.0f, 0.0f};
+    std::vector<int> _marqueeBaseIndices;
 
     static constexpr float kDoubleClickSeconds = 0.4f;
     static constexpr float kDoubleClickDistance = 4.0f;

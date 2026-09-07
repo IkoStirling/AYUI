@@ -28,6 +28,12 @@ bool modifierDown(uint32_t modifiers, UIKeyCode key) {
     return (modifiers & (1u << (key - UIKey_Shift))) != 0;
 }
 
+bool rectanglesIntersect(const math::FRectangle& a,
+                         const math::FRectangle& b) {
+    return a.maxX >= b.minX && a.minX <= b.maxX
+        && a.maxY >= b.minY && a.minY <= b.maxY;
+}
+
 float rectangleWidth(const math::FRectangle& r) {
     return std::max(0.0f, r.maxX - r.minX);
 }
@@ -501,6 +507,9 @@ void TileView::clearItems() {
     _anchorIndex = -1;
     _pressedCell = nullptr;
     _pressedIndex = -1;
+    _marqueePending = false;
+    _marqueeActive = false;
+    _marqueeBaseIndices.clear();
     _scrollState.clearMomentum();
     _scrollState.setScrollOffset(math::FVector2(0.0f, 0.0f));
     performLayout();
@@ -937,6 +946,13 @@ void TileView::onRender(IRenderBackend& renderer) {
     for (TileCell* cell : _cellPool) {
         if (cell != nullptr && cell->isVisible()) cell->render(renderer);
     }
+    if (_marqueeActive) {
+        const math::FRectangle marquee = getMarqueeBounds();
+        renderer.drawRect(
+            marquee, math::FVector4(0.20f, 0.48f, 0.86f, 0.18f));
+        renderer.drawBorderRect(
+            marquee, math::FVector4(0.42f, 0.68f, 1.0f, 0.95f), 1.0f);
+    }
     renderer.popClip();
     if (_vbar != nullptr && _vbar->isVisible()) _vbar->render(renderer);
 }
@@ -995,6 +1011,29 @@ void TileView::scrollToIndex(int index) {
     }
 }
 
+math::FRectangle TileView::getMarqueeBounds() const {
+    return math::FRectangle(
+        std::min(_marqueeStart.x, _marqueeCurrent.x),
+        std::min(_marqueeStart.y, _marqueeCurrent.y),
+        std::max(_marqueeStart.x, _marqueeCurrent.x),
+        std::max(_marqueeStart.y, _marqueeCurrent.y));
+}
+
+bool TileView::onMouseMove(const UIMouseEvent& e) {
+    if (!_marqueePending || _selectionMode != SelectionMode::Extended) {
+        return CompoundFocusableWidget::onMouseMove(e);
+    }
+    const math::FVector2 delta = e.mousePos - _marqueeStart;
+    if (!_marqueeActive
+        && delta.x * delta.x + delta.y * delta.y
+            < _dragThreshold * _dragThreshold) {
+        return true;
+    }
+    _marqueeActive = true;
+    updateMarqueeSelection(e.mousePos);
+    return true;
+}
+
 bool TileView::onMouseButtonDown(const UIMouseEvent& e) {
     if (e.mouseButton != 0 || !getClientRect().contains(e.mousePos)) {
         return false;
@@ -1008,11 +1047,24 @@ bool TileView::onMouseButtonDown(const UIMouseEvent& e) {
     const bool shift = modifierDown(modifiers, UIKey_Shift);
     const bool ctrl = modifierDown(modifiers, UIKey_Control);
     if (!shift && !ctrl) clearSelection();
+    _marqueePending = _selectionMode == SelectionMode::Extended;
+    _marqueeActive = false;
+    _marqueeStart = e.mousePos;
+    _marqueeCurrent = e.mousePos;
+    _marqueeBaseIndices = (shift || ctrl)
+        ? _selectedIndices : std::vector<int>{};
     return true;
 }
 
 bool TileView::onMouseButtonUp(const UIMouseEvent& e) {
-    return e.mouseButton == 0 && getWorldBounds().contains(e.mousePos);
+    if (e.mouseButton != 0) return false;
+    const bool wasSelecting = _marqueePending;
+    if (_marqueeActive) updateMarqueeSelection(e.mousePos);
+    _marqueePending = false;
+    _marqueeActive = false;
+    _marqueeBaseIndices.clear();
+    if (wasSelecting) markDirty();
+    return wasSelecting || getWorldBounds().contains(e.mousePos);
 }
 
 bool TileView::onMouseWheel(const UIMouseWheelEvent& e) {
@@ -1065,6 +1117,35 @@ void TileView::applyPointerSelection(int index, uint32_t modifiers) {
     }
 }
 
+void TileView::updateMarqueeSelection(const math::FVector2& worldPos) {
+    const math::FRectangle client = getClientRect();
+    _marqueeCurrent.x = std::clamp(worldPos.x, client.minX, client.maxX);
+    _marqueeCurrent.y = std::clamp(worldPos.y, client.minY, client.maxY);
+    const math::FRectangle marquee = getMarqueeBounds();
+    const math::FRectangle bounds = getWorldBounds();
+    const float pitchX = _tileSize.x + _tileSpacing;
+    const float pitchY = _tileSize.y + _tileSpacing;
+    const float offsetY = _scrollState.getScrollOffset().y;
+
+    std::vector<int> selected = _marqueeBaseIndices;
+    selected.reserve(selected.size() + _items.size());
+    for (int index = 0; index < static_cast<int>(_items.size()); ++index) {
+        const int row = index / std::max(1, _columnCount);
+        const int column = index % std::max(1, _columnCount);
+        const float left = bounds.minX + _contentPadding + column * pitchX;
+        const float top = bounds.minY + _contentPadding + row * pitchY
+            - offsetY;
+        const math::FRectangle tile(
+            left, top, left + _tileSize.x, top + _tileSize.y);
+        if (rectanglesIntersect(tile, marquee)
+            && rectanglesIntersect(tile, client)) {
+            selected.push_back(index);
+        }
+    }
+    setSelectedIndices(selected);
+    markDirty();
+}
+
 void TileView::handleCellPress(TileCell* cell, const UIMouseEvent& e) {
     if (cell == nullptr || e.mouseButton != 0 || cell->getIndex() < 0) return;
     if (UIManager* ui = UIManager::tryGet()) ui->setFocus(this);
@@ -1073,6 +1154,9 @@ void TileView::handleCellPress(TileCell* cell, const UIMouseEvent& e) {
     _pressedIndex = cell->getIndex();
     _pressPosition = e.mousePos;
     _dragInProgress = false;
+    _marqueePending = false;
+    _marqueeActive = false;
+    _marqueeBaseIndices.clear();
 
     uint32_t modifiers = 0;
     if (UIManager* ui = UIManager::tryGet()) modifiers = ui->getModifiers();

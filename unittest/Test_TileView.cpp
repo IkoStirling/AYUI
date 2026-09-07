@@ -343,6 +343,48 @@ TEST_CASE(tileview_keyboard_focus_selection_and_grid_navigation) {
     manager.shutdown();
 }
 
+TEST_CASE(tileview_extended_selection_supports_background_marquee) {
+    UIManager manager;
+    manager.initialize(nullptr);
+
+    TileView view;
+    manager.root()->addChildExternal(&view);
+    view.setSize(FVector2(352.0f, 220.0f));
+    view.setTileSize(FVector2(100.0f, 100.0f));
+    view.setTileSpacing(8.0f);
+    view.setContentPadding(4.0f);
+    view.setItems(makeTileItems(12));
+    view.setSelectionMode(TileView::SelectionMode::Extended);
+    view.performLayout();
+
+    // x=330 is empty space to the right of the three-column grid. Dragging
+    // back across row zero must select its three tiles without starting the
+    // tile drag/drop path.
+    const FVector2 start(330.0f, 8.0f);
+    const FVector2 end(50.0f, 104.0f);
+    CHECK(view.onMouseButtonDown(UIMouseEvent(start, 0)));
+    CHECK(view.onMouseMove(UIMouseEvent(end, 0)));
+    CHECK(view.isMarqueeSelecting());
+    CHECK(view.getSelectedIndices().size() == 3u);
+    CHECK(view.isSelected(0));
+    CHECK(view.isSelected(1));
+    CHECK(view.isSelected(2));
+    CHECK(view.onMouseButtonUp(UIMouseEvent(end, 0)));
+    CHECK_FALSE(view.isMarqueeSelecting());
+
+    // Ctrl-marquee keeps an existing selection outside the rectangle.
+    view.setSelectedIndex(4);
+    manager.onKeyDown(UIKey_Control);
+    CHECK(view.onMouseButtonDown(UIMouseEvent(start, 0)));
+    CHECK(view.onMouseMove(UIMouseEvent(end, 0)));
+    manager.onKeyUp(UIKey_Control);
+    CHECK(view.onMouseButtonUp(UIMouseEvent(end, 0)));
+    CHECK(view.getSelectedIndices().size() == 4u);
+    CHECK(view.isSelected(4));
+
+    manager.shutdown();
+}
+
 TEST_CASE(tileview_f2_and_enter_target_the_focus_cursor) {
     TileView view;
     view.setItems(makeTileItems(12));
