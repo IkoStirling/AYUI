@@ -18,8 +18,8 @@
         {
           "type": "MenuBar",
           "id": "designer_menubar",
-          "size": { "w": 106, "h": 32 },
-          "slot": { "width": 106 },
+          "size": { "w": 158, "h": 32 },
+          "slot": { "width": 158 },
           "anchorWidth": 52,
           "anchorSpacing": 1,
           "menus": [
@@ -43,6 +43,13 @@
                 { "text": "Select All", "shortcut": "Ctrl+A" },
                 { "text": "Move Up" },
                 { "text": "Move Down" }
+              ]
+            },
+            {
+              "title": "View",
+              "items": [
+                { "text": "Interact Preview", "shortcut": "F6" },
+                { "text": "Safe Area" }
               ]
             }
           ]
@@ -136,14 +143,45 @@
           "padding": { "left": 14, "top": 12, "right": 14, "bottom": 14 },
           "children": [
             {
-              "type": "HBox",
+              "type": "VBox",
               "id": "canvas_header",
-              "size": { "h": 36 },
-              "slot": { "height": 36 },
-              "spacing": 8,
+              "size": { "h": 102 },
+              "slot": { "height": 102 },
+              "spacing": 3,
               "children": [
-                { "type": "TextLabel", "id": "lbl_canvas", "style": "__le_heading", "text": "Canvas", "size": { "w": 90, "h": 28 }, "slot": { "width": 90 } },
-                { "type": "TextLabel", "id": "lbl_canvas_hint", "style": "__le_muted", "text": "100%  ·  8 px grid  ·  Ctrl+wheel zoom  ·  Space drag pan", "size": { "w": 0, "h": 28 }, "slot": { "width": 0 } }
+                {
+                  "type": "HBox", "id": "preview_header_row", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 8,
+                  "children": [
+                    { "type": "TextLabel", "id": "lbl_canvas", "style": "__le_heading", "text": "Canvas", "size": { "w": 68, "h": 28 }, "slot": { "width": 68 } },
+                    { "type": "TextLabel", "id": "lbl_canvas_hint", "style": "__le_muted", "text": "640 x 480 px  ·  640 x 480 DIP  ·  100%", "size": { "w": 0, "h": 28 }, "slot": { "width": 0 } },
+                    { "type": "Button", "id": "btn_preview_mode", "style": "__le_command", "text": "Interact", "size": { "w": 104, "h": 28 }, "slot": { "width": 104 } }
+                  ]
+                },
+                {
+                  "type": "HBox", "id": "preview_device_row", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                  "children": [
+                    { "type": "ComboBox", "id": "preview_preset", "style": "__le_input", "size": { "w": 162, "h": 28 }, "slot": { "width": 162 } },
+                    { "type": "TextLabel", "id": "lbl_preview_w", "style": "__le_muted", "text": "W", "size": { "w": 14, "h": 28 }, "slot": { "width": 14 } },
+                    { "type": "TextInput", "id": "preview_width", "style": "__le_input", "text": "640", "size": { "w": 62, "h": 28 }, "slot": { "width": 62 } },
+                    { "type": "TextLabel", "id": "lbl_preview_h", "style": "__le_muted", "text": "H", "size": { "w": 14, "h": 28 }, "slot": { "width": 14 } },
+                    { "type": "TextInput", "id": "preview_height", "style": "__le_input", "text": "480", "size": { "w": 62, "h": 28 }, "slot": { "width": 62 } },
+                    { "type": "ComboBox", "id": "preview_dpi", "style": "__le_input", "size": { "w": 84, "h": 28 }, "slot": { "width": 84 } },
+                    { "type": "Button", "id": "btn_preview_safe", "style": "__le_command", "text": "Safe Area: Off", "size": { "w": 118, "h": 28 }, "slot": { "width": 118 } }
+                  ]
+                },
+                {
+                  "type": "HBox", "id": "preview_safe_row", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                  "children": [
+                    { "type": "TextLabel", "id": "lbl_preview_safe", "style": "__le_muted", "text": "Safe px  L", "size": { "w": 64, "h": 28 }, "slot": { "width": 64 } },
+                    { "type": "TextInput", "id": "preview_safe_l", "style": "__le_input", "text": "0", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+                    { "type": "TextLabel", "id": "lbl_preview_safe_t", "style": "__le_muted", "text": "T", "size": { "w": 12, "h": 28 }, "slot": { "width": 12 } },
+                    { "type": "TextInput", "id": "preview_safe_t", "style": "__le_input", "text": "0", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+                    { "type": "TextLabel", "id": "lbl_preview_safe_r", "style": "__le_muted", "text": "R", "size": { "w": 12, "h": 28 }, "slot": { "width": 12 } },
+                    { "type": "TextInput", "id": "preview_safe_r", "style": "__le_input", "text": "0", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } },
+                    { "type": "TextLabel", "id": "lbl_preview_safe_b", "style": "__le_muted", "text": "B", "size": { "w": 12, "h": 28 }, "slot": { "width": 12 } },
+                    { "type": "TextInput", "id": "preview_safe_b", "style": "__le_input", "text": "0", "size": { "w": 48, "h": 28 }, "slot": { "width": 48 } }
+                  ]
+                }
               ]
             },
             {
@@ -193,7 +231,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 1700 },
+                "size": { "w": 304, "h": 2400 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -366,11 +404,61 @@
                       { "type": "Button", "id": "btn_clear_texture", "style": "__le_command", "text": "Clear", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
                     ]
                   },
+                  { "type": "TextLabel", "id": "section_texture_resources", "style": "__le_accent", "text": "TEXTURE RESOURCES", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_texture_resource_search", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextInput", "id": "texture_resource_search", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } },
+                      { "type": "Button", "id": "btn_refresh_textures", "style": "__le_command", "text": "Refresh", "size": { "w": 76, "h": 30 }, "slot": { "width": 76 } }
+                    ]
+                  },
+                  { "type": "ListView", "id": "texture_resource_list", "style": "__le_input", "size": { "w": 272, "h": 116 }, "slot": { "height": 116 }, "itemHeight": 24 },
+                  {
+                    "type": "HBox", "id": "row_texture_resource_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextLabel", "id": "texture_resource_hint", "style": "__le_muted", "text": "Select a catalog item to assign it", "size": { "w": 272, "h": 28 }, "slot": { "width": 272 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "texture_resource_status", "style": "__le_muted", "text": "No texture assigned", "size": { "w": 272, "h": 34 }, "slot": { "height": 34 } },
                   {
                     "type": "HBox", "id": "row_prop_items", "size": { "h": 54 }, "slot": { "height": 54 }, "spacing": 4,
                     "children": [
                       { "type": "TextLabel", "id": "lbl_prop_items", "style": "__le_label", "text": "Items\n(| separated)", "size": { "w": 86, "h": 52 }, "slot": { "width": 86 } },
                       { "type": "TextInput", "id": "prop_items", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "section_structured", "style": "__le_accent", "text": "STRUCTURED CONTENT", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "ListView", "id": "structured_items", "style": "__le_input", "size": { "w": 272, "h": 132 }, "slot": { "height": 132 }, "itemHeight": 24 },
+                  {
+                    "type": "HBox", "id": "row_structured_text", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_structured_text", "style": "__le_label", "text": "Text", "size": { "w": 54, "h": 30 }, "slot": { "width": 54 } },
+                      { "type": "TextInput", "id": "structured_text", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_structured_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_structured_add", "style": "__le_command", "text": "+ Add", "size": { "w": 84, "h": 30 }, "slot": { "width": 84 } },
+                      { "type": "Button", "id": "btn_structured_child", "style": "__le_command", "text": "+ Child", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "Button", "id": "btn_structured_remove", "style": "__le_command", "text": "Remove", "size": { "w": 84, "h": 30 }, "slot": { "width": 84 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_structured_order", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_structured_up", "style": "__le_command", "text": "Move Up", "size": { "w": 132, "h": 30 }, "slot": { "width": 132 } },
+                      { "type": "Button", "id": "btn_structured_down", "style": "__le_command", "text": "Move Down", "size": { "w": 132, "h": 30 }, "slot": { "width": 132 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_structured_rich_style", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextInput", "id": "structured_font_size", "style": "__le_input", "text": "14", "size": { "w": 48, "h": 30 }, "slot": { "width": 48 } },
+                      { "type": "TextInput", "id": "structured_color", "style": "__le_input", "text": "#FFFFFFFF", "size": { "w": 96, "h": 30 }, "slot": { "width": 96 } },
+                      { "type": "Button", "id": "btn_structured_bold", "style": "__le_command", "text": "B", "size": { "w": 36, "h": 30 }, "slot": { "width": 36 } },
+                      { "type": "Button", "id": "btn_structured_italic", "style": "__le_command", "text": "I", "size": { "w": 36, "h": 30 }, "slot": { "width": 36 } },
+                      { "type": "Button", "id": "btn_structured_underline", "style": "__le_command", "text": "U", "size": { "w": 36, "h": 30 }, "slot": { "width": 36 } }
                     ]
                   },
                   {

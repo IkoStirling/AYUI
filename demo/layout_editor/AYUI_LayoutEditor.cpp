@@ -30,9 +30,11 @@
 #include "AYUI/UIKeyCode.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <sys/stat.h>
 #include <utility>
@@ -162,6 +164,45 @@ std::string showOpenTextureDialog(HWND owner) {
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
     if (!::GetOpenFileNameW(&ofn)) return {};
     return wideToUtf8Path(file);
+}
+
+std::vector<ayt::ui::LayoutTextureResource> enumeratePreviewTextures() {
+    namespace fs = std::filesystem;
+    std::vector<ayt::ui::LayoutTextureResource> resources;
+    const std::vector<fs::path> roots = {
+        fs::path("assets"),
+        fs::path("../AliyatRenderer/assets/core/textures"),
+        fs::path("../../../../../../../AliyatRenderer/assets/core/textures")
+    };
+    std::error_code error;
+    for (const fs::path& root : roots) {
+        if (!fs::is_directory(root, error)) {
+            error.clear();
+            continue;
+        }
+        for (fs::recursive_directory_iterator it(
+                 root, fs::directory_options::skip_permission_denied, error), end;
+             it != end && resources.size() < 2048u; it.increment(error)) {
+            if (error) {
+                error.clear();
+                continue;
+            }
+            if (!it->is_regular_file(error)) continue;
+            std::string extension = it->path().extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](unsigned char ch) {
+                               return static_cast<char>(std::tolower(ch));
+                           });
+            if (extension != ".png" && extension != ".jpg" &&
+                extension != ".jpeg" && extension != ".bmp" &&
+                extension != ".tga") continue;
+            ayt::ui::LayoutTextureResource resource;
+            resource.key = it->path().lexically_normal().string();
+            resource.displayName = it->path().filename().wstring();
+            resources.push_back(std::move(resource));
+        }
+    }
+    return resources;
 }
 
 ayt::ui::ImageTextureHandle loadPreviewTexture(
@@ -330,6 +371,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     session.setOpenPathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setSavePathPicker([hwnd]() { return showSaveUiJsonDialog(hwnd); });
     session.setTexturePathPicker([hwnd]() { return showOpenTextureDialog(hwnd); });
+    session.setTextureResourceProvider([]() { return enumeratePreviewTextures(); });
     session.setTexturePreviewLoader([&state, &uiBackend](const std::string& path) {
         return loadPreviewTexture(path, uiBackend, state.previewTextures);
     });

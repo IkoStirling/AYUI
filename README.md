@@ -40,9 +40,10 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - AYRenderer 共享 RenderTargetPool：FrameGraph 与 UI Layer 复用同一套 FBO 生命周期和预算，窗口
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery，以及由独立工具和 AYEditor 独立 Designer 窗口共享的 Layout Editor core；Designer
-  已覆盖常用叶控件、集合、Tab、容器和 Modal，支持图片选择/预览及声明式 controller/event 元数据
+  已覆盖常用叶控件、集合、Tab、容器和 Modal，支持结构化集合/树/Tab/RichText 编辑、可搜索纹理
+  资源浏览、分辨率/DPI/Safe Area 设备预览、可回滚交互预览及声明式 controller/event 元数据
 
-2026-09-08 Insider Windows Debug 当前基线为 `5366 / 5366` 条断言通过，Layout Editor headless
+2026-09-08 Insider Windows Debug 当前基线为 `5402 / 5402` 条断言通过，Layout Editor headless
 round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
@@ -251,14 +252,27 @@ TileView 处理。拖拽默认产生 `AYUI.TileItems` payload；文件浏览器�
 独立 `AYUI_LayoutEditor` 与 AYEditor 的独立 Designer 窗口共用 `LayoutEditorSession`。Widget Library
 以可拖拽、带类型 SVG 的分类列表提供：Button/Text/RichText/Input/TextArea/CheckBox/RadioButton、
 Slider/ProgressBar/Spinner/Image，ComboBox/ListView/TileView/TreeView，TabStrip/TabControl，以及
-Panel/VBox/HBox/GridPanel/ScrollView/Separator/Tooltip/Window/Modal/ModalDialog。集合和 Tab 的基础
-item 模型可以在 Inspector 以 `|` 分隔文本编辑。
+Panel/VBox/HBox/GridPanel/ScrollView/Separator/Tooltip/Window/Modal/ModalDialog。List/Tile/Combo、完整
+Tree source、Tab page 和 RichText run 使用统一的 Structured Content Inspector 增删、重命名和排序；
+Tree 可增加子节点，RichText run 可编辑字号、颜色和粗体/斜体/下划线，不再把复杂模型压平成
+`|` 分隔字符串。折叠的 Tree 后代仍参与保存，TabControl page 的移动保持 page ownership 与选择状态。
 
 选择 Image 后可编辑纹理名字，也可使用 Browse/Clear。Session 只定义两个宿主回调：路径选择器
 返回要持久化的纹理名字，preview loader 把它解析为当前后端的临时 `ImageTextureHandle`。独立工具
 使用 AYRenderer 上传 PNG/JPEG/BMP/TGA，AYEditor 子窗使用自己的 GDI 预览纹理；JSON 只写
 `textureName`，不写 GPU/GDI 句柄。生产宿主应让路径选择器返回可由其资源系统解析的相对路径或
 资源键，而不是依赖某台机器的绝对路径。
+
+宿主也可通过 `setTextureResourceProvider()` 提供项目/引擎纹理目录。Inspector 内的资源浏览器支持
+搜索、刷新、选中赋值、尺寸状态和 missing/invalid 警告；资源键与后端 preview handle 分离，目录扫描
+和资源身份仍属于宿主。standalone 默认扫描常见 assets 与 AYRenderer core textures，AYEditor 默认
+组合 Project/Assets 和 EngineAssets。
+
+View 菜单与 Canvas header 提供 Document、Desktop、HiDPI Desktop、Phone、Tablet 预设以及自定义
+物理宽高、DPI scale 和 Safe Area inset。画布把物理尺寸换算为逻辑 DIP，并以 editor-only overlay
+显示安全区；预览尺寸不进入 undo snapshot 或 `.ui.json`，保存时仍写 authored root 尺寸。F6 或
+Interact 按钮进入运行时交互预览：编辑选择框/拖放暂时关闭，控件恢复原始 enabled/read-only 状态；
+退出预览时整棵文档从进入前 snapshot 恢复，避免试点按钮、输入或选择状态污染设计稿。
 
 Inspector 只为当前类型显示有效事件；Controller 和处理器字段只创作声明式元数据。游戏/工具宿主
 仍负责注册真正的 controller 回调。ScrollView content、TabControl page、Modal content/body 在

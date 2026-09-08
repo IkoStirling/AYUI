@@ -3,11 +3,16 @@
 #include "AYUI/ImageTexture.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutPreviewModel.h"
+#include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
+#include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/UIManager.h"
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -27,6 +32,8 @@ public:
     using PathPicker = std::function<std::string()>;
     using TexturePreviewLoader =
         std::function<ImageTextureHandle(const std::string& texturePath)>;
+    using TextureResourceProvider =
+        std::function<std::vector<LayoutTextureResource>()>;
     using TitleUpdater = std::function<void(const std::wstring& title)>;
     using DocumentStateUpdater =
         std::function<void(const std::string& path, bool dirty)>;
@@ -43,6 +50,8 @@ public:
         End,
         Stretch
     };
+
+    enum class Mode { Edit, Interact };
 
     LayoutEditorSession();
     ~LayoutEditorSession();
@@ -82,6 +91,17 @@ public:
     void nudgeSelection(float dx, float dy);
     void toggleSnap();
     void setViewZoom(float zoom, const math::FVector2& pivotWorld);
+    void setMode(Mode mode);
+    Mode mode() const { return _mode; }
+    bool isInteractionPreview() const { return _mode == Mode::Interact; }
+
+    void setPreviewPreset(int index);
+    void setPreviewSettings(const LayoutPreviewSettings& settings);
+    const LayoutPreviewSettings& previewSettings() const {
+        return _previewModel.settings();
+    }
+    void setSafeAreaVisible(bool visible);
+    void refreshTextureResources();
 
     // button: 0=LMB, 1=RMB, 2=MMB
     bool onPointerDown(const math::FVector2& worldPos, int button = 0);
@@ -115,6 +135,7 @@ public:
         _texturePicker = std::move(picker);
     }
     void setTexturePreviewLoader(TexturePreviewLoader loader);
+    void setTextureResourceProvider(TextureResourceProvider provider);
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
     void setDocumentStateUpdater(DocumentStateUpdater updater) {
         _documentStateUpdater = std::move(updater);
@@ -157,6 +178,7 @@ private:
     math::FVector2 screenToDocument(const math::FVector2& point) const;
     math::FRectangle documentToScreen(const math::FRectangle& bounds) const;
     void freezeDocumentInteraction(Widget* root);
+    void restoreDocumentInteraction(Widget* root);
     void rehydrateRuntimePresentation(Widget* root);
     void setStatus(const std::wstring& text);
     void syncPropertyStrip();
@@ -188,6 +210,19 @@ private:
     void chooseTexture();
     void clearTexture();
     void applyTextureName(const std::string& textureName);
+    void syncTextureBrowser();
+    void syncStructuredEditor();
+    void structuredAdd(bool asChild);
+    void structuredRemove();
+    void structuredMove(int delta);
+    void commitStructuredText();
+    void commitStructuredRichStyle();
+    void syncPreviewControls();
+    void commitPreviewFields();
+    void applyPreviewToDocument();
+    void syncPreviewChrome();
+    math::FVector2 authoredRootSize() const;
+    bool previewOverridesDocumentSize() const;
     void bindPropField(const char* id, const char* field, TextInput*& slot,
                        bool numericScrub);
     void commitPropField(const std::string& field, TextInput* slot);
@@ -199,7 +234,7 @@ private:
     void endMutation();
     void pushUndo(LayoutEditKind kind = LayoutEditKind::SnapshotFallback,
                   const char* label = nullptr);
-    Snapshot captureSnapshot() const;
+    Snapshot captureSnapshot();
     void restoreSnapshot(const Snapshot& snap);
     bool chromeEditingText() const;
     bool modifiersCtrl() const;
@@ -305,6 +340,7 @@ private:
     Panel* _anchorPoints[4] = {};
     std::vector<Panel*> _selOutlines;
     Panel* _marqueeBox = nullptr;
+    Panel* _safeAreaBox = nullptr;
     static constexpr float kHandleSize = 8.0f;
 
     Widget* _hierarchyCol = nullptr;
@@ -321,6 +357,20 @@ private:
     bool _spaceDown = false;
     float _gridSize = 8.0f;
     std::vector<std::string> _clipboardItems;
+
+    LayoutStructuredContentModel _structuredModel;
+    LayoutResourceCatalog _textureCatalog;
+    LayoutPreviewModel _previewModel;
+    Mode _mode = Mode::Edit;
+    std::optional<Snapshot> _interactionSnapshot;
+    math::FVector2 _authoredRootSize{640.0f, 480.0f};
+
+    struct InteractionState {
+        bool enabled = true;
+        bool readOnly = false;
+        bool hasReadOnly = false;
+    };
+    std::unordered_map<Widget*, InteractionState> _interactionStates;
 
     DeferredAction _deferred = DeferredAction::None;
 
@@ -365,6 +415,24 @@ private:
     TextInput* _propPadR = nullptr;
     TextInput* _propPadB = nullptr;
     TextLabel* _status = nullptr;
+    ListView* _structuredList = nullptr;
+    TextInput* _structuredText = nullptr;
+    TextInput* _structuredFontSize = nullptr;
+    TextInput* _structuredColor = nullptr;
+    bool _suppressStructured = false;
+    ListView* _textureResourceList = nullptr;
+    TextInput* _textureSearch = nullptr;
+    TextLabel* _textureStatus = nullptr;
+    bool _suppressTextureResources = false;
+    ComboBox* _previewPreset = nullptr;
+    ComboBox* _previewDpi = nullptr;
+    TextInput* _previewWidth = nullptr;
+    TextInput* _previewHeight = nullptr;
+    TextInput* _previewSafeL = nullptr;
+    TextInput* _previewSafeT = nullptr;
+    TextInput* _previewSafeR = nullptr;
+    TextInput* _previewSafeB = nullptr;
+    bool _suppressPreview = false;
     std::vector<Widget*> _hierarchyIndex;
     std::vector<std::string> _styleIds;
 
@@ -372,6 +440,7 @@ private:
     PathPicker _savePicker;
     PathPicker _texturePicker;
     TexturePreviewLoader _texturePreviewLoader;
+    TextureResourceProvider _textureResourceProvider;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;
     UILayoutLoader _docLoader;

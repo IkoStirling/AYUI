@@ -91,6 +91,36 @@ bool TabControl::setTabLabel(int index, const std::wstring& label) {
     return true;
 }
 
+bool TabControl::moveTab(int fromIndex, int toIndex) {
+    const int count = static_cast<int>(_tabs.size());
+    if (fromIndex < 0 || fromIndex >= count || toIndex < 0 ||
+        toIndex >= count || fromIndex == toIndex) {
+        return false;
+    }
+
+    TabEntry moving = std::move(_tabs[static_cast<size_t>(fromIndex)]);
+    _tabs.erase(_tabs.begin() + fromIndex);
+    _tabs.insert(_tabs.begin() + toIndex, std::move(moving));
+
+    if (_selectedIndex == fromIndex) {
+        _selectedIndex = toIndex;
+    } else if (fromIndex < _selectedIndex && _selectedIndex <= toIndex) {
+        --_selectedIndex;
+    } else if (toIndex <= _selectedIndex && _selectedIndex < fromIndex) {
+        ++_selectedIndex;
+    }
+
+    if (_tabStrip != nullptr) {
+        _tabStrip->clearTabs();
+        for (const TabEntry& tab : _tabs) _tabStrip->addTab(tab.label);
+        _tabStrip->setSelectedIndex(_selectedIndex);
+    }
+    remountBodyContent(_selectedIndex);
+    markBoundsDirty();
+    markDirty();
+    return true;
+}
+
 void TabControl::addTabImpl(const std::wstring& label, Widget* content, bool owned) {
     _tabs.push_back(TabEntry{label, content, owned});
     if (_tabStrip != nullptr) {

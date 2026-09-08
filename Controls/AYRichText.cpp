@@ -113,6 +113,50 @@ void RichText::addRun(const RichRun& run) {
     markDirty();
 }
 
+void RichText::insertRun(size_t index, const RichRun& run) {
+    RichRun normalized = run;
+    if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
+    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
+    index = std::min(index, _runs.size());
+    _runs.insert(_runs.begin() + static_cast<std::ptrdiff_t>(index),
+                 std::move(normalized));
+    markBoundsDirty();
+    markDirty();
+}
+
+bool RichText::setRun(size_t index, const RichRun& run) {
+    if (index >= _runs.size()) return false;
+    RichRun normalized = run;
+    if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
+    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
+    _runs[index] = std::move(normalized);
+    markBoundsDirty();
+    markDirty();
+    return true;
+}
+
+bool RichText::removeRun(size_t index) {
+    if (index >= _runs.size()) return false;
+    _runs.erase(_runs.begin() + static_cast<std::ptrdiff_t>(index));
+    markBoundsDirty();
+    markDirty();
+    return true;
+}
+
+bool RichText::moveRun(size_t fromIndex, size_t toIndex) {
+    if (fromIndex >= _runs.size() || toIndex >= _runs.size() ||
+        fromIndex == toIndex) {
+        return false;
+    }
+    RichRun moving = std::move(_runs[fromIndex]);
+    _runs.erase(_runs.begin() + static_cast<std::ptrdiff_t>(fromIndex));
+    _runs.insert(_runs.begin() + static_cast<std::ptrdiff_t>(toIndex),
+                 std::move(moving));
+    markBoundsDirty();
+    markDirty();
+    return true;
+}
+
 void RichText::clearRuns() {
     _runs.clear();
     markBoundsDirty();

@@ -111,6 +111,9 @@ public:
 
     size_t getNodeCount() const { return _flatData.size(); }
     const TreeNodeData& getNodeData(size_t i) const { return _flatData[i]; }
+    // Authoring/serialization access to the complete source model. Unlike
+    // getNodeData(), this includes descendants hidden by collapsed parents.
+    const std::vector<TreeNodeData>& getTreeDataRef() const { return _source; }
 
 protected:
     void rebuildNodes();

@@ -213,6 +213,9 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/LayoutDocumentModel.cpp
     LayoutEditor/LayoutSelectionModel.cpp
     LayoutEditor/LayoutCommandStack.cpp
+    LayoutEditor/LayoutPreviewModel.cpp
+    LayoutEditor/LayoutResourceCatalog.cpp
+    LayoutEditor/LayoutStructuredContentModel.cpp
     LayoutEditor/PropertySchema.cpp
     LayoutEditor/WidgetAuthoringRegistry.cpp
     LayoutEditor/LayoutEditorSession.cpp
@@ -221,6 +224,9 @@ add_library(AYUILayoutEditorCore STATIC
     include/AYUI/LayoutEditor/LayoutDocumentModel.h
     include/AYUI/LayoutEditor/LayoutSelectionModel.h
     include/AYUI/LayoutEditor/LayoutCommandStack.h
+    include/AYUI/LayoutEditor/LayoutPreviewModel.h
+    include/AYUI/LayoutEditor/LayoutResourceCatalog.h
+    include/AYUI/LayoutEditor/LayoutStructuredContentModel.h
     include/AYUI/LayoutEditor/PropertySchema.h
     include/AYUI/LayoutEditor/WidgetAuthoringRegistry.h
 )

@@ -47,6 +47,7 @@ public:
     // removeTab(), clearTabs(), and destruction release owned content.
     void addTabOwned(const std::wstring& label, Widget* content);
     bool setTabLabel(int index, const std::wstring& label);
+    bool moveTab(int fromIndex, int toIndex);
     void removeTab(int index);
     void clearTabs();
     size_t getTabCount() const { return _tabs.size(); }

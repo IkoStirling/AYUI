@@ -49,6 +49,7 @@
 #include <codecvt>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -170,6 +171,40 @@ std::wstring joinItems(const std::vector<std::wstring>& items) {
         result += item;
     }
     return result;
+}
+
+std::wstring formatColorHex(const math::FVector4& color) {
+    auto byte = [](float value) {
+        return static_cast<unsigned int>(std::lround(
+            std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+    wchar_t value[10]{};
+    std::swprintf(value, sizeof(value) / sizeof(value[0]),
+                 L"#%02X%02X%02X%02X", byte(color.x), byte(color.y),
+                 byte(color.z), byte(color.w));
+    return value;
+}
+
+bool parseColorHex(std::wstring value, math::FVector4& out) {
+    value = trimWide(std::move(value));
+    if (!value.empty() && value.front() == L'#') value.erase(value.begin());
+    if (value.size() != 6u && value.size() != 8u) return false;
+    try {
+        const unsigned long packed = std::stoul(value, nullptr, 16);
+        const bool hasAlpha = value.size() == 8u;
+        const unsigned int r = hasAlpha ? (packed >> 24u) & 0xffu
+                                        : (packed >> 16u) & 0xffu;
+        const unsigned int g = hasAlpha ? (packed >> 16u) & 0xffu
+                                        : (packed >> 8u) & 0xffu;
+        const unsigned int b = hasAlpha ? (packed >> 8u) & 0xffu
+                                        : packed & 0xffu;
+        const unsigned int a = hasAlpha ? packed & 0xffu : 0xffu;
+        out = math::FVector4(r / 255.0f, g / 255.0f, b / 255.0f,
+                             a / 255.0f);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 std::string readFileToString(const std::string& path) {
@@ -410,6 +445,10 @@ void installLayoutEditorChromeStyles() {
         11, math::FVector4(0.48f, 0.53f, 0.61f, 1.0f), false));
     sheet->setStyle("__le_accent", text(
         12, math::FVector4(0.36f, 0.68f, 1.0f, 1.0f), true));
+    sheet->setStyle("__le_warning", text(
+        11, math::FVector4(1.0f, 0.66f, 0.28f, 1.0f), false));
+    sheet->setStyle("__le_success", text(
+        11, math::FVector4(0.35f, 0.82f, 0.56f, 1.0f), false));
 }
 
 } // namespace
@@ -501,6 +540,10 @@ Widget* LayoutEditorSession::findChromeById(const std::string& id) const {
 }
 
 void LayoutEditorSession::detach() {
+    if (_mode == Mode::Interact) {
+        _mode = Mode::Edit;
+        restoreDocumentInteraction(_docRoot);
+    }
     destroySelectionChrome();
     destroyHierDropChrome();
     destroyPaletteGhost();
@@ -531,7 +574,13 @@ void LayoutEditorSession::detach() {
     _propGravity = nullptr;
     _selOutlines.clear();
     _marqueeBox = nullptr;
+    _safeAreaBox = nullptr;
     _clipboardItems.clear();
+    _structuredModel.bind(nullptr);
+    _textureCatalog.setEntries({});
+    _interactionStates.clear();
+    _interactionSnapshot.reset();
+    _mode = Mode::Edit;
     _styleIds.clear();
     _viewZoom = 1.0f;
     _viewPan = math::FVector2(0.0f, 0.0f);
@@ -545,6 +594,18 @@ void LayoutEditorSession::detach() {
     _propSpacing = nullptr;
     _propPadL = _propPadT = _propPadR = _propPadB = nullptr;
     _status = nullptr;
+    _structuredList = nullptr;
+    _structuredText = nullptr;
+    _structuredFontSize = nullptr;
+    _structuredColor = nullptr;
+    _textureResourceList = nullptr;
+    _textureSearch = nullptr;
+    _textureStatus = nullptr;
+    _previewPreset = nullptr;
+    _previewDpi = nullptr;
+    _previewWidth = nullptr;
+    _previewHeight = nullptr;
+    _previewSafeL = _previewSafeT = _previewSafeR = _previewSafeB = nullptr;
     _hierarchyIndex.clear();
     _commandStack.clear();
     _documentPath.clear();
@@ -591,6 +652,109 @@ void LayoutEditorSession::pumpDeferred() {
 void LayoutEditorSession::setTexturePreviewLoader(TexturePreviewLoader loader) {
     _texturePreviewLoader = std::move(loader);
     rehydrateRuntimePresentation(_docRoot);
+    syncTextureBrowser();
+}
+
+void LayoutEditorSession::setTextureResourceProvider(
+    TextureResourceProvider provider) {
+    _textureResourceProvider = std::move(provider);
+    refreshTextureResources();
+}
+
+void LayoutEditorSession::setMode(Mode mode) {
+    if (_mode == mode) return;
+    cancelToolDrag();
+    _dragMode = DragMode::None;
+    _dragTarget = nullptr;
+    endMutation();
+    if (mode == Mode::Interact) {
+        if (_ui != nullptr) _ui->setFocus(nullptr);
+        _interactionSnapshot = captureSnapshot();
+        _mode = Mode::Interact;
+        restoreDocumentInteraction(_docRoot);
+        setStatus(L"Interact preview — controls are live; F6 or Esc returns to Edit");
+    } else {
+        const std::optional<Snapshot> restore = _interactionSnapshot;
+        _interactionSnapshot.reset();
+        _mode = Mode::Edit;
+        if (restore.has_value()) {
+            restoreSnapshot(*restore);
+        } else {
+            freezeDocumentInteraction(_docRoot);
+        }
+        setStatus(L"Edit mode — preview interaction state was rolled back");
+    }
+    syncPreviewControls();
+    syncSelectionChrome();
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+}
+
+void LayoutEditorSession::setPreviewPreset(int index) {
+    if (_docRoot != nullptr && !previewOverridesDocumentSize()) {
+        _authoredRootSize = _docRoot->getSize();
+    }
+    if (!_previewModel.selectPreset(index)) return;
+    applyPreviewToDocument();
+    syncPreviewControls();
+    syncSelectionChrome();
+}
+
+void LayoutEditorSession::setPreviewSettings(
+    const LayoutPreviewSettings& settings) {
+    if (_docRoot != nullptr && !previewOverridesDocumentSize()) {
+        _authoredRootSize = _docRoot->getSize();
+    }
+    _previewModel.setCustom(settings);
+    applyPreviewToDocument();
+    syncPreviewControls();
+    syncSelectionChrome();
+}
+
+void LayoutEditorSession::setSafeAreaVisible(bool visible) {
+    _previewModel.setSafeAreaVisible(visible);
+    syncPreviewControls();
+    syncPreviewChrome();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+bool LayoutEditorSession::previewOverridesDocumentSize() const {
+    return !_previewModel.settings().followDocumentSize;
+}
+
+math::FVector2 LayoutEditorSession::authoredRootSize() const {
+    return _docRoot != nullptr && !previewOverridesDocumentSize()
+        ? _docRoot->getSize() : _authoredRootSize;
+}
+
+void LayoutEditorSession::applyPreviewToDocument() {
+    if (_docRoot == nullptr) return;
+    if (!previewOverridesDocumentSize()) {
+        _docRoot->setSize(_authoredRootSize);
+    } else {
+        _docRoot->setSize(_previewModel.logicalSize(_authoredRootSize));
+    }
+    _docRoot->performLayout();
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+    syncPreviewChrome();
+}
+
+void LayoutEditorSession::refreshTextureResources() {
+    std::vector<LayoutTextureResource> entries;
+    if (_textureResourceProvider) {
+        try {
+            entries = _textureResourceProvider();
+        } catch (...) {
+            setStatus(L"Texture resource scan failed");
+        }
+    }
+    _textureCatalog.setEntries(std::move(entries));
+    syncTextureBrowser();
 }
 
 void LayoutEditorSession::bindPropField(const char* id, const char* field,
@@ -715,6 +879,12 @@ void LayoutEditorSession::wireChrome() {
     bindMenuItem(L"Edit", L"Select All", [this]() { selectAll(); });
     bindMenuItem(L"Edit", L"Move Up", [this]() { reorderSelected(-1); });
     bindMenuItem(L"Edit", L"Move Down", [this]() { reorderSelected(1); });
+    bindMenuItem(L"View", L"Interact Preview", [this]() {
+        setMode(_mode == Mode::Edit ? Mode::Interact : Mode::Edit);
+    });
+    bindMenuItem(L"View", L"Safe Area", [this]() {
+        setSafeAreaVisible(!_previewModel.settings().showSafeArea);
+    });
 
     // Palette buttons are driven by onPointer* (click + drag-create).
     // Keep click handlers as a fallback if pointer routing misses them.
@@ -871,7 +1041,136 @@ void LayoutEditorSession::wireChrome() {
     bindBoolCombo(_propReadOnly, "prop_readonly", "readOnly");
     bindGravityCombo();
 
+    _structuredList = dynamic_cast<ListView*>(
+        findChromeById("structured_items"));
+    if (_structuredList != nullptr) {
+        _structuredList->setSelectionMode(ListView::SelectionMode::Single);
+        _structuredList->setOnSelectionChanged([this](int index) {
+            if (_suppressStructured) return;
+            _structuredModel.setSelectedIndex(index);
+            syncStructuredEditor();
+        });
+    }
+    _structuredText = dynamic_cast<TextInput*>(
+        findChromeById("structured_text"));
+    _structuredFontSize = dynamic_cast<TextInput*>(
+        findChromeById("structured_font_size"));
+    _structuredColor = dynamic_cast<TextInput*>(
+        findChromeById("structured_color"));
+    for (TextInput* field : {_structuredText, _structuredFontSize,
+                             _structuredColor}) {
+        if (field == nullptr) continue;
+        field->setOnSubmit([this](const std::wstring&) {
+            if (_structuredModel.kind() == LayoutStructuredKind::RichText)
+                commitStructuredRichStyle();
+            else commitStructuredText();
+        });
+        field->setOnFocusLostNotify([this]() {
+            if (_suppressStructured) return;
+            if (_structuredModel.kind() == LayoutStructuredKind::RichText)
+                commitStructuredRichStyle();
+            else commitStructuredText();
+        });
+    }
+    bindBtn("btn_structured_add", [this]() { structuredAdd(false); });
+    bindBtn("btn_structured_child", [this]() { structuredAdd(true); });
+    bindBtn("btn_structured_remove", [this]() { structuredRemove(); });
+    bindBtn("btn_structured_up", [this]() { structuredMove(-1); });
+    bindBtn("btn_structured_down", [this]() { structuredMove(1); });
+    auto toggleRunFlag = [this](int flag) {
+        const int index = _structuredModel.selectedIndex();
+        if (_structuredModel.kind() != LayoutStructuredKind::RichText ||
+            index < 0 || index >= static_cast<int>(
+                _structuredModel.entries().size())) return;
+        RichRun run = _structuredModel.entries()[static_cast<size_t>(index)].richRun;
+        if (flag == 0) run.bold = !run.bold;
+        else if (flag == 1) run.italic = !run.italic;
+        else run.underline = !run.underline;
+        pushUndo(LayoutEditKind::Property, "Toggle rich-text run style");
+        if (_structuredModel.setSelectedRichRun(run)) markDirty(true);
+        syncStructuredEditor();
+    };
+    bindBtn("btn_structured_bold", [toggleRunFlag]() mutable { toggleRunFlag(0); });
+    bindBtn("btn_structured_italic", [toggleRunFlag]() mutable { toggleRunFlag(1); });
+    bindBtn("btn_structured_underline", [toggleRunFlag]() mutable { toggleRunFlag(2); });
+
+    _textureResourceList = dynamic_cast<ListView*>(
+        findChromeById("texture_resource_list"));
+    if (_textureResourceList != nullptr) {
+        _textureResourceList->setSelectionMode(ListView::SelectionMode::Single);
+        _textureResourceList->setOnSelectionChanged([this](int index) {
+            if (_suppressTextureResources || index < 0) return;
+            const LayoutTextureResource* resource =
+                _textureCatalog.visibleEntry(static_cast<size_t>(index));
+            if (resource == nullptr || dynamic_cast<Image*>(_selected) == nullptr)
+                return;
+            pushUndo(LayoutEditKind::Property, "Assign texture resource");
+            applyTextureName(resource->key);
+            syncPropertyStrip();
+        });
+    }
+    _textureSearch = dynamic_cast<TextInput*>(
+        findChromeById("texture_resource_search"));
+    if (_textureSearch != nullptr) {
+        _textureSearch->setOnTextChanged([this](const std::wstring& value) {
+            if (_suppressTextureResources) return;
+            _textureCatalog.setFilter(value);
+            syncTextureBrowser();
+        });
+    }
+    _textureStatus = dynamic_cast<TextLabel*>(
+        findChromeById("texture_resource_status"));
+    bindBtn("btn_refresh_textures", [this]() { refreshTextureResources(); });
+
+    _previewPreset = dynamic_cast<ComboBox*>(
+        findChromeById("preview_preset"));
+    _previewDpi = dynamic_cast<ComboBox*>(findChromeById("preview_dpi"));
+    _previewWidth = dynamic_cast<TextInput*>(findChromeById("preview_width"));
+    _previewHeight = dynamic_cast<TextInput*>(findChromeById("preview_height"));
+    _previewSafeL = dynamic_cast<TextInput*>(findChromeById("preview_safe_l"));
+    _previewSafeT = dynamic_cast<TextInput*>(findChromeById("preview_safe_t"));
+    _previewSafeR = dynamic_cast<TextInput*>(findChromeById("preview_safe_r"));
+    _previewSafeB = dynamic_cast<TextInput*>(findChromeById("preview_safe_b"));
+    if (_previewPreset != nullptr) {
+        std::vector<std::wstring> names;
+        for (const auto& preset : _previewModel.presets()) names.push_back(preset.name);
+        names.push_back(L"Custom");
+        _previewPreset->setItems(names);
+        _previewPreset->setOnSelectionChanged([this](int index) {
+            if (_suppressPreview) return;
+            if (index >= 0 && index < static_cast<int>(_previewModel.presets().size()))
+                setPreviewPreset(index);
+        });
+    }
+    if (_previewDpi != nullptr) {
+        _previewDpi->setItems({L"1.00x", L"1.25x", L"1.50x", L"2.00x", L"3.00x"});
+        _previewDpi->setOnSelectionChanged([this](int index) {
+            if (_suppressPreview || index < 0) return;
+            static constexpr float scales[] = {1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
+            if (index >= static_cast<int>(sizeof(scales) / sizeof(scales[0]))) return;
+            LayoutPreviewSettings settings = _previewModel.settings();
+            settings.dpiScale = scales[index];
+            setPreviewSettings(settings);
+        });
+    }
+    for (TextInput* field : {_previewWidth, _previewHeight, _previewSafeL,
+                             _previewSafeT, _previewSafeR, _previewSafeB}) {
+        if (field == nullptr) continue;
+        field->setOnSubmit([this](const std::wstring&) { commitPreviewFields(); });
+        field->setOnFocusLostNotify([this]() {
+            if (!_suppressPreview) commitPreviewFields();
+        });
+    }
+    bindBtn("btn_preview_safe", [this]() {
+        setSafeAreaVisible(!_previewModel.settings().showSafeArea);
+    });
+    bindBtn("btn_preview_mode", [this]() {
+        setMode(_mode == Mode::Edit ? Mode::Interact : Mode::Edit);
+    });
+
     _status = dynamic_cast<TextLabel*>(findChromeById("lbl_status"));
+    refreshTextureResources();
+    syncPreviewControls();
 }
 
 void LayoutEditorSession::clearDocument() {
@@ -891,6 +1190,7 @@ void LayoutEditorSession::clearDocument() {
         destroyWidgetTree(_docRoot);
     }
     _documentModel.setRoot(nullptr);
+    _interactionStates.clear();
     _selected = nullptr;
     _selection.clear();
 }
@@ -906,10 +1206,14 @@ void LayoutEditorSession::setDocumentRoot(Widget* root) {
     clearDocument();
     _canvasViewport->addChild(root);
     _documentModel.setRoot(root);
+    _interactionStates.clear();
+    _authoredRootSize = root->getSize();
     _docRoot->setLayoutPositionManaged(false);
     _docRoot->setLayoutSizeManaged(false);
-    freezeDocumentInteraction(_docRoot);
+    if (_mode == Mode::Interact) restoreDocumentInteraction(_docRoot);
+    else freezeDocumentInteraction(_docRoot);
     rehydrateRuntimePresentation(_docRoot);
+    applyPreviewToDocument();
     ensureSelectionChrome();
 }
 
@@ -1009,11 +1313,17 @@ void LayoutEditorSession::freezeDocumentInteraction(Widget* root) {
         return;
     }
     std::function<void(Widget*)> walk = [&](Widget* n) {
+        auto [stateIt, inserted] = _interactionStates.try_emplace(n);
+        InteractionState& saved = stateIt->second;
         if (auto* iw = dynamic_cast<InteractiveWidget*>(n)) {
+            if (inserted) saved.enabled = iw->isEnabled();
             iw->setEnabled(false);
-            iw->setOnClicked({});
         }
         if (auto* ti = dynamic_cast<TextInput*>(n)) {
+            if (inserted || !saved.hasReadOnly) {
+                saved.readOnly = ti->isReadOnly();
+                saved.hasReadOnly = true;
+            }
             ti->setReadOnly(true);
         }
         // Children of layout containers stay container-managed. Letting a
@@ -1031,6 +1341,25 @@ void LayoutEditorSession::freezeDocumentInteraction(Widget* root) {
         for (Widget* c : children) {
             walk(c);
         }
+    };
+    walk(root);
+}
+
+void LayoutEditorSession::restoreDocumentInteraction(Widget* root) {
+    if (root == nullptr) return;
+    std::function<void(Widget*)> walk = [&](Widget* node) {
+        const auto found = _interactionStates.find(node);
+        if (auto* interactive = dynamic_cast<InteractiveWidget*>(node)) {
+            interactive->setEnabled(found == _interactionStates.end()
+                ? true : found->second.enabled);
+        }
+        if (auto* input = dynamic_cast<TextInput*>(node)) {
+            input->setReadOnly(found != _interactionStates.end() &&
+                found->second.hasReadOnly ? found->second.readOnly : false);
+        }
+        std::vector<Widget*> children;
+        collectAuthoredChildren(node, children);
+        for (Widget* child : children) walk(child);
     };
     walk(root);
 }
@@ -1077,6 +1406,7 @@ bool LayoutEditorSession::open(const std::string& path) {
     if (_ui == nullptr || path.empty()) {
         return false;
     }
+    if (_mode == Mode::Interact) setMode(Mode::Edit);
     const std::string json = readFileToString(path);
     if (json.empty()) {
         setStatus(utf8ToWide("Open failed: " + path));
@@ -1120,19 +1450,36 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
     if (_docRoot == nullptr || path.empty()) {
         return false;
     }
+    if (_mode == Mode::Interact) setMode(Mode::Edit);
+    const math::FVector2 previewSize = _docRoot->getSize();
+    const bool restorePreview = previewOverridesDocumentSize();
     try {
+        if (restorePreview) {
+            _docRoot->setSize(_authoredRootSize);
+            _docRoot->performLayout();
+        }
         UILayoutLoader saver;
         if (!saver.saveLayout(path, _docRoot, true)) {
+            if (restorePreview) applyPreviewToDocument();
             setStatus(utf8ToWide("Save failed: " + path));
             return false;
         }
     } catch (const std::exception& ex) {
+        if (restorePreview) {
+            _docRoot->setSize(previewSize);
+            _docRoot->performLayout();
+        }
         setStatus(utf8ToWide(std::string("Save aborted: ") + ex.what()));
         return false;
     } catch (...) {
+        if (restorePreview) {
+            _docRoot->setSize(previewSize);
+            _docRoot->performLayout();
+        }
         setStatus(L"Save aborted");
         return false;
     }
+    if (restorePreview) applyPreviewToDocument();
     _documentPath = path;
     markDirty(false);
     setStatus(utf8ToWide("Saved " + path));
@@ -1272,6 +1619,15 @@ void LayoutEditorSession::syncSelectionChrome() {
     if (_selBox == nullptr || _canvasHost == nullptr) {
         return;
     }
+    syncPreviewChrome();
+    if (_mode == Mode::Interact) {
+        _selBox->setVisible(false);
+        for (Panel* handle : _handles) if (handle != nullptr) handle->setVisible(false);
+        for (Panel* outline : _selOutlines) if (outline != nullptr) outline->setVisible(false);
+        if (_anchorBox != nullptr) _anchorBox->setVisible(false);
+        for (Panel* point : _anchorPoints) if (point != nullptr) point->setVisible(false);
+        return;
+    }
     pruneSelection();
     if (_selection.empty()) {
         _selBox->setVisible(false);
@@ -1353,7 +1709,7 @@ void LayoutEditorSession::syncSelectionChrome() {
             placeHandle(_handles[5], px, py + ph);
             placeHandle(_handles[6], px + pw * 0.5f, py + ph);
             placeHandle(_handles[7], px + pw, py + ph);
-        } else {
+        } else if (!previewOverridesDocumentSize()) {
             for (Panel* h : _handles) {
                 if (h != nullptr) {
                     h->setVisible(false);
@@ -1362,6 +1718,10 @@ void LayoutEditorSession::syncSelectionChrome() {
             placeHandle(_handles[4], px + pw, py + ph * 0.5f);
             placeHandle(_handles[6], px + pw * 0.5f, py + ph);
             placeHandle(_handles[7], px + pw, py + ph);
+        } else {
+            for (Panel* h : _handles) {
+                if (h != nullptr) h->setVisible(false);
+            }
         }
     } else {
         _selBox->setVisible(false);
@@ -1885,10 +2245,18 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             _selected->setPosition(pos);
         } else if (field == "w") {
             size.x = (std::max)(kMinWidgetSize, f);
-            _selected->setSize(size);
+            if (_selected == _docRoot && previewOverridesDocumentSize()) {
+                _authoredRootSize.x = size.x;
+            } else {
+                _selected->setSize(size);
+            }
         } else if (field == "h") {
             size.y = (std::max)(kMinWidgetSize, f);
-            _selected->setSize(size);
+            if (_selected == _docRoot && previewOverridesDocumentSize()) {
+                _authoredRootSize.y = size.y;
+            } else {
+                _selected->setSize(size);
+            }
         }
         refreshAnchorOffsets(_selected);
         markDirty(true);
@@ -1923,11 +2291,21 @@ void LayoutEditorSession::applyProperty(const std::string& field,
     }
 }
 
-LayoutEditorSession::Snapshot LayoutEditorSession::captureSnapshot() const {
+LayoutEditorSession::Snapshot LayoutEditorSession::captureSnapshot() {
     Snapshot snap;
     if (_docRoot != nullptr) {
+        const math::FVector2 previewSize = _docRoot->getSize();
+        const bool restorePreview = previewOverridesDocumentSize();
+        if (restorePreview) {
+            _docRoot->setSize(_authoredRootSize);
+            _docRoot->performLayout();
+        }
         UILayoutLoader saver;
         saver.saveLayoutToString(_docRoot, snap.json, false);
+        if (restorePreview) {
+            _docRoot->setSize(previewSize);
+            _docRoot->performLayout();
+        }
     }
     for (Widget* w : _selection) {
         if (w != nullptr && !w->getId().empty()) {
@@ -2398,6 +2776,7 @@ LayoutEditorSession::DragMode LayoutEditorSession::hitTestResizeHandle(
         return DragMode::None;
     }
     if (widget == _docRoot) {
+        if (previewOverridesDocumentSize()) return DragMode::None;
         if (nearB && nearR) return DragMode::ResizeSE;
         if (nearB) return DragMode::ResizeS;
         if (nearR) return DragMode::ResizeE;
@@ -2571,6 +2950,7 @@ void LayoutEditorSession::destroySelectionChrome() {
         for (Panel*& point : _anchorPoints) point = nullptr;
         _selOutlines.clear();
         _marqueeBox = nullptr;
+        _safeAreaBox = nullptr;
         return;
     }
     auto destroyOne = [this](Panel*& p) {
@@ -2596,6 +2976,7 @@ void LayoutEditorSession::destroySelectionChrome() {
     }
     _selOutlines.clear();
     destroyOne(_marqueeBox);
+    destroyOne(_safeAreaBox);
 }
 
 void LayoutEditorSession::ensureSelectionChrome() {
@@ -2634,7 +3015,23 @@ void LayoutEditorSession::ensureSelectionChrome() {
         anchorPoint.border.color = anchorPoint.borderColor;
         anchorPoint.border.width = 1.0f;
         sheet->setStyle("__le_anchor_point", anchorPoint);
+
+        WidgetStyle safeArea{};
+        safeArea.backgroundColor = math::FVector4(0.95f, 0.66f, 0.18f, 0.0f);
+        safeArea.borderColor = math::FVector4(0.95f, 0.66f, 0.18f, 0.9f);
+        safeArea.border.color = safeArea.borderColor;
+        safeArea.border.width = 1.0f;
+        sheet->setStyle("__le_safe_area", safeArea);
     }
+
+    _safeAreaBox = new Panel();
+    _safeAreaBox->setId("__le_safe_area");
+    _safeAreaBox->setStyleId("__le_safe_area");
+    _safeAreaBox->setBorderEnabled(true);
+    _safeAreaBox->setBackgroundEnabled(true);
+    _safeAreaBox->setVisible(false);
+    _safeAreaBox->setLayoutPositionManaged(false);
+    _canvasHost->addChild(_safeAreaBox);
 
     _anchorBox = new Panel();
     _anchorBox->setId("__le_anchor_box");
@@ -2676,8 +3073,34 @@ void LayoutEditorSession::ensureSelectionChrome() {
     }
 }
 
+void LayoutEditorSession::syncPreviewChrome() {
+    if (_safeAreaBox == nullptr || _canvasHost == nullptr || _docRoot == nullptr) {
+        return;
+    }
+    const LayoutPreviewSettings& settings = _previewModel.settings();
+    if (!settings.showSafeArea) {
+        _safeAreaBox->setVisible(false);
+        return;
+    }
+    const math::FVector4 inset = _previewModel.logicalSafeArea();
+    const math::FRectangle root = _docRoot->getWorldBounds();
+    const float minX = std::min(root.maxX, root.minX + inset.x);
+    const float minY = std::min(root.maxY, root.minY + inset.y);
+    const float maxX = std::max(minX, root.maxX - inset.z);
+    const float maxY = std::max(minY, root.maxY - inset.w);
+    const math::FRectangle screen = documentToScreen(
+        math::FRectangle(minX, minY, maxX, maxY));
+    const math::FRectangle host = _canvasHost->getWorldBounds();
+    _safeAreaBox->setPosition({std::round(screen.minX - host.minX),
+                               std::round(screen.minY - host.minY)});
+    _safeAreaBox->setSize({std::max(1.0f, std::round(screen.maxX - screen.minX)),
+                           std::max(1.0f, std::round(screen.maxY - screen.minY))});
+    _safeAreaBox->setVisible(true);
+}
+
 UiCursorHint LayoutEditorSession::canvasCursorHint(
     const math::FVector2& worldPos) const {
+    if (_mode == Mode::Interact) return UiCursorHint::Default;
     if (!isCanvasHit(worldPos)) {
         return UiCursorHint::Default;
     }
@@ -2732,6 +3155,9 @@ UiCursorHint LayoutEditorSession::canvasCursorHint(
 
 bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
                                         int button) {
+    if (_mode == Mode::Interact) {
+        return false;
+    }
     if (_toolDrag != ToolDrag::None || _dragMode != DragMode::None) {
         if (_dragMode == DragMode::Marquee) {
             clearMarqueeChrome();
@@ -2895,6 +3321,7 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
 }
 
 bool LayoutEditorSession::onPointerMove(const math::FVector2& worldPos) {
+    if (_mode == Mode::Interact) return false;
     if (_toolDrag == ToolDrag::PalettePress ||
         _toolDrag == ToolDrag::HierPress) {
         const float dx = worldPos.x - _toolPressPos.x;
@@ -3000,6 +3427,7 @@ bool LayoutEditorSession::onPointerMove(const math::FVector2& worldPos) {
 
 bool LayoutEditorSession::onPointerUp(const math::FVector2& worldPos,
                                       int /*button*/) {
+    if (_mode == Mode::Interact) return false;
     if (_consumeNextPointerUp) {
         _consumeNextPointerUp = false;
         // Still allow hierarchy drag-commit paths below if a drag started.
@@ -3115,6 +3543,18 @@ bool LayoutEditorSession::onKeyDown(int uiKeyCode) {
 
     if (uiKeyCode == UIKey_Space) {
         _spaceDown = true;
+    }
+
+    if (uiKeyCode == UIKey_F6) {
+        setMode(_mode == Mode::Edit ? Mode::Interact : Mode::Edit);
+        return true;
+    }
+    if (_mode == Mode::Interact) {
+        if (uiKeyCode == UIKey_Escape) {
+            setMode(Mode::Edit);
+            return true;
+        }
+        return false;
     }
 
     if (modifiersCtrl() && uiKeyCode == UIKey_Z) {
@@ -3239,6 +3679,8 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     const auto hasProperty = [&](AuthoringProperty property) {
         return hasSel && properties.contains(property);
     };
+    _structuredModel.bind(_selected);
+    const LayoutStructuredKind structuredKind = _structuredModel.kind();
 
     // Every widget type exposes a different subset of rows. Retaining a
     // large scroll offset from the previous selection can move all rows of
@@ -3345,6 +3787,14 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     for (const PropertyFieldSchema& field : allPropertyFieldSchemas()) {
         if (field.property == AuthoringProperty::Padding) continue;
         bool visible = hasProperty(field.property);
+        if (field.property == AuthoringProperty::Items &&
+            structuredKind != LayoutStructuredKind::None) {
+            visible = false;
+        }
+        if (field.property == AuthoringProperty::Text &&
+            structuredKind == LayoutStructuredKind::RichText) {
+            visible = false;
+        }
         if (field.property == AuthoringProperty::X ||
             field.property == AuthoringProperty::Y) {
             visible = visible && showPos;
@@ -3353,6 +3803,8 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     }
     const bool hasTexture = hasProperty(AuthoringProperty::Texture);
     setChromeVisible("row_prop_texture_actions", hasTexture);
+    setChromeVisible("section_structured",
+                     structuredKind != LayoutStructuredKind::None);
     const bool hasPadding = hasProperty(AuthoringProperty::Padding);
     if (findChromeById("row_prop_padding") != nullptr) {
         setChromeVisible("row_prop_padding", hasPadding);
@@ -3436,6 +3888,8 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPadB, L"");
         syncAnchorPresetStyles();
         _suppressProp = false;
+        syncStructuredEditor();
+        syncTextureBrowser();
         if (_ui != nullptr) {
             _ui->invalidateLayout();
             _ui->layout();
@@ -3445,8 +3899,10 @@ void LayoutEditorSession::syncPropertyStrip() {
     setField(_propId, utf8ToWide(_selected->getId()));
     setField(_propX, formatFloat(_selected->getPosition().x));
     setField(_propY, formatFloat(_selected->getPosition().y));
-    setField(_propW, formatFloat(_selected->getSize().x));
-    setField(_propH, formatFloat(_selected->getSize().y));
+    const math::FVector2 inspectorSize = _selected == _docRoot
+        ? authoredRootSize() : _selected->getSize();
+    setField(_propW, formatFloat(inspectorSize.x));
+    setField(_propH, formatFloat(inspectorSize.y));
     if (_selected->hasAnchorLayout()) {
         const AnchorLayout& anchor = _selected->getAnchorLayout();
         setField(_propAnchorMinX, formatFloat(anchor.anchorMin.x));
@@ -3543,6 +3999,8 @@ void LayoutEditorSession::syncPropertyStrip() {
     }
     syncAnchorPresetStyles();
     _suppressProp = false;
+    syncStructuredEditor();
+    syncTextureBrowser();
     if (_ui != nullptr) {
         // Visibility and field values are one Inspector transaction. Flush
         // once before returning so rapid canvas/outline selection cannot
@@ -3832,6 +4290,298 @@ void LayoutEditorSession::clearTexture() {
     applyTextureName({});
     endMutation();
     syncPropertyStrip();
+}
+
+void LayoutEditorSession::syncTextureBrowser() {
+    const auto* image = dynamic_cast<Image*>(_selected);
+    const bool visible = image != nullptr;
+    setChromeVisible("section_texture_resources", visible);
+    setChromeVisible("row_texture_resource_search", visible);
+    setChromeVisible("texture_resource_list", visible);
+    setChromeVisible("row_texture_resource_actions", visible);
+    setChromeVisible("texture_resource_status", visible);
+    if (!visible) return;
+
+    _suppressTextureResources = true;
+    if (_textureResourceList != nullptr) {
+        _textureResourceList->setItems(_textureCatalog.visibleLabels());
+        int selected = -1;
+        const std::string& key = image->getTextureName();
+        for (size_t i = 0; i < _textureCatalog.visibleIndices().size(); ++i) {
+            const LayoutTextureResource* entry = _textureCatalog.visibleEntry(i);
+            if (entry != nullptr && entry->key == key) {
+                selected = static_cast<int>(i);
+                break;
+            }
+        }
+        _textureResourceList->setSelectedIndex(selected);
+    }
+    _suppressTextureResources = false;
+
+    if (_textureStatus != nullptr) {
+        const std::string& key = image->getTextureName();
+        if (key.empty()) {
+            _textureStatus->setText(L"No texture assigned");
+            _textureStatus->setStyleId("__le_muted");
+        } else if (_textureCatalog.contains(key) || image->hasTexture()) {
+            const ImageTextureHandle& texture = image->getTexture();
+            std::wstring label = L"Ready";
+            if (texture.width > 0 && texture.height > 0) {
+                label += L"  \u00b7  " + std::to_wstring(texture.width) + L" x "
+                    + std::to_wstring(texture.height);
+            }
+            _textureStatus->setText(label);
+            _textureStatus->setStyleId("__le_success");
+        } else if (_textureResourceProvider) {
+            _textureStatus->setText(L"Missing resource — key is not in the current catalog");
+            _textureStatus->setStyleId("__le_warning");
+        } else {
+            _textureStatus->setText(L"Preview unavailable — host has no resource catalog");
+            _textureStatus->setStyleId("__le_warning");
+        }
+    }
+}
+
+void LayoutEditorSession::syncStructuredEditor() {
+    _structuredModel.bind(_selected);
+    const LayoutStructuredKind kind = _structuredModel.kind();
+    const bool visible = kind != LayoutStructuredKind::None;
+    setChromeVisible("section_structured", visible);
+    setChromeVisible("structured_items", visible);
+    setChromeVisible("row_structured_text", visible);
+    setChromeVisible("row_structured_actions", visible);
+    setChromeVisible("row_structured_order", visible);
+    setChromeVisible("row_structured_rich_style",
+                     kind == LayoutStructuredKind::RichText);
+    setChromeVisible("btn_structured_child", kind == LayoutStructuredKind::Tree);
+    if (!visible) return;
+
+    _suppressStructured = true;
+    if (_structuredList != nullptr) {
+        _structuredList->setItems(_structuredModel.displayLabels());
+        if (_structuredModel.selectedIndex() < 0 &&
+            !_structuredModel.entries().empty()) {
+            _structuredModel.setSelectedIndex(0);
+        }
+        _structuredList->setSelectedIndex(_structuredModel.selectedIndex());
+    }
+    const int index = _structuredModel.selectedIndex();
+    const bool hasEntry = index >= 0 && index < static_cast<int>(
+        _structuredModel.entries().size());
+    if (_structuredText != nullptr) {
+        _structuredText->setText(hasEntry
+            ? _structuredModel.entries()[static_cast<size_t>(index)].label
+            : std::wstring{});
+    }
+    if (_structuredFontSize != nullptr) {
+        _structuredFontSize->setText(hasEntry &&
+            kind == LayoutStructuredKind::RichText
+            ? std::to_wstring(_structuredModel.entries()[
+                  static_cast<size_t>(index)].richRun.fontSize)
+            : std::wstring{});
+    }
+    if (_structuredColor != nullptr) {
+        _structuredColor->setText(hasEntry &&
+            kind == LayoutStructuredKind::RichText
+            ? formatColorHex(_structuredModel.entries()[
+                  static_cast<size_t>(index)].richRun.color)
+            : std::wstring{});
+    }
+    _suppressStructured = false;
+    setChromeEnabled("btn_structured_remove", hasEntry);
+    setChromeEnabled("btn_structured_up", hasEntry && index > 0);
+    setChromeEnabled("btn_structured_down", hasEntry &&
+        index + 1 < static_cast<int>(_structuredModel.entries().size()));
+    setChromeEnabled("btn_structured_bold", hasEntry);
+    setChromeEnabled("btn_structured_italic", hasEntry);
+    setChromeEnabled("btn_structured_underline", hasEntry);
+}
+
+void LayoutEditorSession::structuredAdd(bool asChild) {
+    if (_structuredModel.kind() == LayoutStructuredKind::None) return;
+    pushUndo(LayoutEditKind::Insert, "Add structured item");
+    const bool added = _structuredModel.add({}, asChild, [this]() -> Widget* {
+        Widget* page = WidgetFactory::get().create("Panel");
+        if (page == nullptr) return nullptr;
+        page->setId(makeUniqueId("tab_page", page));
+        page->setSize(math::FVector2(240.0f, 140.0f));
+        page->setLayoutPositionManaged(true);
+        page->setLayoutSizeManaged(true);
+        return page;
+    });
+    if (!added) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    freezeDocumentInteraction(_docRoot);
+    refreshHierarchy();
+    syncStructuredEditor();
+    syncSelectionChrome();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+void LayoutEditorSession::structuredRemove() {
+    pushUndo(LayoutEditKind::Delete, "Remove structured item");
+    if (!_structuredModel.removeSelected()) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    refreshHierarchy();
+    syncStructuredEditor();
+    syncSelectionChrome();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+void LayoutEditorSession::structuredMove(int delta) {
+    pushUndo(LayoutEditKind::Reorder, "Reorder structured item");
+    if (!_structuredModel.moveSelected(delta)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    refreshHierarchy();
+    syncStructuredEditor();
+    syncSelectionChrome();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+void LayoutEditorSession::commitStructuredText() {
+    if (_suppressStructured || _structuredText == nullptr) return;
+    const int index = _structuredModel.selectedIndex();
+    if (index < 0 || index >= static_cast<int>(
+        _structuredModel.entries().size())) return;
+    const std::wstring value = _structuredText->getText();
+    if (_structuredModel.entries()[static_cast<size_t>(index)].label == value)
+        return;
+    pushUndo(LayoutEditKind::Property, "Rename structured item");
+    if (!_structuredModel.setSelectedLabel(value)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    refreshHierarchy();
+    syncStructuredEditor();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+void LayoutEditorSession::commitStructuredRichStyle() {
+    if (_suppressStructured ||
+        _structuredModel.kind() != LayoutStructuredKind::RichText) return;
+    const int index = _structuredModel.selectedIndex();
+    if (index < 0 || index >= static_cast<int>(
+        _structuredModel.entries().size())) return;
+    RichRun run = _structuredModel.entries()[static_cast<size_t>(index)].richRun;
+    if (_structuredText != nullptr) run.text = _structuredText->getText();
+    if (_structuredFontSize != nullptr) {
+        float parsed = 0.0f;
+        if (!parseFloat(_structuredFontSize->getText(), parsed) || parsed < 1.0f) {
+            setStatus(L"Rich text font size must be positive");
+            syncStructuredEditor();
+            return;
+        }
+        run.fontSize = static_cast<int>(std::lround(parsed));
+    }
+    if (_structuredColor != nullptr &&
+        !parseColorHex(_structuredColor->getText(), run.color)) {
+        setStatus(L"Rich text color must be #RRGGBB or #RRGGBBAA");
+        syncStructuredEditor();
+        return;
+    }
+    const RichRun& old = _structuredModel.entries()[static_cast<size_t>(index)].richRun;
+    if (old.text == run.text && old.fontSize == run.fontSize &&
+        formatColorHex(old.color) == formatColorHex(run.color)) return;
+    pushUndo(LayoutEditKind::Property, "Edit rich-text run");
+    if (!_structuredModel.setSelectedRichRun(run)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    syncStructuredEditor();
+    if (_ui != nullptr) _ui->invalidateLayout();
+}
+
+void LayoutEditorSession::syncPreviewControls() {
+    _suppressPreview = true;
+    const LayoutPreviewSettings& settings = _previewModel.settings();
+    const int preset = _previewModel.presetIndex() >= 0
+        ? _previewModel.presetIndex()
+        : static_cast<int>(_previewModel.presets().size());
+    if (_previewPreset != nullptr) _previewPreset->setSelectedIndex(preset);
+    if (_previewDpi != nullptr) {
+        static constexpr float scales[] = {1.0f, 1.25f, 1.5f, 2.0f, 3.0f};
+        int best = 0;
+        for (int i = 1; i < static_cast<int>(sizeof(scales) / sizeof(scales[0])); ++i) {
+            if (std::fabs(scales[i] - settings.dpiScale) <
+                std::fabs(scales[best] - settings.dpiScale)) best = i;
+        }
+        _previewDpi->setSelectedIndex(best);
+    }
+    const math::FVector2 documentPixels = authoredRootSize();
+    const float width = settings.followDocumentSize
+        ? documentPixels.x * settings.dpiScale : settings.pixelWidth;
+    const float height = settings.followDocumentSize
+        ? documentPixels.y * settings.dpiScale : settings.pixelHeight;
+    auto set = [](TextInput* field, float value) {
+        if (field != nullptr) field->setText(formatFloat(value));
+    };
+    set(_previewWidth, width);
+    set(_previewHeight, height);
+    set(_previewSafeL, settings.safeAreaPixels.x);
+    set(_previewSafeT, settings.safeAreaPixels.y);
+    set(_previewSafeR, settings.safeAreaPixels.z);
+    set(_previewSafeB, settings.safeAreaPixels.w);
+    if (auto* button = dynamic_cast<Button*>(findChromeById("btn_preview_safe"))) {
+        button->setText(settings.showSafeArea ? L"Safe Area: On" : L"Safe Area: Off");
+        button->setStyleId(settings.showSafeArea ? "__le_primary" : "__le_command");
+    }
+    if (auto* button = dynamic_cast<Button*>(findChromeById("btn_preview_mode"))) {
+        button->setText(_mode == Mode::Interact ? L"Stop Preview" : L"Interact");
+        button->setStyleId(_mode == Mode::Interact ? "__le_primary" : "__le_command");
+    }
+    if (auto* hint = dynamic_cast<TextLabel*>(findChromeById("lbl_canvas_hint"))) {
+        const math::FVector2 logical = _previewModel.logicalSize(authoredRootSize());
+        std::wostringstream label;
+        label << static_cast<int>(std::lround(width)) << L" x "
+              << static_cast<int>(std::lround(height)) << L" px  \u00b7  "
+              << logical.x << L" x " << logical.y << L" DIP  \u00b7  "
+              << static_cast<int>(std::lround(_viewZoom * 100.0f)) << L"%";
+        hint->setText(label.str());
+    }
+    _suppressPreview = false;
+}
+
+void LayoutEditorSession::commitPreviewFields() {
+    if (_suppressPreview) return;
+    float width = 0.0f, height = 0.0f, left = 0.0f, top = 0.0f,
+          right = 0.0f, bottom = 0.0f;
+    if (_previewWidth == nullptr || _previewHeight == nullptr ||
+        !parseFloat(_previewWidth->getText(), width) ||
+        !parseFloat(_previewHeight->getText(), height) || width < 1.0f ||
+        height < 1.0f) {
+        setStatus(L"Preview resolution must be positive");
+        syncPreviewControls();
+        return;
+    }
+    auto readInset = [](TextInput* field, float& value) {
+        if (field == nullptr || field->getText().empty()) {
+            value = 0.0f;
+            return true;
+        }
+        return parseFloat(field->getText(), value) && value >= 0.0f;
+    };
+    if (!readInset(_previewSafeL, left) || !readInset(_previewSafeT, top) ||
+        !readInset(_previewSafeR, right) || !readInset(_previewSafeB, bottom)) {
+        setStatus(L"Safe Area insets must be non-negative");
+        syncPreviewControls();
+        return;
+    }
+    LayoutPreviewSettings settings = _previewModel.settings();
+    settings.pixelWidth = width;
+    settings.pixelHeight = height;
+    settings.safeAreaPixels = {left, top, right, bottom};
+    setPreviewSettings(settings);
 }
 
 bool LayoutEditorSession::hitPaletteType(const math::FVector2& worldPos,
@@ -4929,6 +5679,7 @@ void LayoutEditorSession::setViewZoom(float zoom,
     }
     applyViewportTransform();
     syncSelectionChrome();
+    syncPreviewControls();
     std::wostringstream oss;
     oss << L"Zoom " << static_cast<int>(_viewZoom * 100.0f + 0.5f) << L"%";
     setStatus(oss.str());

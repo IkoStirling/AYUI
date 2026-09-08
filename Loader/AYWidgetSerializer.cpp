@@ -1761,10 +1761,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
     else if (TreeView* tv = dynamic_cast<TreeView*>(widget)) {
         j["type"] = "TreeView";
         j["tree"] = json::array();
-        // Serialize from the flat view (post-collapse); callers wanting the
-        // full source tree should setTree() with the original model.
-        for (size_t i = 0; i < tv->getNodeCount(); ++i) {
-            const auto& d = tv->getNodeData(i);
+        // Persist the complete source tree, including descendants currently
+        // hidden by collapsed ancestors. The flat view is presentation only.
+        for (const auto& d : tv->getTreeDataRef()) {
             json nj;
             nj["label"] = toUtf8(d.label);
             nj["icon"]  = toUtf8(d.icon);

@@ -71,7 +71,7 @@ int main() {
     }
     auto* menuBar = dynamic_cast<ayt::ui::MenuBar*>(
         ui.findById("designer_menubar"));
-    if (menuBar == nullptr || menuBar->getMenuCount() != 2u) {
+    if (menuBar == nullptr || menuBar->getMenuCount() != 3u) {
         std::fprintf(stderr, "designer menu regression: count=%zu\n",
             menuBar != nullptr ? menuBar->getMenuCount() : 0u);
         return 9;
@@ -103,6 +103,20 @@ int main() {
         std::fprintf(stderr, "anchor inspector regression: missing=%d\n",
                      missingAnchorEntries);
         return 45;
+    }
+    static const char* requiredProductIds[] = {
+        "preview_preset", "preview_width", "preview_height", "preview_dpi",
+        "btn_preview_safe", "btn_preview_mode", "structured_items",
+        "structured_text", "texture_resource_list", "texture_resource_status"
+    };
+    int missingProductEntries = 0;
+    for (const char* id : requiredProductIds) {
+        if (ui.findById(id) == nullptr) ++missingProductEntries;
+    }
+    if (missingProductEntries != 0) {
+        std::fprintf(stderr, "phase-3 chrome regression: missing=%d\n",
+                     missingProductEntries);
+        return 80;
     }
     if (!session.open("assets/sample_blank.ui.json")) {
         std::fprintf(stderr, "open failed\n");
@@ -647,6 +661,15 @@ int main() {
     session.selectById("btn_hello");
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");
+    const ayt::math::FVector2 authoredRootSize =
+        session.documentRoot()->getSize();
+    session.setPreviewPreset(3);
+    if (session.documentRoot()->getSize().x != 390.0f ||
+        session.documentRoot()->getSize().y != 844.0f ||
+        !session.previewSettings().showSafeArea) {
+        std::fprintf(stderr, "device preview profile failed\n");
+        return 81;
+    }
 
     const std::filesystem::path outFile =
         std::filesystem::temp_directory_path() /
@@ -689,6 +712,12 @@ int main() {
     if (reloaded == nullptr) {
         std::fprintf(stderr, "reload failed\n");
         return 5;
+    }
+    if (reloaded->getSize().x != authoredRootSize.x ||
+        reloaded->getSize().y != authoredRootSize.y) {
+        std::fprintf(stderr, "preview size leaked into saved document\n");
+        ayt::ui::destroyWidgetTree(reloaded);
+        return 82;
     }
 
     auto* loadedImage = dynamic_cast<ayt::ui::Image*>(
@@ -804,6 +833,27 @@ int main() {
         std::fprintf(stderr, "expanded designer round-trip failed\n%s\n",
                      json.c_str());
         return 19;
+    }
+
+    session.selectById("btn_hello");
+    auto* previewButton = dynamic_cast<ayt::ui::Button*>(session.selected());
+    if (previewButton == nullptr || previewButton->isEnabled()) {
+        std::fprintf(stderr, "edit-mode interaction freeze failed\n");
+        return 83;
+    }
+    session.setMode(ayt::ui::LayoutEditorSession::Mode::Interact);
+    if (!session.isInteractionPreview() || !previewButton->isEnabled()) {
+        std::fprintf(stderr, "interaction preview did not activate controls\n");
+        return 84;
+    }
+    previewButton->setText(L"Transient preview state");
+    session.setMode(ayt::ui::LayoutEditorSession::Mode::Edit);
+    session.selectById("btn_hello");
+    previewButton = dynamic_cast<ayt::ui::Button*>(session.selected());
+    if (previewButton == nullptr || previewButton->getText() != L"RoundTrip" ||
+        previewButton->isEnabled()) {
+        std::fprintf(stderr, "interaction preview rollback failed\n");
+        return 85;
     }
 
     session.detach();

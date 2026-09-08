@@ -67,6 +67,10 @@ public:
 
     void addRun(const std::wstring& text, const math::FVector4& color, int fontSize);
     void addRun(const RichRun& run);
+    void insertRun(size_t index, const RichRun& run);
+    bool setRun(size_t index, const RichRun& run);
+    bool removeRun(size_t index);
+    bool moveRun(size_t fromIndex, size_t toIndex);
     void clearRuns();
     size_t getRunCount() const { return _runs.size(); }
     const RichRun& getRun(size_t i) const { return _runs[i]; }

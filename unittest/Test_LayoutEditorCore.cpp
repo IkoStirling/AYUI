@@ -5,8 +5,16 @@
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutPreviewModel.h"
+#include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
+#include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
+#include "AYUI/ListView.h"
+#include "AYUI/Panel.h"
+#include "AYUI/RichText.h"
+#include "AYUI/TabControl.h"
+#include "AYUI/TreeView.h"
 #include "AYUI/Widget.h"
 
 #include <string>
@@ -130,6 +138,91 @@ TEST_CASE(authoring_registry_is_the_single_palette_and_schema_source) {
         CHECK(registry.findForWidget(grid)->typeName == "GridPanel");
     }
     destroyWidgetTree(created);
+}
+
+TEST_CASE(structured_content_model_edits_lists_trees_tabs_and_rich_runs) {
+    LayoutStructuredContentModel model;
+
+    ListView list;
+    list.setItems({L"One", L"Two"});
+    model.bind(&list);
+    model.setSelectedIndex(0);
+    CHECK(model.add(L"Inserted"));
+    CHECK(model.entries().size() == 3u);
+    CHECK(model.setSelectedLabel(L"Renamed"));
+    CHECK(list.getItemsRef()[1] == L"Renamed");
+    CHECK(model.moveSelected(1));
+    CHECK(list.getItemsRef()[2] == L"Renamed");
+    CHECK(model.removeSelected());
+    CHECK(list.getItemsRef().size() == 2u);
+
+    TreeView tree;
+    tree.setTree({{L"Root", {}, false, true, -1}});
+    model.bind(&tree);
+    model.setSelectedIndex(0);
+    CHECK(model.add(L"Child", true));
+    CHECK(tree.getTreeDataRef().size() == 2u);
+    CHECK(tree.getTreeDataRef()[1].parentIndex == 0);
+    model.setSelectedIndex(0);
+    CHECK(model.removeSelected());
+    CHECK(tree.getTreeDataRef().empty());
+
+    TabControl tabs;
+    auto makePage = []() -> Widget* { return new Panel(); };
+    model.bind(&tabs);
+    CHECK(model.add(L"First", false, makePage));
+    CHECK(model.add(L"Second", false, makePage));
+    CHECK(model.moveSelected(-1));
+    CHECK(tabs.getTabLabel(0) == L"Second");
+    CHECK(model.removeSelected());
+    CHECK(tabs.getTabCount() == 1u);
+
+    RichText rich;
+    rich.addRun(L"Alpha", FVector4(1, 1, 1, 1), 14);
+    model.bind(&rich);
+    model.setSelectedIndex(0);
+    RichRun run = model.entries()[0].richRun;
+    run.text = L"Styled";
+    run.bold = true;
+    run.fontSize = 20;
+    CHECK(model.setSelectedRichRun(run));
+    CHECK(rich.getRun(0).text == L"Styled");
+    CHECK(rich.getRun(0).bold);
+    CHECK(rich.getRun(0).fontSize == 20);
+}
+
+TEST_CASE(resource_catalog_filters_case_insensitively_and_keeps_stable_keys) {
+    LayoutResourceCatalog catalog;
+    catalog.setEntries({
+        {"textures/button.png", L"Button"},
+        {"textures/Hero.PNG", L"Hero portrait"},
+        {"textures/button.png", L"Duplicate"}
+    });
+    CHECK(catalog.entries().size() == 2u);
+    CHECK(catalog.contains("textures/Hero.PNG"));
+    catalog.setFilter(L"hero");
+    CHECK(catalog.visibleIndices().size() == 1u);
+    const LayoutTextureResource* result = catalog.visibleEntry(0);
+    CHECK_NOT_NULL(result);
+    if (result != nullptr) CHECK(result->key == "textures/Hero.PNG");
+}
+
+TEST_CASE(preview_model_maps_physical_resolution_dpi_and_safe_area_to_dip) {
+    LayoutPreviewModel preview;
+    CHECK(preview.selectPreset(3));
+    const FVector2 logical = preview.logicalSize({640.0f, 480.0f});
+    CHECK_FLOAT_EQ(logical.x, 390.0f, 1e-5f);
+    CHECK_FLOAT_EQ(logical.y, 844.0f, 1e-5f);
+    const FVector4 safe = preview.logicalSafeArea();
+    CHECK_FLOAT_EQ(safe.y, 44.0f, 1e-5f);
+    CHECK_FLOAT_EQ(safe.w, 34.0f, 1e-5f);
+
+    preview.setPixelSize(1920.0f, 1080.0f);
+    preview.setDpiScale(2.0f);
+    CHECK(preview.presetIndex() == -1);
+    const FVector2 custom = preview.logicalSize({1.0f, 1.0f});
+    CHECK_FLOAT_EQ(custom.x, 960.0f, 1e-5f);
+    CHECK_FLOAT_EQ(custom.y, 540.0f, 1e-5f);
 }
 
 TEST_SUITE_END

@@ -508,14 +508,35 @@ Distribute 至少三个，其余状态禁用而不是静默执行。普通 prese
 
 工具箱按 Basic/Input/Collections/Layout/Overlay 分类，覆盖常用文本和交互叶控件、Image、
 ComboBox/ListView/TileView/TreeView、TabStrip/TabControl、Grid/Scroll 及 Window/Modal。新增控件必须
-通过 WidgetFactory 创建，不能在 Designer 中维护另一份构造器。集合与 Tab 的第一阶段模型编辑使用
-`|` 分隔 item 文本；复杂树节点、Tab page 管理和控件专用高级属性可在后续改为结构化 inspector，
-但持久化继续走同一个 WidgetSerializer。
+通过 WidgetFactory 创建，不能在 Designer 中维护另一份构造器。第三阶段引入
+`LayoutStructuredContentModel`，统一编辑 Combo/List/Tile item、完整 Tree source、TabStrip/
+TabControl page 与 RichText run；它提供 add/remove/move/rename 及 Tree add-child、RichText style
+适配，并由 Session 统一生成命令 snapshot。Tree Serializer 读取完整 source 而不是只读取展开后的
+visible rows；TabControl reorder 在控件层保持 owned page、当前选择和 mount 状态。旧 `|` 输入只作为
+简单类型兼容入口，不再承担结构化模型的主编辑路径。
 
 Image authoring 把“资源身份”和“预览句柄”分开：`setTexturePathPicker()` 返回写入 `textureName` 的
 名字，`setTexturePreviewLoader()` 由当前宿主把该名字解析为临时 `ImageTextureHandle`。独立工具通过
 AYRenderer 上传预览，AYEditor 子窗口通过 GDI DIB/AlphaBlend 预览；后端句柄不进入 undo snapshot
 或 JSON。宿主应返回资源系统可解析的相对路径/资源键，绝对文件路径只适合本机草稿。
+
+`LayoutResourceCatalog` 是纯 authoring 数据模型，以稳定 key 去重、排序并执行大小写无关搜索；
+`TextureResourceProvider` 由宿主枚举 Project/Assets、EngineAssets 或其他资源索引。Inspector 资源浏览器
+只把选中 key 写入 Image，预览句柄仍由 `setTexturePreviewLoader()` 临时生成；空目录、missing key 和
+失效 preview 都显示明确状态。目录扫描、导入和资源 GUID 不下沉到 AYUI。
+
+`LayoutPreviewModel` 把设备预览定义为 physical width/height、DPI scale 与 physical safe-area inset，
+统一换算为 Canvas 使用的逻辑 DIP。内置 Document/Desktop/HiDPI/Phone/Tablet preset 与自定义设置
+共用该模型；Safe Area 由 editor-only overlay 表示。预览 root extent 是 transient host state，
+`captureSnapshot()` 和保存会短暂恢复 authored root size，完成序列化后重新应用预览，因此设备切换
+不会制造 dirty、undo entry 或改写布局文件。预览覆盖启用时 root resize handles 暂停，避免用户把
+设备尺寸误当成文档固有尺寸。
+
+Session 明确区分 `Edit` 与 `Interact`。进入 Interact 前捕获文档 snapshot，并恢复 attach 时记录的
+enabled/read-only 状态；此时 Session 不截获画布鼠标，运行时 Widget 接收正常 UIManager 输入，所有
+选择 chrome 隐藏。退出时从 snapshot 重建文档并恢复 Edit 冻结状态，保证按钮 toggle、文本输入、
+Tab/列表选择及 controller 副作用不会污染 authoring 文档。F6、View 菜单和 Canvas header 使用同一
+状态切换 API；该模式不是游戏脚本沙箱，也不执行 JSON 中不存在的任意代码。
 
 Inspector 根据选中类型暴露 `controller` 和有效事件字段。Session 只编辑名字，不持有游戏 controller
 对象；运行时由 UILayoutLoader 使用 8.1 的三层优先级绑定。这样 Designer 可以完成交互契约创作，
@@ -658,6 +679,11 @@ Viewport，引入 Widget authoring registry 与 schema-driven Inspector，并为
 恢复兜底。新增核心单测后 Insider Windows Debug 基线为 `5366 / 5366`，round-trip 同步通过；
 AYEditor 全量回归为 `1940 / 1940`。
 
+同日完成 Layout Editor 产品编辑第三阶段：结构化集合/Tree/Tab/RichText 模型、可搜索纹理资源目录、
+物理分辨率/DPI/Safe Area 设备预览和 snapshot 回滚式 Interact 模式进入共享 core；Tree 折叠后代与
+Tab page reorder 的 Serializer/ownership 边界纳入回归。当前 Insider Windows Debug 基线为
+`5402 / 5402`，`AYUI_LayoutEditor_RoundTrip` 同步验证 transient preview 保存隔离与交互退出回滚。
+
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
@@ -748,8 +774,9 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 7. 动画产品化已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/串联 API、
    全局 animation scale、reduced-motion、repeat/yoyo、物理弹簧参数与跨 Sequence 步骤的时间守恒。
-   后续可选扩展只剩 OS reduced-motion 偏好自动桥接和可视化时间线编辑器；它们不要求修改
-   Widget tween 主路径。
+   后续可选扩展只剩 OS reduced-motion 偏好自动桥接和可视化时间线编辑器；时间线编辑器应复用
+   第三阶段的 structured authoring、preview mode 与 resource catalog，在属性/资源/预览基础闭环后
+   再实现，不要求修改 Widget tween 主路径。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 
