@@ -1,17 +1,39 @@
-#include "LayoutEditorSession.h"
+#include "AYUI/LayoutEditor/LayoutEditorSession.h"
+
+#include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
+#include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
 
 #include "AYUI/Box.h"
 #include "AYUI/Button.h"
 #include "AYUI/CheckBox.h"
 #include "AYUI/Clipboard.h"
 #include "AYUI/ComboBox.h"
+#include "AYUI/GridPanel.h"
+#include "AYUI/Image.h"
+#include "AYUI/IRenderBackend.h"
 #include "AYUI/InteractiveWidget.h"
 #include "AYUI/LayoutLoader.h"
+#include "AYUI/ListView.h"
+#include "AYUI/Modal.h"
+#include "AYUI/ModalDialog.h"
 #include "AYUI/Panel.h"
+#include "AYUI/ProgressBar.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/RichText.h"
+#include "AYUI/ScrollView.h"
+#include "AYUI/Separator.h"
+#include "AYUI/Slider.h"
+#include "AYUI/Spinner.h"
 #include "AYUI/Style.h"
+#include "AYUI/TabControl.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/TextArea.h"
 #include "AYUI/TextInput.h"
 #include "AYUI/TextLabel.h"
-#include "AYUI/ListView.h"
+#include "AYUI/TileView.h"
+#include "AYUI/Tooltip.h"
+#include "AYUI/TreeView.h"
+#include "AYUI/Window.h"
 #include "AYUI/Menu.h"
 #include "AYUI/MenuBar.h"
 #include "AYUI/MenuItem.h"
@@ -22,6 +44,7 @@
 #include "AYUI/UIKeyCode.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <codecvt>
 #include <cstdio>
@@ -31,6 +54,7 @@
 #include <iterator>
 #include <locale>
 #include <sstream>
+#include <unordered_set>
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -115,6 +139,39 @@ bool parseFloat(const std::wstring& s, float& out) {
     }
 }
 
+std::wstring trimWide(std::wstring value) {
+    const auto first = value.find_first_not_of(L" \t\r\n");
+    if (first == std::wstring::npos) return {};
+    const auto last = value.find_last_not_of(L" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+std::vector<std::wstring> splitItems(const std::wstring& value) {
+    std::vector<std::wstring> items;
+    std::wstring current;
+    for (const wchar_t ch : value) {
+        if (ch == L'|' || ch == L'\n') {
+            current = trimWide(std::move(current));
+            if (!current.empty()) items.push_back(std::move(current));
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    current = trimWide(std::move(current));
+    if (!current.empty()) items.push_back(std::move(current));
+    return items;
+}
+
+std::wstring joinItems(const std::vector<std::wstring>& items) {
+    std::wstring result;
+    for (const std::wstring& item : items) {
+        if (!result.empty()) result += L" | ";
+        result += item;
+    }
+    return result;
+}
+
 std::string readFileToString(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
@@ -125,75 +182,129 @@ std::string readFileToString(const std::string& path) {
     return ss.str();
 }
 
-std::string typePrefix(const std::string& typeName) {
-    if (typeName == "TextLabel") return "lbl";
-    if (typeName == "Button") return "btn";
-    if (typeName == "Panel") return "panel";
-    if (typeName == "TextInput") return "input";
-    if (typeName == "CheckBox") return "chk";
-    if (typeName == "Slider") return "slider";
-    if (typeName == "ScrollView") return "scroll";
-    if (typeName == "VBox") return "vbox";
-    if (typeName == "HBox") return "hbox";
-    if (typeName == "ProgressBar") return "prog";
-    return "w";
-}
+struct DesignerGridEntry {
+    Widget* widget = nullptr;
+    int rowSpan = 1;
+    int colSpan = 1;
+    GridPanel::HAlign hAlign = GridPanel::HAlign::Fill;
+    GridPanel::VAlign vAlign = GridPanel::VAlign::Fill;
+};
 
-math::FVector2 defaultSizeForType(const std::string& typeName) {
-    if (typeName == "Panel" || typeName == "ScrollView") {
-        return math::FVector2(200.0f, 120.0f);
-    }
-    if (typeName == "VBox" || typeName == "HBox") {
-        return math::FVector2(220.0f, 160.0f);
-    }
-    if (typeName == "TextArea") {
-        return math::FVector2(200.0f, 80.0f);
-    }
-    if (typeName == "Slider") {
-        return math::FVector2(160.0f, 24.0f);
-    }
-    return math::FVector2(120.0f, 28.0f);
-}
-
-SvgDocument::Ptr paletteIconDocument(const std::string& typeName) {
-    struct IconSource {
-        const char* type;
-        const char* path;
-    };
-    static constexpr IconSource kSources[] = {
-        {"Button", "M4 7h16v10H4z M8 12h8"},
-        {"TextLabel", "M5 6h14 M12 6v12 M8 18h8"},
-        {"TextInput", "M3 6h18v12H3z M7 9v6"},
-        {"CheckBox", "M4 5h15v15H4z M7 12l3 3 6-7"},
-        {"Slider", "M4 8h10 M18 8h2 M4 16h3 M11 16h9 M14 5v6 M7 13v6"},
-        {"Panel", "M4 4h16v16H4z M4 9h16"},
-        {"VBox", "M5 4h14v4H5z M5 10h14v4H5z M5 16h14v4H5z"},
-        {"HBox", "M4 5h4v14H4z M10 5h4v14h-4z M16 5h4v14h-4z"},
-        {"ScrollView", "M4 4h16v16H4z M17 7v7 M17 17h.01"},
-    };
-    struct CachedIcon {
-        std::string type;
-        SvgDocument::Ptr document;
-    };
-    static const std::vector<CachedIcon> kIcons = []() {
-        std::vector<CachedIcon> result;
-        result.reserve(std::size(kSources));
-        for (const IconSource& source : kSources) {
-            std::string svg =
-                "<svg viewBox=\"0 0 24 24\" fill=\"none\" "
-                "stroke=\"currentColor\" stroke-width=\"1.7\" "
-                "stroke-linecap=\"round\" stroke-linejoin=\"round\">"
-                "<path d=\"";
-            svg += source.path;
-            svg += "\"/></svg>";
-            result.push_back({source.type, SvgDocument::parse(svg)});
+std::vector<DesignerGridEntry> collectDesignerGridEntries(
+    GridPanel* grid, Widget* omit = nullptr) {
+    std::vector<DesignerGridEntry> entries;
+    if (grid == nullptr) return entries;
+    for (int row = 0; row < grid->getRowCount(); ++row) {
+        for (int col = 0; col < grid->getColumnCount(); ++col) {
+            const GridPanel::CellInfo* cell = grid->findCell(row, col);
+            if (cell == nullptr || cell->widget == nullptr ||
+                cell->widget == omit) {
+                continue;
+            }
+            entries.push_back({cell->widget, cell->rowSpan, cell->colSpan,
+                               cell->hAlign, cell->vAlign});
         }
-        return result;
-    }();
-    for (const CachedIcon& icon : kIcons) {
-        if (icon.type == typeName) return icon.document;
     }
-    return nullptr;
+    return entries;
+}
+
+int designerGridIndexOf(GridPanel* grid, Widget* widget) {
+    if (grid == nullptr || widget == nullptr) return -1;
+    const int cols = grid->getColumnCount();
+    for (int row = 0; row < grid->getRowCount(); ++row) {
+        for (int col = 0; col < cols; ++col) {
+            const GridPanel::CellInfo* cell = grid->findCell(row, col);
+            if (cell != nullptr && cell->widget == widget) {
+                return row * cols + col;
+            }
+        }
+    }
+    return -1;
+}
+
+bool rebuildDesignerGrid(GridPanel* grid, Widget* inserted,
+                         size_t insertIndex) {
+    if (grid == nullptr || inserted == nullptr) return false;
+
+    std::vector<DesignerGridEntry> entries =
+        collectDesignerGridEntries(grid, inserted);
+    if (insertIndex > entries.size()) insertIndex = entries.size();
+    entries.insert(entries.begin() + static_cast<std::ptrdiff_t>(insertIndex),
+                   DesignerGridEntry{inserted});
+
+    int columns = grid->getColumnCount();
+    int rows = grid->getRowCount();
+    if (columns <= 0) columns = 2;
+    if (rows <= 0) rows = 2;
+    while (rows * columns < static_cast<int>(entries.size())) ++rows;
+
+    // Capture first, then detach every occupied cell. Re-applying the
+    // captured metadata preserves authored spans/alignment while assigning
+    // the new child to the next row-major slot.
+    for (int row = 0; row < grid->getRowCount(); ++row) {
+        for (int col = 0; col < grid->getColumnCount(); ++col) {
+            if (grid->getCell(row, col) != nullptr) grid->clearCell(row, col);
+        }
+    }
+    grid->setRowCount(rows);
+    grid->setColumnCount(columns);
+    for (size_t i = 0; i < entries.size(); ++i) {
+        DesignerGridEntry& entry = entries[i];
+        const int row = static_cast<int>(i) / columns;
+        const int col = static_cast<int>(i) % columns;
+        entry.widget->setLayoutPositionManaged(true);
+        entry.widget->setLayoutSizeManaged(true);
+        grid->setCell(row, col, entry.widget, entry.rowSpan, entry.colSpan,
+                      entry.hAlign, entry.vAlign);
+    }
+    grid->performLayout();
+    return inserted->getParent() == grid;
+}
+
+math::FVector2 nextDesignerFreePosition(Widget* parent, Widget* inserted) {
+    constexpr float kInset = 16.0f;
+    constexpr float kGap = 8.0f;
+    if (parent == nullptr || inserted == nullptr) return {24.0f, 24.0f};
+
+    const math::FVector2 parentSize = parent->getSize();
+    const math::FVector2 childSize = inserted->getSize();
+    const float maxX = std::max(kInset, parentSize.x - childSize.x - kInset);
+    const float maxY = std::max(kInset, parentSize.y - childSize.y - kInset);
+    auto overlaps = [parent, inserted, childSize, kGap](float x, float y) {
+        const math::FRectangle candidate(
+            x, y, x + childSize.x, y + childSize.y);
+        for (Widget* sibling : parent->getChildren()) {
+            if (sibling == nullptr || sibling == inserted ||
+                !sibling->isVisible()) {
+                continue;
+            }
+            const math::FVector2 pos = sibling->getPosition();
+            const math::FVector2 size = sibling->getSize();
+            const math::FRectangle occupied(
+                pos.x - kGap, pos.y - kGap,
+                pos.x + size.x + kGap, pos.y + size.y + kGap);
+            if (candidate.minX < occupied.maxX &&
+                candidate.maxX > occupied.minX &&
+                candidate.minY < occupied.maxY &&
+                candidate.maxY > occupied.minY) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (float y = kInset; y <= maxY + 0.5f; y += kGap) {
+        for (float x = kInset; x <= maxX + 0.5f; x += kGap) {
+            if (!overlaps(x, y)) return {x, y};
+        }
+    }
+
+    // A full absolute container still gets deterministic cascade placement;
+    // drag-create remains the route for choosing an exact overlapping point.
+    const size_t ordinal = parent->getChildren().size();
+    const float offset = static_cast<float>(ordinal % 8u) * kGap;
+    return {std::min(maxX, kInset + offset),
+            std::min(maxY, kInset + offset)};
 }
 
 void installLayoutEditorChromeStyles() {
@@ -303,6 +414,14 @@ void installLayoutEditorChromeStyles() {
 
 } // namespace
 
+LayoutEditorSession::LayoutEditorSession()
+    : _docRoot(_documentModel.rootRef()),
+      _documentPath(_documentModel.pathRef()),
+      _dirty(_documentModel.dirtyRef()),
+      _selected(_selectionModel.primaryRef()),
+      _selection(_selectionModel.items()),
+      _commandStack(64) {}
+
 LayoutEditorSession::~LayoutEditorSession() {
     detach();
 }
@@ -328,15 +447,17 @@ bool LayoutEditorSession::attach(UIManager& ui, Widget* chromeRoot) {
 
     _docLoader.setWidgetFactory(&WidgetFactory::get());
     wireChrome();
+    ensureCanvasViewport();
 
-    if (_canvasHost->getChildren().empty()) {
+    if (_canvasViewport == nullptr || _canvasViewport->getChildren().empty()) {
         ensureEmptyDocument();
     } else {
-        // First child is the document; selection chrome is appended after.
-        _docRoot = nullptr;
-        for (Widget* c : _canvasHost->getChildren()) {
+        // The viewport owns exactly the authored document root. Selection
+        // chrome remains a sibling above it in canvas_host.
+        _documentModel.setRoot(nullptr);
+        for (Widget* c : _canvasViewport->getChildren()) {
             if (!isEditorOverlay(c)) {
-                _docRoot = c;
+                _documentModel.setRoot(c);
                 break;
             }
         }
@@ -389,14 +510,15 @@ void LayoutEditorSession::detach() {
     _spaceDown = false;
     _paletteType.clear();
     _hierDragWidget = nullptr;
-    _mutationOpen = false;
+    _commandStack.end();
     _deferred = DeferredAction::None;
     _consumeNextPointerUp = false;
     _ui = nullptr;
     _canvasHost = nullptr;
-    _docRoot = nullptr;
-    _selected = nullptr;
-    _selection.clear();
+    _canvasViewport = nullptr;
+    _documentModel.setRoot(nullptr);
+    _selectionModel.clear();
+    _inspectorSelection = nullptr;
     _hierarchy = nullptr;
     _hierarchyCol = nullptr;
     _chromeRoot = nullptr;
@@ -412,20 +534,25 @@ void LayoutEditorSession::detach() {
     _clipboardItems.clear();
     _styleIds.clear();
     _viewZoom = 1.0f;
+    _viewPan = math::FVector2(0.0f, 0.0f);
     _snapEnabled = true;
     _gridSize = 8.0f;
     _propId = _propX = _propY = _propW = _propH = _propText = nullptr;
+    _propTexture = _propItems = _propController = nullptr;
+    _propOnClick = _propOnToggled = _propOnValueChanged = nullptr;
+    _propOnTextChanged = _propOnSubmit = nullptr;
+    _propOnSelectionChanged = _propOnItemActivated = _propOnClose = nullptr;
     _propSpacing = nullptr;
     _propPadL = _propPadT = _propPadR = _propPadB = nullptr;
     _status = nullptr;
     _hierarchyIndex.clear();
-    _undoStack.clear();
-    _redoStack.clear();
+    _commandStack.clear();
     _documentPath.clear();
     _dirty = false;
 }
 
 void LayoutEditorSession::pumpDeferred() {
+    syncCanvasViewportGeometry();
     const DeferredAction action = _deferred;
     _deferred = DeferredAction::None;
     switch (action) {
@@ -459,6 +586,11 @@ void LayoutEditorSession::pumpDeferred() {
         break;
     }
     syncSelectionChrome();
+}
+
+void LayoutEditorSession::setTexturePreviewLoader(TexturePreviewLoader loader) {
+    _texturePreviewLoader = std::move(loader);
+    rehydrateRuntimePresentation(_docRoot);
 }
 
 void LayoutEditorSession::bindPropField(const char* id, const char* field,
@@ -499,8 +631,29 @@ void LayoutEditorSession::commitPropField(const std::string& field,
     if (_suppressProp || slot == nullptr) {
         return;
     }
+    if (field == "id") {
+        const std::string candidate = wideToUtf8(trimWide(slot->getText()));
+        std::wstring reason;
+        if (!validateWidgetId(candidate, _selected, &reason)) {
+            setStatus(L"ID rejected — " + reason);
+            _suppressProp = true;
+            slot->setText(_selected != nullptr
+                ? utf8ToWide(_selected->getId()) : std::wstring{});
+            _suppressProp = false;
+            return;
+        }
+        if (_selected != nullptr && candidate == _selected->getId()) {
+            return;
+        }
+    }
     beginMutation();
     applyProperty(field, slot->getText());
+}
+
+bool LayoutEditorSession::validateWidgetId(const std::string& candidate,
+                                           Widget* edited,
+                                           std::wstring* reason) const {
+    return _documentModel.validateId(candidate, edited, reason);
 }
 
 void LayoutEditorSession::wireChrome() {
@@ -565,39 +718,23 @@ void LayoutEditorSession::wireChrome() {
 
     // Palette buttons are driven by onPointer* (click + drag-create).
     // Keep click handlers as a fallback if pointer routing misses them.
-    bindBtn("btn_add_button", [this]() { addWidget("Button"); });
-    bindBtn("btn_add_label", [this]() { addWidget("TextLabel"); });
-    bindBtn("btn_add_panel", [this]() { addWidget("Panel"); });
-    bindBtn("btn_add_input", [this]() { addWidget("TextInput"); });
-    bindBtn("btn_add_checkbox", [this]() { addWidget("CheckBox"); });
-    bindBtn("btn_add_slider", [this]() { addWidget("Slider"); });
-    bindBtn("btn_add_scroll", [this]() { addWidget("ScrollView"); });
-    bindBtn("btn_add_vbox", [this]() { addWidget("VBox"); });
-    bindBtn("btn_add_hbox", [this]() { addWidget("HBox"); });
-
-    static constexpr struct {
-        const char* id;
-        const char* type;
-    } kPaletteEntries[] = {
-        {"btn_add_button", "Button"},
-        {"btn_add_label", "TextLabel"},
-        {"btn_add_input", "TextInput"},
-        {"btn_add_checkbox", "CheckBox"},
-        {"btn_add_slider", "Slider"},
-        {"btn_add_panel", "Panel"},
-        {"btn_add_vbox", "VBox"},
-        {"btn_add_hbox", "HBox"},
-        {"btn_add_scroll", "ScrollView"},
-    };
-    for (const auto& entry : kPaletteEntries) {
-        auto* button = dynamic_cast<Button*>(findChromeById(entry.id));
+    for (const WidgetAuthoringDescriptor& entry :
+         WidgetAuthoringRegistry::get().descriptors()) {
+        if (entry.paletteButtonId.empty()) continue;
+        auto* button = dynamic_cast<Button*>(
+            findChromeById(entry.paletteButtonId));
         if (button == nullptr) continue;
-        button->setIconDocument(paletteIconDocument(entry.type));
+        const std::string typeName = entry.typeName;
+        button->setOnClicked([this, typeName]() { addWidget(typeName); });
+        button->setIconDocument(entry.icon);
         button->setIconSize(17.0f);
         button->setIconGap(10.0f);
         button->setIconColor(math::FVector4(0.50f, 0.74f, 1.0f, 1.0f));
         button->setPadding(12.0f, 6.0f, 10.0f, 6.0f);
     }
+
+    bindBtn("btn_pick_texture", [this]() { chooseTexture(); });
+    bindBtn("btn_clear_texture", [this]() { clearTexture(); });
 
     bindBtn("btn_align_left", [this]() { alignSelection(AlignMode::Left); });
     bindBtn("btn_align_hcenter", [this]() { alignSelection(AlignMode::HCenter); });
@@ -607,6 +744,21 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_align_bottom", [this]() { alignSelection(AlignMode::Bottom); });
     bindBtn("btn_dist_h", [this]() { alignSelection(AlignMode::DistributeH); });
     bindBtn("btn_dist_v", [this]() { alignSelection(AlignMode::DistributeV); });
+    for (int vertical = 0; vertical < 4; ++vertical) {
+        for (int horizontal = 0; horizontal < 4; ++horizontal) {
+            const std::string id = "btn_anchor_" +
+                std::to_string(vertical) + std::to_string(horizontal);
+            bindBtn(id.c_str(), [this, horizontal, vertical]() {
+                const bool snapWidget = _ui != nullptr &&
+                    (_ui->getModifiers() &
+                     (1u << (UIKey_Control - UIKey_Shift))) != 0u;
+                setAnchorPreset(
+                    static_cast<AnchorAxisMode>(horizontal),
+                    static_cast<AnchorAxisMode>(vertical), snapWidget);
+            });
+        }
+    }
+    bindBtn("btn_anchor_none", [this]() { clearSelectedAnchors(); });
     bindBtn("btn_move_up", [this]() { reorderSelected(-1); });
     bindBtn("btn_move_down", [this]() { reorderSelected(1); });
     bindBtn("btn_snap", [this]() { toggleSnap(); });
@@ -638,7 +790,32 @@ void LayoutEditorSession::wireChrome() {
     bindPropField("prop_y", "y", _propY, true);
     bindPropField("prop_w", "w", _propW, true);
     bindPropField("prop_h", "h", _propH, true);
+    bindPropField("prop_anchor_min_x", "anchorMinX", _propAnchorMinX, true);
+    bindPropField("prop_anchor_min_y", "anchorMinY", _propAnchorMinY, true);
+    bindPropField("prop_anchor_max_x", "anchorMaxX", _propAnchorMaxX, true);
+    bindPropField("prop_anchor_max_y", "anchorMaxY", _propAnchorMaxY, true);
+    bindPropField("prop_offset_min_x", "offsetMinX", _propOffsetMinX, true);
+    bindPropField("prop_offset_min_y", "offsetMinY", _propOffsetMinY, true);
+    bindPropField("prop_offset_max_x", "offsetMaxX", _propOffsetMaxX, true);
+    bindPropField("prop_offset_max_y", "offsetMaxY", _propOffsetMaxY, true);
+    bindPropField("prop_pivot_x", "pivotX", _propPivotX, true);
+    bindPropField("prop_pivot_y", "pivotY", _propPivotY, true);
     bindPropField("prop_text", "text", _propText, false);
+    bindPropField("prop_texture", "texture", _propTexture, false);
+    bindPropField("prop_items", "items", _propItems, false);
+    bindPropField("prop_controller", "controller", _propController, false);
+    bindPropField("prop_on_click", "event:onClick", _propOnClick, false);
+    bindPropField("prop_on_toggled", "event:onToggled", _propOnToggled, false);
+    bindPropField("prop_on_value_changed", "event:onValueChanged",
+                  _propOnValueChanged, false);
+    bindPropField("prop_on_text_changed", "event:onTextChanged",
+                  _propOnTextChanged, false);
+    bindPropField("prop_on_submit", "event:onSubmit", _propOnSubmit, false);
+    bindPropField("prop_on_selection_changed", "event:onSelectionChanged",
+                  _propOnSelectionChanged, false);
+    bindPropField("prop_on_item_activated", "event:onItemActivated",
+                  _propOnItemActivated, false);
+    bindPropField("prop_on_close", "event:onClose", _propOnClose, false);
     bindPropField("prop_spacing", "spacing", _propSpacing, true);
     bindPropField("prop_pad_l", "padL", _propPadL, true);
     bindPropField("prop_pad_t", "padT", _propPadT, true);
@@ -655,6 +832,7 @@ void LayoutEditorSession::wireChrome() {
             }
             beginMutation();
             applyProperty("style", utf8ToWide(_styleIds[static_cast<size_t>(index)]));
+            endMutation();
         });
         syncStyleCombo();
     }
@@ -672,6 +850,7 @@ void LayoutEditorSession::wireChrome() {
             static const char* kH[] = {"Left", "Center", "Right"};
             beginMutation();
             applyProperty("hAlign", utf8ToWide(kH[index]));
+            endMutation();
         });
     }
     if (_propTextVAlign != nullptr) {
@@ -683,6 +862,7 @@ void LayoutEditorSession::wireChrome() {
             static const char* kV[] = {"Top", "Center", "Bottom"};
             beginMutation();
             applyProperty("vAlign", utf8ToWide(kV[index]));
+            endMutation();
         });
     }
 
@@ -704,12 +884,13 @@ void LayoutEditorSession::clearDocument() {
     // Tear down selection chrome first so destroyWidgetTree doesn't
     // double-free panels we still hold pointers to.
     destroySelectionChrome();
-    std::vector<Widget*> kids = _canvasHost->getChildren();
-    for (Widget* child : kids) {
-        _canvasHost->removeChild(child);
-        destroyWidgetTree(child);
+    if (_docRoot != nullptr) {
+        if (Widget* parent = _docRoot->getParent()) {
+            parent->removeChild(_docRoot);
+        }
+        destroyWidgetTree(_docRoot);
     }
-    _docRoot = nullptr;
+    _documentModel.setRoot(nullptr);
     _selected = nullptr;
     _selection.clear();
 }
@@ -718,11 +899,109 @@ void LayoutEditorSession::setDocumentRoot(Widget* root) {
     if (_canvasHost == nullptr || root == nullptr) {
         return;
     }
+    ensureCanvasViewport();
+    if (_canvasViewport == nullptr) {
+        return;
+    }
     clearDocument();
-    _canvasHost->addChild(root);
-    _docRoot = root;
+    _canvasViewport->addChild(root);
+    _documentModel.setRoot(root);
+    _docRoot->setLayoutPositionManaged(false);
+    _docRoot->setLayoutSizeManaged(false);
     freezeDocumentInteraction(_docRoot);
+    rehydrateRuntimePresentation(_docRoot);
     ensureSelectionChrome();
+}
+
+void LayoutEditorSession::ensureCanvasViewport() {
+    if (_canvasHost == nullptr) {
+        _canvasViewport = nullptr;
+        return;
+    }
+    if (_canvasViewport != nullptr &&
+        _canvasViewport->getParent() == _canvasHost) {
+        syncCanvasViewportGeometry();
+        return;
+    }
+
+    LayoutCanvasViewport* viewport = nullptr;
+    for (Widget* child : _canvasHost->getChildren()) {
+        if (child != nullptr && child->getId() == "__le_canvas_viewport") {
+            viewport = dynamic_cast<LayoutCanvasViewport*>(child);
+            if (viewport != nullptr) break;
+        }
+    }
+    if (viewport == nullptr) {
+        viewport = new LayoutCanvasViewport();
+
+        // Migrate a document that chrome JSON or an earlier session mounted
+        // directly under canvas_host. Editor overlays stay above the new
+        // viewport and never become authored children.
+        std::vector<Widget*> authoredRoots;
+        for (Widget* child : _canvasHost->getChildren()) {
+            if (child != nullptr && !isEditorOverlay(child)) {
+                authoredRoots.push_back(child);
+            }
+        }
+        _canvasHost->addChild(viewport);
+        _canvasHost->moveChildToIndex(viewport, 0u);
+        for (Widget* child : authoredRoots) {
+            _canvasHost->removeChild(child);
+            viewport->addChild(child);
+        }
+    }
+    _canvasViewport = viewport;
+    syncCanvasViewportGeometry();
+    applyViewportTransform();
+}
+
+void LayoutEditorSession::syncCanvasViewportGeometry() {
+    auto* viewport = dynamic_cast<LayoutCanvasViewport*>(_canvasViewport);
+    if (viewport == nullptr || _canvasHost == nullptr) {
+        return;
+    }
+    const math::FVector2 hostSize = _canvasHost->getSize();
+    if (viewport->getPosition().x != 0.0f ||
+        viewport->getPosition().y != 0.0f) {
+        viewport->setPosition(math::FVector2(0.0f, 0.0f));
+    }
+    if (std::fabs(viewport->getSize().x - hostSize.x) > 0.01f ||
+        std::fabs(viewport->getSize().y - hostSize.y) > 0.01f) {
+        viewport->setSize(hostSize);
+    }
+}
+
+void LayoutEditorSession::applyViewportTransform() {
+    if (auto* viewport = dynamic_cast<LayoutCanvasViewport*>(_canvasViewport)) {
+        viewport->setView(_viewZoom, _viewPan);
+    }
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+    }
+}
+
+math::FVector2 LayoutEditorSession::documentToScreen(
+    const math::FVector2& point) const {
+    if (auto* viewport = dynamic_cast<LayoutCanvasViewport*>(_canvasViewport)) {
+        return viewport->documentToScreen(point);
+    }
+    return point;
+}
+
+math::FVector2 LayoutEditorSession::screenToDocument(
+    const math::FVector2& point) const {
+    if (auto* viewport = dynamic_cast<LayoutCanvasViewport*>(_canvasViewport)) {
+        return viewport->screenToDocument(point);
+    }
+    return point;
+}
+
+math::FRectangle LayoutEditorSession::documentToScreen(
+    const math::FRectangle& bounds) const {
+    if (auto* viewport = dynamic_cast<LayoutCanvasViewport*>(_canvasViewport)) {
+        return viewport->documentToScreen(bounds);
+    }
+    return bounds;
 }
 
 void LayoutEditorSession::freezeDocumentInteraction(Widget* root) {
@@ -737,19 +1016,48 @@ void LayoutEditorSession::freezeDocumentInteraction(Widget* root) {
         if (auto* ti = dynamic_cast<TextInput*>(n)) {
             ti->setReadOnly(true);
         }
-        // Children of VBox/HBox must stay layout-managed or they stack
-        // at (0,0) and can be dragged out of the box. Free-move only
-        // when the parent is not a box layout.
-        const bool underBox =
-            n->getParent() != nullptr &&
-            dynamic_cast<BoxBase*>(n->getParent()) != nullptr;
-        n->setLayoutPositionManaged(underBox);
-        for (Widget* c : n->getChildren()) {
+        // Children of layout containers stay container-managed. Letting a
+        // Grid child become free-positioned disconnects it from its cell and
+        // makes all newly-authored controls appear stacked at (0,0).
+        const bool underLayout = n->getParent() != nullptr &&
+            (dynamic_cast<BoxBase*>(n->getParent()) != nullptr ||
+             dynamic_cast<GridPanel*>(n->getParent()) != nullptr);
+        n->setLayoutPositionManaged(underLayout);
+        if (dynamic_cast<GridPanel*>(n->getParent()) != nullptr) {
+            n->setLayoutSizeManaged(true);
+        }
+        std::vector<Widget*> children;
+        collectAuthoredChildren(n, children);
+        for (Widget* c : children) {
             walk(c);
         }
     };
     walk(root);
 }
+
+void LayoutEditorSession::rehydrateRuntimePresentation(Widget* root) {
+    if (root == nullptr || !_texturePreviewLoader) {
+        return;
+    }
+    std::function<void(Widget*)> walk = [&](Widget* node) {
+        if (node == nullptr || isEditorOverlay(node)) return;
+        if (auto* image = dynamic_cast<Image*>(node)) {
+            const std::string textureName = image->getTextureName();
+            if (!textureName.empty() && !image->hasTexture()) {
+                ImageTextureHandle preview = _texturePreviewLoader(textureName);
+                if (preview.isValid()) {
+                    if (preview.name.empty()) preview.name = textureName;
+                    image->setTexture(preview);
+                }
+            }
+        }
+        std::vector<Widget*> children;
+        collectAuthoredChildren(node, children);
+        for (Widget* child : children) walk(child);
+    };
+    walk(root);
+}
+
 void LayoutEditorSession::ensureEmptyDocument() {
     Widget* panel = WidgetFactory::get().create("Panel");
     if (panel == nullptr) {
@@ -759,6 +1067,7 @@ void LayoutEditorSession::ensureEmptyDocument() {
     panel->setPosition(math::FVector2(16.0f, 16.0f));
     panel->setSize(math::FVector2(640.0f, 480.0f));
     panel->setLayoutPositionManaged(false);
+    panel->setLayoutSizeManaged(false);
     setDocumentRoot(panel);
     _documentPath.clear();
     markDirty(false);
@@ -778,8 +1087,7 @@ bool LayoutEditorSession::open(const std::string& path) {
         setStatus(utf8ToWide("Open failed: " + path));
         return false;
     }
-    _undoStack.clear();
-    _redoStack.clear();
+    _commandStack.clear();
     setDocumentRoot(loaded);
     _documentPath = path;
     markDirty(false);
@@ -832,18 +1140,13 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
 }
 
 bool LayoutEditorSession::selectionContains(Widget* widget) const {
-    return std::find(_selection.begin(), _selection.end(), widget) !=
-           _selection.end();
+    return _selectionModel.contains(widget);
 }
 
 void LayoutEditorSession::pruneSelection() {
-    _selection.erase(
-        std::remove_if(_selection.begin(), _selection.end(),
-                       [this](Widget* w) {
-                           return w == nullptr || !isUnderCanvas(w) ||
-                                  w == _canvasHost;
-                       }),
-        _selection.end());
+    _selectionModel.prune([this](Widget* widget) {
+        return isUnderCanvas(widget) && widget != _canvasHost;
+    });
     normalizeSelectionNesting();
     if (_selected != nullptr && !selectionContains(_selected)) {
         _selected = _selection.empty() ? nullptr : _selection.back();
@@ -891,6 +1194,34 @@ void LayoutEditorSession::select(Widget* widget, bool additive) {
     if (_ui != nullptr && _ui->getFocusedWidget() != nullptr) {
         _ui->setFocus(nullptr);
     }
+    // Selection changes are a hard transaction boundary even if a host
+    // backend did not emit focus-lost for the previous inspector field.
+    endMutation();
+
+    // Inactive TabControl pages are part of the authored model but are not
+    // mounted under the body panel. Selecting a page (or one of its authored
+    // descendants) from the Outline must first make that page active so its
+    // bounds, canvas chrome, and Inspector all refer to the live tree.
+    if (widget != nullptr && !isUnderCanvas(widget)) {
+        for (Widget* candidate = widget; candidate != nullptr;
+             candidate = candidate->getParent()) {
+            auto* tabs = dynamic_cast<TabControl*>(
+                structuredContentOwner(candidate));
+            if (tabs == nullptr) continue;
+            for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
+                if (tabs->getTabContent(i) == candidate) {
+                    tabs->setSelectedIndex(i);
+                    tabs->performLayout();
+                    if (_ui != nullptr) {
+                        _ui->invalidateLayout();
+                        _ui->layout();
+                    }
+                    break;
+                }
+            }
+            break;
+        }
+    }
 
     if (widget == _canvasHost) {
         widget = nullptr;
@@ -905,17 +1236,10 @@ void LayoutEditorSession::select(Widget* widget, bool additive) {
     }
 
     if (!additive || widget == nullptr) {
-        _selection.clear();
-        if (widget != nullptr) {
-            _selection.push_back(widget);
-        }
-        _selected = widget;
+        _selectionModel.setSingle(widget);
     } else {
         if (selectionContains(widget)) {
-            _selection.erase(
-                std::remove(_selection.begin(), _selection.end(), widget),
-                _selection.end());
-            _selected = _selection.empty() ? nullptr : _selection.back();
+            _selectionModel.remove(widget);
         } else {
             // Drop any ancestor/descendant of the new pick first, then add.
             _selection.erase(
@@ -926,8 +1250,7 @@ void LayoutEditorSession::select(Widget* widget, bool additive) {
                                            isAncestorOf(w, widget));
                                }),
                 _selection.end());
-            _selection.push_back(widget);
-            _selected = widget;
+            _selectionModel.add(widget);
         }
     }
 
@@ -962,6 +1285,10 @@ void LayoutEditorSession::syncSelectionChrome() {
                 o->setVisible(false);
             }
         }
+        if (_anchorBox != nullptr) _anchorBox->setVisible(false);
+        for (Panel* point : _anchorPoints) {
+            if (point != nullptr) point->setVisible(false);
+        }
         return;
     }
 
@@ -986,7 +1313,8 @@ void LayoutEditorSession::syncSelectionChrome() {
             outline->setVisible(false);
             continue;
         }
-        const math::FRectangle wb = _selection[i]->getWorldBounds();
+        const math::FRectangle wb = documentToScreen(
+            _selection[i]->getWorldBounds());
         const float minX = std::round(wb.minX - host.minX);
         const float minY = std::round(wb.minY - host.minY);
         const float maxX = std::round(wb.maxX - host.minX);
@@ -1001,7 +1329,8 @@ void LayoutEditorSession::syncSelectionChrome() {
 
     // Keep legacy selBox as primary highlight (slightly thicker).
     if (_selected != nullptr && isUnderCanvas(_selected)) {
-        const math::FRectangle wb = _selected->getWorldBounds();
+        const math::FRectangle wb = documentToScreen(
+            _selected->getWorldBounds());
         const float px = std::round(wb.minX - host.minX);
         const float py = std::round(wb.minY - host.minY);
         const float right = std::round(wb.maxX - host.minX);
@@ -1012,8 +1341,9 @@ void LayoutEditorSession::syncSelectionChrome() {
         _selBox->setSize(math::FVector2(pw + kOutset * 2.0f,
                                         ph + kOutset * 2.0f));
         _selBox->setVisible(true);
-        // No resize handles on document root — full-canvas handles fight
-        // selection chrome and are easy to mis-hit after Shift-select.
+        // The document origin is immutable, but its preview size must remain
+        // authorable so responsive anchors can be tested. Root exposes only
+        // right/bottom handles; left/top handles would rewrite the origin.
         if (_selected != _docRoot) {
             placeHandle(_handles[0], px, py);
             placeHandle(_handles[1], px + pw * 0.5f, py);
@@ -1029,6 +1359,9 @@ void LayoutEditorSession::syncSelectionChrome() {
                     h->setVisible(false);
                 }
             }
+            placeHandle(_handles[4], px + pw, py + ph * 0.5f);
+            placeHandle(_handles[6], px + pw * 0.5f, py + ph);
+            placeHandle(_handles[7], px + pw, py + ph);
         }
     } else {
         _selBox->setVisible(false);
@@ -1036,6 +1369,66 @@ void LayoutEditorSession::syncSelectionChrome() {
             if (h != nullptr) {
                 h->setVisible(false);
             }
+        }
+    }
+
+    const bool showAnchors = _selected != nullptr &&
+        isUnderCanvas(_selected) && canUseAnchorLayout(_selected) &&
+        _selected->hasAnchorLayout();
+    if (!showAnchors) {
+        if (_anchorBox != nullptr) _anchorBox->setVisible(false);
+        for (Panel* point : _anchorPoints) {
+            if (point != nullptr) point->setVisible(false);
+        }
+        return;
+    }
+
+    const AnchorLayout& anchor = _selected->getAnchorLayout();
+    Widget* parent = _selected->getParent();
+    const math::FRectangle parentWorld = parent->getWorldBounds();
+    const math::FVector2 parentSize = parent->getSize();
+    const math::FVector2 minScreen = documentToScreen(math::FVector2(
+        parentWorld.minX + parentSize.x * anchor.anchorMin.x,
+        parentWorld.minY + parentSize.y * anchor.anchorMin.y));
+    const math::FVector2 maxScreen = documentToScreen(math::FVector2(
+        parentWorld.minX + parentSize.x * anchor.anchorMax.x,
+        parentWorld.minY + parentSize.y * anchor.anchorMax.y));
+    const float minX = minScreen.x - host.minX;
+    const float minY = minScreen.y - host.minY;
+    const float maxX = maxScreen.x - host.minX;
+    const float maxY = maxScreen.y - host.minY;
+    if (_anchorBox != nullptr) {
+        const bool hasExtent = std::fabs(maxX - minX) > 0.5f ||
+                               std::fabs(maxY - minY) > 0.5f;
+        _anchorBox->setPosition(math::FVector2(std::round(minX),
+                                               std::round(minY)));
+        _anchorBox->setSize(math::FVector2(
+            (std::max)(1.0f, std::round(maxX - minX)),
+            (std::max)(1.0f, std::round(maxY - minY))));
+        _anchorBox->setVisible(hasExtent);
+    }
+    const math::FVector2 positions[4] = {
+        {minX, minY}, {maxX, minY}, {minX, maxY}, {maxX, maxY}
+    };
+    constexpr float kAnchorPointSize = 6.0f;
+    for (int i = 0; i < 4; ++i) {
+        Panel* point = _anchorPoints[i];
+        if (point == nullptr) continue;
+        bool duplicate = false;
+        for (int prior = 0; prior < i; ++prior) {
+            if (std::fabs(positions[i].x - positions[prior].x) < 0.5f &&
+                std::fabs(positions[i].y - positions[prior].y) < 0.5f) {
+                duplicate = true;
+                break;
+            }
+        }
+        point->setVisible(!duplicate);
+        if (!duplicate) {
+            point->setPosition(math::FVector2(
+                std::round(positions[i].x - kAnchorPointSize * 0.5f),
+                std::round(positions[i].y - kAnchorPointSize * 0.5f)));
+            point->setSize(math::FVector2(kAnchorPointSize,
+                                          kAnchorPointSize));
         }
     }
 }
@@ -1064,30 +1457,12 @@ void LayoutEditorSession::refreshHierarchy() {
     _hierarchyIndex.clear();
     std::vector<std::wstring> labels;
     if (_docRoot != nullptr) {
-        std::function<void(Widget*, int)> walk = [&](Widget* node, int depth) {
-            if (node == nullptr || isEditorOverlay(node)) {
-                return;
-            }
-            std::wstring label(static_cast<size_t>(depth) * 2, L' ');
-            const std::string& id = node->getId();
-            if (!id.empty()) {
-                label += utf8ToWide(id);
-            } else {
-                label += L"(anon)";
-            }
-            if (dynamic_cast<BoxBase*>(node) != nullptr) {
-                label += L"  [box]";
-            } else if (dynamic_cast<CompoundWidget*>(node) != nullptr) {
-                label += L"  [container]";
-            }
-            labels.push_back(label);
-            _hierarchyIndex.push_back(node);
-            for (Widget* c : node->getChildren()) {
-                walk(c, depth + 1);
-            }
-        };
-        walk(_docRoot, 0);
+        collectHierarchy(_docRoot, 0, labels, _hierarchyIndex);
     }
+
+    std::vector<Widget*> authoredWidgets;
+    collectDocumentWidgets(_docRoot, authoredWidgets);
+    _documentModel.rebuildIndex(authoredWidgets);
 
     if (_hierarchy == nullptr) {
         setStatus(L"DBG: refreshHierarchy skipped — no ListView");
@@ -1118,7 +1493,7 @@ void LayoutEditorSession::updateContainerHint() {
     if (_selected == nullptr) {
         return;
     }
-    if (dynamic_cast<CompoundWidget*>(_selected) != nullptr) {
+    if (isContainerWidget(_selected)) {
         const std::string& id = _selected->getId();
         std::wstring msg = L"Container selected";
         if (!id.empty()) {
@@ -1140,8 +1515,12 @@ void LayoutEditorSession::addWidget(const std::string& typeName) {
         return;
     }
 
-    pushUndo();
-    placeNewWidget(created, parent, -1, nullptr);
+    pushUndo(LayoutEditKind::Insert, "Add widget");
+    if (!placeNewWidget(created, parent, -1, nullptr)) {
+        _commandStack.discardLastUndo();
+        destroyWidgetTree(created);
+        return;
+    }
     freezeDocumentInteraction(created);
     markDirty(true);
     refreshHierarchy();
@@ -1163,13 +1542,19 @@ void LayoutEditorSession::deleteSelected() {
         return;
     }
     std::vector<Widget*> doomed;
+    bool keptStructuredRoot = false;
     for (Widget* w : _selection) {
-        if (w != nullptr && w != _docRoot) {
+        if (w != nullptr && w != _docRoot &&
+            structuredContentOwner(w) == nullptr) {
             doomed.push_back(w);
+        } else if (w != nullptr && structuredContentOwner(w) != nullptr) {
+            keptStructuredRoot = true;
         }
     }
     if (doomed.empty()) {
-        setStatus(L"Cannot delete document root");
+        setStatus(keptStructuredRoot
+            ? L"Structured content roots use their owner's model"
+            : L"Cannot delete document root");
         return;
     }
 
@@ -1180,7 +1565,7 @@ void LayoutEditorSession::deleteSelected() {
         return da > db;
     });
 
-    pushUndo();
+    pushUndo(LayoutEditKind::Delete, "Delete selection");
     _dragMode = DragMode::None;
     _dragTarget = nullptr;
     _selected = nullptr;
@@ -1202,7 +1587,9 @@ void LayoutEditorSession::deleteSelected() {
     markDirty(true);
     refreshHierarchy();
     syncPropertyStrip();
-    setStatus(L"Deleted");
+    setStatus(keptStructuredRoot
+        ? L"Deleted selection; kept structured content root"
+        : L"Deleted");
     if (_ui != nullptr) {
         _ui->invalidateLayout();
         _ui->layout();
@@ -1215,10 +1602,13 @@ void LayoutEditorSession::applyProperty(const std::string& field,
     }
 
     if (field == "id") {
-        const std::string newId = wideToUtf8(value);
-        if (newId.empty()) {
+        const std::string newId = wideToUtf8(trimWide(value));
+        std::wstring reason;
+        if (!validateWidgetId(newId, _selected, &reason)) {
+            setStatus(L"ID rejected — " + reason);
             return;
         }
+        if (newId == _selected->getId()) return;
         _selected->setId(newId);
         markDirty(true);
         refreshHierarchy();
@@ -1229,6 +1619,69 @@ void LayoutEditorSession::applyProperty(const std::string& field,
     if (field == "style") {
         _selected->setStyleId(wideToUtf8(value));
         markDirty(true);
+        return;
+    }
+
+    if (field == "controller") {
+        _selected->setControllerId(wideToUtf8(trimWide(value)));
+        markDirty(true);
+        return;
+    }
+
+    if (field.rfind("event:", 0) == 0) {
+        _selected->setEventBinding(field.substr(6),
+                                   wideToUtf8(trimWide(value)));
+        markDirty(true);
+        return;
+    }
+
+    if (field == "texture") {
+        if (dynamic_cast<Image*>(_selected) == nullptr) {
+            setStatus(L"Texture: only Image");
+            return;
+        }
+        applyTextureName(wideToUtf8(trimWide(value)));
+        return;
+    }
+
+    if (field == "items") {
+        const std::vector<std::wstring> items = splitItems(value);
+        if (auto* combo = dynamic_cast<ComboBox*>(_selected)) {
+            combo->setItems(items);
+        } else if (auto* list = dynamic_cast<ListView*>(_selected)) {
+            list->setItems(items);
+        } else if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
+            tiles->setItems(items);
+        } else if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
+            std::vector<TreeNodeData> nodes;
+            nodes.reserve(items.size());
+            for (const std::wstring& item : items) {
+                nodes.push_back({item, {}, false, false, -1});
+            }
+            tree->setTree(nodes);
+        } else if (auto* strip = dynamic_cast<TabStrip*>(_selected)) {
+            strip->clearTabs();
+            for (const std::wstring& item : items) strip->addTab(item);
+        } else if (auto* tabs = dynamic_cast<TabControl*>(_selected)) {
+            const int oldCount = static_cast<int>(tabs->getTabCount());
+            const int shared = (std::min)(oldCount, static_cast<int>(items.size()));
+            for (int i = 0; i < shared; ++i) tabs->setTabLabel(i, items[i]);
+            for (int i = oldCount - 1; i >= static_cast<int>(items.size()); --i) {
+                tabs->removeTab(i);
+            }
+            for (int i = oldCount; i < static_cast<int>(items.size()); ++i) {
+                auto* page = new Panel();
+                page->setId(makeUniqueId("tab_page", tabs));
+                page->setBorderEnabled(false);
+                tabs->addTabOwned(items[static_cast<size_t>(i)], page);
+            }
+        } else {
+            setStatus(L"Items: only collection and tab controls");
+            return;
+        }
+        markDirty(true);
+        refreshHierarchy();
+        if (_ui != nullptr) _ui->invalidateLayout();
         return;
     }
 
@@ -1290,7 +1743,12 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             markDirty(true);
             return;
         }
-        setStatus(L"checked: only CheckBox");
+        if (auto* radio = dynamic_cast<RadioButton*>(_selected)) {
+            radio->setChecked(value == L"true" || value == L"1" || value == L"True");
+            markDirty(true);
+            return;
+        }
+        setStatus(L"checked: only CheckBox or RadioButton");
         return;
     }
     if (field == "password") {
@@ -1308,7 +1766,12 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             markDirty(true);
             return;
         }
-        setStatus(L"readOnly: only TextInput");
+        if (auto* area = dynamic_cast<TextArea*>(_selected)) {
+            area->setReadOnly(value == L"true" || value == L"1" || value == L"True");
+            markDirty(true);
+            return;
+        }
+        setStatus(L"readOnly: only TextInput or TextArea");
         return;
     }
     if (field == "gravity") {
@@ -1336,19 +1799,79 @@ void LayoutEditorSession::applyProperty(const std::string& field,
         return;
     }
 
-    if (_selected == _docRoot && (field == "x" || field == "y")) {
-        setStatus(L"Document root position is fixed");
+    const bool positionOwnedByLayout = _selected->getParent() != nullptr &&
+        (dynamic_cast<BoxBase*>(_selected->getParent()) != nullptr ||
+         dynamic_cast<GridPanel*>(_selected->getParent()) != nullptr);
+    if ((_selected == _docRoot ||
+         structuredContentOwner(_selected) != nullptr ||
+         positionOwnedByLayout) &&
+        (field == "x" || field == "y")) {
+        setStatus(_selected == _docRoot
+            ? L"Document root position is fixed"
+            : (positionOwnedByLayout
+                ? L"Position is managed by the parent layout"
+                : L"Structured content position is fixed by its owner"));
         syncPropertyStrip();
         return;
     }
 
+    const bool anchorField =
+        field == "anchorMinX" || field == "anchorMinY" ||
+        field == "anchorMaxX" || field == "anchorMaxY" ||
+        field == "offsetMinX" || field == "offsetMinY" ||
+        field == "offsetMaxX" || field == "offsetMaxY" ||
+        field == "pivotX" || field == "pivotY";
     float f = 0.0f;
     if (field == "x" || field == "y" || field == "w" || field == "h" ||
         field == "spacing" || field == "padL" || field == "padT" ||
-        field == "padR" || field == "padB") {
+        field == "padR" || field == "padB" || anchorField) {
         if (!parseFloat(value, f)) {
             return;
         }
+    }
+
+    if (anchorField) {
+        if (!canUseAnchorLayout(_selected)) {
+            setStatus(L"Anchors apply only to free-positioned children");
+            syncPropertyStrip();
+            return;
+        }
+        if (!_selected->hasAnchorLayout()) {
+            _selected->setAnchorLayoutPreservingRect(
+                math::FVector2(0.0f, 0.0f),
+                math::FVector2(0.0f, 0.0f));
+        }
+        AnchorLayout layout = _selected->getAnchorLayout();
+        const bool preservesRect =
+            field == "anchorMinX" || field == "anchorMinY" ||
+            field == "anchorMaxX" || field == "anchorMaxY" ||
+            field == "pivotX" || field == "pivotY";
+        if (field == "anchorMinX") layout.anchorMin.x = f;
+        else if (field == "anchorMinY") layout.anchorMin.y = f;
+        else if (field == "anchorMaxX") layout.anchorMax.x = f;
+        else if (field == "anchorMaxY") layout.anchorMax.y = f;
+        else if (field == "offsetMinX") layout.offsetMin.x = f;
+        else if (field == "offsetMinY") layout.offsetMin.y = f;
+        else if (field == "offsetMaxX") layout.offsetMax.x = f;
+        else if (field == "offsetMaxY") layout.offsetMax.y = f;
+        else if (field == "pivotX") layout.pivot.x = f;
+        else if (field == "pivotY") layout.pivot.y = f;
+
+        _selected->setLayoutPositionManaged(false);
+        _selected->setLayoutSizeManaged(false);
+        _selected->setAnchorLayout(layout);
+        if (preservesRect) {
+            _selected->refreshAnchorOffsetsFromCurrentRect();
+        } else if (_selected->getParent() != nullptr) {
+            _selected->applyAnchorLayout(_selected->getParent()->getSize());
+        }
+        markDirty(true);
+        syncSelectionChrome();
+        syncAnchorPresetStyles();
+        if (_ui != nullptr) {
+            _ui->invalidateLayout();
+        }
+        return;
     }
 
     if (field == "x" || field == "y" || field == "w" || field == "h") {
@@ -1367,6 +1890,7 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             size.y = (std::max)(kMinWidgetSize, f);
             _selected->setSize(size);
         }
+        refreshAnchorOffsets(_selected);
         markDirty(true);
         if (_ui != nullptr) {
             _ui->invalidateLayout();
@@ -1413,6 +1937,7 @@ LayoutEditorSession::Snapshot LayoutEditorSession::captureSnapshot() const {
     if (_selected != nullptr) {
         snap.primaryId = _selected->getId();
     }
+    snap.dirty = _dirty;
     return snap;
 }
 
@@ -1439,58 +1964,53 @@ void LayoutEditorSession::restoreSnapshot(const Snapshot& snap) {
     }
     syncPropertyStrip();
     syncHierarchySelection();
-    markDirty(true);
+    markDirty(snap.dirty);
     _ui->invalidateLayout();
     _ui->layout();
 }
 
-void LayoutEditorSession::pushUndo() {
+void LayoutEditorSession::pushUndo(LayoutEditKind kind, const char* label) {
     if (_docRoot == nullptr) {
         return;
     }
-    _undoStack.push_back(captureSnapshot());
-    if (_undoStack.size() > kMaxUndo) {
-        _undoStack.erase(_undoStack.begin());
-    }
-    _redoStack.clear();
+    _commandStack.push(captureSnapshot(), kind,
+                       label != nullptr ? label : std::string{});
 }
 
-void LayoutEditorSession::beginMutation() {
-    if (!_mutationOpen) {
-        pushUndo();
-        _mutationOpen = true;
-    }
+void LayoutEditorSession::beginMutation(LayoutEditKind kind,
+                                        const char* label) {
+    if (_docRoot == nullptr) return;
+    _commandStack.begin(captureSnapshot(), kind,
+                        label != nullptr ? label : "Edit property");
 }
 
 void LayoutEditorSession::endMutation() {
-    _mutationOpen = false;
+    _commandStack.end();
 }
 
 void LayoutEditorSession::undo() {
-    if (_undoStack.empty() || _docRoot == nullptr) {
+    if (!_commandStack.canUndo() || _docRoot == nullptr) {
         setStatus(L"Nothing to undo");
         return;
     }
-    _redoStack.push_back(captureSnapshot());
-    Snapshot snap = _undoStack.back();
-    _undoStack.pop_back();
-    _mutationOpen = false;
+    const std::optional<Snapshot> snap =
+        _commandStack.undo(captureSnapshot());
+    if (!snap) return;
     _dragMode = DragMode::None;
-    restoreSnapshot(snap);
+    restoreSnapshot(*snap);
     setStatus(L"Undo");
 }
 
 void LayoutEditorSession::redo() {
-    if (_redoStack.empty() || _docRoot == nullptr) {
+    if (!_commandStack.canRedo() || _docRoot == nullptr) {
         setStatus(L"Nothing to redo");
         return;
     }
-    _undoStack.push_back(captureSnapshot());
-    Snapshot snap = _redoStack.back();
-    _redoStack.pop_back();
-    _mutationOpen = false;
+    const std::optional<Snapshot> snap =
+        _commandStack.redo(captureSnapshot());
+    if (!snap) return;
     _dragMode = DragMode::None;
-    restoreSnapshot(snap);
+    restoreSnapshot(*snap);
     setStatus(L"Redo");
 }
 
@@ -1499,7 +2019,19 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
         setStatus(L"Align needs Ctrl/Shift multi-select (2+ widgets)");
         return;
     }
-    pushUndo();
+    Widget* commonParent = _selection.front() != nullptr
+        ? _selection.front()->getParent() : nullptr;
+    for (Widget* widget : _selection) {
+        if (structuredContentOwner(widget) != nullptr ||
+            (widget != nullptr && widget->getParent() != nullptr &&
+             (dynamic_cast<BoxBase*>(widget->getParent()) != nullptr ||
+              dynamic_cast<GridPanel*>(widget->getParent()) != nullptr)) ||
+            widget == nullptr || widget->getParent() != commonParent) {
+            setStatus(L"Align only applies to free-positioned siblings");
+            return;
+        }
+    }
+    pushUndo(LayoutEditKind::Transform, "Align selection");
 
     float minX = _selection[0]->getPosition().x;
     float minY = _selection[0]->getPosition().y;
@@ -1556,7 +2088,7 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     case AlignMode::DistributeH: {
         if (_selection.size() < 3) {
             setStatus(L"DistH needs 3+ widgets");
-            _undoStack.pop_back();
+            _commandStack.discardLastUndo();
             return;
         }
         std::vector<Widget*> sorted = _selection;
@@ -1581,7 +2113,7 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     case AlignMode::DistributeV: {
         if (_selection.size() < 3) {
             setStatus(L"DistV needs 3+ widgets");
-            _undoStack.pop_back();
+            _commandStack.discardLastUndo();
             return;
         }
         std::vector<Widget*> sorted = _selection;
@@ -1605,6 +2137,10 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     }
     }
 
+    for (Widget* widget : _selection) {
+        refreshAnchorOffsets(widget);
+    }
+
     endMutation();
     markDirty(true);
     syncPropertyStrip();
@@ -1614,8 +2150,178 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     setStatus(doneMsg);
 }
 
+bool LayoutEditorSession::canUseAnchorLayout(Widget* widget) const {
+    if (widget == nullptr || widget == _docRoot || widget->getParent() == nullptr ||
+        widget->getParent() == _canvasHost ||
+        structuredContentOwner(widget) != nullptr) {
+        return false;
+    }
+    Widget* parent = widget->getParent();
+    return dynamic_cast<BoxBase*>(parent) == nullptr &&
+           dynamic_cast<GridPanel*>(parent) == nullptr;
+}
+
+void LayoutEditorSession::refreshAnchorOffsets(Widget* widget) {
+    if (canUseAnchorLayout(widget) && widget->hasAnchorLayout()) {
+        widget->refreshAnchorOffsetsFromCurrentRect();
+    }
+}
+
+void LayoutEditorSession::setAnchorPreset(AnchorAxisMode horizontal,
+                                          AnchorAxisMode vertical,
+                                          bool snapWidgetToAnchor) {
+    auto resolveAxis = [](AnchorAxisMode mode, float& minValue,
+                          float& maxValue, float& pivotValue) {
+        switch (mode) {
+        case AnchorAxisMode::Start:
+            minValue = maxValue = 0.0f;
+            pivotValue = 0.0f;
+            break;
+        case AnchorAxisMode::Center:
+            minValue = maxValue = 0.5f;
+            pivotValue = 0.5f;
+            break;
+        case AnchorAxisMode::End:
+            minValue = maxValue = 1.0f;
+            pivotValue = 1.0f;
+            break;
+        case AnchorAxisMode::Stretch:
+            minValue = 0.0f;
+            maxValue = 1.0f;
+            pivotValue = 0.5f;
+            break;
+        }
+    };
+
+    float minX = 0.0f, maxX = 0.0f, pivotX = 0.5f;
+    float minY = 0.0f, maxY = 0.0f, pivotY = 0.5f;
+    resolveAxis(horizontal, minX, maxX, pivotX);
+    resolveAxis(vertical, minY, maxY, pivotY);
+
+    int changed = 0;
+    endMutation();
+    pushUndo(LayoutEditKind::Transform, "Set anchor preset");
+    for (Widget* widget : _selection) {
+        if (!canUseAnchorLayout(widget)) {
+            continue;
+        }
+        widget->setLayoutPositionManaged(false);
+        widget->setLayoutSizeManaged(false);
+        if (!snapWidgetToAnchor) {
+            widget->setAnchorLayoutPreservingRect(
+                math::FVector2(minX, minY), math::FVector2(maxX, maxY),
+                math::FVector2(pivotX, pivotY));
+        } else {
+            const math::FVector2 size = widget->getSize();
+            AnchorLayout layout;
+            layout.anchorMin = math::FVector2(minX, minY);
+            layout.anchorMax = math::FVector2(maxX, maxY);
+            layout.pivot = math::FVector2(pivotX, pivotY);
+            if (minX == maxX) {
+                layout.offsetMin.x = -pivotX * size.x;
+                layout.offsetMax.x = (1.0f - pivotX) * size.x;
+            }
+            if (minY == maxY) {
+                layout.offsetMin.y = -pivotY * size.y;
+                layout.offsetMax.y = (1.0f - pivotY) * size.y;
+            }
+            widget->setAnchorLayout(layout);
+            if (widget->getParent() != nullptr) {
+                widget->applyAnchorLayout(widget->getParent()->getSize());
+            }
+        }
+        ++changed;
+    }
+    if (changed == 0) {
+        _commandStack.discardLastUndo();
+        setStatus(L"Anchors apply only to free-positioned children");
+        return;
+    }
+    markDirty(true);
+    syncPropertyStrip();
+    syncSelectionChrome();
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+    std::wostringstream status;
+    status << (snapWidgetToAnchor
+        ? L"Anchor preset snapped " : L"Anchor preset applied to ")
+           << changed << L" widget(s)";
+    if (!snapWidgetToAnchor) {
+        status << L" — Ctrl+click to snap widget";
+    }
+    setStatus(status.str());
+}
+
+void LayoutEditorSession::clearSelectedAnchors() {
+    int changed = 0;
+    endMutation();
+    pushUndo(LayoutEditKind::Transform, "Clear anchors");
+    for (Widget* widget : _selection) {
+        if (!canUseAnchorLayout(widget) || !widget->hasAnchorLayout()) {
+            continue;
+        }
+        widget->clearAnchorLayout();
+        ++changed;
+    }
+    if (changed == 0) {
+        _commandStack.discardLastUndo();
+        setStatus(L"Selection has no free-layout anchors");
+        return;
+    }
+    markDirty(true);
+    syncPropertyStrip();
+    syncSelectionChrome();
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+    setStatus(L"Anchors disabled; absolute rectangle preserved");
+}
+
+void LayoutEditorSession::syncAnchorPresetStyles() {
+    auto setButtonStyle = [this](const std::string& id, bool active) {
+        if (auto* button = dynamic_cast<Button*>(findChromeById(id))) {
+            button->setStyleId(active ? "__le_primary" : "__le_command");
+        }
+    };
+    for (int vertical = 0; vertical < 4; ++vertical) {
+        for (int horizontal = 0; horizontal < 4; ++horizontal) {
+            setButtonStyle("btn_anchor_" + std::to_string(vertical) +
+                               std::to_string(horizontal), false);
+        }
+    }
+
+    const bool eligible = canUseAnchorLayout(_selected);
+    setButtonStyle("btn_anchor_none",
+                   eligible && !_selected->hasAnchorLayout());
+    if (!eligible || !_selected->hasAnchorLayout()) {
+        return;
+    }
+
+    const AnchorLayout& layout = _selected->getAnchorLayout();
+    auto axisMode = [](float minValue, float maxValue) {
+        constexpr float epsilon = 0.0001f;
+        if (std::fabs(minValue) < epsilon &&
+            std::fabs(maxValue - 1.0f) < epsilon) return 3;
+        if (std::fabs(minValue - maxValue) >= epsilon) return -1;
+        if (std::fabs(minValue) < epsilon) return 0;
+        if (std::fabs(minValue - 0.5f) < epsilon) return 1;
+        if (std::fabs(minValue - 1.0f) < epsilon) return 2;
+        return -1;
+    };
+    const int horizontal = axisMode(layout.anchorMin.x, layout.anchorMax.x);
+    const int vertical = axisMode(layout.anchorMin.y, layout.anchorMax.y);
+    if (horizontal >= 0 && vertical >= 0) {
+        setButtonStyle("btn_anchor_" + std::to_string(vertical) +
+                           std::to_string(horizontal), true);
+    }
+}
+
 void LayoutEditorSession::reorderSelected(int delta) {
-    if (_selected == nullptr || _selected == _docRoot || delta == 0) {
+    if (_selected == nullptr || _selected == _docRoot || delta == 0 ||
+        structuredContentOwner(_selected) != nullptr) {
         return;
     }
     Widget* parent = _selected->getParent();
@@ -1623,13 +2329,22 @@ void LayoutEditorSession::reorderSelected(int delta) {
         return;
     }
 
-    pushUndo();
+    pushUndo(LayoutEditKind::Reorder, "Reorder selection");
     bool ok = false;
     if (auto* box = dynamic_cast<BoxBase*>(parent)) {
         const int cur = box->slotIndexOf(_selected);
         const int next = cur + delta;
         if (cur >= 0 && next >= 0 && box->slotAt(next) != nullptr) {
             ok = box->moveSlotToIndex(_selected, static_cast<size_t>(next));
+        }
+    } else if (auto* grid = dynamic_cast<GridPanel*>(parent)) {
+        const int cur = designerGridIndexOf(grid, _selected);
+        const int next = cur + delta;
+        const int count = static_cast<int>(
+            collectDesignerGridEntries(grid).size());
+        if (cur >= 0 && next >= 0 && next < count) {
+            ok = rebuildDesignerGrid(grid, _selected,
+                                     static_cast<size_t>(next));
         }
     } else {
         const auto& kids = parent->getChildren();
@@ -1651,9 +2366,7 @@ void LayoutEditorSession::reorderSelected(int delta) {
 
     endMutation();
     if (!ok) {
-        if (!_undoStack.empty()) {
-            _undoStack.pop_back();
-        }
+        _commandStack.discardLastUndo();
         setStatus(L"Cannot reorder further");
         return;
     }
@@ -1672,7 +2385,7 @@ LayoutEditorSession::DragMode LayoutEditorSession::hitTestResizeHandle(
     if (widget == nullptr) {
         return DragMode::None;
     }
-    const math::FRectangle b = widget->getWorldBounds();
+    const math::FRectangle b = documentToScreen(widget->getWorldBounds());
     const float x = worldPos.x;
     const float y = worldPos.y;
     const bool nearL = std::abs(x - b.minX) <= kHandleHit;
@@ -1682,6 +2395,12 @@ LayoutEditorSession::DragMode LayoutEditorSession::hitTestResizeHandle(
     const bool inX = x >= b.minX - kHandleHit && x <= b.maxX + kHandleHit;
     const bool inY = y >= b.minY - kHandleHit && y <= b.maxY + kHandleHit;
     if (!inX || !inY) {
+        return DragMode::None;
+    }
+    if (widget == _docRoot) {
+        if (nearB && nearR) return DragMode::ResizeSE;
+        if (nearB) return DragMode::ResizeS;
+        if (nearR) return DragMode::ResizeE;
         return DragMode::None;
     }
     if (nearT && nearL) return DragMode::ResizeNW;
@@ -1778,6 +2497,7 @@ void LayoutEditorSession::applyResizeDelta(Widget* widget, DragMode mode,
     }
     widget->setPosition(pos);
     widget->setSize(size);
+    refreshAnchorOffsets(widget);
 }
 
 Widget* LayoutEditorSession::pickDocumentWidget(
@@ -1785,21 +2505,27 @@ Widget* LayoutEditorSession::pickDocumentWidget(
     if (_docRoot == nullptr || !isCanvasHit(worldPos)) {
         return nullptr;
     }
-    // Deepest-first walk of the document only (ignores selection chrome).
+    const math::FVector2 documentPos = screenToDocument(worldPos);
+    // Deepest-first walk of the authored document only. Composite runtime
+    // controls own implementation children (virtual rows, scrollbars, tab
+    // buttons, dialog chrome); those must never become Designer selections.
     std::function<Widget*(Widget*)> walk = [&](Widget* n) -> Widget* {
-        if (n == nullptr || !n->isVisible()) {
+        if (n == nullptr || !n->isVisible() ||
+            !n->getWorldBounds().contains(documentPos)) {
             return nullptr;
         }
-        const auto& kids = n->getChildren();
+        std::vector<Widget*> kids;
+        collectAuthoredChildren(n, kids);
         for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+            // An inactive TabControl page is authored but intentionally not
+            // mounted. It can be selected from the Outline, not by stale
+            // canvas geometry left from its previous activation.
+            if (!isUnderCanvas(*it)) continue;
             if (Widget* hit = walk(*it)) {
                 return hit;
             }
         }
-        if (n->getWorldBounds().contains(worldPos)) {
-            return n;
-        }
-        return nullptr;
+        return n;
     };
     return walk(_docRoot);
 }
@@ -1841,6 +2567,8 @@ void LayoutEditorSession::destroySelectionChrome() {
         for (Panel*& h : _handles) {
             h = nullptr;
         }
+        _anchorBox = nullptr;
+        for (Panel*& point : _anchorPoints) point = nullptr;
         _selOutlines.clear();
         _marqueeBox = nullptr;
         return;
@@ -1858,6 +2586,10 @@ void LayoutEditorSession::destroySelectionChrome() {
     destroyOne(_selBox);
     for (Panel*& h : _handles) {
         destroyOne(h);
+    }
+    destroyOne(_anchorBox);
+    for (Panel*& point : _anchorPoints) {
+        destroyOne(point);
     }
     for (Panel*& o : _selOutlines) {
         destroyOne(o);
@@ -1888,6 +2620,40 @@ void LayoutEditorSession::ensureSelectionChrome() {
         handle.border.color = handle.borderColor;
         handle.border.width = 1.0f;
         sheet->setStyle("__le_sel_handle", handle);
+
+        WidgetStyle anchorBox{};
+        anchorBox.backgroundColor = math::FVector4(1.0f, 0.67f, 0.20f, 0.0f);
+        anchorBox.borderColor = math::FVector4(1.0f, 0.67f, 0.20f, 0.85f);
+        anchorBox.border.color = anchorBox.borderColor;
+        anchorBox.border.width = 1.0f;
+        sheet->setStyle("__le_anchor_box", anchorBox);
+
+        WidgetStyle anchorPoint{};
+        anchorPoint.backgroundColor = math::FVector4(1.0f, 0.72f, 0.25f, 1.0f);
+        anchorPoint.borderColor = math::FVector4(0.18f, 0.12f, 0.04f, 1.0f);
+        anchorPoint.border.color = anchorPoint.borderColor;
+        anchorPoint.border.width = 1.0f;
+        sheet->setStyle("__le_anchor_point", anchorPoint);
+    }
+
+    _anchorBox = new Panel();
+    _anchorBox->setId("__le_anchor_box");
+    _anchorBox->setStyleId("__le_anchor_box");
+    _anchorBox->setBorderEnabled(true);
+    _anchorBox->setBackgroundEnabled(true);
+    _anchorBox->setVisible(false);
+    _anchorBox->setLayoutPositionManaged(false);
+    _canvasHost->addChild(_anchorBox);
+    for (int i = 0; i < 4; ++i) {
+        _anchorPoints[i] = new Panel();
+        _anchorPoints[i]->setId(
+            std::string("__le_anchor_point_") + std::to_string(i));
+        _anchorPoints[i]->setStyleId("__le_anchor_point");
+        _anchorPoints[i]->setBorderEnabled(true);
+        _anchorPoints[i]->setBackgroundEnabled(true);
+        _anchorPoints[i]->setVisible(false);
+        _anchorPoints[i]->setLayoutPositionManaged(false);
+        _canvasHost->addChild(_anchorPoints[i]);
     }
 
     _selBox = new Panel();
@@ -1930,12 +2696,13 @@ UiCursorHint LayoutEditorSession::canvasCursorHint(
         case DragMode::ResizeSW:
             return UiCursorHint::SizeNesw;
         case DragMode::Move:
-            return UiCursorHint::Move;
+            return structuredContentOwner(_selected) == nullptr
+                ? UiCursorHint::Move : UiCursorHint::Default;
         default:
             break;
         }
     }
-    if (_selected != nullptr && _selected != _docRoot) {
+    if (_selected != nullptr) {
         switch (hitTestResizeHandle(_selected, worldPos)) {
         case DragMode::ResizeE:
         case DragMode::ResizeW:
@@ -1956,7 +2723,8 @@ UiCursorHint LayoutEditorSession::canvasCursorHint(
         }
     }
     Widget* picked = pickDocumentWidget(worldPos);
-    if (picked != nullptr && picked != _docRoot) {
+    if (picked != nullptr && picked != _docRoot &&
+        structuredContentOwner(picked) == nullptr) {
         return UiCursorHint::Move;
     }
     return UiCursorHint::Default;
@@ -1973,12 +2741,12 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
         _dragTarget = nullptr;
     }
 
-    // Middle mouse or Space+LMB → pan document root.
+    // Middle mouse or Space+LMB pans the editor viewport. It must never
+    // rewrite the authored root position or participate in undo/dirty state.
     if (button == 2 || (button == 0 && modifiersSpace() && isCanvasHit(worldPos))) {
         if (_docRoot != nullptr) {
             _dragMode = DragMode::Pan;
             _dragLastMouse = worldPos;
-            _docRoot->setLayoutPositionManaged(false);
             setStatus(L"Panning canvas");
             return true;
         }
@@ -2005,7 +2773,8 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
             const bool additive = modifiersAdditive();
             select(node, additive);
             _consumeNextPointerUp = true;
-            if (!additive && node != nullptr && node != _docRoot) {
+            if (!additive && node != nullptr && node != _docRoot &&
+                structuredContentOwner(node) == nullptr) {
                 _toolDrag = ToolDrag::HierPress;
                 _hierDragWidget = node;
                 _toolPressPos = worldPos;
@@ -2021,16 +2790,17 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
         return false;
     }
 
-    auto isBoxChild = [](Widget* w) -> bool {
+    auto isLayoutChild = [](Widget* w) -> bool {
         return w != nullptr && w->getParent() != nullptr &&
-               dynamic_cast<BoxBase*>(w->getParent()) != nullptr;
+               (dynamic_cast<BoxBase*>(w->getParent()) != nullptr ||
+                dynamic_cast<GridPanel*>(w->getParent()) != nullptr);
     };
 
-    if (_selected != nullptr && _selected != _docRoot &&
-        !isBoxChild(_selected) && !modifiersAdditive()) {
+    if (_selected != nullptr &&
+        !isLayoutChild(_selected) && !modifiersAdditive()) {
         const DragMode handle = hitTestResizeHandle(_selected, worldPos);
         if (handle != DragMode::None && handle != DragMode::Move) {
-            beginMutation();
+            beginMutation(LayoutEditKind::Transform, "Resize widget");
             _dragMode = handle;
             _dragTarget = _selected;
             _dragLastMouse = worldPos;
@@ -2073,16 +2843,20 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
         select(hit, false);
     }
 
-    if (hit == _docRoot || (_selected == _docRoot && _selection.size() == 1)) {
-        setStatus(L"Document root selected — position is fixed");
+    if (hit == _docRoot || (_selected == _docRoot && _selection.size() == 1) ||
+        structuredContentOwner(hit) != nullptr) {
+        setStatus(hit == _docRoot
+            ? L"Document root selected — drag right/bottom handles to resize"
+            : L"Structured content selected — position is owned by its container");
         _dragMode = DragMode::None;
         _dragTarget = nullptr;
         _consumeNextPointerUp = true;
         return true;
     }
 
-    auto canFreeMove = [&isBoxChild](Widget* w) -> bool {
-        return w != nullptr && !isBoxChild(w);
+    auto canFreeMove = [this, &isLayoutChild](Widget* w) -> bool {
+        return w != nullptr && !isLayoutChild(w) &&
+               structuredContentOwner(w) == nullptr;
     };
 
     int movable = 0;
@@ -2092,8 +2866,8 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
         }
     }
     if (movable == 0) {
-        if (isBoxChild(hit)) {
-            setStatus(L"Box child — drag in Hierarchy to reorder (canvas drag disabled)");
+        if (isLayoutChild(hit)) {
+            setStatus(L"Layout child — drag in Hierarchy to reorder (canvas drag disabled)");
         } else {
             setStatus(L"Selection has no free-position widgets to drag");
         }
@@ -2103,7 +2877,7 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
         return true;
     }
 
-    beginMutation();
+    beginMutation(LayoutEditKind::Transform, "Move selection");
     _dragMode = DragMode::Move;
     _dragTarget = hit;
     _dragLastMouse = worldPos;
@@ -2173,11 +2947,10 @@ bool LayoutEditorSession::onPointerMove(const math::FVector2& worldPos) {
     }
 
     if (_dragMode == DragMode::Pan) {
-        if (_docRoot != nullptr && (delta.x != 0.0f || delta.y != 0.0f)) {
-            math::FVector2 pos = _docRoot->getPosition();
-            pos.x += delta.x;
-            pos.y += delta.y;
-            _docRoot->setPosition(pos);
+        if (delta.x != 0.0f || delta.y != 0.0f) {
+            _viewPan.x += delta.x;
+            _viewPan.y += delta.y;
+            applyViewportTransform();
             syncSelectionChrome();
         }
         return true;
@@ -2187,29 +2960,36 @@ bool LayoutEditorSession::onPointerMove(const math::FVector2& worldPos) {
         return true;
     }
 
+    const math::FVector2 documentDelta(
+        delta.x / _viewZoom, delta.y / _viewZoom);
+
     if (_dragMode == DragMode::Move) {
         if (!_selection.empty()) {
             for (Widget* w : _selection) {
-                if (w == nullptr || w == _docRoot) {
+                if (w == nullptr || w == _docRoot ||
+                    structuredContentOwner(w) != nullptr) {
                     continue;
                 }
                 if (w->getParent() != nullptr &&
-                    dynamic_cast<BoxBase*>(w->getParent()) != nullptr) {
+                    (dynamic_cast<BoxBase*>(w->getParent()) != nullptr ||
+                     dynamic_cast<GridPanel*>(w->getParent()) != nullptr)) {
                     continue;
                 }
                 math::FVector2 pos = w->getPosition();
-                pos.x += delta.x;
-                pos.y += delta.y;
+                pos.x += documentDelta.x;
+                pos.y += documentDelta.y;
                 w->setPosition(pos);
+                refreshAnchorOffsets(w);
             }
         } else if (_dragTarget != nullptr && _dragTarget != _docRoot) {
             math::FVector2 pos = _dragTarget->getPosition();
-            pos.x += delta.x;
-            pos.y += delta.y;
+            pos.x += documentDelta.x;
+            pos.y += documentDelta.y;
             _dragTarget->setPosition(pos);
+            refreshAnchorOffsets(_dragTarget);
         }
     } else if (_dragTarget != nullptr) {
-        applyResizeDelta(_dragTarget, _dragMode, delta);
+        applyResizeDelta(_dragTarget, _dragMode, documentDelta);
     }
 
     markDirty(true);
@@ -2433,19 +3213,50 @@ void LayoutEditorSession::setChromeVisible(const char* id, bool visible) {
     }
 }
 
+void LayoutEditorSession::setChromeEnabled(const char* id, bool enabled) {
+    if (_ui == nullptr || id == nullptr) {
+        return;
+    }
+    if (auto* interactive = dynamic_cast<InteractiveWidget*>(
+            findChromeById(id))) {
+        interactive->setEnabled(enabled);
+    }
+}
+
 void LayoutEditorSession::updatePropPanelVisibility() {
     const bool hasSel = _selected != nullptr;
     const bool isDocumentRoot = hasSel && _selected == _docRoot;
-    const bool isLabel = dynamic_cast<TextLabel*>(_selected) != nullptr;
-    const bool isButton = dynamic_cast<Button*>(_selected) != nullptr;
-    const bool isInput = dynamic_cast<TextInput*>(_selected) != nullptr;
-    const bool isCheck = dynamic_cast<CheckBox*>(_selected) != nullptr;
-    const bool isBox = dynamic_cast<BoxBase*>(_selected) != nullptr;
-    const bool hasText = isLabel || isButton || isInput || isCheck;
+    const bool isStructuredRoot = hasSel &&
+        structuredContentOwner(_selected) != nullptr;
+    const WidgetAuthoringDescriptor* authoring =
+        WidgetAuthoringRegistry::get().findForWidget(_selected);
+    static const PropertySchema fallbackProperties{
+        AuthoringProperty::Id, AuthoringProperty::X, AuthoringProperty::Y,
+        AuthoringProperty::Width, AuthoringProperty::Height,
+        AuthoringProperty::Style};
+    const PropertySchema& properties = authoring != nullptr
+        ? authoring->properties : fallbackProperties;
+    const auto hasProperty = [&](AuthoringProperty property) {
+        return hasSel && properties.contains(property);
+    };
+
+    // Every widget type exposes a different subset of rows. Retaining a
+    // large scroll offset from the previous selection can move all rows of
+    // a shorter Inspector (especially document_root) above the clip and
+    // make the panel look empty. Start each new selection at its first row;
+    // edits on the same selection preserve the user's current scroll.
+    if (_inspectorSelection != _selected) {
+        if (auto* scroll = dynamic_cast<ScrollView*>(
+                findChromeById("props_scroll"))) {
+            scroll->setScrollOffset(math::FVector2(0.0f, 0.0f));
+        }
+        _inspectorSelection = _selected;
+    }
     // Free position: hide x/y for box-managed children (layout owns them).
-    bool showPos = hasSel && !isDocumentRoot;
+    bool showPos = hasSel && !isDocumentRoot && !isStructuredRoot;
     if (hasSel && _selected->getParent() != nullptr &&
-        dynamic_cast<BoxBase*>(_selected->getParent()) != nullptr) {
+        (dynamic_cast<BoxBase*>(_selected->getParent()) != nullptr ||
+         dynamic_cast<GridPanel*>(_selected->getParent()) != nullptr)) {
         showPos = false;
     }
 
@@ -2479,41 +3290,78 @@ void LayoutEditorSession::updatePropPanelVisibility() {
         }
     };
 
-    const bool canArrange = hasSel && !isDocumentRoot;
+    Widget* arrangeParent = !_selection.empty() && _selection.front() != nullptr
+        ? _selection.front()->getParent() : nullptr;
+    bool freeSiblingSelection = arrangeParent != nullptr;
+    for (Widget* widget : _selection) {
+        if (!canUseAnchorLayout(widget) || widget->getParent() != arrangeParent) {
+            freeSiblingSelection = false;
+            break;
+        }
+    }
+    const bool canArrange = hasSel && !isDocumentRoot && !isStructuredRoot &&
+                            canUseAnchorLayout(_selected);
+    const bool canAlign = freeSiblingSelection && _selection.size() >= 2;
+    const bool canDistribute = freeSiblingSelection && _selection.size() >= 3;
+    const bool canAnchor = canUseAnchorLayout(_selected);
+    const bool hasAnchors = canAnchor && _selected->hasAnchorLayout();
     setChromeVisible("section_arrange", canArrange);
     setChromeVisible("row_arrange_horizontal", canArrange);
     setChromeVisible("row_arrange_vertical", canArrange);
     setChromeVisible("row_arrange_distribute", canArrange);
-    setChromeVisible("section_identity", hasSel);
-    setChromeVisible("section_transform", hasSel);
-    setChromeVisible("section_content", hasText);
-    setChromeVisible("section_appearance", hasSel);
-    setChromeVisible("section_layout", isBox);
+    for (const char* id : {"btn_align_left", "btn_align_hcenter",
+                           "btn_align_right", "btn_align_top",
+                           "btn_align_vcenter", "btn_align_bottom"}) {
+        setChromeEnabled(id, canAlign);
+    }
+    setChromeEnabled("btn_dist_h", canDistribute);
+    setChromeEnabled("btn_dist_v", canDistribute);
+    setChromeEnabled("btn_snap", canArrange);
 
-    row("row_prop_id", "lbl_prop_id", "prop_id", hasSel);
-    row("row_prop_x", "lbl_prop_x", "prop_x", showPos);
-    row("row_prop_y", "lbl_prop_y", "prop_y", showPos);
-    row("row_prop_w", "lbl_prop_w", "prop_w", hasSel);
-    row("row_prop_h", "lbl_prop_h", "prop_h", hasSel);
-    row("row_prop_text", "lbl_prop_text", "prop_text", hasText);
-    row("row_prop_text_halign", "lbl_prop_text_halign",
-        "prop_text_halign", isLabel || isInput);
-    row("row_prop_text_valign", "lbl_prop_text_valign",
-        "prop_text_valign", isLabel);
-    row("row_prop_style", "lbl_prop_style", "prop_style_combo", hasSel);
-    row("row_prop_checked", "lbl_prop_checked", "prop_checked", isCheck);
-    row("row_prop_password", "lbl_prop_password", "prop_password", isInput);
-    row("row_prop_readonly", "lbl_prop_readonly", "prop_readonly", isInput);
-    row("row_prop_gravity", "lbl_prop_gravity", "prop_gravity", isBox);
-    row("row_prop_spacing", "lbl_prop_spacing", "prop_spacing", isBox);
+    setChromeVisible("section_anchor", canAnchor);
+    setChromeVisible("row_anchor_presets_0", canAnchor);
+    setChromeVisible("row_anchor_presets_1", canAnchor);
+    setChromeVisible("row_anchor_presets_2", canAnchor);
+    setChromeVisible("row_anchor_presets_3", canAnchor);
+    setChromeVisible("row_anchor_none", canAnchor);
+    setChromeVisible("row_prop_anchor_min", hasAnchors);
+    setChromeVisible("row_prop_anchor_max", hasAnchors);
+    setChromeVisible("row_prop_offset_min", hasAnchors);
+    setChromeVisible("row_prop_offset_max", hasAnchors);
+    setChromeVisible("row_prop_pivot", hasAnchors);
+    setChromeVisible("section_identity", hasSel &&
+        properties.hasSection(PropertySection::Identity));
+    setChromeVisible("section_transform", hasSel &&
+        properties.hasSection(PropertySection::Transform));
+    setChromeVisible("section_content", hasSel &&
+        properties.hasSection(PropertySection::Content));
+    setChromeVisible("section_appearance", hasSel &&
+        properties.hasSection(PropertySection::Appearance));
+    setChromeVisible("section_layout", hasSel &&
+        properties.hasSection(PropertySection::Layout));
+    setChromeVisible("section_interaction", hasSel &&
+        properties.hasSection(PropertySection::Interaction));
+
+    for (const PropertyFieldSchema& field : allPropertyFieldSchemas()) {
+        if (field.property == AuthoringProperty::Padding) continue;
+        bool visible = hasProperty(field.property);
+        if (field.property == AuthoringProperty::X ||
+            field.property == AuthoringProperty::Y) {
+            visible = visible && showPos;
+        }
+        row(field.rowId, field.labelId, field.controlId, visible);
+    }
+    const bool hasTexture = hasProperty(AuthoringProperty::Texture);
+    setChromeVisible("row_prop_texture_actions", hasTexture);
+    const bool hasPadding = hasProperty(AuthoringProperty::Padding);
     if (findChromeById("row_prop_padding") != nullptr) {
-        setChromeVisible("row_prop_padding", isBox);
+        setChromeVisible("row_prop_padding", hasPadding);
     } else {
-        setChromeVisible("lbl_prop_pad", isBox);
-        setChromeVisible("prop_pad_l", isBox);
-        setChromeVisible("prop_pad_t", isBox);
-        setChromeVisible("prop_pad_r", isBox);
-        setChromeVisible("prop_pad_b", isBox);
+        setChromeVisible("lbl_prop_pad", hasPadding);
+        setChromeVisible("prop_pad_l", hasPadding);
+        setChromeVisible("prop_pad_t", hasPadding);
+        setChromeVisible("prop_pad_r", hasPadding);
+        setChromeVisible("prop_pad_b", hasPadding);
     }
 
     if (auto* title = dynamic_cast<TextLabel*>(_ui != nullptr
@@ -2522,14 +3370,8 @@ void LayoutEditorSession::updatePropPanelVisibility() {
             title->setText(L"Properties");
         } else {
             std::wstring t = L"Properties — ";
-            if (isLabel) t += L"TextLabel";
-            else if (isButton) t += L"Button";
-            else if (isInput) t += L"TextInput";
-            else if (isCheck) t += L"CheckBox";
-            else if (dynamic_cast<VBox*>(_selected) != nullptr) t += L"VBox";
-            else if (dynamic_cast<HBox*>(_selected) != nullptr) t += L"HBox";
-            else if (dynamic_cast<Panel*>(_selected) != nullptr) t += L"Panel";
-            else t += L"Widget";
+            t += authoring != nullptr
+                ? utf8ToWide(authoring->displayName) : L"Widget";
             title->setText(t);
         }
     }
@@ -2553,7 +3395,28 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propY, L"");
         setField(_propW, L"");
         setField(_propH, L"");
+        setField(_propAnchorMinX, L"");
+        setField(_propAnchorMinY, L"");
+        setField(_propAnchorMaxX, L"");
+        setField(_propAnchorMaxY, L"");
+        setField(_propOffsetMinX, L"");
+        setField(_propOffsetMinY, L"");
+        setField(_propOffsetMaxX, L"");
+        setField(_propOffsetMaxY, L"");
+        setField(_propPivotX, L"");
+        setField(_propPivotY, L"");
         setField(_propText, L"");
+        setField(_propTexture, L"");
+        setField(_propItems, L"");
+        setField(_propController, L"");
+        setField(_propOnClick, L"");
+        setField(_propOnToggled, L"");
+        setField(_propOnValueChanged, L"");
+        setField(_propOnTextChanged, L"");
+        setField(_propOnSubmit, L"");
+        setField(_propOnSelectionChanged, L"");
+        setField(_propOnItemActivated, L"");
+        setField(_propOnClose, L"");
         if (_propStyleCombo != nullptr) {
             _suppressStyleCombo = true;
             _propStyleCombo->setSelectedIndex(0);
@@ -2571,6 +3434,7 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPadT, L"");
         setField(_propPadR, L"");
         setField(_propPadB, L"");
+        syncAnchorPresetStyles();
         _suppressProp = false;
         if (_ui != nullptr) {
             _ui->invalidateLayout();
@@ -2583,9 +3447,71 @@ void LayoutEditorSession::syncPropertyStrip() {
     setField(_propY, formatFloat(_selected->getPosition().y));
     setField(_propW, formatFloat(_selected->getSize().x));
     setField(_propH, formatFloat(_selected->getSize().y));
+    if (_selected->hasAnchorLayout()) {
+        const AnchorLayout& anchor = _selected->getAnchorLayout();
+        setField(_propAnchorMinX, formatFloat(anchor.anchorMin.x));
+        setField(_propAnchorMinY, formatFloat(anchor.anchorMin.y));
+        setField(_propAnchorMaxX, formatFloat(anchor.anchorMax.x));
+        setField(_propAnchorMaxY, formatFloat(anchor.anchorMax.y));
+        setField(_propOffsetMinX, formatFloat(anchor.offsetMin.x));
+        setField(_propOffsetMinY, formatFloat(anchor.offsetMin.y));
+        setField(_propOffsetMaxX, formatFloat(anchor.offsetMax.x));
+        setField(_propOffsetMaxY, formatFloat(anchor.offsetMax.y));
+        setField(_propPivotX, formatFloat(anchor.pivot.x));
+        setField(_propPivotY, formatFloat(anchor.pivot.y));
+    } else {
+        setField(_propAnchorMinX, L"");
+        setField(_propAnchorMinY, L"");
+        setField(_propAnchorMaxX, L"");
+        setField(_propAnchorMaxY, L"");
+        setField(_propOffsetMinX, L"");
+        setField(_propOffsetMinY, L"");
+        setField(_propOffsetMaxX, L"");
+        setField(_propOffsetMaxY, L"");
+        setField(_propPivotX, L"");
+        setField(_propPivotY, L"");
+    }
     std::wstring text;
     getTextPayload(_selected, text);
     setField(_propText, text);
+    if (auto* image = dynamic_cast<Image*>(_selected)) {
+        setField(_propTexture, utf8ToWide(image->getTextureName()));
+    } else {
+        setField(_propTexture, L"");
+    }
+    std::vector<std::wstring> items;
+    if (auto* combo = dynamic_cast<ComboBox*>(_selected)) {
+        items = combo->getItemsRef();
+    } else if (auto* list = dynamic_cast<ListView*>(_selected)) {
+        items = list->getItemsRef();
+    } else if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
+        items = tiles->getItemsRef();
+    } else if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
+        for (size_t i = 0; i < tree->getNodeCount(); ++i) {
+            items.push_back(tree->getNodeData(i).label);
+        }
+    } else if (auto* strip = dynamic_cast<TabStrip*>(_selected)) {
+        for (int i = 0; i < strip->getTabCount(); ++i) {
+            items.push_back(strip->getTabLabel(i));
+        }
+    } else if (auto* tabs = dynamic_cast<TabControl*>(_selected)) {
+        for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
+            items.push_back(tabs->getTabLabel(i));
+        }
+    }
+    setField(_propItems, joinItems(items));
+    setField(_propController, utf8ToWide(_selected->getControllerId()));
+    auto syncEvent = [this, &setField](TextInput* field, const char* eventName) {
+        setField(field, utf8ToWide(_selected->getEventBinding(eventName)));
+    };
+    syncEvent(_propOnClick, "onClick");
+    syncEvent(_propOnToggled, "onToggled");
+    syncEvent(_propOnValueChanged, "onValueChanged");
+    syncEvent(_propOnTextChanged, "onTextChanged");
+    syncEvent(_propOnSubmit, "onSubmit");
+    syncEvent(_propOnSelectionChanged, "onSelectionChanged");
+    syncEvent(_propOnItemActivated, "onItemActivated");
+    syncEvent(_propOnClose, "onClose");
     if (_propStyleCombo != nullptr) {
         int idx = 0;
         const std::string& sid = _selected->getStyleId();
@@ -2615,6 +3541,7 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPadR, L"");
         setField(_propPadB, L"");
     }
+    syncAnchorPresetStyles();
     _suppressProp = false;
     if (_ui != nullptr) {
         // Visibility and field values are one Inspector transaction. Flush
@@ -2648,21 +3575,7 @@ bool LayoutEditorSession::isUnderCanvas(Widget* widget) const {
 }
 
 Widget* LayoutEditorSession::findInDocument(const std::string& id) const {
-    if (_docRoot == nullptr || id.empty()) {
-        return nullptr;
-    }
-    std::function<Widget*(Widget*)> walk = [&](Widget* n) -> Widget* {
-        if (n->getId() == id) {
-            return n;
-        }
-        for (Widget* c : n->getChildren()) {
-            if (Widget* found = walk(c)) {
-                return found;
-            }
-        }
-        return nullptr;
-    };
-    return walk(_docRoot);
+    return id.empty() ? nullptr : _documentModel.findById(id);
 }
 
 Widget* LayoutEditorSession::pickParentForAdd() const {
@@ -2672,14 +3585,58 @@ Widget* LayoutEditorSession::pickParentForAdd() const {
     if (_selected == nullptr) {
         return _docRoot;
     }
-    if (dynamic_cast<CompoundWidget*>(_selected) != nullptr) {
+    if (isContainerWidget(_selected)) {
         return _selected;
     }
     Widget* parent = _selected->getParent();
-    if (parent != nullptr && isUnderCanvas(parent) && parent != _canvasHost) {
+    if (parent != nullptr && isUnderCanvas(parent) && parent != _canvasHost &&
+        isContainerWidget(parent)) {
         return parent;
     }
     return _docRoot;
+}
+
+void LayoutEditorSession::collectAuthoredChildren(
+    Widget* node, std::vector<Widget*>& out) const {
+    out.clear();
+    if (node == nullptr) return;
+
+    // Virtual collections and self-contained composites are authoring leaves.
+    if (dynamic_cast<ListView*>(node) != nullptr ||
+        dynamic_cast<TileView*>(node) != nullptr ||
+        dynamic_cast<TreeView*>(node) != nullptr ||
+        dynamic_cast<ComboBox*>(node) != nullptr ||
+        dynamic_cast<TabStrip*>(node) != nullptr ||
+        dynamic_cast<TextArea*>(node) != nullptr ||
+        dynamic_cast<Tooltip*>(node) != nullptr) {
+        return;
+    }
+    if (auto* scroll = dynamic_cast<ScrollView*>(node)) {
+        if (Widget* content = scroll->getContent()) out.push_back(content);
+        return;
+    }
+    if (auto* tabs = dynamic_cast<TabControl*>(node)) {
+        out.reserve(tabs->getTabCount());
+        for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
+            if (Widget* page = tabs->getTabContent(i)) out.push_back(page);
+        }
+        return;
+    }
+    if (auto* dialog = dynamic_cast<ModalDialog*>(node)) {
+        if (Widget* body = dialog->getBodyContent()) out.push_back(body);
+        return;
+    }
+    if (auto* modal = dynamic_cast<Modal*>(node)) {
+        if (Widget* content = modal->getContent()) out.push_back(content);
+        return;
+    }
+
+    for (Widget* child : node->getChildren()) {
+        if (child == nullptr || isEditorOverlay(child)) continue;
+        if (dynamic_cast<Window*>(node) != nullptr &&
+            dynamic_cast<ScrollBar*>(child) != nullptr) continue;
+        out.push_back(child);
+    }
 }
 
 void LayoutEditorSession::collectHierarchy(
@@ -2697,17 +3654,51 @@ void LayoutEditorSession::collectHierarchy(
     } else {
         label += L"(anon)";
     }
+    if (dynamic_cast<BoxBase*>(node) != nullptr) {
+        label += L"  [box]";
+    } else if (dynamic_cast<CompoundWidget*>(node) != nullptr) {
+        label += L"  [container]";
+    }
     labels.push_back(label);
     widgets.push_back(node);
-    for (Widget* child : node->getChildren()) {
+
+    std::vector<Widget*> children;
+    collectAuthoredChildren(node, children);
+    for (Widget* child : children) {
         collectHierarchy(child, depth + 1, labels, widgets);
     }
 }
 
-std::string LayoutEditorSession::makeUniqueId(const std::string& prefix) const {
+std::string LayoutEditorSession::makeUniqueId(
+    const std::string& prefix, Widget* detachedRoot) const {
+    // IDs must also see physical implementation/legacy children. The
+    // semantic Outline deliberately hides ListView rows and other private
+    // descendants; using only that view let an accidentally-attached child
+    // reserve no ID and produced an unbounded run of duplicate `w_3` nodes.
+    const auto treeContainsId = [this](Widget* root,
+                                       const std::string& id) -> bool {
+        std::unordered_set<Widget*> visited;
+        std::function<bool(Widget*)> walk = [&](Widget* node) -> bool {
+            if (node == nullptr || !visited.insert(node).second) return false;
+            if (node->getId() == id) return true;
+            for (Widget* child : node->getChildren()) {
+                if (walk(child)) return true;
+            }
+            // Include authored aliases that may not currently be mounted,
+            // notably inactive TabControl pages.
+            std::vector<Widget*> authored;
+            collectAuthoredChildren(node, authored);
+            for (Widget* child : authored) {
+                if (walk(child)) return true;
+            }
+            return false;
+        };
+        return walk(root);
+    };
     for (int i = 1; i < 10000; ++i) {
         const std::string candidate = prefix + "_" + std::to_string(i);
-        if (findInDocument(candidate) == nullptr) {
+        if (!treeContainsId(_docRoot, candidate) &&
+            !treeContainsId(detachedRoot, candidate)) {
             return candidate;
         }
     }
@@ -2732,6 +3723,26 @@ bool LayoutEditorSession::getTextPayload(Widget* widget,
         out = c->getText();
         return true;
     }
+    if (auto* radio = dynamic_cast<RadioButton*>(widget)) {
+        out = radio->getText();
+        return true;
+    }
+    if (auto* area = dynamic_cast<TextArea*>(widget)) {
+        out = area->getText();
+        return true;
+    }
+    if (auto* tip = dynamic_cast<Tooltip*>(widget)) {
+        out = tip->getText();
+        return true;
+    }
+    if (auto* window = dynamic_cast<Window*>(widget)) {
+        out = window->getTitle();
+        return true;
+    }
+    if (auto* rich = dynamic_cast<RichText*>(widget)) {
+        out = rich->getPlainText();
+        return true;
+    }
     out.clear();
     return false;
 }
@@ -2754,7 +3765,73 @@ bool LayoutEditorSession::setTextPayload(Widget* widget,
         c->setText(text);
         return true;
     }
+    if (auto* radio = dynamic_cast<RadioButton*>(widget)) {
+        radio->setText(text);
+        return true;
+    }
+    if (auto* area = dynamic_cast<TextArea*>(widget)) {
+        area->setText(text);
+        return true;
+    }
+    if (auto* tip = dynamic_cast<Tooltip*>(widget)) {
+        tip->setText(text);
+        return true;
+    }
+    if (auto* window = dynamic_cast<Window*>(widget)) {
+        window->setTitle(text);
+        return true;
+    }
+    if (auto* rich = dynamic_cast<RichText*>(widget)) {
+        rich->clearRuns();
+        if (!text.empty()) rich->addRun(text, rich->getDefaultColor(),
+                                       rich->getDefaultFontSize());
+        return true;
+    }
     return false;
+}
+
+void LayoutEditorSession::applyTextureName(const std::string& textureName) {
+    auto* image = dynamic_cast<Image*>(_selected);
+    if (image == nullptr) return;
+    if (textureName.empty()) {
+        image->setTexture(std::string());
+        markDirty(true);
+        return;
+    }
+
+    ImageTextureHandle preview;
+    if (_texturePreviewLoader) preview = _texturePreviewLoader(textureName);
+    if (preview.handle != nullptr) {
+        preview.name = textureName;
+        image->setTexture(preview);
+        setStatus(L"Texture preview loaded");
+    } else {
+        image->setTexture(textureName);
+        setStatus(L"Texture assigned; preview is unavailable in this host");
+    }
+    markDirty(true);
+}
+
+void LayoutEditorSession::chooseTexture() {
+    if (dynamic_cast<Image*>(_selected) == nullptr) return;
+    if (!_texturePicker) {
+        setStatus(L"No texture picker is configured");
+        return;
+    }
+    const std::string path = _texturePicker();
+    if (path.empty()) return;
+    beginMutation();
+    applyTextureName(path);
+    endMutation();
+    syncPropertyStrip();
+}
+
+void LayoutEditorSession::clearTexture() {
+    if (dynamic_cast<Image*>(_selected) == nullptr) return;
+    beginMutation();
+    applyTextureName({});
+    endMutation();
+    syncPropertyStrip();
 }
 
 bool LayoutEditorSession::hitPaletteType(const math::FVector2& worldPos,
@@ -2762,25 +3839,24 @@ bool LayoutEditorSession::hitPaletteType(const math::FVector2& worldPos,
     if (_ui == nullptr) {
         return false;
     }
-    static const struct {
-        const char* id;
-        const char* type;
-    } kEntries[] = {
-        {"btn_add_button", "Button"},
-        {"btn_add_label", "TextLabel"},
-        {"btn_add_panel", "Panel"},
-        {"btn_add_input", "TextInput"},
-        {"btn_add_checkbox", "CheckBox"},
-        {"btn_add_slider", "Slider"},
-        {"btn_add_scroll", "ScrollView"},
-        {"btn_add_vbox", "VBox"},
-        {"btn_add_hbox", "HBox"},
-    };
-    for (const auto& e : kEntries) {
-        Widget* w = findChromeById(e.id);
+    // The palette content is intentionally much taller than its viewport.
+    // Directly testing each button's world bounds bypassed ScrollView's
+    // clipped hit-test contract, so off-screen entries remained clickable
+    // over Document Outline. Gate this editor-level shortcut by the exact
+    // same client rectangle used by ScrollView rendering and hit testing.
+    auto* paletteScroll = dynamic_cast<ScrollView*>(
+        findChromeById("palette_scroll"));
+    if (paletteScroll == nullptr ||
+        !paletteScroll->getClientRect().contains(worldPos)) {
+        return false;
+    }
+    for (const WidgetAuthoringDescriptor& entry :
+         WidgetAuthoringRegistry::get().descriptors()) {
+        if (entry.paletteButtonId.empty()) continue;
+        Widget* w = findChromeById(entry.paletteButtonId);
         if (w != nullptr && w->isVisible() &&
             w->getWorldBounds().contains(worldPos)) {
-            outType = e.type;
+            outType = entry.typeName;
             return true;
         }
     }
@@ -2841,19 +3917,77 @@ int LayoutEditorSession::hierarchyIndexAt(const math::FVector2& worldPos,
 }
 
 bool LayoutEditorSession::isContainerWidget(Widget* widget) const {
-    return dynamic_cast<CompoundWidget*>(widget) != nullptr;
+    return dynamic_cast<Panel*>(widget) != nullptr ||
+        dynamic_cast<BoxBase*>(widget) != nullptr ||
+        dynamic_cast<GridPanel*>(widget) != nullptr ||
+        dynamic_cast<ScrollView*>(widget) != nullptr ||
+        dynamic_cast<TabControl*>(widget) != nullptr ||
+        dynamic_cast<Modal*>(widget) != nullptr ||
+        dynamic_cast<Window*>(widget) != nullptr;
+}
+
+Widget* LayoutEditorSession::structuredContentOwner(Widget* content) const {
+    if (content == nullptr || _docRoot == nullptr) {
+        return nullptr;
+    }
+
+    // The outline exposes authored content slots instead of implementation
+    // children. Some of those slots (inactive TabControl pages in particular)
+    // are not mounted in the physical Widget tree, so walking getParent()
+    // cannot identify their logical owner. Follow the same semantic tree as
+    // collectHierarchy() and return the control that owns the slot.
+    std::function<Widget*(Widget*)> visit = [&](Widget* node) -> Widget* {
+        if (node == nullptr) return nullptr;
+
+        if (auto* tabs = dynamic_cast<TabControl*>(node)) {
+            for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
+                Widget* page = tabs->getTabContent(i);
+                if (page == content) return tabs;
+                if (Widget* owner = visit(page)) return owner;
+            }
+            return nullptr;
+        }
+        if (auto* dialog = dynamic_cast<ModalDialog*>(node)) {
+            Widget* body = dialog->getBodyContent();
+            if (body == content) return dialog;
+            return visit(body);
+        }
+        if (auto* scroll = dynamic_cast<ScrollView*>(node)) {
+            Widget* scrollContent = scroll->getContent();
+            if (scrollContent == content) return scroll;
+            return visit(scrollContent);
+        }
+        if (auto* modal = dynamic_cast<Modal*>(node)) {
+            Widget* modalContent = modal->getContent();
+            if (modalContent == content) return modal;
+            return visit(modalContent);
+        }
+
+        std::vector<Widget*> children;
+        collectAuthoredChildren(node, children);
+        for (Widget* child : children) {
+            if (Widget* owner = visit(child)) return owner;
+        }
+        return nullptr;
+    };
+    return visit(_docRoot);
 }
 
 bool LayoutEditorSession::isAncestorOf(Widget* ancestor, Widget* node) const {
     if (ancestor == nullptr || node == nullptr || ancestor == node) {
         return false;
     }
-    for (Widget* p = node->getParent(); p != nullptr; p = p->getParent()) {
-        if (p == ancestor) {
-            return true;
+    std::function<bool(Widget*)> contains = [&](Widget* current) {
+        std::vector<Widget*> children;
+        collectAuthoredChildren(current, children);
+        for (Widget* child : children) {
+            if (child == node || contains(child)) {
+                return true;
+            }
         }
-    }
-    return false;
+        return false;
+    };
+    return contains(ancestor);
 }
 
 int LayoutEditorSession::siblingIndexOf(Widget* child) const {
@@ -2866,6 +4000,9 @@ int LayoutEditorSession::siblingIndexOf(Widget* child) const {
     }
     if (auto* box = dynamic_cast<BoxBase*>(parent)) {
         return box->slotIndexOf(child);
+    }
+    if (auto* grid = dynamic_cast<GridPanel*>(parent)) {
+        return designerGridIndexOf(grid, child);
     }
     const auto& kids = parent->getChildren();
     for (size_t i = 0; i < kids.size(); ++i) {
@@ -2901,6 +4038,20 @@ LayoutEditorSession::HierDropTarget LayoutEditorSession::resolveHierDrop(
     out.listIndex = idx;
     out.valid = true;
 
+    // Structured content roots represent a fixed slot (a tab page, modal
+    // body, or scroll content), not an ordinary reorderable child. Dropping
+    // on their outline row means inserting into that root regardless of the
+    // pointer's vertical fraction. Moving the root itself is rejected by the
+    // commit path below.
+    if (structuredContentOwner(target) != nullptr) {
+        if (isContainerWidget(target)) {
+            out.place = DropPlace::Into;
+        } else {
+            out.valid = false;
+        }
+        return out;
+    }
+
     const bool canInto = isContainerWidget(target) && target != dragged &&
                          (dragged == nullptr || !isAncestorOf(dragged, target));
     if (canInto && frac > 0.28f && frac < 0.72f) {
@@ -2922,26 +4073,78 @@ LayoutEditorSession::HierDropTarget LayoutEditorSession::resolveHierDrop(
     return out;
 }
 
-void LayoutEditorSession::detachFromTree(Widget* child) {
+bool LayoutEditorSession::detachFromTree(Widget* child) {
     if (child == nullptr) {
-        return;
+        return false;
+    }
+    // A structured root cannot be detached without changing the control's
+    // authored model (for example, removing a TabControl page). Reordering
+    // such roots is intentionally handled as a separate future operation.
+    if (structuredContentOwner(child) != nullptr) {
+        return false;
     }
     Widget* parent = child->getParent();
     if (parent == nullptr) {
-        return;
+        return false;
     }
     if (auto* box = dynamic_cast<BoxBase*>(parent)) {
         box->removeWidget(child);
+    } else if (auto* grid = dynamic_cast<GridPanel*>(parent)) {
+        const int index = designerGridIndexOf(grid, child);
+        if (index < 0 || grid->getColumnCount() <= 0) return false;
+        grid->clearCell(index / grid->getColumnCount(),
+                        index % grid->getColumnCount());
     } else {
         parent->removeChild(child);
     }
+    return child->getParent() == nullptr;
 }
 
 bool LayoutEditorSession::attachAt(Widget* parent, Widget* child, size_t index) {
     if (parent == nullptr || child == nullptr) {
         return false;
     }
+
+    // Redirect drops on structural controls through their semantic content
+    // slots. This keeps private aliases such as ScrollView::_content and
+    // Modal::_content synchronized with the visible Widget tree.
+    if (auto* scroll = dynamic_cast<ScrollView*>(parent)) {
+        if (Widget* content = scroll->getContent()) {
+            if (!isContainerWidget(content)) return false;
+            return attachAt(content, child, index);
+        }
+        scroll->setContentOwned(child);
+        child->setPosition({0.0f, 0.0f});
+        return scroll->getContent() == child && child->getParent() == scroll;
+    }
+    if (auto* tabs = dynamic_cast<TabControl*>(parent)) {
+        Widget* page = tabs->getTabContent(tabs->getSelectedIndex());
+        if (page == nullptr || !isContainerWidget(page)) return false;
+        return attachAt(page, child, index);
+    }
+    if (auto* dialog = dynamic_cast<ModalDialog*>(parent)) {
+        if (Widget* body = dialog->getBodyContent()) {
+            if (!isContainerWidget(body)) return false;
+            return attachAt(body, child, index);
+        }
+        dialog->setBodyContentOwned(child);
+        child->setPosition({0.0f, 0.0f});
+        return dialog->getBodyContent() == child;
+    }
+    if (auto* modal = dynamic_cast<Modal*>(parent)) {
+        if (Widget* content = modal->getContent()) {
+            if (!isContainerWidget(content)) return false;
+            return attachAt(content, child, index);
+        }
+        modal->setContentOwned(child);
+        child->setPosition({0.0f, 0.0f});
+        return modal->getContent() == child && child->getParent() == modal;
+    }
+    if (!isContainerWidget(parent)) {
+        return false;
+    }
     if (auto* box = dynamic_cast<BoxBase*>(parent)) {
+        child->clearAnchorLayout();
         int slotCount = 0;
         while (box->slotAt(slotCount) != nullptr) {
             ++slotCount;
@@ -2956,6 +4159,10 @@ bool LayoutEditorSession::attachAt(Widget* parent, Widget* child, size_t index) 
         box->insertWidget(insertAt, child, 0.0f);
         return child->getParent() == parent;
     }
+    if (auto* grid = dynamic_cast<GridPanel*>(parent)) {
+        child->clearAnchorLayout();
+        return rebuildDesignerGrid(grid, child, index);
+    }
 
     parent->addChild(child);
     if (child->getParent() != parent) {
@@ -2969,41 +4176,89 @@ bool LayoutEditorSession::attachAt(Widget* parent, Widget* child, size_t index) 
     if (insertAt >= n) {
         insertAt = n - 1;
     }
-    return parent->moveChildToIndex(child, insertAt);
+    const bool moved = parent->moveChildToIndex(child, insertAt);
+    if (moved && child->hasAnchorLayout()) {
+        child->refreshAnchorOffsetsFromCurrentRect();
+    }
+    return moved;
 }
 
 Widget* LayoutEditorSession::createWidgetInstance(const std::string& typeName) {
-    Widget* created = WidgetFactory::get().create(typeName);
-    if (created == nullptr) {
-        return nullptr;
-    }
-    created->setId(makeUniqueId(typePrefix(typeName)));
-    created->setPosition(math::FVector2(24.0f, 24.0f));
-    created->setSize(defaultSizeForType(typeName));
-    if (typeName == "Button") {
-        setTextPayload(created, L"Button");
-    } else if (typeName == "TextLabel") {
-        setTextPayload(created, L"Label");
-    } else if (typeName == "TextInput") {
-        setTextPayload(created, L"");
-    } else if (typeName == "CheckBox") {
-        setTextPayload(created, L"Check");
-    }
-    return created;
+    return WidgetAuthoringRegistry::get().create(
+        typeName, [this](const std::string& prefix, Widget* detachedRoot) {
+            return makeUniqueId(prefix, detachedRoot);
+        });
 }
 
-void LayoutEditorSession::placeNewWidget(Widget* created, Widget* parent,
+bool LayoutEditorSession::placeNewWidget(Widget* created, Widget* parent,
                                          int insertIndex,
                                          const math::FVector2* worldPos) {
     if (created == nullptr || parent == nullptr) {
-        return;
+        return false;
+    }
+    if (auto* scroll = dynamic_cast<ScrollView*>(parent)) {
+        if (Widget* content = scroll->getContent()) {
+            if (!isContainerWidget(content)) {
+                setStatus(L"ScrollView content is not a container");
+                return false;
+            }
+            parent = content;
+        } else {
+            scroll->setContentOwned(created);
+            created->setPosition({0.0f, 0.0f});
+            return true;
+        }
+    }
+    if (auto* tabs = dynamic_cast<TabControl*>(parent)) {
+        Widget* page = tabs->getTabContent(tabs->getSelectedIndex());
+        if (page == nullptr || !isContainerWidget(page)) {
+            setStatus(L"TabControl has no editable content page");
+            return false;
+        }
+        parent = page;
+    }
+    if (auto* dialog = dynamic_cast<ModalDialog*>(parent)) {
+        if (Widget* body = dialog->getBodyContent()) {
+            if (!isContainerWidget(body)) {
+                setStatus(L"ModalDialog body is not a container");
+                return false;
+            }
+            parent = body;
+        } else {
+            dialog->setBodyContentOwned(created);
+            created->setPosition({0.0f, 0.0f});
+            return true;
+        }
+    } else if (auto* modal = dynamic_cast<Modal*>(parent)) {
+        if (Widget* content = modal->getContent()) {
+            if (!isContainerWidget(content)) {
+                setStatus(L"Modal content is not a container");
+                return false;
+            }
+            parent = content;
+        } else {
+            modal->setContentOwned(created);
+            created->setPosition({0.0f, 0.0f});
+            return true;
+        }
+    }
+    if (!isContainerWidget(parent)) {
+        setStatus(L"Selected control cannot contain authored children");
+        return false;
     }
     if (auto* box = dynamic_cast<BoxBase*>(parent)) {
+        created->clearAnchorLayout();
         if (insertIndex < 0) {
             box->addWidget(created, 0.0f);
         } else {
             box->insertWidget(insertIndex, created, 0.0f);
         }
+    } else if (auto* grid = dynamic_cast<GridPanel*>(parent)) {
+        created->clearAnchorLayout();
+        const size_t index = insertIndex < 0
+            ? collectDesignerGridEntries(grid).size()
+            : static_cast<size_t>(insertIndex);
+        if (!rebuildDesignerGrid(grid, created, index)) return false;
     } else {
         parent->addChild(created);
         if (insertIndex >= 0) {
@@ -3014,15 +4269,27 @@ void LayoutEditorSession::placeNewWidget(Widget* created, Widget* parent,
             }
             parent->moveChildToIndex(created, idx);
         }
-        if (worldPos != nullptr &&
-            dynamic_cast<BoxBase*>(parent) == nullptr) {
+        if (worldPos != nullptr) {
             const math::FRectangle pb = parent->getWorldBounds();
             created->setPosition(math::FVector2(
                 worldPos->x - pb.minX, worldPos->y - pb.minY));
             created->setLayoutPositionManaged(false);
+        } else {
+            created->setPosition(nextDesignerFreePosition(parent, created));
+            created->setLayoutPositionManaged(false);
         }
         snapWidgetPosition(created);
+        created->setLayoutSizeManaged(false);
+        if (created->hasAnchorLayout()) {
+            created->refreshAnchorOffsetsFromCurrentRect();
+        } else {
+            created->setAnchorLayoutPreservingRect(
+                math::FVector2(0.0f, 0.0f),
+                math::FVector2(0.0f, 0.0f),
+                math::FVector2(0.0f, 0.0f));
+        }
     }
+    return created->getParent() == parent;
 }
 
 void LayoutEditorSession::commitPaletteDrop(const math::FVector2& worldPos) {
@@ -3037,7 +4304,7 @@ void LayoutEditorSession::commitPaletteDrop(const math::FVector2& worldPos) {
 
     Widget* parent = nullptr;
     int insertIndex = -1;
-    math::FVector2 dropPos = worldPos;
+    math::FVector2 dropPos = screenToDocument(worldPos);
     const math::FVector2* posPtr = &dropPos;
 
     Widget* hit = pickDocumentWidget(worldPos);
@@ -3045,7 +4312,9 @@ void LayoutEditorSession::commitPaletteDrop(const math::FVector2& worldPos) {
         parent = hit;
     } else if (hit != nullptr) {
         Widget* p = hit->getParent();
-        if (p != nullptr && isUnderCanvas(p) && p != _canvasHost) {
+            if (p != nullptr && isUnderCanvas(p) && p != _canvasHost &&
+                p != _canvasViewport &&
+                isContainerWidget(p)) {
             parent = p;
             insertIndex = siblingIndexOf(hit) + 1;
         } else {
@@ -3065,8 +4334,12 @@ void LayoutEditorSession::commitPaletteDrop(const math::FVector2& worldPos) {
         setStatus(utf8ToWide("Unknown type: " + _paletteType));
         return;
     }
-    pushUndo();
-    placeNewWidget(created, parent, insertIndex, posPtr);
+    pushUndo(LayoutEditKind::Insert, "Drop widget");
+    if (!placeNewWidget(created, parent, insertIndex, posPtr)) {
+        _commandStack.discardLastUndo();
+        destroyWidgetTree(created);
+        return;
+    }
     freezeDocumentInteraction(created);
     markDirty(true);
     refreshHierarchy();
@@ -3082,6 +4355,10 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
     Widget* dragged = _hierDragWidget;
     if (dragged == nullptr || dragged == _docRoot) {
         setStatus(L"Reorder cancelled");
+        return;
+    }
+    if (structuredContentOwner(dragged) != nullptr) {
+        setStatus(L"Structured content roots cannot be reordered");
         return;
     }
     HierDropTarget drop = resolveHierDrop(worldPos, dragged);
@@ -3123,24 +4400,29 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
             setStatus(L"No change");
             return;
         }
-        pushUndo();
+        pushUndo(LayoutEditKind::Reorder, "Reorder hierarchy");
         bool ok = false;
         if (auto* box = dynamic_cast<BoxBase*>(newParent)) {
             ok = box->moveSlotToIndex(dragged, static_cast<size_t>(dest));
+        } else if (auto* grid = dynamic_cast<GridPanel*>(newParent)) {
+            ok = rebuildDesignerGrid(grid, dragged,
+                                     static_cast<size_t>(dest));
         } else {
             ok = newParent->moveChildToIndex(dragged,
                                              static_cast<size_t>(dest));
         }
         if (!ok) {
-            if (!_undoStack.empty()) {
-                _undoStack.pop_back();
-            }
+            _commandStack.discardLastUndo();
             setStatus(L"Reorder failed");
             return;
         }
     } else {
-        pushUndo();
-        detachFromTree(dragged);
+        pushUndo(LayoutEditKind::Reorder, "Reparent hierarchy");
+        if (!detachFromTree(dragged)) {
+            _commandStack.discardLastUndo();
+            setStatus(L"Reorder failed");
+            return;
+        }
         size_t dest = 0;
         if (insertIndex < 0) {
             if (auto* box = dynamic_cast<BoxBase*>(newParent)) {
@@ -3169,9 +4451,7 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
                 attachAt(oldParent, dragged,
                          oldIndex >= 0 ? static_cast<size_t>(oldIndex) : 0);
             }
-            if (!_undoStack.empty()) {
-                _undoStack.pop_back();
-            }
+            _commandStack.discardLastUndo();
             setStatus(L"Reorder failed");
             return;
         }
@@ -3395,7 +4675,10 @@ void LayoutEditorSession::showPaletteGhost(const std::string& typeName) {
     if (_paletteGhost == nullptr) {
         return;
     }
-    const math::FVector2 sz = defaultSizeForType(typeName);
+    const WidgetAuthoringDescriptor* descriptor =
+        WidgetAuthoringRegistry::get().find(typeName);
+    const math::FVector2 sz = descriptor != nullptr
+        ? descriptor->defaultSize : math::FVector2(120.0f, 28.0f);
     _paletteGhost->setSize(sz);
     if (_paletteGhostLabel != nullptr) {
         _paletteGhostLabel->setText(utf8ToWide(typeName));
@@ -3431,22 +4714,19 @@ void LayoutEditorSession::hidePaletteGhost() {
 
 void LayoutEditorSession::selectAll() {
     _selection.clear();
-    collectDocumentWidgets(_docRoot, _selection);
-    // Prefer not selecting the document root alone as primary if children exist.
-    _selected = nullptr;
-    for (Widget* w : _selection) {
-        if (w != nullptr && w != _docRoot) {
-            _selected = w;
-            break;
+    std::vector<Widget*> authored;
+    collectDocumentWidgets(_docRoot, authored);
+    for (Widget* widget : authored) {
+        if (widget != nullptr && widget != _docRoot &&
+            isUnderCanvas(widget)) {
+            _selection.push_back(widget);
         }
     }
-    if (_selected == nullptr && !_selection.empty()) {
-        _selected = _selection.front();
-    }
     normalizeSelectionNesting();
-    if (_selected != nullptr && !selectionContains(_selected)) {
-        _selected = _selection.empty() ? nullptr : _selection.back();
+    if (_selection.empty() && _docRoot != nullptr) {
+        _selection.push_back(_docRoot);
     }
+    _selected = _selection.empty() ? nullptr : _selection.back();
     syncPropertyStrip();
     syncHierarchySelection();
     syncSelectionChrome();
@@ -3455,17 +4735,23 @@ void LayoutEditorSession::selectAll() {
     setStatus(oss.str());
 }
 
-void LayoutEditorSession::copySelection() {
-    _clipboardItems.clear();
+std::vector<std::string> LayoutEditorSession::serializeSelectionItems() const {
+    std::vector<std::string> items;
+    UILayoutLoader saver;
     for (Widget* w : _selection) {
         if (w == nullptr || w == _docRoot || isEditorOverlay(w)) {
             continue;
         }
         std::string json;
-        if (_docLoader.saveLayoutToString(w, json, false) && !json.empty()) {
-            _clipboardItems.push_back(std::move(json));
+        if (saver.saveLayoutToString(w, json, false) && !json.empty()) {
+            items.push_back(std::move(json));
         }
     }
+    return items;
+}
+
+void LayoutEditorSession::copySelection() {
+    _clipboardItems = serializeSelectionItems();
     if (_clipboardItems.empty()) {
         setStatus(L"Copy: nothing to copy");
         return;
@@ -3484,39 +4770,42 @@ void LayoutEditorSession::copySelection() {
 }
 
 void LayoutEditorSession::pasteClipboard() {
-    if (_clipboardItems.empty()) {
-        std::wstring clip;
-        if (getClipboard().getText(clip) && !clip.empty()) {
-            const std::string utf8 = wideToUtf8(clip);
-            _clipboardItems.clear();
-            const std::string delim = "\n/*AYUI_CLIP*/\n";
-            size_t start = 0;
-            while (start < utf8.size()) {
-                size_t pos = utf8.find(delim, start);
-                if (pos == std::string::npos) {
-                    _clipboardItems.push_back(utf8.substr(start));
-                    break;
-                }
-                _clipboardItems.push_back(utf8.substr(start, pos - start));
-                start = pos + delim.size();
-            }
+    std::vector<std::string> source = _clipboardItems;
+    std::wstring clip;
+    if (getClipboard().getText(clip)) {
+        source.clear();
+        const std::string utf8 = wideToUtf8(clip);
+        const std::string delim = "\n/*AYUI_CLIP*/\n";
+        size_t start = 0;
+        while (start < utf8.size()) {
+            const size_t pos = utf8.find(delim, start);
+            const std::string item = pos == std::string::npos
+                ? utf8.substr(start) : utf8.substr(start, pos - start);
+            if (!item.empty()) source.push_back(item);
+            if (pos == std::string::npos) break;
+            start = pos + delim.size();
         }
     }
-    if (_clipboardItems.empty()) {
+    if (source.empty()) {
         setStatus(L"Paste: clipboard empty");
         return;
     }
+    _clipboardItems = source;
+    pasteSerializedItems(source);
+}
 
+void LayoutEditorSession::pasteSerializedItems(
+    const std::vector<std::string>& items) {
     Widget* parent = pickParentForAdd();
     if (parent == nullptr) {
         setStatus(L"Paste: no parent");
         return;
     }
 
-    pushUndo();
+    pushUndo(LayoutEditKind::Clipboard, "Paste");
     std::vector<Widget*> pasted;
     float offset = 16.0f;
-    for (const std::string& json : _clipboardItems) {
+    for (const std::string& json : items) {
         Widget* created = _docLoader.loadFromString(json);
         if (created == nullptr) {
             continue;
@@ -3526,15 +4815,17 @@ void LayoutEditorSession::pasteClipboard() {
         pos.x += offset;
         pos.y += offset;
         created->setPosition(pos);
-        placeNewWidget(created, parent, -1, nullptr);
+        if (!placeNewWidget(created, parent, -1, nullptr)) {
+            destroyWidgetTree(created);
+            continue;
+        }
         freezeDocumentInteraction(created);
+        rehydrateRuntimePresentation(created);
         pasted.push_back(created);
         offset += 8.0f;
     }
     if (pasted.empty()) {
-        if (!_undoStack.empty()) {
-            _undoStack.pop_back();
-        }
+        _commandStack.discardLastUndo();
         setStatus(L"Paste failed");
         return;
     }
@@ -3555,11 +4846,12 @@ void LayoutEditorSession::pasteClipboard() {
 }
 
 void LayoutEditorSession::duplicateSelection() {
-    copySelection();
-    if (_clipboardItems.empty()) {
+    const std::vector<std::string> items = serializeSelectionItems();
+    if (items.empty()) {
+        setStatus(L"Duplicate: nothing to duplicate");
         return;
     }
-    pasteClipboard();
+    pasteSerializedItems(items);
     setStatus(L"Duplicated");
 }
 
@@ -3567,26 +4859,36 @@ void LayoutEditorSession::nudgeSelection(float dx, float dy) {
     if (_selection.empty()) {
         return;
     }
-    beginMutation();
+    const std::size_t undoDepthBefore = _commandStack.undoDepth();
+    beginMutation(LayoutEditKind::Transform, "Nudge selection");
     bool moved = false;
     for (Widget* w : _selection) {
-        if (w == nullptr || w == _docRoot) {
+        if (w == nullptr || w == _docRoot ||
+            structuredContentOwner(w) != nullptr) {
             continue;
         }
         if (w->getParent() != nullptr &&
-            dynamic_cast<BoxBase*>(w->getParent()) != nullptr) {
+            (dynamic_cast<BoxBase*>(w->getParent()) != nullptr ||
+             dynamic_cast<GridPanel*>(w->getParent()) != nullptr)) {
             continue;
         }
         math::FVector2 pos = w->getPosition();
         pos.x += dx;
         pos.y += dy;
         w->setPosition(pos);
+        refreshAnchorOffsets(w);
         moved = true;
     }
     endMutation();
     if (!moved) {
+        if (_commandStack.undoDepth() > undoDepthBefore) {
+            _commandStack.discardLastUndo();
+        }
         if (_selected == _docRoot && _selection.size() == 1u) {
             setStatus(L"Document root position is fixed");
+        } else if (_selected != nullptr &&
+                   structuredContentOwner(_selected) != nullptr) {
+            setStatus(L"Structured content position is fixed by its owner");
         } else {
             setStatus(L"Nudge: no free-position widgets in selection");
         }
@@ -3609,27 +4911,24 @@ void LayoutEditorSession::toggleSnap() {
 }
 
 void LayoutEditorSession::setViewZoom(float zoom,
-                                      const math::FVector2& /*pivotWorld*/) {
+                                      const math::FVector2& pivotWorld) {
     zoom = (std::max)(0.25f, (std::min)(4.0f, zoom));
-    if (_docRoot == nullptr || std::fabs(zoom - _viewZoom) < 0.0001f) {
+    if (std::fabs(zoom - _viewZoom) < 0.0001f) {
         _viewZoom = zoom;
         return;
     }
-    const float factor = zoom / _viewZoom;
+    const math::FVector2 documentPivot = screenToDocument(pivotWorld);
     _viewZoom = zoom;
-
-    // The document root is the immutable authoring origin. Scaling around
-    // the pointer used to rewrite its X/Y values, so every wheel notch made
-    // a selected root drift diagonally. Keep the root's top-left anchor
-    // fixed; only document extents and descendants participate in zoom.
-    scaleDocumentTree(_docRoot, factor);
-
-    markDirty(true);
-    syncSelectionChrome();
-    if (_ui != nullptr) {
-        _ui->invalidateLayout();
-        _ui->layout();
+    if (_canvasViewport != nullptr) {
+        const math::FRectangle viewportBounds =
+            _canvasViewport->getWorldBounds();
+        _viewPan.x = pivotWorld.x - viewportBounds.minX -
+            (documentPivot.x - viewportBounds.minX) * _viewZoom;
+        _viewPan.y = pivotWorld.y - viewportBounds.minY -
+            (documentPivot.y - viewportBounds.minY) * _viewZoom;
     }
+    applyViewportTransform();
+    syncSelectionChrome();
     std::wostringstream oss;
     oss << L"Zoom " << static_cast<int>(_viewZoom * 100.0f + 0.5f) << L"%";
     setStatus(oss.str());
@@ -3709,6 +5008,7 @@ void LayoutEditorSession::bindBoolCombo(ComboBox*& slot, const char* id,
         }
         beginMutation();
         applyProperty(fieldName, index == 1 ? L"true" : L"false");
+        endMutation();
     });
 }
 
@@ -3741,6 +5041,7 @@ void LayoutEditorSession::bindGravityCombo() {
         };
         beginMutation();
         applyProperty("gravity", utf8ToWide(kG[index]));
+        endMutation();
     });
 }
 
@@ -3752,10 +5053,14 @@ void LayoutEditorSession::syncEnumCombos() {
 
     if (auto* cb = dynamic_cast<CheckBox*>(_selected)) {
         checkedIdx = cb->isChecked() ? 1 : 0;
+    } else if (auto* radio = dynamic_cast<RadioButton*>(_selected)) {
+        checkedIdx = radio->isChecked() ? 1 : 0;
     }
     if (auto* ti = dynamic_cast<TextInput*>(_selected)) {
         passwordIdx = ti->isPasswordMode() ? 1 : 0;
         readOnlyIdx = ti->isReadOnly() ? 1 : 0;
+    } else if (auto* area = dynamic_cast<TextArea*>(_selected)) {
+        readOnlyIdx = area->isReadOnly() ? 1 : 0;
     }
     if (auto* box = dynamic_cast<BoxBase*>(_selected)) {
         switch (box->getGravity()) {
@@ -3812,17 +5117,20 @@ float LayoutEditorSession::snapValue(float v) const {
 }
 
 void LayoutEditorSession::snapWidgetPosition(Widget* w) {
-    if (w == nullptr || !_snapEnabled) {
+    if (w == nullptr || !_snapEnabled ||
+        structuredContentOwner(w) != nullptr) {
         return;
     }
     if (w->getParent() != nullptr &&
-        dynamic_cast<BoxBase*>(w->getParent()) != nullptr) {
+        (dynamic_cast<BoxBase*>(w->getParent()) != nullptr ||
+         dynamic_cast<GridPanel*>(w->getParent()) != nullptr)) {
         return;
     }
     math::FVector2 pos = w->getPosition();
     pos.x = snapValue(pos.x);
     pos.y = snapValue(pos.y);
     w->setPosition(pos);
+    refreshAnchorOffsets(w);
 }
 
 void LayoutEditorSession::snapSelectionPositions() {
@@ -3849,7 +5157,9 @@ void LayoutEditorSession::remintTreeIds(Widget* root) {
             }
         }
         n->setId(makeUniqueId(prefix));
-        for (Widget* c : n->getChildren()) {
+        std::vector<Widget*> children;
+        collectAuthoredChildren(n, children);
+        for (Widget* c : children) {
             walk(c);
         }
     };
@@ -3862,38 +5172,10 @@ void LayoutEditorSession::collectDocumentWidgets(
         return;
     }
     out.push_back(node);
-    for (Widget* c : node->getChildren()) {
+    std::vector<Widget*> children;
+    collectAuthoredChildren(node, children);
+    for (Widget* c : children) {
         collectDocumentWidgets(c, out);
-    }
-}
-
-void LayoutEditorSession::scaleDocumentTree(Widget* node, float factor) {
-    if (node == nullptr || isEditorOverlay(node)) {
-        return;
-    }
-    for (Widget* c : node->getChildren()) {
-        if (c == nullptr || isEditorOverlay(c)) {
-            continue;
-        }
-        if (!c->isLayoutPositionManaged()) {
-            math::FVector2 p = c->getPosition();
-            p.x *= factor;
-            p.y *= factor;
-            c->setPosition(p);
-        }
-        if (!c->isLayoutSizeManaged()) {
-            math::FVector2 s = c->getSize();
-            s.x *= factor;
-            s.y *= factor;
-            c->setSize(s);
-        }
-        scaleDocumentTree(c, factor);
-    }
-    if (!node->isLayoutSizeManaged() && node == _docRoot) {
-        math::FVector2 s = node->getSize();
-        s.x *= factor;
-        s.y *= factor;
-        node->setSize(s);
     }
 }
 
@@ -3967,17 +5249,22 @@ void LayoutEditorSession::clearMarqueeChrome() {
 void LayoutEditorSession::commitMarquee(const math::FVector2& a,
                                         const math::FVector2& b,
                                         bool additive) {
-    math::FRectangle box(
-        (std::min)(a.x, b.x), (std::min)(a.y, b.y),
-        (std::max)(a.x, b.x), (std::max)(a.y, b.y));
-    if (box.width() < 3.0f && box.height() < 3.0f) {
+    if (std::fabs(a.x - b.x) < 3.0f && std::fabs(a.y - b.y) < 3.0f) {
         return;
     }
+    const math::FVector2 documentA = screenToDocument(a);
+    const math::FVector2 documentB = screenToDocument(b);
+    math::FRectangle box(
+        (std::min)(documentA.x, documentB.x),
+        (std::min)(documentA.y, documentB.y),
+        (std::max)(documentA.x, documentB.x),
+        (std::max)(documentA.y, documentB.y));
     std::vector<Widget*> hits;
     std::vector<Widget*> all;
     collectDocumentWidgets(_docRoot, all);
     for (Widget* w : all) {
-        if (w == nullptr || w == _docRoot || isEditorOverlay(w)) {
+        if (w == nullptr || w == _docRoot || isEditorOverlay(w) ||
+            !isUnderCanvas(w)) {
             continue;
         }
         const math::FRectangle wb = w->getWorldBounds();

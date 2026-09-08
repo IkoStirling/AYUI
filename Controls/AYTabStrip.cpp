@@ -36,6 +36,14 @@ void TabStrip::addTab(const std::wstring& label) {
     }
 }
 
+bool TabStrip::setTabLabel(int index, const std::wstring& label) {
+    if (index < 0 || index >= static_cast<int>(_labels.size())) return false;
+    _labels[static_cast<size_t>(index)] = label;
+    ensureButtonsCreated();
+    markDirty();
+    return true;
+}
+
 void TabStrip::removeTab(int index) {
     if (index < 0 || index >= static_cast<int>(_labels.size())) return;
     _labels.erase(_labels.begin() + index);

@@ -51,6 +51,10 @@ public:
 
     int  getSelectedIndex() const { return _selectedIndex; }
     void setSelectedIndex(int index);
+    // Host-driven selection that follows the same notification contract as a
+    // committed popup row. Plain setSelectedIndex remains the silent model
+    // synchronization path used during layout/property refresh.
+    void setSelectedIndexAndNotify(int index);
     const std::wstring& getSelectedItem() const;
 
     // Popup control.
@@ -121,6 +125,7 @@ public:
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    void renderChildren(IRenderBackend& renderer) override;
 
 protected:
     void layoutChildren() override;

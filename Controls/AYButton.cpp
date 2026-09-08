@@ -70,7 +70,9 @@ math::FRectangle Button::getTextBounds() const {
 // so vertical-grow containers don't keep extending it.
 math::FVector2 Button::getPreferredSize() const {
     constexpr float kMinButtonHeight = 24.0f;
-    const float textW = measurePrefixWidth(_text, _text.size());
+    const int fontSize = resolveTextFontSize(getStyleId(), 14);
+    const float textW = measurePrefixWidth(
+        _text, _text.size(), nullptr, fontSize);
     const float preferredH = std::max(kMinButtonHeight, getHeight());
     const float iconW = _iconDocument != nullptr
         ? _iconSize + (_text.empty() ? 0.0f : _iconGap) : 0.0f;
@@ -100,7 +102,7 @@ void Button::onRender(IRenderBackend& renderer) {
         }
         renderer.drawRoundedRect(bounds, background, style.cornerRadius);
         renderer.drawBorderRect(bounds,
-                                math::FVector4(0.12f, 0.12f, 0.12f, 1.0f),
+                                style.borderColor,
                                 style.borderWidth, style.cornerRadius);
     } else {
         // Hardcoded fallback (R-1 + pre-R-1 behavior). Hover is a restrained
@@ -160,9 +162,21 @@ void Button::onRender(IRenderBackend& renderer) {
     }
 
     if (!_text.empty()) {
-        math::FVector4 textColor = isEnabled() ? math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)
-                                                : math::FVector4(0.55f, 0.55f, 0.55f, 1.0f);
-        renderer.drawText(getTextBounds(), _text, 14, textColor);
+        const int fontSize = resolveTextFontSize(getStyleId(), 14);
+        math::FVector4 textColor = resolveTextColor(
+            getStyleId(), this,
+            isEnabled() ? math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)
+                        : math::FVector4(0.55f, 0.55f, 0.55f, 1.0f));
+        if (!isEnabled() && !getStyleId().empty()) {
+            textColor.w *= 0.55f;
+        }
+        const math::FRectangle textBounds = getTextBounds();
+        if (textBounds.maxX > textBounds.minX
+            && textBounds.maxY > textBounds.minY) {
+            renderer.pushClip(textBounds);
+            renderer.drawText(textBounds, _text, fontSize, textColor);
+            renderer.popClip();
+        }
     }
 }
 

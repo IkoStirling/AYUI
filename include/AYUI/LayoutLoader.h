@@ -53,6 +53,13 @@ public:
 
     void bindEvent(const std::string& widgetId, const std::string& eventType,
                    std::function<void()> handler);
+    // Name-based bindings used by declarative controller metadata. Resolution
+    // order is widget-id/event (legacy), controller/handler, then handler.
+    void bindControllerEvent(const std::string& controllerId,
+                             const std::string& handlerName,
+                             std::function<void()> handler);
+    void bindHandler(const std::string& handlerName,
+                     std::function<void()> handler);
     void clearEventBindings();
     void clearWidgetRegistry();
 

@@ -23,7 +23,18 @@ using nlohmann::json;
 #include "AYUI/ScrollView.h"
 #include "AYUI/Slider.h"
 #include "AYUI/CheckBox.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/InteractiveWidget.h"
 #include "AYUI/ProgressBar.h"
+#include "AYUI/Panel.h"
+#include "AYUI/RichText.h"
+#include "AYUI/Separator.h"
+#include "AYUI/TabControl.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/TreeView.h"
+#include "AYUI/Modal.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/Dimmer.h"
 #include "AYUI/DockArea.h"
 #include "AYUI/DockCard.h"
 #include "AYUI/DockOverlay.h"
@@ -36,11 +47,25 @@ using nlohmann::json;
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <codecvt>
 #include <cstring>
+#include <filesystem>
 #include <locale>
 #include <string>
 #include <vector>
+
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <Windows.h>
+#endif
 
 #if defined(_DEBUG) && defined(_MSC_VER)
 #  include <crtdbg.h>
@@ -364,16 +389,49 @@ bool UILayoutLoader::saveLayout(const std::string& filepath, Widget* root, bool 
     std::string jsonStr;
     if (!saveLayoutToString(root, jsonStr, pretty)) return false;
 
-    std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
+    namespace fs = std::filesystem;
+    const fs::path target = fs::u8path(filepath);
+    static std::atomic<uint64_t> sequence{0};
+    const uint64_t stamp = static_cast<uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    fs::path temporary = target;
+    temporary += ".tmp." + std::to_string(stamp) + "." +
+                 std::to_string(sequence.fetch_add(1, std::memory_order_relaxed));
+
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
     if (!file.is_open()) {
         std::fprintf(stderr, "[UILayoutLoader] save error: cannot open '%s' for write\n",
                      filepath.c_str());
         return false;
     }
     file.write(jsonStr.data(), static_cast<std::streamsize>(jsonStr.size()));
-    if (!file.good()) {
+    file.flush();
+    const bool writeOk = file.good();
+    file.close();
+    if (!writeOk || file.fail()) {
         std::fprintf(stderr, "[UILayoutLoader] save error: write to '%s' failed\n",
                      filepath.c_str());
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+        return false;
+    }
+
+    bool replaced = false;
+#if defined(_WIN32)
+    replaced = ::MoveFileExW(
+        temporary.c_str(), target.c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+#else
+    std::error_code renameError;
+    fs::rename(temporary, target, renameError);
+    replaced = !renameError;
+#endif
+    if (!replaced) {
+        std::fprintf(stderr,
+                     "[UILayoutLoader] save error: cannot atomically replace '%s'\n",
+                     filepath.c_str());
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
         return false;
     }
     return true;
@@ -435,6 +493,18 @@ void UILayoutLoader::bindEvent(const std::string& widgetId, const std::string& e
                                 std::function<void()> handler) {
     std::string key = widgetId + "." + eventType;
     _eventBindings[key] = handler;
+}
+
+void UILayoutLoader::bindControllerEvent(const std::string& controllerId,
+                                         const std::string& handlerName,
+                                         std::function<void()> handler) {
+    _eventBindings["@controller." + controllerId + "." + handlerName] =
+        std::move(handler);
+}
+
+void UILayoutLoader::bindHandler(const std::string& handlerName,
+                                 std::function<void()> handler) {
+    _eventBindings["@handler." + handlerName] = std::move(handler);
 }
 
 void UILayoutLoader::clearEventBindings() {
@@ -529,6 +599,31 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         LOADER_HEAP_CHECK("after_set_size");
     }
 
+    // Responsive free-layout anchors. Offsets are signed deltas from the
+    // normalized parent anchor points to the child's near/far edges. Their
+    // presence makes both axes anchor-managed rather than Box/Grid-managed.
+    if (j.contains("anchors") && j["anchors"].is_object()) {
+        const json& anchors = j["anchors"];
+        AnchorLayout layout;
+        auto readVec2 = [&anchors](const char* key,
+                                   const math::FVector2& fallback) {
+            math::FVector2 value = fallback;
+            if (anchors.contains(key) && anchors[key].is_object()) {
+                value.x = anchors[key].value("x", value.x);
+                value.y = anchors[key].value("y", value.y);
+            }
+            return value;
+        };
+        layout.anchorMin = readVec2("min", layout.anchorMin);
+        layout.anchorMax = readVec2("max", layout.anchorMax);
+        layout.offsetMin = readVec2("offsetMin", layout.offsetMin);
+        layout.offsetMax = readVec2("offsetMax", layout.offsetMax);
+        layout.pivot = readVec2("pivot", layout.pivot);
+        widget->setAnchorLayout(layout);
+        widget->setLayoutPositionManaged(false);
+        widget->setLayoutSizeManaged(false);
+    }
+
     // Visible
     widget->setVisible(j.value("visible", true));
 
@@ -536,6 +631,22 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     std::string style = j.value("style", "");
     if (!style.empty()) {
         widget->setStyleId(style);
+    }
+
+    // Declarative interaction metadata is retained even when the current
+    // host has not registered a controller. This is essential for editor
+    // round-trips and lets tools inspect a layout without game code loaded.
+    widget->setControllerId(j.value("controller", ""));
+    if (j.contains("events") && j["events"].is_object()) {
+        for (auto it = j["events"].begin(); it != j["events"].end(); ++it) {
+            if (it.value().is_string()) {
+                widget->setEventBinding(it.key(), it.value().get<std::string>());
+            }
+        }
+    }
+    if (j.contains("onClick") && j["onClick"].is_string() &&
+        widget->getEventBinding("onClick").empty()) {
+        widget->setEventBinding("onClick", j["onClick"].get<std::string>());
     }
 
     if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
@@ -649,6 +760,9 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     }
 
     if (Window* window = dynamic_cast<Window*>(widget)) {
+        if (j.contains("title") && j["title"].is_string()) {
+            window->setTitle(utf8ToWide(j["title"].get<std::string>()));
+        }
         if (j.contains("movable")) {
             window->setMovable(j["movable"].get<bool>());
         }
@@ -710,6 +824,124 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         }
     }
 
+    // Keep the production loader aligned with WidgetSerializer for the
+    // authorable leaf controls. The layout editor saves through the
+    // serializer but re-opens through this loader, so dropping any of these
+    // fields makes a successful save appear to work until the next open.
+    if (RadioButton* radio = dynamic_cast<RadioButton*>(widget)) {
+        if (j.contains("checked")) {
+            radio->setChecked(j["checked"].get<bool>());
+        }
+        if (j.contains("groupId")) {
+            radio->setGroupId(j["groupId"].get<int>());
+        }
+    }
+    if (TextInput* input = dynamic_cast<TextInput*>(widget)) {
+        if (j.contains("password")) {
+            input->setPasswordMode(j["password"].get<bool>());
+        }
+        if (j.contains("readOnly")) {
+            input->setReadOnly(j["readOnly"].get<bool>());
+        }
+        if (j.contains("maxLength")) {
+            input->setMaxLength(static_cast<size_t>(
+                std::max(0, j["maxLength"].get<int>())));
+        }
+        if (j.contains("hAlign")) {
+            const int align = j["hAlign"].get<int>();
+            input->setHAlign(align == 1 ? TextInput::HAlign::Center
+                             : align == 2 ? TextInput::HAlign::Right
+                                          : TextInput::HAlign::Left);
+        }
+    }
+    if (TextArea* area = dynamic_cast<TextArea*>(widget)) {
+        if (j.contains("readOnly")) {
+            area->setReadOnly(j["readOnly"].get<bool>());
+        }
+        if (j.contains("maxLength")) {
+            area->setMaxLength(static_cast<size_t>(
+                std::max(0, j["maxLength"].get<int>())));
+        }
+        if (j.contains("lineHeight")) {
+            area->setLineHeight(j["lineHeight"].get<float>());
+        }
+    }
+    if (TextLabel* label = dynamic_cast<TextLabel*>(widget)) {
+        if (j.contains("fontSize")) {
+            label->setFontSize(j["fontSize"].get<int>());
+        }
+        if (j.contains("hAlign")) {
+            if (j["hAlign"].is_string()) {
+                const std::string align = j["hAlign"].get<std::string>();
+                label->setHorizontalAlignment(
+                    align == "Center" ? TextLabel::HAlignment::Center
+                    : align == "Right" ? TextLabel::HAlignment::Right
+                                       : TextLabel::HAlignment::Left);
+            } else if (j["hAlign"].is_number_integer()) {
+                const int align = j["hAlign"].get<int>();
+                label->setHorizontalAlignment(
+                    align == 1 ? TextLabel::HAlignment::Center
+                    : align == 2 ? TextLabel::HAlignment::Right
+                                 : TextLabel::HAlignment::Left);
+            }
+        }
+        if (j.contains("vAlign")) {
+            if (j["vAlign"].is_string()) {
+                const std::string align = j["vAlign"].get<std::string>();
+                label->setVerticalAlignment(
+                    (align == "Center" || align == "Middle")
+                        ? TextLabel::VAlignment::Center
+                    : align == "Bottom" ? TextLabel::VAlignment::Bottom
+                                        : TextLabel::VAlignment::Top);
+            } else if (j["vAlign"].is_number_integer()) {
+                const int align = j["vAlign"].get<int>();
+                label->setVerticalAlignment(
+                    align == 1 ? TextLabel::VAlignment::Center
+                    : align == 2 ? TextLabel::VAlignment::Bottom
+                                 : TextLabel::VAlignment::Top);
+            }
+        }
+    }
+    if (Panel* panel = dynamic_cast<Panel*>(widget)) {
+        if (j.contains("borderEnabled")) {
+            panel->setBorderEnabled(j["borderEnabled"].get<bool>());
+        }
+        if (j.contains("backgroundEnabled")) {
+            panel->setBackgroundEnabled(j["backgroundEnabled"].get<bool>());
+        }
+        if (j.contains("padding") && j["padding"].is_object()) {
+            panel->setPadding(math::FVector4(
+                j["padding"].value("left", 0.0f),
+                j["padding"].value("top", 0.0f),
+                j["padding"].value("right", 0.0f),
+                j["padding"].value("bottom", 0.0f)));
+        }
+    }
+    if (Tooltip* tooltip = dynamic_cast<Tooltip*>(widget)) {
+        if (j.contains("hoverDelay")) {
+            tooltip->setHoverDelay(j["hoverDelay"].get<float>());
+        }
+    }
+    if (Separator* separator = dynamic_cast<Separator*>(widget)) {
+        if (j.contains("orientation") && j["orientation"].is_string()) {
+            separator->setOrientation(j["orientation"].get<std::string>() == "vertical"
+                ? Separator::Orientation::Vertical
+                : Separator::Orientation::Horizontal);
+        }
+        if (j.contains("color") && j["color"].is_object()) {
+            const auto& color = j["color"];
+            separator->setColor(math::FVector4(
+                color.value("r", 1.0f), color.value("g", 1.0f),
+                color.value("b", 1.0f), color.value("a", 1.0f)));
+        }
+        if (j.contains("thickness")) {
+            separator->setThickness(j["thickness"].get<float>());
+        }
+        if (j.contains("inset")) {
+            separator->setInset(j["inset"].get<float>());
+        }
+    }
+
     // LayoutLoader is the path used by Editor shell JSON. Keep ScrollView's
     // single-content wire format symmetric with WidgetSerializer; treating
     // `content` as an ordinary child leaves ScrollView::_content null, so the
@@ -756,6 +988,228 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
             scroll->setScrollOffset(math::FVector2(
                 j["scrollOffset"].value("x", 0.0f),
                 j["scrollOffset"].value("y", 0.0f)));
+        }
+    }
+
+    // Tab and modal controls own structured payloads that are deliberately
+    // not emitted as ordinary children[]. Build them through buildWidgetTree
+    // (rather than WidgetSerializer::deserialize) so every nested authored ID
+    // is registered in this loader and receives declarative event bindings.
+    if (TabControl* tabs = dynamic_cast<TabControl*>(widget)) {
+        if (j.contains("tabs") && j["tabs"].is_array()) {
+            for (const auto& tabJson : j["tabs"]) {
+                if (!tabJson.is_object()) continue;
+                Widget* content = nullptr;
+                if (tabJson.contains("content")
+                    && tabJson["content"].is_object()) {
+                    content = buildWidgetTree(JsonHandle(
+                        const_cast<json*>(&tabJson["content"])));
+                }
+                tabs->addTabOwned(utf8ToWide(
+                    tabJson.value("label", std::string())), content);
+            }
+        }
+        if (j.contains("selectedIndex")) {
+            tabs->setSelectedIndex(j["selectedIndex"].get<int>());
+        }
+        if (j.contains("headerHeight")) {
+            tabs->setHeaderHeight(j["headerHeight"].get<float>());
+        }
+    }
+    if (TabStrip* strip = dynamic_cast<TabStrip*>(widget)) {
+        if (j.contains("tabs") && j["tabs"].is_array()) {
+            for (const auto& tabJson : j["tabs"]) {
+                if (tabJson.is_string()) {
+                    strip->addTab(utf8ToWide(tabJson.get<std::string>()));
+                }
+            }
+        }
+        if (j.contains("selectedIndex")) {
+            strip->setSelectedIndex(j["selectedIndex"].get<int>());
+        }
+        if (j.contains("tabHeight")) {
+            strip->setTabHeight(j["tabHeight"].get<float>());
+        }
+        if (j.contains("spacing")) {
+            strip->setSpacing(j["spacing"].get<float>());
+        }
+        if (j.contains("indicatorTweenMs")) {
+            strip->setIndicatorTweenMs(j["indicatorTweenMs"].get<float>());
+        }
+        if (j.contains("overflowMode")) {
+            const int mode = j["overflowMode"].get<int>();
+            if (mode >= 0
+                && mode <= static_cast<int>(TabStrip::OverflowMode::Clip)) {
+                strip->setOverflowMode(
+                    static_cast<TabStrip::OverflowMode>(mode));
+            }
+        }
+        if (j.contains("minTabWidth")) {
+            strip->setMinTabWidth(j["minTabWidth"].get<float>());
+        }
+    }
+
+    const auto restoreModalBase = [&j](Modal* modal) {
+        if (j.contains("dismissOnDimmerClick")) {
+            modal->setDismissOnDimmerClick(
+                j["dismissOnDimmerClick"].get<bool>());
+        }
+        if (j.contains("dimmer") && j["dimmer"].is_object()) {
+            const auto& dimmerJson = j["dimmer"];
+            auto* dimmer = new Dimmer();
+            if (dimmerJson.contains("scrimColor")
+                && dimmerJson["scrimColor"].is_object()) {
+                const auto& color = dimmerJson["scrimColor"];
+                dimmer->setScrimColor(math::FVector4(
+                    color.value("r", 0.0f), color.value("g", 0.0f),
+                    color.value("b", 0.0f), color.value("a", 0.5f)));
+            }
+            modal->setDimmerOwned(dimmer);
+        }
+    };
+    if (ModalDialog* dialog = dynamic_cast<ModalDialog*>(widget)) {
+        restoreModalBase(dialog);
+        if (j.contains("acceptText")) {
+            dialog->setAcceptText(
+                utf8ToWide(j["acceptText"].get<std::string>()));
+        }
+        if (j.contains("rejectText")) {
+            dialog->setRejectText(
+                utf8ToWide(j["rejectText"].get<std::string>()));
+        }
+        if (j.contains("bodyContent") && j["bodyContent"].is_object()) {
+            if (Widget* body = buildWidgetTree(JsonHandle(
+                    const_cast<json*>(&j["bodyContent"])))) {
+                dialog->setBodyContentOwned(body);
+            }
+        }
+    } else if (Modal* modal = dynamic_cast<Modal*>(widget)) {
+        restoreModalBase(modal);
+        if (j.contains("content") && j["content"].is_object()) {
+            if (Widget* content = buildWidgetTree(JsonHandle(
+                    const_cast<json*>(&j["content"])))) {
+                modal->setContentOwned(content);
+            }
+        }
+    }
+
+    if (TreeView* tree = dynamic_cast<TreeView*>(widget)) {
+        if (j.contains("tree") && j["tree"].is_array()) {
+            std::vector<TreeNodeData> nodes;
+            nodes.reserve(j["tree"].size());
+            for (const auto& nodeJson : j["tree"]) {
+                if (!nodeJson.is_object()) continue;
+                TreeNodeData node;
+                node.label = utf8ToWide(
+                    nodeJson.value("label", std::string()));
+                node.icon = utf8ToWide(
+                    nodeJson.value("icon", std::string()));
+                node.hasChildren = nodeJson.value("hasChildren", false);
+                node.expanded = nodeJson.value("expanded", false);
+                node.parentIndex = nodeJson.value("parentIndex", -1);
+                nodes.push_back(std::move(node));
+            }
+            tree->setTree(nodes);
+        }
+        if (j.contains("selectedIndex")) {
+            tree->setSelectedIndex(j["selectedIndex"].get<int>());
+        }
+        if (j.contains("itemHeight")) {
+            tree->setItemHeight(j["itemHeight"].get<float>());
+        }
+    }
+
+    if (RichText* rich = dynamic_cast<RichText*>(widget)) {
+        rich->clearRuns();
+        if (j.contains("defaultColor") && j["defaultColor"].is_object()) {
+            const auto& color = j["defaultColor"];
+            rich->setDefaultColor(math::FVector4(
+                color.value("r", 1.0f), color.value("g", 1.0f),
+                color.value("b", 1.0f), color.value("a", 1.0f)));
+        }
+        if (j.contains("defaultFontSize")) {
+            rich->setDefaultFontSize(j["defaultFontSize"].get<int>());
+        }
+        if (j.contains("wrapWidth")) {
+            rich->setWrapWidth(j["wrapWidth"].get<float>());
+        }
+        if (j.contains("wrapMode")) {
+            const int value = j["wrapMode"].get<int>();
+            if (value >= 0
+                && value <= static_cast<int>(RichTextWrapMode::Character)) {
+                rich->setWrapMode(static_cast<RichTextWrapMode>(value));
+            }
+        }
+        if (j.contains("alignment")) {
+            const int value = j["alignment"].get<int>();
+            if (value >= 0
+                && value <= static_cast<int>(RichTextAlignment::Justify)) {
+                rich->setAlignment(static_cast<RichTextAlignment>(value));
+            }
+        }
+        if (j.contains("verticalAlignment")) {
+            const int value = j["verticalAlignment"].get<int>();
+            if (value >= 0 && value <= static_cast<int>(
+                    RichTextVerticalAlignment::Bottom)) {
+                rich->setVerticalAlignment(
+                    static_cast<RichTextVerticalAlignment>(value));
+            }
+        }
+        if (j.contains("overflow")) {
+            const int value = j["overflow"].get<int>();
+            if (value >= 0
+                && value <= static_cast<int>(RichTextOverflow::Ellipsis)) {
+                rich->setOverflow(static_cast<RichTextOverflow>(value));
+            }
+        }
+        if (j.contains("lineHeight")) {
+            rich->setLineHeight(j["lineHeight"].get<float>());
+        }
+        if (j.contains("lineSpacing")) {
+            rich->setLineSpacing(j["lineSpacing"].get<float>());
+        }
+        if (j.contains("maxLines")) {
+            rich->setMaxLines(j["maxLines"].get<size_t>());
+        }
+        if (j.contains("textDirection")) {
+            const int value = j["textDirection"].get<int>();
+            if (value >= 0
+                && value <= static_cast<int>(TextDirection::RightToLeft)) {
+                rich->setTextDirection(static_cast<TextDirection>(value));
+            }
+        }
+        if (j.contains("runs") && j["runs"].is_array()) {
+            for (const auto& runJson : j["runs"]) {
+                if (!runJson.is_object() || !runJson.contains("text")) continue;
+                RichRun run;
+                run.text = utf8ToWide(runJson["text"].get<std::string>());
+                run.color = rich->getDefaultColor();
+                run.fontSize = rich->getDefaultFontSize();
+                if (runJson.contains("color")
+                    && runJson["color"].is_object()) {
+                    const auto& color = runJson["color"];
+                    run.color = math::FVector4(
+                        color.value("r", 1.0f), color.value("g", 1.0f),
+                        color.value("b", 1.0f), color.value("a", 1.0f));
+                }
+                if (runJson.contains("fontSize")) {
+                    run.fontSize = runJson["fontSize"].get<int>();
+                }
+                if (runJson.contains("fontFamily")) {
+                    run.fontFamily = utf8ToWide(
+                        runJson["fontFamily"].get<std::string>());
+                }
+                run.fontWeight = std::clamp(
+                    runJson.value("fontWeight", 400), 100, 900);
+                run.language = runJson.value("language", std::string());
+                run.bold = runJson.value("bold", false);
+                run.italic = runJson.value("italic", false);
+                run.underline = runJson.value("underline", false);
+                run.strikethrough = runJson.value("strikethrough", false);
+                run.letterSpacing = runJson.value("letterSpacing", 0.0f);
+                run.baselineShift = runJson.value("baselineShift", 0.0f);
+                rich->addRun(run);
+            }
         }
     }
 
@@ -825,8 +1279,7 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         items.reserve(j["items"].size());
         for (const auto& s : j["items"]) {
             if (!s.is_string()) continue;
-            const std::string u8 = s.get<std::string>();
-            items.emplace_back(u8.begin(), u8.end());
+            items.push_back(utf8ToWide(s.get<std::string>()));
         }
         if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
             cb->setItems(items);
@@ -939,6 +1392,10 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
             if (CheckBox* checkBox = dynamic_cast<CheckBox*>(widget)) {
                 checkBox->setText(wtext);
             }
+        } else if (type == "RadioButton") {
+            if (RadioButton* radio = dynamic_cast<RadioButton*>(widget)) {
+                radio->setText(wtext);
+            }
         } else if (type == "TextInput") {
             // L1 — parity with WidgetSerializer. Inspector inputs ship
             // initial values like "0.00" in layout JSON; previously the
@@ -974,7 +1431,7 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                     mi->setShortcut(utf8ToWide(sc));
                 }
             }
-        } else if (type == "Window") {
+        } else if (type == "Window" && !j.contains("title")) {
             if (Window* window = dynamic_cast<Window*>(widget)) {
                 window->setTitle(wtext);
             }
@@ -982,15 +1439,74 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         LOADER_HEAP_CHECK("after_set_text");
     }
 
-    // onClick binding
-    if (!id.empty() && j.contains("onClick")) {
-        std::string handlerName = j["onClick"].get<std::string>();
-        std::string key = id + ".onClick";
-        auto it = _eventBindings.find(key);
-        if (it != _eventBindings.end()) {
-            if (Button* button = dynamic_cast<Button*>(widget)) {
-                button->setOnClicked(it->second);
-            }
+    // Resolve a declarative event using the old id/event binding first, then
+    // the controller-scoped name, then a globally registered handler name.
+    auto resolveEvent = [this, widget, &id](const char* eventName)
+            -> std::function<void()> {
+        auto find = [this](const std::string& key) -> std::function<void()> {
+            const auto it = _eventBindings.find(key);
+            return it != _eventBindings.end() ? it->second : std::function<void()>{};
+        };
+        if (!id.empty()) {
+            if (auto callback = find(id + "." + eventName)) return callback;
+        }
+        const std::string& handlerName = widget->getEventBinding(eventName);
+        if (handlerName.empty()) return {};
+        if (!widget->getControllerId().empty()) {
+            if (auto callback = find("@controller." + widget->getControllerId()
+                                     + "." + handlerName)) return callback;
+        }
+        return find("@handler." + handlerName);
+    };
+
+    if (auto callback = resolveEvent("onClick")) {
+        if (auto* interactive = dynamic_cast<InteractiveWidget*>(widget)) {
+            interactive->setOnClicked(std::move(callback));
+        }
+    }
+    if (auto callback = resolveEvent("onToggled")) {
+        if (auto* check = dynamic_cast<CheckBox*>(widget)) {
+            check->setOnToggled([callback](bool) { callback(); });
+        } else if (auto* radio = dynamic_cast<RadioButton*>(widget)) {
+            radio->setOnToggled([callback](bool) { callback(); });
+        }
+    }
+    if (auto callback = resolveEvent("onValueChanged")) {
+        if (auto* slider = dynamic_cast<Slider*>(widget)) {
+            slider->setOnValueChanged([callback](float) { callback(); });
+        }
+    }
+    if (auto callback = resolveEvent("onTextChanged")) {
+        if (auto* input = dynamic_cast<TextInput*>(widget)) {
+            input->setOnTextChanged([callback](const std::wstring&) { callback(); });
+        } else if (auto* area = dynamic_cast<TextArea*>(widget)) {
+            area->setOnTextChanged([callback](const std::wstring&) { callback(); });
+        }
+    }
+    if (auto callback = resolveEvent("onSubmit")) {
+        if (auto* input = dynamic_cast<TextInput*>(widget)) {
+            input->setOnSubmit([callback](const std::wstring&) { callback(); });
+        }
+    }
+    if (auto callback = resolveEvent("onSelectionChanged")) {
+        auto relay = [callback](int) { callback(); };
+        if (auto* combo = dynamic_cast<ComboBox*>(widget)) combo->setOnSelectionChanged(relay);
+        else if (auto* list = dynamic_cast<ListView*>(widget)) list->setOnSelectionChanged(relay);
+        else if (auto* tiles = dynamic_cast<TileView*>(widget)) tiles->setOnSelectionChanged(relay);
+        else if (auto* tree = dynamic_cast<TreeView*>(widget)) tree->setOnSelectionChanged(relay);
+        else if (auto* tabs = dynamic_cast<TabControl*>(widget)) tabs->setOnSelectionChanged(relay);
+        else if (auto* strip = dynamic_cast<TabStrip*>(widget)) strip->setOnSelectionChanged(relay);
+    }
+    if (auto callback = resolveEvent("onItemActivated")) {
+        auto relay = [callback](int) { callback(); };
+        if (auto* list = dynamic_cast<ListView*>(widget)) list->setOnItemActivated(relay);
+        else if (auto* tiles = dynamic_cast<TileView*>(widget)) tiles->setOnItemActivated(relay);
+    }
+    if (auto callback = resolveEvent("onClose")) {
+        if (auto* modal = dynamic_cast<Modal*>(widget)) {
+            modal->setOnClose(std::move(callback));
+        } else if (auto* window = dynamic_cast<Window*>(widget)) {
+            window->setOnClose(std::move(callback));
         }
     }
 

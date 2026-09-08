@@ -13,7 +13,11 @@
 #include <Windows.h>
 #include <commdlg.h>
 
-#include "LayoutEditorSession.h"
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#include "AYUI/LayoutEditor/LayoutEditorSession.h"
 
 #include "AYUI.h"
 #include "AYUI/DeviceInputBridge.h"
@@ -32,6 +36,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
@@ -144,6 +149,54 @@ std::string showSaveUiJsonDialog(HWND owner) {
     return wideToUtf8Path(file);
 }
 
+std::string showOpenTextureDialog(HWND owner) {
+    wchar_t file[MAX_PATH] = {};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter =
+        L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga\0"
+        L"All\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+    if (!::GetOpenFileNameW(&ofn)) return {};
+    return wideToUtf8Path(file);
+}
+
+ayt::ui::ImageTextureHandle loadPreviewTexture(
+    const std::string& path, ayt::render::UIRenderBackend& backend,
+    std::unordered_map<std::string, ayt::ui::ImageTextureHandle>& cache) {
+    const auto found = cache.find(path);
+    if (found != cache.end()) return found->second;
+
+    int width = 0;
+    int height = 0;
+    int components = 0;
+    stbi_uc* rgba = stbi_load(path.c_str(), &width, &height, &components, 4);
+    if (rgba == nullptr || width <= 0 || height <= 0 || width > 65535 || height > 65535) {
+        if (rgba != nullptr) stbi_image_free(rgba);
+        return {};
+    }
+    const size_t byteCount = static_cast<size_t>(width)
+        * static_cast<size_t>(height) * 4u;
+    std::vector<uint8_t> bgra(rgba, rgba + byteCount);
+    stbi_image_free(rgba);
+    for (size_t i = 0; i < byteCount; i += 4u) {
+        std::swap(bgra[i], bgra[i + 2u]);
+    }
+    void* handle = backend.createUiTexture(
+        static_cast<uint16_t>(width), static_cast<uint16_t>(height), bgra.data());
+    if (handle == nullptr) return {};
+    ayt::ui::ImageTextureHandle result;
+    result.handle = handle;
+    result.width = width;
+    result.height = height;
+    result.name = path;
+    cache.emplace(path, result);
+    return result;
+}
+
 struct AppState {
     ayt::ui::UIManager* ui = nullptr;
     ayt::ui::LayoutEditorSession* session = nullptr;
@@ -154,6 +207,7 @@ struct AppState {
     float mouseX = 0.0f;
     float mouseY = 0.0f;
     bool running = true;
+    std::unordered_map<std::string, ayt::ui::ImageTextureHandle> previewTextures;
 };
 
 void updateCursor(AppState& state, ayt::device::WindowManager& window) {
@@ -275,6 +329,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     state.session = &session;
     session.setOpenPathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setSavePathPicker([hwnd]() { return showSaveUiJsonDialog(hwnd); });
+    session.setTexturePathPicker([hwnd]() { return showOpenTextureDialog(hwnd); });
+    session.setTexturePreviewLoader([&state, &uiBackend](const std::string& path) {
+        return loadPreviewTexture(path, uiBackend, state.previewTextures);
+    });
     session.setTitleUpdater([hwnd](const std::wstring& title) {
         if (hwnd != nullptr) {
             ::SetWindowTextW(hwnd, title.c_str());
@@ -476,6 +534,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     session.detach();
     ui.shutdown();
+    for (const auto& [path, texture] : state.previewTextures) {
+        (void)path;
+        uiBackend.releaseUiTexture(texture.handle);
+    }
+    state.previewTextures.clear();
     uiBackend.shutdown();
     renderer.shutdown();
     devices.shutdown();

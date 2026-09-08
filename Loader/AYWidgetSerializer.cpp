@@ -22,6 +22,7 @@
 #include "AYUI/ListView.h"
 #include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
+#include "AYUI/ColorPicker.h"
 #include "AYUI/Window.h"
 #include "AYUI/Panel.h"
 #include "AYUI/Box.h"
@@ -72,6 +73,7 @@ static bool hasStructuredChildPayload(Widget* widget) {
         || dynamic_cast<ListView*>(widget) != nullptr
         || dynamic_cast<TileView*>(widget) != nullptr
         || dynamic_cast<ComboBox*>(widget) != nullptr
+        || dynamic_cast<ColorPicker*>(widget) != nullptr
         || dynamic_cast<TreeView*>(widget) != nullptr
         || dynamic_cast<MenuItem*>(widget) != nullptr
         || dynamic_cast<Menu*>(widget) != nullptr
@@ -133,11 +135,46 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             widget->setSize(math::FVector2(w, h));
         }
 
+        if (j.contains("anchors") && j["anchors"].is_object()) {
+            const auto& anchors = j["anchors"];
+            AnchorLayout layout;
+            auto readVec2 = [&anchors](const char* key,
+                                       const math::FVector2& fallback) {
+                math::FVector2 value = fallback;
+                if (anchors.contains(key) && anchors[key].is_object()) {
+                    value.x = anchors[key].value("x", value.x);
+                    value.y = anchors[key].value("y", value.y);
+                }
+                return value;
+            };
+            layout.anchorMin = readVec2("min", layout.anchorMin);
+            layout.anchorMax = readVec2("max", layout.anchorMax);
+            layout.offsetMin = readVec2("offsetMin", layout.offsetMin);
+            layout.offsetMax = readVec2("offsetMax", layout.offsetMax);
+            layout.pivot = readVec2("pivot", layout.pivot);
+            widget->setAnchorLayout(layout);
+        }
+
         widget->setVisible(j.value("visible", true));
         widget->setStyleId(j.value("style", ""));
+        widget->setControllerId(j.value("controller", ""));
+        if (j.contains("events") && j["events"].is_object()) {
+            for (auto it = j["events"].begin(); it != j["events"].end(); ++it) {
+                if (it.value().is_string()) {
+                    widget->setEventBinding(it.key(), it.value().get<std::string>());
+                }
+            }
+        }
+        // Legacy layouts stored the click handler directly on the widget.
+        if (j.contains("onClick") && j["onClick"].is_string() &&
+            widget->getEventBinding("onClick").empty()) {
+            widget->setEventBinding("onClick", j["onClick"].get<std::string>());
+        }
         widget->setOpacity(j.value("opacity", 1.0f));
-        widget->setLayoutPositionManaged(j.value("layoutPositionManaged", true));
-        widget->setLayoutSizeManaged(j.value("layoutSizeManaged", true));
+        widget->setLayoutPositionManaged(j.value(
+            "layoutPositionManaged", !widget->hasAnchorLayout()));
+        widget->setLayoutSizeManaged(j.value(
+            "layoutSizeManaged", !widget->hasAnchorLayout()));
         widget->setAccessibilityHidden(j.value("accessibilityHidden", false));
         if (j.contains("accessibilityRole") && j["accessibilityRole"].is_string()) {
             AccessibilityRole role;
@@ -478,6 +515,42 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             }
             if (j.contains("maxPopupItems")) {
                 cb->setMaxPopupItems(j["maxPopupItems"].get<int>());
+            }
+        }
+
+        if (ColorPicker* picker = dynamic_cast<ColorPicker*>(widget)) {
+            if (j.contains("paletteBanks") && j["paletteBanks"].is_array()) {
+                std::vector<ColorPaletteBank> banks;
+                for (const auto& bankJson : j["paletteBanks"]) {
+                    if (!bankJson.is_object()) continue;
+                    ColorPaletteBank bank;
+                    bank.name = toWstring(bankJson.value("name", ""));
+                    if (bankJson.contains("colors")
+                        && bankJson["colors"].is_array()) {
+                        for (const auto& colorJson : bankJson["colors"]) {
+                            if (!colorJson.is_array()
+                                || colorJson.size() != 4u) continue;
+                            bank.colors.push_back({
+                                colorJson[0].get<float>(),
+                                colorJson[1].get<float>(),
+                                colorJson[2].get<float>(),
+                                colorJson[3].get<float>()});
+                        }
+                    }
+                    if (!bank.name.empty()) banks.push_back(std::move(bank));
+                }
+                if (!banks.empty()) picker->setPaletteBanks(std::move(banks));
+            }
+            if (j.contains("activePalette")) {
+                picker->setActivePalette(j["activePalette"].get<size_t>());
+            }
+            if (j.contains("color") && j["color"].is_array()
+                && j["color"].size() == 4u) {
+                picker->setColor({
+                    j["color"][0].get<float>(),
+                    j["color"][1].get<float>(),
+                    j["color"][2].get<float>(),
+                    j["color"][3].get<float>()}, false);
             }
         }
 
@@ -1135,9 +1208,28 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
 
     j["visible"] = widget->isVisible();
     j["style"] = widget->getStyleId();
+    if (!widget->getControllerId().empty()) {
+        j["controller"] = widget->getControllerId();
+    }
+    if (!widget->getEventBindings().empty()) {
+        j["events"] = json::object();
+        for (const auto& [eventName, handlerName] : widget->getEventBindings()) {
+            if (!handlerName.empty()) j["events"][eventName] = handlerName;
+        }
+    }
     j["opacity"] = widget->getOpacity();
     j["layoutPositionManaged"] = widget->isLayoutPositionManaged();
     j["layoutSizeManaged"] = widget->isLayoutSizeManaged();
+    if (widget->hasAnchorLayout()) {
+        const AnchorLayout& anchor = widget->getAnchorLayout();
+        j["anchors"] = {
+            {"min", {{"x", anchor.anchorMin.x}, {"y", anchor.anchorMin.y}}},
+            {"max", {{"x", anchor.anchorMax.x}, {"y", anchor.anchorMax.y}}},
+            {"offsetMin", {{"x", anchor.offsetMin.x}, {"y", anchor.offsetMin.y}}},
+            {"offsetMax", {{"x", anchor.offsetMax.x}, {"y", anchor.offsetMax.y}}},
+            {"pivot", {{"x", anchor.pivot.x}, {"y", anchor.pivot.y}}}
+        };
+    }
     if (widget->hasExplicitAccessibilityRole()) {
         j["accessibilityRole"] = accessibilityRoleName(widget->getAccessibilityRole());
     }
@@ -1316,6 +1408,23 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
         }
         j["selectedIndex"] = cb->getSelectedIndex();
         j["maxPopupItems"] = cb->getMaxPopupItems();
+    }
+    else if (ColorPicker* picker = dynamic_cast<ColorPicker*>(widget)) {
+        j["type"] = "ColorPicker";
+        const math::FVector4 color = picker->color();
+        j["color"] = {color.x, color.y, color.z, color.w};
+        j["activePalette"] = picker->activePalette();
+        j["paletteBanks"] = json::array();
+        for (const ColorPaletteBank& bank : picker->paletteBanks()) {
+            json bankJson;
+            bankJson["name"] = toUtf8(bank.name);
+            bankJson["colors"] = json::array();
+            for (const math::FVector4& swatch : bank.colors) {
+                bankJson["colors"].push_back(
+                    {swatch.x, swatch.y, swatch.z, swatch.w});
+            }
+            j["paletteBanks"].push_back(std::move(bankJson));
+        }
     }
     else if (TabControl* tc = dynamic_cast<TabControl*>(widget)) {
         j["type"] = "TabControl";

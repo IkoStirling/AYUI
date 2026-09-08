@@ -251,6 +251,29 @@ TEST_CASE(tabcontrol_render_emits_header_and_body) {
     CHECK(rectCount >= 2);
 }
 
+TEST_CASE(tabcontrol_layout_fits_managed_active_page_to_body) {
+    TabControl tc;
+    Panel* page = new Panel();
+    tc.addTab(L"Page", page);
+    tc.setSize(FVector2(360.0f, 220.0f));
+    tc.setHeaderHeight(32.0f);
+    tc.performLayout();
+
+    CHECK_FLOAT_EQ(page->getPosition().x, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(page->getPosition().y, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(page->getSize().x, 360.0f, 1e-5f);
+    CHECK_FLOAT_EQ(page->getSize().y, 188.0f, 1e-5f);
+
+    page->setLayoutSizeManaged(false);
+    page->setSize(FVector2(91.0f, 73.0f));
+    tc.performLayout();
+    CHECK_FLOAT_EQ(page->getSize().x, 91.0f, 1e-5f);
+    CHECK_FLOAT_EQ(page->getSize().y, 73.0f, 1e-5f);
+
+    tc.clearTabs();
+    destroyWidgetTree(page);
+}
+
 // Phase D (D4) — Phase D PR-3 swaps the vertical ListView header for a
 // horizontal TabStrip (row of Buttons). After layout, the strip's child
 // Button positions must lay out left-to-right with strictly increasing X.

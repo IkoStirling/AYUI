@@ -1,9 +1,14 @@
 #pragma once
 
+#include "AYUI/ImageTexture.h"
+#include "AYUI/LayoutEditor/LayoutCommandStack.h"
+#include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutSelectionModel.h"
 #include "AYUI/UIManager.h"
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ayt::ui {
@@ -15,11 +20,13 @@ class Panel;
 class TextInput;
 class TextLabel;
 
-// Shared core for AYUI_LayoutEditor.exe and AYEditor ChildWindow host.
+// Product authoring core shared by AYUI_LayoutEditor and AYEditor hosts.
 // One UIManager: chrome (layout_editor.ui.json) + document under canvas_host.
 class LayoutEditorSession {
 public:
     using PathPicker = std::function<std::string()>;
+    using TexturePreviewLoader =
+        std::function<ImageTextureHandle(const std::string& texturePath)>;
     using TitleUpdater = std::function<void(const std::wstring& title)>;
     using DocumentStateUpdater =
         std::function<void(const std::string& path, bool dirty)>;
@@ -30,7 +37,14 @@ public:
         DistributeH, DistributeV
     };
 
-    LayoutEditorSession() = default;
+    enum class AnchorAxisMode {
+        Start,
+        Center,
+        End,
+        Stretch
+    };
+
+    LayoutEditorSession();
     ~LayoutEditorSession();
 
     LayoutEditorSession(const LayoutEditorSession&) = delete;
@@ -56,6 +70,10 @@ public:
     void undo();
     void redo();
     void alignSelection(AlignMode mode);
+    void setAnchorPreset(AnchorAxisMode horizontal,
+                         AnchorAxisMode vertical,
+                         bool snapWidgetToAnchor = false);
+    void clearSelectedAnchors();
     void reorderSelected(int delta);
 
     void copySelection();
@@ -87,11 +105,16 @@ public:
     const std::vector<Widget*>& selection() const { return _selection; }
     Widget* documentRoot() const { return _docRoot; }
     float viewZoom() const { return _viewZoom; }
+    const math::FVector2& viewPan() const { return _viewPan; }
     bool snapEnabled() const { return _snapEnabled; }
     float gridSize() const { return _gridSize; }
 
     void setOpenPathPicker(PathPicker picker) { _openPicker = std::move(picker); }
     void setSavePathPicker(PathPicker picker) { _savePicker = std::move(picker); }
+    void setTexturePathPicker(PathPicker picker) {
+        _texturePicker = std::move(picker);
+    }
+    void setTexturePreviewLoader(TexturePreviewLoader loader);
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
     void setDocumentStateUpdater(DocumentStateUpdater updater) {
         _documentStateUpdater = std::move(updater);
@@ -113,11 +136,7 @@ private:
     };
     enum class DropPlace { Before, After, Into };
 
-    struct Snapshot {
-        std::string json;
-        std::vector<std::string> selectedIds;
-        std::string primaryId;
-    };
+    using Snapshot = LayoutEditorSnapshot;
 
     struct HierDropTarget {
         Widget* target = nullptr;
@@ -131,11 +150,19 @@ private:
     void clearDocument();
     void setDocumentRoot(Widget* root);
     void ensureEmptyDocument();
+    void ensureCanvasViewport();
+    void syncCanvasViewportGeometry();
+    void applyViewportTransform();
+    math::FVector2 documentToScreen(const math::FVector2& point) const;
+    math::FVector2 screenToDocument(const math::FVector2& point) const;
+    math::FRectangle documentToScreen(const math::FRectangle& bounds) const;
     void freezeDocumentInteraction(Widget* root);
+    void rehydrateRuntimePresentation(Widget* root);
     void setStatus(const std::wstring& text);
     void syncPropertyStrip();
     void updatePropPanelVisibility();
     void setChromeVisible(const char* id, bool visible);
+    void setChromeEnabled(const char* id, bool enabled);
     void syncHierarchySelection();
     void syncStyleCombo();
     void syncTextAlignCombos();
@@ -148,20 +175,30 @@ private:
     Widget* pickDocumentWidget(const math::FVector2& worldPos) const;
     Widget* findInDocument(const std::string& id) const;
     Widget* pickParentForAdd() const;
+    void collectAuthoredChildren(Widget* node,
+                                 std::vector<Widget*>& out) const;
     void collectHierarchy(Widget* node, int depth,
                           std::vector<std::wstring>& labels,
                           std::vector<Widget*>& widgets) const;
     void updateContainerHint();
-    std::string makeUniqueId(const std::string& prefix) const;
+    std::string makeUniqueId(const std::string& prefix,
+                             Widget* detachedRoot = nullptr) const;
     bool setTextPayload(Widget* widget, const std::wstring& text);
     bool getTextPayload(Widget* widget, std::wstring& out) const;
+    void chooseTexture();
+    void clearTexture();
+    void applyTextureName(const std::string& textureName);
     void bindPropField(const char* id, const char* field, TextInput*& slot,
                        bool numericScrub);
     void commitPropField(const std::string& field, TextInput* slot);
+    bool validateWidgetId(const std::string& candidate, Widget* edited,
+                          std::wstring* reason = nullptr) const;
 
-    void beginMutation();
+    void beginMutation(LayoutEditKind kind = LayoutEditKind::Property,
+                       const char* label = nullptr);
     void endMutation();
-    void pushUndo();
+    void pushUndo(LayoutEditKind kind = LayoutEditKind::SnapshotFallback,
+                  const char* label = nullptr);
     Snapshot captureSnapshot() const;
     void restoreSnapshot(const Snapshot& snap);
     bool chromeEditingText() const;
@@ -181,6 +218,9 @@ private:
     void ensureSelectionChrome();
     void destroySelectionChrome();
     void placeHandle(Widget* handle, float x, float y);
+    bool canUseAnchorLayout(Widget* widget) const;
+    void refreshAnchorOffsets(Widget* widget);
+    void syncAnchorPresetStyles();
     void ensureSelOutlines(size_t count);
     void updateMarqueeChrome(const math::FVector2& a, const math::FVector2& b);
     void clearMarqueeChrome();
@@ -194,12 +234,13 @@ private:
     HierDropTarget resolveHierDrop(const math::FVector2& worldPos,
                                    Widget* dragged) const;
     bool isContainerWidget(Widget* widget) const;
+    Widget* structuredContentOwner(Widget* content) const;
     bool isAncestorOf(Widget* ancestor, Widget* node) const;
     int siblingIndexOf(Widget* child) const;
-    void detachFromTree(Widget* child);
+    bool detachFromTree(Widget* child);
     bool attachAt(Widget* parent, Widget* child, size_t index);
     Widget* createWidgetInstance(const std::string& typeName);
-    void placeNewWidget(Widget* created, Widget* parent, int insertIndex,
+    bool placeNewWidget(Widget* created, Widget* parent, int insertIndex,
                         const math::FVector2* worldPos);
     void commitPaletteDrop(const math::FVector2& worldPos);
     void commitHierarchyDrop(const math::FVector2& worldPos);
@@ -220,15 +261,25 @@ private:
     void snapSelectionPositions();
     void remintTreeIds(Widget* root);
     void collectDocumentWidgets(Widget* node, std::vector<Widget*>& out) const;
-    void scaleDocumentTree(Widget* node, float factor);
+    std::vector<std::string> serializeSelectionItems() const;
+    void pasteSerializedItems(const std::vector<std::string>& items);
+
+    // Phase 2 core models are authoritative. References keep the mature
+    // interaction code source-compatible while storage and invariants move
+    // out of the Session monolith.
+    LayoutDocumentModel _documentModel;
+    Widget*& _docRoot;
+    std::string& _documentPath;
+    bool& _dirty;
+    LayoutSelectionModel _selectionModel;
+    Widget*& _selected;
+    std::vector<Widget*>& _selection;
+    LayoutCommandStack _commandStack;
 
     UIManager* _ui = nullptr;
     Widget* _canvasHost = nullptr;
-    Widget* _docRoot = nullptr;
-    Widget* _selected = nullptr;
-    std::vector<Widget*> _selection;
-    std::string _documentPath;
-    bool _dirty = false;
+    Widget* _canvasViewport = nullptr;
+    Widget* _inspectorSelection = nullptr;
     bool _suppressProp = false;
     bool _suppressHierarchy = false;
     bool _suppressStyleCombo = false;
@@ -241,7 +292,6 @@ private:
     Widget* _dragTarget = nullptr;
     math::FVector2 _dragLastMouse{0.0f, 0.0f};
     math::FVector2 _marqueeStart{0.0f, 0.0f};
-    bool _mutationOpen = false;
 
     ToolDrag _toolDrag = ToolDrag::None;
     std::string _paletteType;
@@ -251,6 +301,8 @@ private:
 
     Panel* _selBox = nullptr;
     Panel* _handles[8] = {};
+    Panel* _anchorBox = nullptr;
+    Panel* _anchorPoints[4] = {};
     std::vector<Panel*> _selOutlines;
     Panel* _marqueeBox = nullptr;
     static constexpr float kHandleSize = 8.0f;
@@ -264,14 +316,11 @@ private:
     TextLabel* _paletteGhostLabel = nullptr;
 
     float _viewZoom = 1.0f;
+    math::FVector2 _viewPan{0.0f, 0.0f};
     bool _snapEnabled = true;
     bool _spaceDown = false;
     float _gridSize = 8.0f;
     std::vector<std::string> _clipboardItems;
-
-    std::vector<Snapshot> _undoStack;
-    std::vector<Snapshot> _redoStack;
-    static constexpr size_t kMaxUndo = 64;
 
     DeferredAction _deferred = DeferredAction::None;
 
@@ -281,7 +330,28 @@ private:
     TextInput* _propY = nullptr;
     TextInput* _propW = nullptr;
     TextInput* _propH = nullptr;
+    TextInput* _propAnchorMinX = nullptr;
+    TextInput* _propAnchorMinY = nullptr;
+    TextInput* _propAnchorMaxX = nullptr;
+    TextInput* _propAnchorMaxY = nullptr;
+    TextInput* _propOffsetMinX = nullptr;
+    TextInput* _propOffsetMinY = nullptr;
+    TextInput* _propOffsetMaxX = nullptr;
+    TextInput* _propOffsetMaxY = nullptr;
+    TextInput* _propPivotX = nullptr;
+    TextInput* _propPivotY = nullptr;
     TextInput* _propText = nullptr;
+    TextInput* _propTexture = nullptr;
+    TextInput* _propItems = nullptr;
+    TextInput* _propController = nullptr;
+    TextInput* _propOnClick = nullptr;
+    TextInput* _propOnToggled = nullptr;
+    TextInput* _propOnValueChanged = nullptr;
+    TextInput* _propOnTextChanged = nullptr;
+    TextInput* _propOnSubmit = nullptr;
+    TextInput* _propOnSelectionChanged = nullptr;
+    TextInput* _propOnItemActivated = nullptr;
+    TextInput* _propOnClose = nullptr;
     ComboBox* _propStyleCombo = nullptr;
     ComboBox* _propTextHAlign = nullptr;
     ComboBox* _propTextVAlign = nullptr;
@@ -300,6 +370,8 @@ private:
 
     PathPicker _openPicker;
     PathPicker _savePicker;
+    PathPicker _texturePicker;
+    TexturePreviewLoader _texturePreviewLoader;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;
     UILayoutLoader _docLoader;

@@ -235,6 +235,15 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget);
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget,
                            StyleState state);
 
+// Typography is resolved separately from ResolvedStyle so adding styled text
+// does not change the layout of that widely returned ABI value type. Unknown
+// styles preserve the caller-provided fallback.
+int resolveTextFontSize(const std::string& styleId, int fallbackFontSize);
+math::FVector4 resolveTextColor(
+    const std::string& styleId,
+    const Widget* widget,
+    const math::FVector4& fallbackColor);
+
 // H-3: theme-driven accent accessor. Returns the "color.accent" token
 // of the currently active theme; alpha is overridden by `alpha` so
 // call sites that historically used FVector4(0.18, 0.45, 0.78, A) get

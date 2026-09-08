@@ -23,14 +23,16 @@ constexpr int kTextFontSize = ayt::ui::kDefaultTextFontSize;
 
 size_t columnFromLocalX(const std::wstring& text,
                         const std::wstring& display,
-                        float localX) {
+                        float localX,
+                        int fontSize) {
     if (localX <= 0.0f || text.empty()) return 0;
     const UnicodeTextAnalysis analysis = analyzeUnicodeText(text);
     size_t previous = 0;
     float previousX = 0.0f;
     for (const UnicodeTextCluster& cluster : analysis.clusters) {
         const size_t boundary = cluster.textStart + cluster.textLength;
-        const float boundaryX = measurePrefixWidth(display, boundary);
+        const float boundaryX = measurePrefixWidth(
+            display, boundary, nullptr, fontSize);
         if (localX < (previousX + boundaryX) * 0.5f) return previous;
         previous = boundary;
         previousX = boundaryX;
@@ -295,7 +297,9 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
     const std::wstring& display = _passwordMode
         ? std::wstring(_text.size(), L'*') : _text;
-    const size_t colAtClick = columnFromLocalX(_text, display, localX);
+    const size_t colAtClick = columnFromLocalX(
+        _text, display, localX,
+        resolveTextFontSize(getStyleId(), kTextFontSize));
     // PR-A3: double-click word select. We only fire this on a SECOND
     // click within kDoubleClickSeconds AND within ±kDoubleClickColSlack
     // columns of the previous click. A first-click that would also
@@ -359,7 +363,9 @@ bool TextInput::onMouseMove(const UIMouseEvent& e) {
     const float localX = e.mousePos.x - (b.minX + kPaddingX);
     const std::wstring& display = _passwordMode
         ? std::wstring(_text.size(), L'*') : _text;
-    const size_t cur = columnFromLocalX(_text, display, localX);
+    const size_t cur = columnFromLocalX(
+        _text, display, localX,
+        resolveTextFontSize(getStyleId(), kTextFontSize));
     const size_t anchor = _dragAnchorCol;
     if (cur < anchor) {
         _selStart = cur;
@@ -687,25 +693,31 @@ void TextInput::onRender(IRenderBackend& renderer) {
     math::FVector4 bg;
     math::FVector4 borderColor;
     float borderWidth;
+    float cornerRadius;
     if (style.hasStyle) {
         bg = style.backgroundColor;
         borderColor = style.borderColor;
         borderWidth = style.borderWidth;
+        cornerRadius = style.cornerRadius;
     } else {
         bg = math::FVector4(0.12f, 0.12f, 0.13f, 1.0f);
         borderColor = _hasFocus
             ? resolveAccentColor(1.0f)
             : math::FVector4(0.4f, 0.4f, 0.45f, 1.0f);
         borderWidth = 1.0f;
+        cornerRadius = 2.0f;
     }
-    // B3: rounded fill matches the 2px rounded border.
-    renderer.drawRoundedRect(bounds, bg, 2.0f);
-    renderer.drawBorderRect(bounds, borderColor, borderWidth, 2.0f);
+    renderer.drawRoundedRect(bounds, bg, cornerRadius);
+    renderer.drawBorderRect(
+        bounds, borderColor, borderWidth, cornerRadius);
 
     // Display text — password mask replaces each char with '*'.
+    const int textFontSize = resolveTextFontSize(
+        getStyleId(), kTextFontSize);
     const std::wstring displayText =
         _passwordMode ? std::wstring(_text.size(), L'*') : _text;
-    const float textW = measurePrefixWidth(displayText, displayText.size());
+    const float textW = measurePrefixWidth(
+        displayText, displayText.size(), &renderer, textFontSize);
     const float innerW = (bounds.maxX - kPaddingX) - (bounds.minX + kPaddingX);
     float textMinX = bounds.minX + kPaddingX;
     if (_hAlign == HAlign::Right && textW < innerW) {
@@ -724,19 +736,24 @@ void TextInput::onRender(IRenderBackend& renderer) {
             if (bsel < a) std::swap(a, bsel);
             if (a > displayText.size()) a = displayText.size();
             if (bsel > displayText.size()) bsel = displayText.size();
-            const float selX0 = textMinX + measurePrefixWidth(displayText, a);
-            const float selX1 = textMinX + measurePrefixWidth(displayText, bsel);
+            const float selX0 = textMinX + measurePrefixWidth(
+                displayText, a, &renderer, textFontSize);
+            const float selX1 = textMinX + measurePrefixWidth(
+                displayText, bsel, &renderer, textFontSize);
             const float pad = 2.0f;
             renderer.drawRect(
                 math::FRectangle(selX0, bounds.minY + pad,
                                  selX1, bounds.maxY - pad),
                 resolveAccentColor(0.45f));
         }
-        const math::FVector4 textColor = _readOnly
+        const math::FVector4 fallbackTextColor = _readOnly
             ? math::FVector4(0.55f, 0.55f, 0.55f, 1.0f)
             : math::FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+        math::FVector4 textColor = resolveTextColor(
+            getStyleId(), this, fallbackTextColor);
+        if (_readOnly && !getStyleId().empty()) textColor.w *= 0.62f;
         if (!displayText.empty()) {
-            renderer.drawText(textBounds, displayText, kTextFontSize, textColor);
+            renderer.drawText(textBounds, displayText, textFontSize, textColor);
         }
     }
 
@@ -756,7 +773,8 @@ void TextInput::onRender(IRenderBackend& renderer) {
             const WidgetStyle* ws = StyleManager::get().getStyle(getStyleId());
             if (ws != nullptr) phColor = ws->placeholderColor;
         }
-        const float phW = measurePrefixWidth(_placeholder, _placeholder.size());
+        const float phW = measurePrefixWidth(
+            _placeholder, _placeholder.size(), &renderer, textFontSize);
         float phMinX = bounds.minX + kPaddingX;
         if (_hAlign == HAlign::Right && phW < innerW) {
             phMinX = bounds.maxX - kPaddingX - phW;
@@ -766,7 +784,7 @@ void TextInput::onRender(IRenderBackend& renderer) {
         math::FRectangle textBounds(
             phMinX, bounds.minY,
             bounds.maxX - kPaddingX, bounds.maxY);
-        renderer.drawText(textBounds, _placeholder, kTextFontSize, phColor);
+        renderer.drawText(textBounds, _placeholder, textFontSize, phColor);
     }
 
     // =================================================================
@@ -792,9 +810,11 @@ void TextInput::onRender(IRenderBackend& renderer) {
                 ulColor = ws->compositionUnderlineColor;
             }
         }
-        const float ulX = textMinX + measurePrefixWidth(displayText, _caret);
-        const float ulW = measurePrefixWidth(_compositionPreview,
-                                             _compositionPreview.size());
+        const float ulX = textMinX + measurePrefixWidth(
+            displayText, _caret, &renderer, textFontSize);
+        const float ulW = measurePrefixWidth(
+            _compositionPreview, _compositionPreview.size(),
+            &renderer, textFontSize);
         const float ulY = bounds.maxY - 3.0f;
         constexpr float ulH = 1.5f;
         renderer.drawRect(
@@ -804,7 +824,8 @@ void TextInput::onRender(IRenderBackend& renderer) {
 
     // Caret — vertical bar at the glyph edge after `_caret` characters.
     if (_hasFocus && _caretVisible) {
-        float cx = textMinX + measurePrefixWidth(displayText, _caret);
+        float cx = textMinX + measurePrefixWidth(
+            displayText, _caret, &renderer, textFontSize);
         const float maxCx = bounds.maxX - kPaddingX - kCaretWidth;
         if (cx > maxCx) cx = maxCx;
         if (cx < bounds.minX + kPaddingX) cx = bounds.minX + kPaddingX;

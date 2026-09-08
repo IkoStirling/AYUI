@@ -69,15 +69,24 @@ void TreeNode::onRender(IRenderBackend& renderer) {
     const math::FRectangle b = getWorldBounds();
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
 
-    // Selection band — full row, accent color when selected.
+    // Keep row state decoration inside the node's hierarchy lane.  The
+    // label has always retained its depth prefix, but a full-width selected
+    // band made a selected descendant look like a root entry because the
+    // strongest visual edge jumped back to the TreeView's left edge.
+    const float depthOffset =
+        static_cast<float>(std::max(0, _depth)) * kIndentPx;
+    const float stateMinX = std::min(b.maxX, b.minX + depthOffset);
+    const math::FRectangle stateBounds(
+        stateMinX, b.minY, b.maxX, b.maxY);
     if (_selected) {
-        renderer.drawRect(b, resolveAccentColor(0.55f));
+        renderer.drawRect(stateBounds, resolveAccentColor(0.55f));
     } else if (isMouseOver() && isEnabled()) {
-        renderer.drawRect(b, math::FVector4(0.30f, 0.30f, 0.32f, 0.5f));
+        renderer.drawRect(
+            stateBounds, math::FVector4(0.30f, 0.30f, 0.32f, 0.5f));
     }
 
     // Compute prefix columns.
-    const float arrowMinX = b.minX + static_cast<float>(_depth) * kIndentPx;
+    const float arrowMinX = b.minX + depthOffset;
     const float iconMinX  = arrowMinX + kArrowColPx;
     const float labelMinX = iconMinX + kIconColPx;
 

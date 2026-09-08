@@ -38,6 +38,11 @@ GalleryChildBackend::~GalleryChildBackend() {
 }
 
 void GalleryChildBackend::releaseBackbuffer() {
+    while (_memDc != nullptr && !_clipStates.empty()) {
+        RestoreDC(_memDc, _clipStates.back());
+        _clipStates.pop_back();
+    }
+    _clipStates.clear();
     if (_memDc != nullptr) {
         if (_oldBitmap != nullptr) {
             SelectObject(_memDc, _oldBitmap);
@@ -89,6 +94,10 @@ void GalleryChildBackend::setDrawTarget(HDC hdc, int width, int height) {
 }
 
 void GalleryChildBackend::beginFrame() {
+    while (_hdc != nullptr && !_clipStates.empty()) {
+        RestoreDC(_hdc, _clipStates.back());
+        _clipStates.pop_back();
+    }
 }
 
 void GalleryChildBackend::endFrame() {
@@ -187,6 +196,26 @@ void GalleryChildBackend::drawWithAlpha(const math::FRectangle& bounds, void* te
                                         float alpha) {
     AYUNREFERENCED_PARAM(alpha);
     drawRect(bounds, textureHandle, math::FRectangle(0.0f, 0.0f, 1.0f, 1.0f));
+}
+
+void GalleryChildBackend::pushClip(const math::FRectangle& bounds) {
+    if (_hdc == nullptr) return;
+    const int state = SaveDC(_hdc);
+    if (state == 0) return;
+
+    const int left = static_cast<int>(std::floor(bounds.minX));
+    const int top = static_cast<int>(std::floor(bounds.minY));
+    const int right = static_cast<int>(std::ceil(bounds.maxX));
+    const int bottom = static_cast<int>(std::ceil(bounds.maxY));
+    IntersectClipRect(_hdc, left, top, right, bottom);
+    _clipStates.push_back(state);
+}
+
+void GalleryChildBackend::popClip() {
+    if (_hdc == nullptr || _clipStates.empty()) return;
+    const int state = _clipStates.back();
+    _clipStates.pop_back();
+    RestoreDC(_hdc, state);
 }
 
 GalleryChildBackend::PathHandle GalleryChildBackend::createPath() {

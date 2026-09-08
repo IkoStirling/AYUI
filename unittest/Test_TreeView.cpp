@@ -108,6 +108,35 @@ TEST_CASE(treeview_selection_via_row_click) {
     CHECK(firedTo == 2);
 }
 
+TEST_CASE(tree_node_selected_band_preserves_hierarchy_indent) {
+    TreeNode node;
+    node.setPosition(FVector2(10.0f, 20.0f));
+    node.setSize(FVector2(200.0f, 18.0f));
+    node.setDepth(2);
+    node.setLabel(L"grandchild");
+    node.setSelected(true);
+
+    MockRenderer renderer;
+    node.onRender(renderer);
+
+    const auto& calls = renderer.getDrawCalls();
+    CHECK(calls.size() == 2u);
+    if (calls.size() != 2u) return;
+
+    CHECK(calls[0].type == MockRenderer::DrawCall::Rect);
+    CHECK_FLOAT_EQ(calls[0].bounds.minX,
+                   10.0f + 2.0f * TreeNode::kIndentPx, 1e-5f);
+    CHECK_FLOAT_EQ(calls[0].bounds.maxX, 210.0f, 1e-5f);
+
+    // Selection decoration must not disturb the existing text prefix:
+    // depth indent + disclosure column + icon column.
+    CHECK(calls[1].type == MockRenderer::DrawCall::Text);
+    CHECK_FLOAT_EQ(calls[1].bounds.minX,
+                   10.0f + 2.0f * TreeNode::kIndentPx
+                       + TreeNode::kArrowColPx + TreeNode::kIconColPx,
+                   1e-5f);
+}
+
 TEST_CASE(treeview_scroll_offset_updates_bar) {
     TreeView tv;
     tv.setSize(FVector2(240.0f, 32.0f));   // height = 2 rows visible

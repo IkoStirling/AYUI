@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-09-01
+**文档修订：** 2026-09-08
 
 **CMake 目标版本：** 1.0.0
 
@@ -9,7 +9,7 @@
 **状态：** 根工程集成、Widget-local retained display-list、Production root/subtree UI Layer、共享
 RenderTargetPool、Serializer 完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
 Tab/RichText 产品化、Unicode shaping、Windows UI Automation adapter、POSIX Clipboard、Docking、
-Layout Editor、动画与完整单测均可构建。
+Layout Editor（扩展工具箱、图片预览、声明式 controller/event）、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -76,9 +76,10 @@ AYDevice / host events
 | `Layout/` | VBox/HBox、GridPanel、Constraint、Splitter |
 | `Loader/` | UILayoutLoader、WidgetFactory、WidgetSerializer |
 | `Style/` | StyleSheet、Theme、MockRenderer |
+| `LayoutEditor/` | Editor-only document/selection/command/viewport、authoring registry/schema 与 Session |
 | `i18n/` | JSON 语言表和 UTF-8 解析 |
 | `unittest/` | 单元、场景、生命周期和性能回归 |
-| `demo/` | Gallery、Layout Editor、round-trip 工具 |
+| `demo/` | Gallery、Layout Editor standalone/round-trip 宿主 |
 
 `AYUI.h` 是稳定的便利聚合头，包含常用控件、Docking、Theme、Loader、UIManager 和渲染接口。实现辅助头（例如 `DockTrace`、`ScrollBarSync`）仍应按需显式包含。
 
@@ -116,6 +117,15 @@ Widget
 - VBox/HBox 维护与 children 对应的 slot；slot 可以是固定尺寸或 fill，并带 min/max 限制。
 - ScrollView 的 `getClientRect()` 是绘制裁剪和命中测试的共同真值。
 - GridPanel 的 row/column/cell attachment 是布局语义，不能仅靠 children 顺序推断。
+- 自由布局 child 可选用 `AnchorLayout`。每个轴的边界满足
+  `childMin = parentSize * anchorMin + offsetMin`、
+  `childMax = parentSize * anchorMax + offsetMax`；anchor 使用 `[0, 1]` 归一化父级坐标，offset 使用
+  DIP。`anchorMin == anchorMax` 表示固定锚点，二者不同表示随父级伸缩。Pivot 是后续旋转/缩放的
+  变换原点语义，不改变上述边界方程。
+- Anchor 仅在父级没有接管 child position/size 时参与 descend layout；Grid/VBox/HBox 的 cell/slot
+  规则拥有确定的更高优先级。切换 Anchor preset 必须重算 offset 以保持当前视觉矩形，直接移动、
+  resize、nudge、snap 或 align 后则反向刷新 offset，避免下一帧布局弹回。内层自由容器的
+  `setSize()` 必须立即把新尺寸传播给锚定 child，不能只等待 UIManager 的 viewport layout gate。
 - Dock tree 使用 VBox/HBox + SplitterHandle 作为实际 Widget 树，不维护第二套平行几何树。
 
 ### 4.3 绘制与脏标记
@@ -369,13 +379,26 @@ List 语义。
   "accessibilityRole": "button",
   "accessibilityLabel": "Confirm changes",
   "text": "ui.common.ok",
-  "onClick": "confirm"
+  "controller": "SettingsController",
+  "events": {
+    "onClick": "confirm"
+  }
 }
 ```
 
 Loader 还解析各控件的专用字段，例如 Box spacing/padding/gravity、ListView selection、Image textureName、Grid cells、Dock cards/floating/weights。
 
-事件字符串不是脚本。宿主先用 `bindEvent(widgetId, eventName, callback)` 注册 C++ 回调，loader 再按 id 连接。
+事件字符串不是脚本。Widget 保存 controller ID 和 `eventName -> handlerName` 元数据；Loader 按以下
+优先级解析宿主注册的 C++ 回调：
+
+1. `bindEvent(widgetId, eventName, callback)`，兼容旧布局和单实例精确覆盖；
+2. `bindControllerEvent(controllerId, handlerName, callback)`，供同一 controller 下多个 Widget 复用；
+3. `bindHandler(handlerName, callback)`，供宿主注册全局命名动作。
+
+内置类型接线覆盖 `onClick`、`onToggled`、`onValueChanged`、`onTextChanged`、`onSubmit`、
+`onSelectionChanged`、`onItemActivated` 与 `onClose`。回调参数仍由具体宿主/controller 从自己的状态
+读取；RadioButton 参与 `onToggled`，TextArea 参与 `onTextChanged`。JSON 不承诺动态执行脚本或反序列化函数。旧顶层 `onClick` 继续读入并归一化为
+`events.onClick`。
 
 ### 8.2 WidgetFactory
 
@@ -388,19 +411,22 @@ Factory 是唯一的 `type` → constructor 注册表。默认注册覆盖普通
 Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证分层：
 
 - 41 个公共注册类型都具有明确 type 决策和往返测试；通用位置、尺寸、可见性、style、opacity、
-  layout-managed flags、style override 与 accessibility 元数据可往返。
+  layout-managed flags、style override、accessibility 及 controller/event 元数据可往返。
 - 核心叶控件、列表/树、Box、Panel、Window、Spinner 的视觉和行为字段有类型覆盖。
 - UTF-8 文本必须无损往返。
 - GridPanel 使用 row/column definitions、padding、spacing 和 `cells[]`，每个 cell 显式保存
   row/column/span/alignment/content；通用 `children` 只作为旧格式读取兼容，不与 cells 重复导出。
 - ScrollView、Menu/MenuItem/MenuBar、StatusBar、TabControl/TabStrip、Modal/ModalDialog、
   DockCard/DockOverlay/DockArea 使用专用结构化内容，内部实现子树不作为通用 children 重复序列化。
+- 生产 `UILayoutLoader` 必须与 Serializer 的结构化格式对称；Tab page、Modal content/body 等嵌套
+  payload 通过 `buildWidgetTree()` 递归加载，使 inactive page 和深层事件节点也进入 ID 注册表。
 - TabStrip overflow/min width 与 RichText paragraph/run 样式属于持久数据；scroll offset、layout
   fragments、semantic runtime ID 等派生/瞬态状态不写入 wire format。
 - DockCard content、DockArea slot/floating/weight/min size 和 Modal 的 owned content 在反序列化后
   恢复明确所有权。
 
 持久化边界不包含回调函数、焦点/hover/capture、动画瞬时值、拖拽会话、纹理后端句柄等运行时状态。
+处理器名字属于数据并可持久化，但只有宿主显式注册后才会产生行为。
 `DockTabGroup` 属于 DockArea 内部实现，不是独立注册或持久化根类型。
 
 新增可 JSON 创建的公共控件时，至少要同时提供 factory 测试和 serializer/loader 决策；若不支持完整往返，必须在这里明确记录。
@@ -441,21 +467,59 @@ Modal 打开后，UIManager 只向 active modal 子树路由输入；dimmer 吞�
 
 ### 9.4 Layout Editor 宿主边界
 
-`LayoutEditorSession` 是 AYUI 通用布局编辑核心，独立 `AYUI_LayoutEditor` 与 AYEditor 的独立
-Designer 工具窗复用同一实现。`attach(UIManager&)` 支持完整窗口 chrome；
+`AYUILayoutEditorCore` 是不进入游戏 runtime 的 authoring 静态库；独立 `AYUI_LayoutEditor` 与
+AYEditor 的独立 Designer 工具窗链接同一库。`LayoutEditorSession` 是 UI/手势协调器，
+`attach(UIManager&)` 支持完整窗口 chrome；
 `attach(UIManager&, Widget* chromeRoot)` 支持通用 View fallback，使 `canvas_host`、Palette、
 Hierarchy 和属性栏 id 只在给定子树内解析。文档状态回调只发布路径/dirty，不引入 AYEditor
 文档类型、Scene、资源或原生窗口语义。
 
-Session 仍负责画布手势、undo/redo 和 `UILayoutLoader`/Serializer 往返；owner window、
+Authoring 状态拆为四个独立组件：`LayoutDocumentModel` 持有 root/path/dirty、全树 ID index 与重复
+检测；`LayoutSelectionModel` 维护 primary/multi-selection 不变量；`LayoutCommandStack` 管理事务、
+coalescing 与 undo/redo；`LayoutCanvasViewport` 维护非破坏性的 view transform。Session 仍协调画布
+手势和 `UILayoutLoader`/Serializer 往返；owner window、
 渲染 backend、资源身份、关闭提示和工作区命令路由由上层宿主负责。AYEditor 通过一个共享
 Controller 适配 Session，正常路径不再嵌入 Scene Center；AYUI 不知道自己运行在 standalone、
 Dock fallback 还是 AYDevice 顶层窗口中，也不复制第二套布局编辑状态机。
+
+`WidgetAuthoringRegistry` 是 Palette 与 Inspector 的单一 authoring 元数据源，集中 type/display name、
+分类、SVG、ID prefix、默认尺寸、factory 后初始化、可编辑属性和事件 schema；运行时构造仍委托
+`WidgetFactory`。`PropertySchema` 以字段和 section 描述 Inspector，类型切换不再依赖持续增长的
+`dynamic_cast` 显隐矩阵。属性读写中的少量控件 adapter 仍允许渐进迁移，但新类型首先注册 descriptor，
+不得再增加平行的 Palette/default-size/icon 表。
+
+命令栈已经区分 `Property`、`Insert`、`Delete`、`Reorder`、`Transform`、`Clipboard` 与
+`SnapshotFallback` edit intent。当前 entry 同时保存完整 JSON snapshot，作为复杂复合控件和旧路径的
+可靠恢复兜底；后续可以逐类替换为小粒度 typed command，而不改变 Session/宿主接口。snapshot 包含
+dirty 状态，undo 到已保存版本会恢复 clean，redo 才重新进入 dirty。
 
 Chrome 本身采用 File/Edit 菜单栏、单列 Widget Library + Document Outline、Canvas、滚动
 Inspector、状态栏布局。`UILayoutLoader` 与 Serializer 都支持 MenuBar 的结构化 `menus/items`
 声明及 shortcut/submenu；命令不再依赖一排临时按钮。Widget Library 行绑定类型专属 SVG，点击
 和拖放共享同一创建语义；对齐、分布与 Snap 属于 Inspector 的选择上下文。
+
+自由布局 Inspector 提供 4×4 Anchor preset：横轴 Start/Center/End/Stretch 与纵轴
+Start/Center/End/Stretch 的笛卡尔组合，并提供 Absolute 退回入口。选中 anchored child 时画布绘制
+琥珀色 anchor range/point，属性区暴露归一化 Min/Max、DIP OffsetMin/OffsetMax 与 Pivot；preset、
+数值编辑、清除 Anchor 均进入同一 undo/redo snapshot 和 Serializer 往返。该 section 对 document
+root、结构 content root 以及 Grid/VBox/HBox child 隐藏。Align 只在至少两个同父级自由控件时可用，
+Distribute 至少三个，其余状态禁用而不是静默执行。普通 preset 点击保留当前矩形；Ctrl+点击把
+固定轴的 widget pivot 吸附到 anchor，Stretch 轴使用零边距贴合父级，且操作仍可撤销。
+
+工具箱按 Basic/Input/Collections/Layout/Overlay 分类，覆盖常用文本和交互叶控件、Image、
+ComboBox/ListView/TileView/TreeView、TabStrip/TabControl、Grid/Scroll 及 Window/Modal。新增控件必须
+通过 WidgetFactory 创建，不能在 Designer 中维护另一份构造器。集合与 Tab 的第一阶段模型编辑使用
+`|` 分隔 item 文本；复杂树节点、Tab page 管理和控件专用高级属性可在后续改为结构化 inspector，
+但持久化继续走同一个 WidgetSerializer。
+
+Image authoring 把“资源身份”和“预览句柄”分开：`setTexturePathPicker()` 返回写入 `textureName` 的
+名字，`setTexturePreviewLoader()` 由当前宿主把该名字解析为临时 `ImageTextureHandle`。独立工具通过
+AYRenderer 上传预览，AYEditor 子窗口通过 GDI DIB/AlphaBlend 预览；后端句柄不进入 undo snapshot
+或 JSON。宿主应返回资源系统可解析的相对路径/资源键，绝对文件路径只适合本机草稿。
+
+Inspector 根据选中类型暴露 `controller` 和有效事件字段。Session 只编辑名字，不持有游戏 controller
+对象；运行时由 UILayoutLoader 使用 8.1 的三层优先级绑定。这样 Designer 可以完成交互契约创作，
+同时维持“JSON 不执行任意脚本”的安全边界。
 
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
 必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section
@@ -465,7 +529,29 @@ Inspector、状态栏布局。`UILayoutLoader` 与 Serializer 都支持 MenuBar 
 
 Document root 是固定的 authoring origin：画布拖动、方向键、X/Y 属性和排列命令都不能改变其
 位置，Ctrl+滚轮缩放也保持根的左上锚点不变。普通 free-position Widget 使用方向键做 1px 微调，
-Shift+方向键使用当前 grid step；方向键微调不再被 Snap 立即吸回原网格点。
+Shift+方向键使用当前 grid step；方向键微调不再被 Snap 立即吸回原网格点。固定的是 root origin，
+不是 preview extent：root 仍显示 Width/Height，并提供右边、下边和右下角 resize handle，以便直接
+验证 responsive anchor。Inspector 在主选中项变化时归零自身 scroll offset，防止上一类型较长的
+属性表把较短的 root 属性区整体滚出 viewport。
+
+画布视图状态由非文档节点 `LayoutCanvasViewport` 持有。Pan/Zoom 通过 backend transform 和逆向
+输入坐标映射作用于 authored subtree，不再缩放或平移 Widget 的 position/size，也不进入 dirty、
+undo snapshot 或 `.ui.json`；缩放 pivot 下的文档点保持不动。AYRenderer 与 AYEditor GDI backend
+都实现平衡的 transform stack，frame 开始时会恢复调用方遗留的未配对状态。选择框、resize handle、
+palette drop 和 marquee 统一经过 document/screen 映射，避免显示坐标与编辑坐标分叉。
+
+编辑可靠性以文档事务为边界：ID 在提交前校验格式、保留前缀和全树唯一性，切换选中项会结束正在
+合并的属性事务；Duplicate 直接复制当前 selection snapshot，不改写系统剪贴板，Paste 每次优先读取
+系统剪贴板，避免复用过期的内部 payload。Image 的 `textureName` 在打开、恢复和粘贴后通过宿主
+preview loader 重新生成运行时句柄。文件保存先写同目录唯一临时文件并 flush，再执行原子替换，失败
+时保留旧文件并清理临时文件。
+
+Outline 展示 authored semantic tree，不暴露 List/Tile/Tree 的虚拟 cell 或 Tab/Modal 的实现 chrome。
+ScrollView content、TabControl page、Modal content/body 是固定结构槽：drop into 会重定向到当前
+content/page host，槽根本身不能作为普通 sibling 被拖离。这个限制保证控件内部内容别名、所有权边和
+Serializer 的结构化 payload 始终与画布树一致；未来若提供 Tab page reorder/remove，应走专用模型
+命令而不是通用 `removeChild()`。创建尚未挂载的复合控件时，内部 page/content ID 也必须与文档树和
+该 detached subtree 同时查重，不能等挂载后再依赖 Outline 扫描。
 
 ## 10. 动画与时间推进
 
@@ -559,6 +645,18 @@ FrameGraph 与 UI Layer 通过同一个 RenderTargetPool 获得物理 FBO。Mock
 2026-09-01 原生 SVG、连续 contour、设备输入桥接、容器溢出修复、虚拟化 TileView、
 InfoStrip/CornerMarker，以及 Timeline repeat/yoyo、物理弹簧和跨步骤时间守恒回归纳入当前
 Windows Debug 基线：`5147 / 5147`；上面的 2026-08-29 数量保留为该轮审计快照。
+
+2026-09-08 扩展 Layout Editor 工具箱、Image 选择/后端预览、controller/event 往返、生产 Loader
+结构化 payload 对称性及 detached Tab page ID 唯一性回归后，Insider Windows Debug 基线为
+`5322 / 5322`。同日完成 Layout Editor 可靠性第一阶段：非破坏性 CanvasViewport、ID/undo 事务、
+原子保存、剪贴板优先级和 Image preview rehydrate 纳入回归，当前基线为 `5330 / 5330`；
+`AYUI_LayoutEditor_RoundTrip` 同步通过并验证 Pan/Zoom 前后序列化字节一致、根尺寸 authoring、
+ID 拒绝、clipboard/duplicate 边界、图片恢复和原子替换。
+
+同日完成 Layout Editor 架构第二阶段：抽取 `AYUILayoutEditorCore`，拆分 Document/Selection/Command/
+Viewport，引入 Widget authoring registry 与 schema-driven Inspector，并为类型化 edit intent 保留 JSON
+恢复兜底。新增核心单测后 Insider Windows Debug 基线为 `5366 / 5366`，round-trip 同步通过；
+AYEditor 全量回归为 `1940 / 1940`。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
@@ -691,6 +789,15 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明
 排序屏障，而不是在两种 batch mode 中各实现一次。
 
+### 14.2 通用颜色创作控件（2026-09-08）
+
+`ColorPicker` 是 AYUI 的通用颜色创作入口，统一提供 HSV 饱和度/明度面、色相与透明度条、
+`#RRGGBB` / `#RRGGBBAA` 输入、命名色组、记忆/替换色块和拾色请求回调。控件只管理交互
+状态；屏幕/画布像素如何采样由宿主通过回调决定，色组的跨会话保存也由宿主选择项目或用户
+偏好存储。这样 AYUI 不依赖渲染器回读或某个编辑器的配置格式，而 AYEditor、材质工具、粒子
+工具和 AY2D 可以复用同一个颜色模型与交互。控件类型、当前颜色、活动色组及色样进入
+`WidgetSerializer` wire contract，内部组合控件不会作为外部 children 重复序列化。
+
 ## 15. 决策摘要
 
 | 决策 | 结论 |
@@ -709,6 +816,7 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |
 | Popup | UIManager overlay 集中管理 |
+| 颜色创作 | 通用 ColorPicker；HSV/Hex/命名色组归控件，像素采样和持久化归宿主 |
 | Dock tree | VBox/HBox/Splitter 直接作为 Widget tree |
 | 销毁 | `destroyWidgetTree` + 明确 owned/external API |
 | 线程 | UI 树单线程修改 |

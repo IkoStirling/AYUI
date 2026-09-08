@@ -101,6 +101,25 @@ enum class LayerCachePolicy : uint8_t {
     Auto
 };
 
+// Responsive placement for a free-positioned child. Anchor coordinates are
+// normalized to the parent rectangle. offsetMin/offsetMax are signed pixel
+// deltas from those anchor points to the child's near/far edges:
+//
+//   childMin = parentSize * anchorMin + offsetMin
+//   childMax = parentSize * anchorMax + offsetMax
+//
+// Equal min/max values keep the child at a fixed size relative to one parent
+// point; a range stretches the child as the parent changes size. Pivot is
+// retained for authoring/transform-origin semantics and does not change the
+// edge equation above.
+struct AnchorLayout {
+    math::FVector2 anchorMin{0.0f, 0.0f};
+    math::FVector2 anchorMax{0.0f, 0.0f};
+    math::FVector2 offsetMin{0.0f, 0.0f};
+    math::FVector2 offsetMax{0.0f, 0.0f};
+    math::FVector2 pivot{0.5f, 0.5f};
+};
+
 class Widget {
 public:
     Widget();
@@ -185,6 +204,22 @@ public:
         // derived offsets from this widget's size also need their
         // caches invalidated.
         markDescendantsBoundsDirty();
+
+        // Anchors are a direct parent-size constraint, not a viewport-only
+        // layout effect. UIManager deliberately skips a full performLayout
+        // pass while the client size is unchanged, so waiting for that pass
+        // leaves anchored children stale when an editor, animation, or host
+        // resizes an inner free-layout Panel. Resolve direct anchored
+        // children now; child setSize() cascades the same rule to nested
+        // anchored descendants. Structured layout children keep their
+        // position/size-managed flags and are therefore unaffected.
+        for (Widget* child : _children) {
+            if (child != nullptr && child->hasAnchorLayout() &&
+                !child->isLayoutPositionManaged() &&
+                !child->isLayoutSizeManaged()) {
+                child->applyAnchorLayout(_size);
+            }
+        }
     }
 
     // PR-B3 hotfix — scrollable content size separate from the widget's
@@ -206,6 +241,26 @@ public:
     // Defaults to true so a freshly-added child participates in the layout.
     bool isLayoutSizeManaged() const { return _layoutSizeManaged; }
     void setLayoutSizeManaged(bool managed) { _layoutSizeManaged = managed; }
+
+    // UE/RectTransform-style responsive anchors for children of free-layout
+    // containers. Structured parents (Box/Grid/etc.) retain precedence via
+    // their own layout pass and should leave this disabled.
+    bool hasAnchorLayout() const { return _anchorLayoutEnabled; }
+    const AnchorLayout& getAnchorLayout() const { return _anchorLayout; }
+    void setAnchorLayout(const AnchorLayout& layout);
+    void clearAnchorLayout();
+
+    // Change the anchor/pivot while preserving the widget's current visual
+    // rectangle. The widget must already be attached to its intended parent.
+    void setAnchorLayoutPreservingRect(const math::FVector2& anchorMin,
+                                       const math::FVector2& anchorMax,
+                                       const math::FVector2& pivot =
+                                           math::FVector2(0.5f, 0.5f));
+
+    // Recompute edge offsets after an editor/host directly changes position
+    // or size. applyAnchorLayout() is the parent-layout side of the contract.
+    void refreshAnchorOffsetsFromCurrentRect();
+    void applyAnchorLayout(const math::FVector2& parentSize);
 
     void bringToFront();
 
@@ -361,6 +416,34 @@ public:
         markDirty();
     }
     const std::string& getStyleId() const { return _styleId; }
+
+    // Declarative interaction metadata. These strings describe the contract
+    // between a layout and its host controller; Widget deliberately does not
+    // know how controllers are instantiated. UILayoutLoader can resolve the
+    // names against callbacks registered by a host, while authoring tools can
+    // round-trip them even when no game/controller code is present.
+    void setControllerId(const std::string& id) { _controllerId = id; }
+    const std::string& getControllerId() const { return _controllerId; }
+    void setEventBinding(const std::string& eventName,
+                         const std::string& handlerName) {
+        if (eventName.empty()) return;
+        if (handlerName.empty()) {
+            _eventBindings.erase(eventName);
+        } else {
+            _eventBindings[eventName] = handlerName;
+        }
+    }
+    void clearEventBinding(const std::string& eventName) {
+        _eventBindings.erase(eventName);
+    }
+    const std::string& getEventBinding(const std::string& eventName) const {
+        static const std::string empty;
+        const auto it = _eventBindings.find(eventName);
+        return it != _eventBindings.end() ? it->second : empty;
+    }
+    const std::unordered_map<std::string, std::string>& getEventBindings() const {
+        return _eventBindings;
+    }
 
     // =================================================================
     // G11 — per-widget token overrides. When the active theme resolves
@@ -642,6 +725,8 @@ protected:
     bool _visible;
     bool _layoutPositionManaged = true;
     bool _layoutSizeManaged = true;
+    bool _anchorLayoutEnabled = false;
+    AnchorLayout _anchorLayout;
 
     // PR-anim: tree opacity + fade transition state. _opacity == 1.0 is
     // the fast path (no pushOpacity, byte-identical rendering); the
@@ -660,6 +745,8 @@ protected:
 
     std::string _styleId;
     std::string _id;
+    std::string _controllerId;
+    std::unordered_map<std::string, std::string> _eventBindings;
     // G11 — per-widget token overrides. Keyed by bare token name (no
     // leading '$'). Resolved during StyleSheet parsing AND during
     // resolveStyle() so a JSON-loaded style with `"$color.bg": "..."`

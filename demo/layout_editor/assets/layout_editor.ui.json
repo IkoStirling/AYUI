@@ -68,17 +68,57 @@
           "padding": { "left": 16, "top": 12, "right": 16, "bottom": 12 },
           "children": [
             { "type": "TextLabel", "id": "lbl_palette", "style": "__le_heading", "text": "Widget Library", "size": { "w": 244, "h": 24 }, "slot": { "height": 24 } },
-            { "type": "TextLabel", "id": "lbl_pal_basic", "style": "__le_muted", "text": "BASIC", "size": { "w": 244, "h": 18 }, "slot": { "height": 18 } },
-            { "type": "Button", "id": "btn_add_button", "style": "__le_palette", "text": "Button", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_label", "style": "__le_palette", "text": "Text Label", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_input", "style": "__le_palette", "text": "Text Input", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_checkbox", "style": "__le_palette", "text": "Check Box", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_slider", "style": "__le_palette", "text": "Slider", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "TextLabel", "id": "lbl_pal_layout", "style": "__le_muted", "text": "LAYOUT", "size": { "w": 244, "h": 18 }, "slot": { "height": 18 } },
-            { "type": "Button", "id": "btn_add_panel", "style": "__le_palette", "text": "Panel", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_vbox", "style": "__le_palette", "text": "Vertical Box", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_hbox", "style": "__le_palette", "text": "Horizontal Box", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
-            { "type": "Button", "id": "btn_add_scroll", "style": "__le_palette", "text": "Scroll View", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 } },
+            {
+              "type": "ScrollView",
+              "id": "palette_scroll",
+              "size": { "w": 244, "h": 390 },
+              "slot": { "height": 390 },
+              "verticalScrollBar": true,
+              "horizontalScrollBar": false,
+              "verticalScrollBarVisibility": "auto",
+              "horizontalScrollBarVisibility": "hidden",
+              "content": {
+                "type": "VBox",
+                "id": "palette_content",
+                "size": { "w": 228, "h": 1010 },
+                "spacing": 2,
+                "padding": { "left": 0, "top": 0, "right": 8, "bottom": 8 },
+                "children": [
+                  { "type": "TextLabel", "id": "lbl_pal_basic", "style": "__le_muted", "text": "BASIC & CONTENT", "size": { "w": 220, "h": 18 }, "slot": { "height": 18 } },
+                  { "type": "Button", "id": "btn_add_button", "style": "__le_palette", "text": "Button", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_label", "style": "__le_palette", "text": "Text Label", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_richtext", "style": "__le_palette", "text": "Rich Text", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_input", "style": "__le_palette", "text": "Text Input", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_textarea", "style": "__le_palette", "text": "Text Area", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_checkbox", "style": "__le_palette", "text": "Check Box", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_radio", "style": "__le_palette", "text": "Radio Button", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_slider", "style": "__le_palette", "text": "Slider", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_progress", "style": "__le_palette", "text": "Progress Bar", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_spinner", "style": "__le_palette", "text": "Spinner", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_image", "style": "__le_palette", "text": "Image", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextLabel", "id": "lbl_pal_data", "style": "__le_muted", "text": "COLLECTIONS", "size": { "w": 220, "h": 18 }, "slot": { "height": 18 } },
+                  { "type": "Button", "id": "btn_add_combo", "style": "__le_palette", "text": "Combo Box", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_list", "style": "__le_palette", "text": "List View", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_tiles", "style": "__le_palette", "text": "Tile View", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_tree", "style": "__le_palette", "text": "Tree View", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextLabel", "id": "lbl_pal_navigation", "style": "__le_muted", "text": "NAVIGATION", "size": { "w": 220, "h": 18 }, "slot": { "height": 18 } },
+                  { "type": "Button", "id": "btn_add_tabstrip", "style": "__le_palette", "text": "Tab Strip", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_tabs", "style": "__le_palette", "text": "Tab Control", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextLabel", "id": "lbl_pal_layout", "style": "__le_muted", "text": "LAYOUT", "size": { "w": 220, "h": 18 }, "slot": { "height": 18 } },
+                  { "type": "Button", "id": "btn_add_panel", "style": "__le_palette", "text": "Panel", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_vbox", "style": "__le_palette", "text": "Vertical Box", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_hbox", "style": "__le_palette", "text": "Horizontal Box", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_grid", "style": "__le_palette", "text": "Grid Panel", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_scroll", "style": "__le_palette", "text": "Scroll View", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_separator", "style": "__le_palette", "text": "Separator", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextLabel", "id": "lbl_pal_overlay", "style": "__le_muted", "text": "OVERLAYS", "size": { "w": 220, "h": 18 }, "slot": { "height": 18 } },
+                  { "type": "Button", "id": "btn_add_tooltip", "style": "__le_palette", "text": "Tooltip", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_window", "style": "__le_palette", "text": "Window", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_modal", "style": "__le_palette", "text": "Modal", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_add_dialog", "style": "__le_palette", "text": "Modal Dialog", "size": { "w": 220, "h": 30 }, "slot": { "height": 30 } }
+                ]
+              }
+            },
             { "type": "Separator", "id": "sep_palette", "size": { "w": 244, "h": 1 }, "slot": { "height": 1 } },
             { "type": "TextLabel", "id": "lbl_hierarchy", "style": "__le_heading", "text": "Document Outline", "size": { "w": 244, "h": 24 }, "slot": { "height": 24 } },
             { "type": "TextLabel", "id": "lbl_hierarchy_hint", "style": "__le_muted", "text": "Drag rows to reorder or nest", "size": { "w": 244, "h": 34 }, "slot": { "height": 34 } },
@@ -153,7 +193,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 780 },
+                "size": { "w": 304, "h": 1700 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -182,6 +222,90 @@
                       { "type": "Button", "id": "btn_snap", "style": "__le_primary", "text": "Snap", "size": { "w": 88, "h": 30 }, "slot": { "width": 88 } }
                     ]
                   },
+                  { "type": "TextLabel", "id": "section_anchor", "style": "__le_accent", "text": "ANCHOR LAYOUT", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_anchor_presets_0", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_anchor_00", "style": "__le_command", "text": "TL", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_01", "style": "__le_command", "text": "TC", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_02", "style": "__le_command", "text": "TR", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_03", "style": "__le_command", "text": "H-T", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_anchor_presets_1", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_anchor_10", "style": "__le_command", "text": "ML", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_11", "style": "__le_command", "text": "MC", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_12", "style": "__le_command", "text": "MR", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_13", "style": "__le_command", "text": "H-M", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_anchor_presets_2", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_anchor_20", "style": "__le_command", "text": "BL", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_21", "style": "__le_command", "text": "BC", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_22", "style": "__le_command", "text": "BR", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_23", "style": "__le_command", "text": "H-B", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_anchor_presets_3", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_anchor_30", "style": "__le_command", "text": "V-L", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_31", "style": "__le_command", "text": "V-C", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_32", "style": "__le_command", "text": "V-R", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } },
+                      { "type": "Button", "id": "btn_anchor_33", "style": "__le_command", "text": "FILL", "size": { "w": 64, "h": 30 }, "slot": { "width": 64 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_anchor_none", "size": { "h": 30 }, "slot": { "height": 30 },
+                    "children": [
+                      { "type": "Button", "id": "btn_anchor_none", "style": "__le_command", "text": "Absolute (disable anchors)", "size": { "w": 272, "h": 30 }, "slot": { "width": 272 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_anchor_min", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_anchor_min", "style": "__le_label", "text": "Anchor min", "size": { "w": 80, "h": 30 }, "slot": { "width": 80 } },
+                      { "type": "TextInput", "id": "prop_anchor_min_x", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "TextInput", "id": "prop_anchor_min_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_anchor_max", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_anchor_max", "style": "__le_label", "text": "Anchor max", "size": { "w": 80, "h": 30 }, "slot": { "width": 80 } },
+                      { "type": "TextInput", "id": "prop_anchor_max_x", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "TextInput", "id": "prop_anchor_max_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_offset_min", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_offset_min", "style": "__le_label", "text": "Offset min", "size": { "w": 80, "h": 30 }, "slot": { "width": 80 } },
+                      { "type": "TextInput", "id": "prop_offset_min_x", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "TextInput", "id": "prop_offset_min_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_offset_max", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_offset_max", "style": "__le_label", "text": "Offset max", "size": { "w": 80, "h": 30 }, "slot": { "width": 80 } },
+                      { "type": "TextInput", "id": "prop_offset_max_x", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "TextInput", "id": "prop_offset_max_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_pivot", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_pivot", "style": "__le_label", "text": "Pivot", "size": { "w": 80, "h": 30 }, "slot": { "width": 80 } },
+                      { "type": "TextInput", "id": "prop_pivot_x", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "TextInput", "id": "prop_pivot_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
+                    ]
+                  },
+
                   { "type": "TextLabel", "id": "section_identity", "style": "__le_accent", "text": "IDENTITY", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {
                     "type": "HBox", "id": "row_prop_id", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
@@ -228,6 +352,28 @@
                     ]
                   },
                   {
+                    "type": "HBox", "id": "row_prop_texture", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_texture", "style": "__le_label", "text": "Texture", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_texture", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_texture_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextLabel", "id": "texture_action_spacer", "style": "__le_label", "text": "", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "Button", "id": "btn_pick_texture", "style": "__le_command", "text": "Browse…", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "Button", "id": "btn_clear_texture", "style": "__le_command", "text": "Clear", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_items", "size": { "h": 54 }, "slot": { "height": 54 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_items", "style": "__le_label", "text": "Items\n(| separated)", "size": { "w": 86, "h": 52 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_items", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
                     "type": "HBox", "id": "row_prop_text_halign", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
                     "children": [
                       { "type": "TextLabel", "id": "lbl_prop_text_halign", "style": "__le_label", "text": "Horizontal", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
@@ -268,6 +414,70 @@
                     "children": [
                       { "type": "TextLabel", "id": "lbl_prop_readonly", "style": "__le_label", "text": "Read only", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
                       { "type": "ComboBox", "id": "prop_readonly", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "section_interaction", "style": "__le_accent", "text": "INTERACTION", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_prop_controller", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_controller", "style": "__le_label", "text": "Controller", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_controller", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_click", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_click", "style": "__le_label", "text": "On Click", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_click", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_toggled", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_toggled", "style": "__le_label", "text": "On Toggled", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_toggled", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_value_changed", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_value_changed", "style": "__le_label", "text": "On Value", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_value_changed", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_text_changed", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_text_changed", "style": "__le_label", "text": "On Change", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_text_changed", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_submit", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_submit", "style": "__le_label", "text": "On Submit", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_submit", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_selection_changed", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_selection_changed", "style": "__le_label", "text": "On Select", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_selection_changed", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_item_activated", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_item_activated", "style": "__le_label", "text": "On Activate", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_item_activated", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_prop_on_close", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_prop_on_close", "style": "__le_label", "text": "On Close", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "TextInput", "id": "prop_on_close", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
                   { "type": "TextLabel", "id": "section_layout", "style": "__le_accent", "text": "LAYOUT", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },

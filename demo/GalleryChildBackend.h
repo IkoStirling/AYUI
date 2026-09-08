@@ -51,6 +51,9 @@ public:
                   const math::FVector4& color) override;
     void drawWithAlpha(const math::FRectangle& bounds, void* textureHandle, float alpha) override;
 
+    void pushClip(const math::FRectangle& bounds) override;
+    void popClip() override;
+
     PathHandle createPath() override;
     void releasePath(PathHandle path) override;
     void addPathContour(PathHandle path, const math::FVector2* points,
@@ -99,6 +102,7 @@ private:
     int _bbWidth = 0;
     int _bbHeight = 0;
     int _nextPathId = 1;
+    std::vector<int> _clipStates;
     std::unordered_map<int, PathState> _paths;
 };
 

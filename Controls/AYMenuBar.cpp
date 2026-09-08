@@ -278,10 +278,21 @@ void MenuBar::onRender(IRenderBackend& renderer) {
     if (b.maxX <= b.minX || b.maxY <= b.minY) return;
     // Dark bar background.
     renderer.drawRect(b, math::FVector4(0.12f, 0.13f, 0.16f, 1.0f));
-    // Bottom border.
+}
+
+void MenuBar::renderChildren(IRenderBackend& renderer) {
+    Widget::renderChildren(renderer);
+
+    // Draw the rule after the anchors so it remains continuous instead of
+    // surviving only as small fragments in the gaps between opaque buttons.
+    // MenuBar shrinks to the live anchor cluster, so this line naturally ends
+    // below Help rather than running to both window edges.
+    const math::FRectangle b = getWorldBounds();
+    if (b.maxX - b.minX <= 4.0f || b.maxY <= b.minY) return;
     renderer.drawRect(
-        math::FRectangle(b.minX, b.maxY - 1.0f, b.maxX, b.maxY),
-        math::FVector4(0.30f, 0.30f, 0.34f, 1.0f));
+        math::FRectangle(b.minX + 2.0f, b.maxY - 1.0f,
+                         b.maxX - 2.0f, b.maxY),
+        math::FVector4(0.38f, 0.40f, 0.45f, 0.82f));
 }
 
 Widget* createMenuBarWidget() { return new MenuBar(); }

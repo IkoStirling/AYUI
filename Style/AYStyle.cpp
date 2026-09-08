@@ -497,16 +497,39 @@ ResolvedStyle resolveStyleImpl(const std::string& styleId, const Widget* widget,
     };
     apply(s->bgToken, out.backgroundColor);
     apply(s->borderColorToken, out.borderColor);
-    // Code-review Sweep3-#7: ResolvedStyle doesn't carry textColor, so
-    // we can't write the re-expanded value here. Hosts that need
-    // theme-overridable textColor should extend ResolvedStyle with a
-    // textColor field and call apply(s->textColorToken, out.textColor).
-    // For now, the StyleManager direct lookup (StyleManager::get().getStyle
-    // -> WidgetStyle::textColor) still surfaces the value frozen at
-    // load time — the same Sweep3-#6 caveat applies.
+    // Typography is resolved through resolveTextColor / resolveTextFontSize
+    // below, keeping ResolvedStyle's ABI layout unchanged.
     if (s->backgroundStates.enabled)
         out.backgroundColor = s->backgroundStates.forState(state);
     return out;
+}
+
+int resolveTextFontSize(const std::string& styleId, int fallbackFontSize) {
+    const WidgetStyle* style = StyleManager::get().getStyle(styleId);
+    return style != nullptr && style->font.fontSize > 0
+        ? style->font.fontSize : fallbackFontSize;
+}
+
+math::FVector4 resolveTextColor(
+    const std::string& styleId,
+    const Widget* widget,
+    const math::FVector4& fallbackColor) {
+    const WidgetStyle* style = StyleManager::get().getStyle(styleId);
+    if (style == nullptr) return fallbackColor;
+
+    math::FVector4 color = style->textColor;
+    if (style->textColorToken.empty()) return color;
+
+    if (widget != nullptr
+        && widget->findInheritedStyleTokenOverride(
+            style->textColorToken, color)) {
+        return color;
+    }
+    if (const Theme* theme = ThemeManager::get().getActiveTheme()) {
+        return theme->resolveColor(
+            std::string("$") + style->textColorToken);
+    }
+    return color;
 }
 
 } // namespace ayt::ui

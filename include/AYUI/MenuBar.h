@@ -96,6 +96,7 @@ public:
 
     void performLayout() override;
     void onRender(IRenderBackend& renderer) override;
+    void renderChildren(IRenderBackend& renderer) override;
 
 private:
     void layoutAnchors();

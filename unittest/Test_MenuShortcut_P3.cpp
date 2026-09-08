@@ -60,12 +60,12 @@ TEST_CASE(parse_shortcut_alias_alt_option) {
     // "Option" is a recognized alias for the Alt bit (macOS naming).
     // Both Alt+Option+F4 (duplicate-known-modifiers) parses the same as
     // Alt+F4 — we accept the alias and OR the bit twice (idempotent).
-    // F4 itself is OUT of P3's parser alphabet, so the whole binding
-    // returns false (display string preserved, no dispatch).
+    // Function keys are part of the shared editor accelerator alphabet.
     uint8_t mods = 0;
     int key = 0;
-    CHECK(MenuItem::parseShortcut(L"Alt+Option+F4", mods, key) == false);
-    CHECK(key == 0);   // F4 unrecognized; mods discarded with the binding
+    CHECK(MenuItem::parseShortcut(L"Alt+Option+F4", mods, key) == true);
+    CHECK(mods == MenuItem::kAccelAlt);
+    CHECK(key == UIKey_F4);
 
     // Just the alias on its own (recognized key).
     CHECK(MenuItem::parseShortcut(L"Option+S", mods, key) == true);
@@ -73,13 +73,12 @@ TEST_CASE(parse_shortcut_alias_alt_option) {
     CHECK(key  == UIKey_S);
 }
 
-TEST_CASE(parse_shortcut_unsupported_key_returns_false) {
+TEST_CASE(parse_shortcut_function_key_returns_true) {
     uint8_t mods = 0;
     int key = 0;
-    // F1 is not in our P3 parser alphabet.
-    CHECK(MenuItem::parseShortcut(L"Ctrl+F1", mods, key) == false);
-    // Display string still kept; accelerator just doesn't dispatch.
-    CHECK(key == 0);
+    CHECK(MenuItem::parseShortcut(L"Ctrl+F1", mods, key) == true);
+    CHECK(mods == MenuItem::kAccelControl);
+    CHECK(key == UIKey_F1);
 }
 
 TEST_CASE(parse_shortcut_empty_or_garbage_returns_false) {

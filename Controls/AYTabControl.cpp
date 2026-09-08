@@ -83,6 +83,14 @@ void TabControl::addTabOwned(const std::wstring& label, Widget* content) {
     addTabImpl(label, content, true);
 }
 
+bool TabControl::setTabLabel(int index, const std::wstring& label) {
+    if (index < 0 || index >= static_cast<int>(_tabs.size())) return false;
+    _tabs[static_cast<size_t>(index)].label = label;
+    if (_tabStrip != nullptr) _tabStrip->setTabLabel(index, label);
+    markDirty();
+    return true;
+}
+
 void TabControl::addTabImpl(const std::wstring& label, Widget* content, bool owned) {
     _tabs.push_back(TabEntry{label, content, owned});
     if (_tabStrip != nullptr) {
@@ -230,8 +238,22 @@ void TabControl::layoutChildren() {
         _tabStrip->setPosition(math::FVector2(0.0f, 0.0f));
     }
     if (_body != nullptr) {
-        _body->setSize(math::FVector2(w, std::max(0.0f, getHeight() - hh)));
+        const math::FVector2 bodySize(
+            w, std::max(0.0f, getHeight() - hh));
+        _body->setSize(bodySize);
         _body->setPosition(math::FVector2(0.0f, hh));
+        // A tab page is the logical content slot, not a freely-positioned
+        // sibling. Keep the active page fitted to the body so newly-created
+        // or deserialized pages with no explicit size are immediately
+        // visible and editable. Hosts can opt out for a custom viewport by
+        // clearing the page's layout-size-managed flag.
+        Widget* active = getTabContent(_selectedIndex);
+        if (active != nullptr) {
+            active->setPosition(math::FVector2(0.0f, 0.0f));
+            if (active->isLayoutSizeManaged()) {
+                active->setSize(bodySize);
+            }
+        }
     }
 }
 

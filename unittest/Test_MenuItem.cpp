@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYUI/MenuItem.h"
+#include "AYUI/UIKeyCode.h"
 #include "AYUI/MockRenderer.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/WidgetSerializer.h"
@@ -23,6 +24,19 @@ TEST_CASE(menuitem_set_text_and_shortcut) {
     item.setShortcut(L"Ctrl+S");
     CHECK(item.getText() == L"Save");
     CHECK(item.getShortcut() == L"Ctrl+S");
+}
+
+TEST_CASE(menuitem_parses_function_delete_and_arrow_shortcuts) {
+    MenuItem item;
+    item.setShortcut(L"Shift+F5");
+    CHECK(item.getAccelMods() == MenuItem::kAccelShift);
+    CHECK(item.getAccelKey() == UIKey_F5);
+    item.setShortcut(L"Delete");
+    CHECK(item.getAccelMods() == 0);
+    CHECK(item.getAccelKey() == UIKey_Delete);
+    item.setShortcut(L"Ctrl+Left");
+    CHECK(item.getAccelMods() == MenuItem::kAccelControl);
+    CHECK(item.getAccelKey() == UIKey_Left);
 }
 
 TEST_CASE(menuitem_activate_does_not_toggle_selection) {
@@ -90,4 +104,3 @@ TEST_CASE(menuitem_factory_and_serializer_round_trip) {
 }
 
 TEST_SUITE_END
-

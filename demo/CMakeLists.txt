@@ -44,8 +44,6 @@ add_custom_command(TARGET AYUI_Gallery POST_BUILD
 # ---------------------------------------------------------------------------
 add_executable(AYUI_LayoutEditor WIN32
     layout_editor/AYUI_LayoutEditor.cpp
-    layout_editor/LayoutEditorSession.cpp
-    layout_editor/LayoutEditorSession.h
 )
 
 target_include_directories(AYUI_LayoutEditor PRIVATE
@@ -53,7 +51,7 @@ target_include_directories(AYUI_LayoutEditor PRIVATE
 )
 
 target_link_libraries(AYUI_LayoutEditor PRIVATE
-    AYUI
+    AYUILayoutEditorCore
     AYRenderer
     AYDevice
 )
@@ -83,13 +81,11 @@ add_custom_command(TARGET AYUI_LayoutEditor POST_BUILD
 # Headless open→mutate→save→reload check (no HWND).
 add_executable(AYUI_LayoutEditor_RoundTrip
     layout_editor/_roundtrip_check.cpp
-    layout_editor/LayoutEditorSession.cpp
-    layout_editor/LayoutEditorSession.h
 )
 target_include_directories(AYUI_LayoutEditor_RoundTrip PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor
 )
-target_link_libraries(AYUI_LayoutEditor_RoundTrip PRIVATE AYUI)
+target_link_libraries(AYUI_LayoutEditor_RoundTrip PRIVATE AYUILayoutEditorCore)
 if(MSVC)
     target_compile_options(AYUI_LayoutEditor_RoundTrip PRIVATE /Zc:__cplusplus /Zc:preprocessor)
     target_compile_definitions(AYUI_LayoutEditor_RoundTrip PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

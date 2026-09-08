@@ -13,6 +13,7 @@ set(SRC_FILES
     Controls/AYRadioButton.cpp
     Controls/AYRadioGroup.cpp
     Controls/AYSlider.cpp
+    Controls/AYColorPicker.cpp
     Controls/AYProgressBar.cpp
     Controls/AYFocusableWidget.cpp
     Controls/AYTextInput.cpp
@@ -95,6 +96,7 @@ set(HEAD_FILES
     include/AYUI/RadioButton.h
     include/AYUI/RadioGroup.h
     include/AYUI/Slider.h
+    include/AYUI/ColorPicker.h
     include/AYUI/ProgressBar.h
     include/AYUI/FocusableWidget.h
     include/AYUI/TextInput.h
@@ -201,6 +203,39 @@ target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
 if(WIN32)
     # Native Unicode itemization, bidi levels and UAX #14 line-break data.
     target_link_libraries(${MODULE_NAME} PRIVATE usp10 uiautomationcore oleaut32)
+endif()
+
+# Product-grade layout authoring core shared by the standalone Designer,
+# AYEditor and headless regression tools. Keep it separate from AYUI runtime:
+# games that only load .ui.json do not pay for editor models or chrome logic.
+add_library(AYUILayoutEditorCore STATIC
+    LayoutEditor/LayoutCanvasViewport.cpp
+    LayoutEditor/LayoutDocumentModel.cpp
+    LayoutEditor/LayoutSelectionModel.cpp
+    LayoutEditor/LayoutCommandStack.cpp
+    LayoutEditor/PropertySchema.cpp
+    LayoutEditor/WidgetAuthoringRegistry.cpp
+    LayoutEditor/LayoutEditorSession.cpp
+    include/AYUI/LayoutEditor/LayoutEditorSession.h
+    include/AYUI/LayoutEditor/LayoutCanvasViewport.h
+    include/AYUI/LayoutEditor/LayoutDocumentModel.h
+    include/AYUI/LayoutEditor/LayoutSelectionModel.h
+    include/AYUI/LayoutEditor/LayoutCommandStack.h
+    include/AYUI/LayoutEditor/PropertySchema.h
+    include/AYUI/LayoutEditor/WidgetAuthoringRegistry.h
+)
+target_include_directories(AYUILayoutEditorCore
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/LayoutEditor
+)
+target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI)
+if(MSVC)
+    target_compile_options(AYUILayoutEditorCore PRIVATE
+        /Zc:__cplusplus /Zc:preprocessor)
+    target_compile_definitions(AYUILayoutEditorCore PRIVATE
+        NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 enable_testing()

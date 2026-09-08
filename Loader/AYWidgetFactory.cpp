@@ -3,6 +3,7 @@
 #include "AYUI/CheckBox.h"
 #include "AYUI/RadioButton.h"
 #include "AYUI/Slider.h"
+#include "AYUI/ColorPicker.h"
 #include "AYUI/ProgressBar.h"
 #include "AYUI/Spinner.h"
 #include "AYUI/TextInput.h"
@@ -77,6 +78,7 @@ struct DefaultWidgetRegistrar {
         WidgetFactory::get().registerCreator("CheckBox", createCheckBoxWidget);
         WidgetFactory::get().registerCreator("RadioButton", createRadioButtonWidget);
         WidgetFactory::get().registerCreator("Slider", createSliderWidget);
+        WidgetFactory::get().registerCreator("ColorPicker", createColorPickerWidget);
         WidgetFactory::get().registerCreator("ProgressBar", createProgressBarWidget);
         WidgetFactory::get().registerCreator("Spinner", createSpinnerWidget);
         WidgetFactory::get().registerCreator("TextInput", createTextInputWidget);

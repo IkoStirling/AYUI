@@ -3,6 +3,7 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/PopupAnchor.h"
 #include "AYUI/Style.h"
+#include "AYUI/TextMeasure.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYMath/MathUtils.h"
@@ -18,6 +19,7 @@ ComboBox::ComboBox() {
 
     _display = new TextLabel();
     _display->setText(L"");
+    _display->setVerticalAlignment(TextLabel::VAlignment::Center);
     addChildExternal(_display);
 }
 
@@ -119,6 +121,14 @@ void ComboBox::setSelectedIndex(int index) {
     // explicit popup sync with _silentPopupSync, then resets it.
     if (!_silentPopupSync) {
         syncPopupSelection();
+    }
+}
+
+void ComboBox::setSelectedIndexAndNotify(int index) {
+    const int previous = _selectedIndex;
+    setSelectedIndex(index);
+    if (_selectedIndex != previous && _onSelectionChanged) {
+        _onSelectionChanged(_selectedIndex);
     }
 }
 
@@ -553,11 +563,10 @@ void ComboBox::onRender(IRenderBackend& renderer) {
         ? style.borderColor
         : math::FVector4(0.45f, 0.45f, 0.5f, 1.0f);
     float bw = style.hasStyle ? style.borderWidth : 1.0f;
+    const float cornerRadius = style.hasStyle ? style.cornerRadius : 2.0f;
 
-    // B3: rounded fill matches the 2px rounded border (square fill pokes
-    // out of the ring corners otherwise).
-    renderer.drawRoundedRect(bounds, bg, 2.0f);
-    renderer.drawBorderRect(bounds, border, bw, 2.0f);
+    renderer.drawRoundedRect(bounds, bg, cornerRadius);
+    renderer.drawBorderRect(bounds, border, bw, cornerRadius);
 
     // Arrow chevron — a small downward triangle on the right edge, drawn
     // as a quad with a notch to suggest a chevron without a path API.
@@ -585,6 +594,28 @@ void ComboBox::onRender(IRenderBackend& renderer) {
     // method returns. We render ONLY the main area + arrow + border here.
     // (Drawing the popup explicitly would double-render it because
     // CompoundWidget::render walks _children after calling onRender.)
+}
+
+void ComboBox::renderChildren(IRenderBackend& renderer) {
+    if (_display == nullptr) return;
+
+    const int fontSize = resolveTextFontSize(
+        getStyleId(), kDefaultTextFontSize);
+    const math::FVector4 textColor = resolveTextColor(
+        getStyleId(), this, math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+    if (_display->getFontSize() != fontSize) {
+        _display->setFontSize(fontSize);
+    }
+    if (_display->getTextColor() != textColor) {
+        _display->setTextColor(textColor);
+    }
+
+    // The display label's text shaping bounds do not imply a backend clip.
+    // Keep long selected values inside the text slot so they cannot paint
+    // across the arrow or a neighboring property-panel action button.
+    renderer.pushClip(_display->getWorldBounds());
+    _display->render(renderer);
+    renderer.popClip();
 }
 
 Widget* createComboBoxWidget() {

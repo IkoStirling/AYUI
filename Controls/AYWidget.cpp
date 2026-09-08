@@ -84,6 +84,16 @@ void releaseWidgetLayer(WidgetRetainedState& state) {
 
 void compoundDescendLayout(Widget* self) {
     if (self == nullptr) return;
+    // Responsive anchors belong to free-positioned children. Apply them
+    // before the parent's specialized layout pass so Box/Grid layout remains
+    // authoritative if malformed input happens to contain both systems.
+    for (Widget* child : self->getChildren()) {
+        if (child != nullptr && child->hasAnchorLayout() &&
+            !child->isLayoutPositionManaged() &&
+            !child->isLayoutSizeManaged()) {
+            child->applyAnchorLayout(self->getSize());
+        }
+    }
     // layoutChildren() is virtual on CompoundWidget and on
     // CompoundFocusableWidget. We invoke it via the base pointer; the
     // dispatch is dynamic, so each derived class's override fires.
@@ -328,6 +338,103 @@ void Widget::bringToFront() {
             return;
         }
     }
+}
+
+void Widget::setAnchorLayout(const AnchorLayout& layout) {
+    auto unit = [](float value, float fallback) {
+        return std::isfinite(value)
+            ? std::clamp(value, 0.0f, 1.0f)
+            : fallback;
+    };
+    auto finite = [](float value) {
+        return std::isfinite(value) ? value : 0.0f;
+    };
+
+    AnchorLayout normalized = layout;
+    normalized.anchorMin.x = unit(layout.anchorMin.x, 0.0f);
+    normalized.anchorMin.y = unit(layout.anchorMin.y, 0.0f);
+    normalized.anchorMax.x = unit(layout.anchorMax.x, normalized.anchorMin.x);
+    normalized.anchorMax.y = unit(layout.anchorMax.y, normalized.anchorMin.y);
+    normalized.anchorMax.x = std::max(normalized.anchorMin.x,
+                                      normalized.anchorMax.x);
+    normalized.anchorMax.y = std::max(normalized.anchorMin.y,
+                                      normalized.anchorMax.y);
+    normalized.offsetMin.x = finite(layout.offsetMin.x);
+    normalized.offsetMin.y = finite(layout.offsetMin.y);
+    normalized.offsetMax.x = finite(layout.offsetMax.x);
+    normalized.offsetMax.y = finite(layout.offsetMax.y);
+    normalized.pivot.x = unit(layout.pivot.x, 0.5f);
+    normalized.pivot.y = unit(layout.pivot.y, 0.5f);
+
+    const auto sameVec = [](const math::FVector2& a,
+                            const math::FVector2& b) {
+        return a.x == b.x && a.y == b.y;
+    };
+    if (_anchorLayoutEnabled &&
+        sameVec(_anchorLayout.anchorMin, normalized.anchorMin) &&
+        sameVec(_anchorLayout.anchorMax, normalized.anchorMax) &&
+        sameVec(_anchorLayout.offsetMin, normalized.offsetMin) &&
+        sameVec(_anchorLayout.offsetMax, normalized.offsetMax) &&
+        sameVec(_anchorLayout.pivot, normalized.pivot)) {
+        return;
+    }
+    _anchorLayout = normalized;
+    _anchorLayoutEnabled = true;
+    markDirty();
+}
+
+void Widget::clearAnchorLayout() {
+    if (!_anchorLayoutEnabled) {
+        return;
+    }
+    _anchorLayoutEnabled = false;
+    _anchorLayout = AnchorLayout{};
+    markDirty();
+}
+
+void Widget::setAnchorLayoutPreservingRect(
+    const math::FVector2& anchorMin,
+    const math::FVector2& anchorMax,
+    const math::FVector2& pivot) {
+    AnchorLayout layout = _anchorLayoutEnabled
+        ? _anchorLayout : AnchorLayout{};
+    layout.anchorMin = anchorMin;
+    layout.anchorMax = anchorMax;
+    layout.pivot = pivot;
+    setAnchorLayout(layout);
+    refreshAnchorOffsetsFromCurrentRect();
+}
+
+void Widget::refreshAnchorOffsetsFromCurrentRect() {
+    if (!_anchorLayoutEnabled || _parent == nullptr) {
+        return;
+    }
+    const math::FVector2 parentSize = _parent->getSize();
+    AnchorLayout layout = _anchorLayout;
+    layout.offsetMin = math::FVector2(
+        _position.x - parentSize.x * layout.anchorMin.x,
+        _position.y - parentSize.y * layout.anchorMin.y);
+    layout.offsetMax = math::FVector2(
+        _position.x + _size.x - parentSize.x * layout.anchorMax.x,
+        _position.y + _size.y - parentSize.y * layout.anchorMax.y);
+    setAnchorLayout(layout);
+}
+
+void Widget::applyAnchorLayout(const math::FVector2& parentSize) {
+    if (!_anchorLayoutEnabled) {
+        return;
+    }
+    const float minX = parentSize.x * _anchorLayout.anchorMin.x +
+                       _anchorLayout.offsetMin.x;
+    const float minY = parentSize.y * _anchorLayout.anchorMin.y +
+                       _anchorLayout.offsetMin.y;
+    const float maxX = parentSize.x * _anchorLayout.anchorMax.x +
+                       _anchorLayout.offsetMax.x;
+    const float maxY = parentSize.y * _anchorLayout.anchorMax.y +
+                       _anchorLayout.offsetMax.y;
+    setPosition(math::FVector2(minX, minY));
+    setSize(math::FVector2(std::max(0.0f, maxX - minX),
+                           std::max(0.0f, maxY - minY)));
 }
 
 math::FVector2 Widget::getWorldPosition() const {

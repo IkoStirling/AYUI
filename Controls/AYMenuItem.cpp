@@ -22,13 +22,11 @@ namespace ayt::ui {
 //
 // Key token: a single char mapped to UIKeyCode. Recognized:
 //   - 'a'..'z' (case-insensitive) → UIKey_A..UIKey_Z
-//   - 0 / 1 special tokens today:
+//   - named keys:
 //       "Enter"   → UIKey_Enter
 //       "Tab"     → UIKey_Tab
 //       "Esc"     → UIKey_Escape
-//   F1..F12 / arrow keys not parsed in P3 — accelerators for those are
-//   rare and risk clashing with existing B-phase keyboard nav
-//   (Up/Down/Left/Right inside ListView/Menu/TabControl). Out of scope.
+//       "Delete", "Space", arrows, F1..F12
 // ============================================================================
 
 namespace {
@@ -63,11 +61,29 @@ int keyTokenToCode(const std::wstring& tok) {
         const wchar_t c = tok[0];
         if (c >= L'A' && c <= L'Z') return static_cast<int>(UIKey_A + (c - L'A'));
         if (c >= L'a' && c <= L'z') return static_cast<int>(UIKey_A + (c - L'a'));
+        if (c >= L'0' && c <= L'9') return static_cast<int>(UIKey_Num0 + (c - L'0'));
         return 0;
+    }
+    if (tok.size() >= 2 && (tok[0] == L'F' || tok[0] == L'f')) {
+        int number = 0;
+        for (size_t i = 1; i < tok.size(); ++i) {
+            if (tok[i] < L'0' || tok[i] > L'9') {
+                number = 0;
+                break;
+            }
+            number = number * 10 + static_cast<int>(tok[i] - L'0');
+        }
+        if (number >= 1 && number <= 12) return UIKey_F1 + number - 1;
     }
     if (iequals(tok, "enter") || iequals(tok, "return")) return UIKey_Enter;
     if (iequals(tok, "tab"))                            return UIKey_Tab;
     if (iequals(tok, "esc") || iequals(tok, "escape"))   return UIKey_Escape;
+    if (iequals(tok, "delete") || iequals(tok, "del"))   return UIKey_Delete;
+    if (iequals(tok, "space"))                           return UIKey_Space;
+    if (iequals(tok, "left"))                            return UIKey_Left;
+    if (iequals(tok, "right"))                           return UIKey_Right;
+    if (iequals(tok, "up"))                              return UIKey_Up;
+    if (iequals(tok, "down"))                            return UIKey_Down;
     return 0;   // Unrecognized — P3 out-of-scope keys fail closed.
 }
 

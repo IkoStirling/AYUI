@@ -15,6 +15,7 @@
 #include "Test_RadioButton.cpp"
 #include "Test_RadioGroup.cpp"
 #include "Test_Slider.cpp"
+#include "Test_ColorPicker.cpp"
 #include "Test_ProgressBar.cpp"
 #include "Test_TextInput.cpp"
 #include "Test_ScrollBar.cpp"
@@ -104,6 +105,8 @@
 #include "Test_Productization.cpp"            // DPI, semantics, theme cascade, overflow, rich layout
 #include "Test_UnicodeText.cpp"                // grapheme, UAX #14 and bidi analysis
 #include "Test_DeviceInputBridge.cpp"          // AYDevice -> AYUI platform-neutral input seam
+#include "Test_AnchorLayout.cpp"               // responsive free-layout anchors + persistence
+#include "Test_LayoutEditorCore.cpp"            // product authoring models, registry and schema
 
 int runTest()
 {

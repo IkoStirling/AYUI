@@ -4,7 +4,7 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 
 - CMake 目标版本：`1.0.0`
 - 当前功能里程碑：v1.6 已实现
-- 最近全模块审计：2026-08-31
+- 最近全模块审计：2026-09-08
 - 权威架构文档：[design.md](design.md)
 - 变更记录：[CHANGELOG.md](CHANGELOG.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
@@ -16,11 +16,12 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 已实现的主要能力：
 
 - Widget 树、命中测试、事件冒泡、焦点、鼠标捕获、拖放和多窗口 `UIManager`
-- VBox/HBox、GridPanel、ScrollView、Splitter 与约束辅助
+- VBox/HBox、GridPanel、ScrollView、Splitter、自由布局 Anchor/Offset/Pivot 与约束辅助
 - Button、输入框、ListView、虚拟化 TileView、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
+- 通用 `ColorPicker`：HSV/透明度选择、十六进制输入、命名记忆色组及宿主拾色回调
 - DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
-- 41 个注册类型的 Serializer wire contract，含 Grid cell、虚拟化 TileView、复合内容、Menu/Dock/Modal 专用结构
+- 42 个注册类型的 Serializer wire contract，含 ColorPicker、Grid cell、虚拟化 TileView、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 逻辑 DIP 坐标、独立 DPI/UI scale、物理输入换算与按缩放倍率栅格化字体
 - 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断、增量 diff 及 Serializer 元数据
@@ -38,9 +39,11 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 可选的 Production root UI Layer：静态主树复用离屏像素，overlay/drag visual 保持即时绘制
 - AYRenderer 共享 RenderTargetPool：FrameGraph 与 UI Layer 复用同一套 FBO 生命周期和预算，窗口
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
-- Gallery，以及由独立工具和 AYEditor 独立 Designer 窗口共享的 Layout Editor core
+- Gallery，以及由独立工具和 AYEditor 独立 Designer 窗口共享的 Layout Editor core；Designer
+  已覆盖常用叶控件、集合、Tab、容器和 Modal，支持图片选择/预览及声明式 controller/event 元数据
 
-2026-09-01 Windows Debug 当前基线为 `5163 / 5163` 条断言通过。2026-08-29 审计快照为
+2026-09-08 Insider Windows Debug 当前基线为 `5366 / 5366` 条断言通过，Layout Editor headless
+round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -114,7 +117,7 @@ ui.render();
 #include "AYUI.h"
 
 ayt::ui::UILayoutLoader loader;
-loader.bindEvent("btn_ok", "onClick", [] {
+loader.bindControllerEvent("PauseController", "confirm", [] {
     // Handle the action in host code.
 });
 
@@ -123,7 +126,9 @@ ayt::ui::Widget* root = loader.loadFromFile("menu.ui.json");
 ayt::ui::destroyWidgetTree(root);
 ```
 
-JSON 中的可执行逻辑不会被反序列化；`onClick` 等字段只用于匹配宿主通过 `bindEvent` 注册的回调。
+JSON 中不保存或执行代码。Widget 只持久化 `controller` 与 `events` 中的处理器名字；Loader 按
+“`bindEvent(widgetId, eventName)` 旧式精确绑定 → `bindControllerEvent(controller, handler)` →
+`bindHandler(handler)` 全局命名绑定”的顺序解析为宿主提供的 C++ 回调。
 
 动画策略和时间线同样从 `AYUI.h` 暴露：
 
@@ -217,7 +222,10 @@ TileView 处理。拖拽默认产生 `AYUI.TileItems` payload；文件浏览器�
           "type": "Button",
           "id": "btn_resume",
           "text": "ui.pause.resume",
-          "onClick": "resume_game"
+          "controller": "PauseController",
+          "events": {
+            "onClick": "resumeGame"
+          }
         }
       ]
     }
@@ -232,7 +240,54 @@ TileView 处理。拖拽默认产生 `AYUI.TileItems` payload；文件浏览器�
 - Theme JSON 可用 `"extends": "base-theme"` 继承 token 和 sheet；Widget 的 token override
   从父控件向后代级联，最近的 override 胜出。
 - `accessibilityRole/Label/Description/Value/Hidden` 可覆盖自动推断语义，并随布局序列化。
+- `controller` 和 `events` 是可往返的声明式名字，不是脚本；当前内置接线覆盖 `onClick`、
+  `onToggled`、`onValueChanged`、`onTextChanged`、`onSubmit`、`onSelectionChanged`、
+  `onItemActivated` 与 `onClose`；RadioButton 可接 `onToggled`，TextArea 可接 `onTextChanged`。
+  旧顶层 `onClick` 仍可读取并迁移到 `events.onClick`。
 - Dock 布局通过 `UILayoutLoader::saveLayout*` 与 `loadFrom*` 持久化。
+
+## Layout Editor
+
+独立 `AYUI_LayoutEditor` 与 AYEditor 的独立 Designer 窗口共用 `LayoutEditorSession`。Widget Library
+以可拖拽、带类型 SVG 的分类列表提供：Button/Text/RichText/Input/TextArea/CheckBox/RadioButton、
+Slider/ProgressBar/Spinner/Image，ComboBox/ListView/TileView/TreeView，TabStrip/TabControl，以及
+Panel/VBox/HBox/GridPanel/ScrollView/Separator/Tooltip/Window/Modal/ModalDialog。集合和 Tab 的基础
+item 模型可以在 Inspector 以 `|` 分隔文本编辑。
+
+选择 Image 后可编辑纹理名字，也可使用 Browse/Clear。Session 只定义两个宿主回调：路径选择器
+返回要持久化的纹理名字，preview loader 把它解析为当前后端的临时 `ImageTextureHandle`。独立工具
+使用 AYRenderer 上传 PNG/JPEG/BMP/TGA，AYEditor 子窗使用自己的 GDI 预览纹理；JSON 只写
+`textureName`，不写 GPU/GDI 句柄。生产宿主应让路径选择器返回可由其资源系统解析的相对路径或
+资源键，而不是依赖某台机器的绝对路径。
+
+Inspector 只为当前类型显示有效事件；Controller 和处理器字段只创作声明式元数据。游戏/工具宿主
+仍负责注册真正的 controller 回调。ScrollView content、TabControl page、Modal content/body 在
+Outline 中是固定结构槽：可以把控件拖入这些槽，但不能把槽根当作普通 child 拖走，避免控件内部
+内容引用与可见树分离。结构槽中的未挂载 Tab page 同样参与 ID 唯一性检查；保存后由生产
+`UILayoutLoader` 按专用 payload 重建，并把深层 ID 注册到 `findWidgetById()`。
+
+自由布局控件支持 4×4 Anchor preset：横轴 Left/Center/Right/Stretch 与纵轴
+Top/Center/Bottom/Stretch 的全部组合。锚点使用归一化 `anchorMin/anchorMax`，边界由
+`parentSize * anchor + offset` 决定；切换 preset 会保留控件当前屏幕矩形。Inspector 可继续编辑
+Min/Max、两组 Offset 与 Pivot，也可切回 Absolute。画布以琥珀色范围框和锚点显示约束；这些操作
+参与 undo/redo 并随 JSON 往返。Anchor 只适用于 Panel 等自由布局父级，Grid/VBox/HBox 子项仍由
+各自 slot/cell 布局管理。对齐按钮要求至少两个同父级自由控件，分布按钮要求至少三个，不满足时
+自动禁用。父级 `setSize()` 会立即重算锚定后代，不依赖 viewport resize 或下一次全树 layout；
+在 preset 上按住 Ctrl 点击还会立即把控件吸附到固定锚点，Stretch 轴则贴合父级两边。Document
+root 的位置固定，但 Width/Height 始终可在 Inspector 编辑，也可拖动右边、下边或右下角手柄改变
+预览尺寸；切换选中项时 Inspector 自动回到首行，避免旧滚动偏移把根尺寸字段移出裁剪区。
+
+Pan/Zoom 由 editor-only `CanvasViewport` 处理，只改变画布视图 transform 和输入坐标映射，不修改
+文档 Widget 几何、dirty 状态、undo snapshot 或序列化结果。ID 提交会检查格式、编辑器保留前缀与
+全树唯一性；保存使用同目录临时文件原子替换，Paste 优先读取当前系统剪贴板，Duplicate 不覆盖系统
+剪贴板。带 `textureName` 的 Image 在打开、undo/redo 和粘贴后由宿主 preview loader 恢复预览句柄。
+
+Authoring 代码位于独立静态库 `AYUILayoutEditorCore`，不进入游戏只需链接的 AYUI runtime。核心把
+`LayoutDocumentModel`、`LayoutSelectionModel`、`LayoutCommandStack` 与 `LayoutCanvasViewport`
+从宿主 Session 中拆开；standalone 与 AYEditor 只负责窗口、backend 和资源选择器。Palette、类型图标、
+默认尺寸/初始化与 Inspector schema 统一来自 `WidgetAuthoringRegistry`，新增类型不再需要同步修改多张
+硬编码表。`PropertySchema` 按字段/section 生成属性行显隐；命令栈已记录 Property/Insert/Delete/Reorder/
+Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 
@@ -350,9 +405,10 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 - `Layout/`：Box、Grid、Constraint、Splitter
 - `Loader/`：JSON loader、factory、serializer
 - `Style/`：style/theme 与 MockRenderer
+- `LayoutEditor/`：可复用的 authoring model、registry、schema、command stack 与 Session
 - `i18n/`：语言表
 - `unittest/`：模块回归测试
-- `demo/`：Gallery 与 Layout Editor
+- `demo/`：Gallery 与 Layout Editor standalone/round-trip 宿主
 
 ## 已知边界
 
@@ -379,8 +435,8 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 - POSIX Clipboard 按 macOS `pbcopy/pbpaste`、Wayland `wl-copy/wl-paste`、X11 `xclip/xsel`
   的顺序选择可用后端；无可用 helper 或 headless session 时返回 `false`，不会阻塞或回退到私有剪贴板。
 - `WidgetSerializer` 已覆盖全部 41 个公共注册类型；Grid、ScrollView、TileView、Menu、StatusBar、Tab、
-  Modal 和 Dock 使用各自的结构化 payload。回调、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时
-  临时状态不属于持久化格式。
+  Modal 和 Dock 使用各自的结构化 payload。Controller/event 处理器名字属于持久化元数据；真正的
+  回调函数、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时状态不属于持久化格式。
 - Windows UI Automation adapter 已实现 Fragment tree、常用 control pattern、跨线程动作封送和
   增量事件；AT-SPI/NSAccessibility 原生 provider 仍待实现。TextInput/TextArea 的 UIA TextPattern、
   原生 selection range 和 live-region 事件也尚未进入本阶段。

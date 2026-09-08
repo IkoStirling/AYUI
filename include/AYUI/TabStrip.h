@@ -34,6 +34,7 @@ public:
     // Tab data management. The strip owns the Button it creates; the
     // host's "content" is NOT touched here — that's TabControl's job.
     void addTab(const std::wstring& label);
+    bool setTabLabel(int index, const std::wstring& label);
     void removeTab(int index);
     void clearTabs();
 

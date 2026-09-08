@@ -13,6 +13,15 @@
 #include "AYUI/ImageTexture.h"
 #include "AYUI/GridPanel.h"
 #include "AYUI/ScrollView.h"
+#include "AYUI/RadioButton.h"
+#include "AYUI/RichText.h"
+#include "AYUI/Separator.h"
+#include "AYUI/TabControl.h"
+#include "AYUI/TabStrip.h"
+#include "AYUI/Modal.h"
+#include "AYUI/ModalDialog.h"
+#include "AYUI/Dimmer.h"
+#include "AYUI/TreeView.h"
 #include "AYUI/Window.h"
 #include "AYUI/Box.h"
 #include "AYUI/Widget.h"
@@ -75,6 +84,75 @@ TEST_CASE(test_layout_loader_button) {
     destroyWidgetTree(widget);
 }
 
+TEST_CASE(test_layout_loader_controller_event_metadata_and_resolution) {
+    UILayoutLoader loader;
+    int controllerHits = 0;
+    loader.bindControllerEvent("MainMenuController", "startGame",
+        [&controllerHits]() { ++controllerHits; });
+
+    Widget* raw = loader.loadFromString(R"({
+        "type": "Button",
+        "id": "btn_start",
+        "controller": "MainMenuController",
+        "events": { "onClick": "startGame" },
+        "size": { "w": 120, "h": 32 }
+    })");
+    Button* button = dynamic_cast<Button*>(raw);
+    CHECK(button != nullptr);
+    if (button != nullptr) {
+        CHECK(button->getControllerId() == "MainMenuController");
+        CHECK(button->getEventBinding("onClick") == "startGame");
+        CHECK(button->onMouseButtonDown(UIMouseEvent(FVector2(10, 10), 0)));
+        CHECK(button->onMouseButtonUp(UIMouseEvent(FVector2(10, 10), 0)));
+        CHECK(controllerHits == 1);
+
+        std::string saved;
+        CHECK(loader.saveLayoutToString(button, saved, false));
+        CHECK(saved.find("MainMenuController") != std::string::npos);
+        CHECK(saved.find("startGame") != std::string::npos);
+        CHECK(saved.find("events") != std::string::npos);
+    }
+    destroyWidgetTree(raw);
+}
+
+TEST_CASE(test_layout_loader_named_handler_and_legacy_id_binding_precedence) {
+    UILayoutLoader loader;
+    int namedHits = 0;
+    loader.bindHandler("openInventory", [&namedHits]() { ++namedHits; });
+    Widget* namedRaw = loader.loadFromString(R"({
+        "type": "Button", "id": "inventory",
+        "onClick": "openInventory", "size": { "w": 100, "h": 30 }
+    })");
+    Button* named = dynamic_cast<Button*>(namedRaw);
+    CHECK(named != nullptr);
+    if (named != nullptr) {
+        CHECK(named->getEventBinding("onClick") == "openInventory");
+        named->onMouseButtonDown(UIMouseEvent(FVector2(5, 5), 0));
+        named->onMouseButtonUp(UIMouseEvent(FVector2(5, 5), 0));
+    }
+    CHECK(namedHits == 1);
+    destroyWidgetTree(namedRaw);
+
+    int idHits = 0;
+    int fallbackHits = 0;
+    loader.clearWidgetRegistry();
+    loader.bindEvent("priority", "onClick", [&idHits]() { ++idHits; });
+    loader.bindHandler("fallback", [&fallbackHits]() { ++fallbackHits; });
+    Widget* priorityRaw = loader.loadFromString(R"({
+        "type": "Button", "id": "priority",
+        "events": { "onClick": "fallback" },
+        "size": { "w": 100, "h": 30 }
+    })");
+    Button* priority = dynamic_cast<Button*>(priorityRaw);
+    if (priority != nullptr) {
+        priority->onMouseButtonDown(UIMouseEvent(FVector2(5, 5), 0));
+        priority->onMouseButtonUp(UIMouseEvent(FVector2(5, 5), 0));
+    }
+    CHECK(idHits == 1);
+    CHECK(fallbackHits == 0);
+    destroyWidgetTree(priorityRaw);
+}
+
 TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
     UILayoutLoader loader;
 
@@ -112,7 +190,7 @@ TEST_CASE(test_layout_loader_window) {
     const char* json = R"({
         "type": "Window",
         "id": "my_window",
-        "text": "My Title",
+        "title": "My Title",
         "position": { "x": 50, "y": 50 },
         "size": { "w": 400, "h": 300 }
     })";
@@ -620,6 +698,235 @@ TEST_CASE(layout_loader_builds_structured_menubar_items_and_shortcuts) {
     CHECK(edit != nullptr && edit->getItemCount() == 2u);
     CHECK(edit == nullptr || edit->getItem(0) == nullptr
           || edit->getItem(0)->getShortcut() == L"Ctrl+Z");
+    destroyWidgetTree(root);
+}
+
+TEST_CASE(layout_loader_builds_structured_tabs_and_modals) {
+    UILayoutLoader loader;
+    Widget* root = loader.loadFromString(R"json({
+        "type": "Panel",
+        "id": "root",
+        "children": [
+            {
+                "type": "TabControl",
+                "id": "tabs",
+                "headerHeight": 36,
+                "selectedIndex": 1,
+                "tabs": [
+                    {
+                        "label": "General",
+                        "content": {
+                            "type": "Panel",
+                            "id": "page_general",
+                            "children": [
+                                { "type": "Button", "id": "tab_button",
+                                  "text": "Apply" }
+                            ]
+                        }
+                    },
+                    {
+                        "label": "高级",
+                        "content": {
+                            "type": "Panel",
+                            "id": "page_advanced"
+                        }
+                    }
+                ]
+            },
+            {
+                "type": "TabStrip",
+                "id": "strip",
+                "tabs": ["One", "Two", "Three"],
+                "selectedIndex": 2,
+                "tabHeight": 32,
+                "spacing": 5,
+                "indicatorTweenMs": 175,
+                "overflowMode": 1,
+                "minTabWidth": 72
+            },
+            {
+                "type": "Modal",
+                "id": "modal",
+                "dismissOnDimmerClick": false,
+                "dimmer": {
+                    "scrimColor": { "r": 0.1, "g": 0.2, "b": 0.3, "a": 0.7 }
+                },
+                "content": {
+                    "type": "Panel",
+                    "id": "modal_content",
+                    "children": [
+                        { "type": "TextLabel", "id": "modal_label",
+                          "text": "Modal body" }
+                    ]
+                }
+            },
+            {
+                "type": "ModalDialog",
+                "id": "dialog",
+                "acceptText": "Confirm",
+                "rejectText": "Back",
+                "bodyContent": {
+                    "type": "Panel",
+                    "id": "dialog_body",
+                    "children": [
+                        { "type": "TextInput", "id": "dialog_input",
+                          "text": "value" }
+                    ]
+                }
+            }
+        ]
+    })json");
+
+    CHECK(root != nullptr);
+
+    auto* tabs = dynamic_cast<TabControl*>(loader.findWidgetById("tabs"));
+    CHECK(tabs != nullptr);
+    CHECK(tabs != nullptr && tabs->getTabCount() == 2u);
+    CHECK(tabs != nullptr && tabs->getTabLabel(1) == L"高级");
+    CHECK(tabs != nullptr && tabs->getSelectedIndex() == 1);
+    CHECK(tabs != nullptr && tabs->getHeaderHeight() == 36.0f);
+    CHECK(tabs != nullptr && tabs->getTabContent(0) ==
+        loader.findWidgetById("page_general"));
+    CHECK(tabs != nullptr && tabs->getTabContent(1) ==
+        loader.findWidgetById("page_advanced"));
+    CHECK(loader.findWidgetById("tab_button") != nullptr);
+    CHECK(tabs == nullptr || tabs->getTabContent(1) == nullptr ||
+        tabs->getTabContent(1)->getParent() == tabs->getBodyPanel());
+
+    auto* strip = dynamic_cast<TabStrip*>(loader.findWidgetById("strip"));
+    CHECK(strip != nullptr);
+    CHECK(strip != nullptr && strip->getTabCount() == 3);
+    CHECK(strip != nullptr && strip->getSelectedIndex() == 2);
+    CHECK(strip != nullptr && strip->getTabLabel(2) == L"Three");
+    CHECK(strip != nullptr && strip->getOverflowMode() ==
+        TabStrip::OverflowMode::Compress);
+    CHECK(strip != nullptr && strip->getMinTabWidth() == 72.0f);
+
+    auto* modal = dynamic_cast<Modal*>(loader.findWidgetById("modal"));
+    CHECK(modal != nullptr);
+    CHECK(modal != nullptr && !modal->isDismissOnDimmerClick());
+    CHECK(modal != nullptr && modal->getContent() ==
+        loader.findWidgetById("modal_content"));
+    CHECK(loader.findWidgetById("modal_label") != nullptr);
+    CHECK(modal != nullptr && modal->getDimmer() != nullptr);
+    CHECK(modal == nullptr || modal->getDimmer() == nullptr ||
+        modal->getDimmer()->getScrimColor().w == 0.7f);
+
+    auto* dialog = dynamic_cast<ModalDialog*>(loader.findWidgetById("dialog"));
+    CHECK(dialog != nullptr);
+    CHECK(dialog != nullptr && dialog->getAcceptText() == L"Confirm");
+    CHECK(dialog != nullptr && dialog->getRejectText() == L"Back");
+    CHECK(dialog != nullptr && dialog->getBodyContent() ==
+        loader.findWidgetById("dialog_body"));
+    CHECK(loader.findWidgetById("dialog_input") != nullptr);
+
+    destroyWidgetTree(root);
+}
+
+TEST_CASE(layout_loader_preserves_designer_leaf_and_collection_payloads) {
+    UILayoutLoader loader;
+    int toggleEvents = 0;
+    int textEvents = 0;
+    loader.bindControllerEvent("FormController", "toggleOption",
+        [&toggleEvents]() { ++toggleEvents; });
+    loader.bindControllerEvent("FormController", "editNotes",
+        [&textEvents]() { ++textEvents; });
+    Widget* root = loader.loadFromString(R"json({
+        "type": "Widget",
+        "id": "root",
+        "children": [
+            {
+                "type": "RadioButton", "id": "radio", "text": "Option",
+                "checked": true, "groupId": 7,
+                "controller": "FormController",
+                "events": { "onToggled": "toggleOption" }
+            },
+            {
+                "type": "TreeView", "id": "tree", "selectedIndex": 1,
+                "itemHeight": 30,
+                "tree": [
+                    { "label": "Root", "hasChildren": true,
+                      "expanded": true, "parentIndex": -1 },
+                    { "label": "子项", "hasChildren": false,
+                      "expanded": false, "parentIndex": 0 }
+                ]
+            },
+            {
+                "type": "RichText", "id": "rich", "defaultFontSize": 16,
+                "wrapMode": 1, "alignment": 3, "lineSpacing": 2,
+                "runs": [
+                    { "text": "Hello ", "fontSize": 16, "bold": true },
+                    { "text": "世界", "fontSize": 18, "italic": true }
+                ]
+            },
+            {
+                "type": "TextInput", "id": "input", "text": "secret",
+                "password": true, "readOnly": true, "maxLength": 12,
+                "hAlign": 2
+            },
+            {
+                "type": "TextArea", "id": "area", "text": "line",
+                "readOnly": true, "maxLength": 64, "lineHeight": 20,
+                "controller": "FormController",
+                "events": { "onTextChanged": "editNotes" }
+            },
+            {
+                "type": "Separator", "id": "separator",
+                "orientation": "vertical", "thickness": 3, "inset": 4,
+                "color": { "r": 0.2, "g": 0.4, "b": 0.6, "a": 1.0 }
+            }
+        ]
+    })json");
+
+    CHECK(root != nullptr);
+
+    auto* radio = dynamic_cast<RadioButton*>(loader.findWidgetById("radio"));
+    CHECK(radio != nullptr);
+    CHECK(radio != nullptr && radio->getText() == L"Option");
+    CHECK(radio != nullptr && radio->isChecked());
+    CHECK(radio != nullptr && radio->getGroupId() == 7);
+    if (radio != nullptr) radio->setChecked(false);
+    CHECK(toggleEvents == 1);
+
+    auto* tree = dynamic_cast<TreeView*>(loader.findWidgetById("tree"));
+    CHECK(tree != nullptr);
+    CHECK(tree != nullptr && tree->getNodeCount() == 2u);
+    CHECK(tree != nullptr && tree->getNodeData(1).label == L"子项");
+    CHECK(tree != nullptr && tree->getSelectedIndex() == 1);
+    CHECK(tree != nullptr && tree->getItemHeight() == 30.0f);
+
+    auto* rich = dynamic_cast<RichText*>(loader.findWidgetById("rich"));
+    CHECK(rich != nullptr);
+    CHECK(rich != nullptr && rich->getRunCount() == 2u);
+    CHECK(rich != nullptr && rich->getPlainText() == L"Hello 世界");
+    CHECK(rich != nullptr && rich->getRun(0).bold);
+    CHECK(rich != nullptr && rich->getRun(1).italic);
+    CHECK(rich != nullptr && rich->getAlignment() ==
+        RichTextAlignment::Justify);
+
+    auto* input = dynamic_cast<TextInput*>(loader.findWidgetById("input"));
+    CHECK(input != nullptr);
+    CHECK(input != nullptr && input->isPasswordMode());
+    CHECK(input != nullptr && input->isReadOnly());
+    CHECK(input != nullptr && input->getMaxLength() == 12u);
+    CHECK(input != nullptr && input->getHAlign() == TextInput::HAlign::Right);
+
+    auto* area = dynamic_cast<TextArea*>(loader.findWidgetById("area"));
+    CHECK(area != nullptr);
+    CHECK(area != nullptr && area->isReadOnly());
+    CHECK(area != nullptr && area->getMaxLength() == 64u);
+    CHECK(area != nullptr && area->getLineHeight() == 20.0f);
+    if (area != nullptr) area->setText(L"updated");
+    CHECK(textEvents == 1);
+
+    auto* separator = dynamic_cast<Separator*>(
+        loader.findWidgetById("separator"));
+    CHECK(separator != nullptr);
+    CHECK(separator != nullptr && separator->getOrientation() ==
+        Separator::Orientation::Vertical);
+    CHECK(separator != nullptr && separator->getThickness() == 3.0f);
+    CHECK(separator != nullptr && separator->getInset() == 4.0f);
+
     destroyWidgetTree(root);
 }
 
