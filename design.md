@@ -580,6 +580,20 @@ undo snapshot 或 `.ui.json`；缩放 pivot 下的文档点保持不动。AYRend
 都实现平衡的 transform stack，frame 开始时会恢复调用方遗留的未配对状态。选择框、resize handle、
 palette drop 和 marquee 统一经过 document/screen 映射，避免显示坐标与编辑坐标分叉。
 
+第五阶段 Reuse & Responsive 保持“编辑器创作能力与运行时求值分离”。`LayoutReuseLibrary` 保存命名
+Widget 子树 JSON，插入时立即展开并重新生成整棵子树 ID；实例不是共享引用，因此修改、撤销和运行时
+加载均沿用现有 Widget 模型。只有存在定义时文档才升级为 `{format, version, reusable, root}` 信封，
+旧 root-only 文件保持字节结构兼容；生产 Loader 忽略 `reusable` 并只构建 `root`，模板管理不进入
+AYUI runtime 的对象生命周期。
+
+响应式布局采用父级逻辑宽度查询，而不是全局窗口查询，使嵌套工具面板和 RenderTarget 内 UI 也能
+独立响应。规则区间使用 `[minWidth, maxWidth)`，`maxWidth <= 0` 表示无上界；第一个匹配规则可覆盖
+effective visibility，并可为非 layout-managed Widget 替换 AnchorLayout。authored visibility 和基础
+Anchor 始终保留，离开断点后无损恢复。VBox/HBox/Grid 等结构布局继续决定子项几何，响应式规则只以
+可见性影响占位；这样不会形成 Anchor 与 slot/cell 的双重布局权。Designer 先固定 Compact/Medium/Wide
+三个产品断点，preview width 属于 transient host state，不进入 snapshot 或布局 JSON；规则编辑、block
+定义/插入/删除均进入命令栈。Validation 对无效区间、区间重叠和无基础 Anchor 的覆盖给出诊断。
+
 编辑可靠性以文档事务为边界：ID 在提交前校验格式、保留前缀和全树唯一性，切换选中项会结束正在
 合并的属性事务；Duplicate 直接复制当前 selection snapshot，不改写系统剪贴板，Paste 每次优先读取
 系统剪贴板，避免复用过期的内部 payload。Image 的 `textureName` 在打开、恢复和粘贴后通过宿主
@@ -706,6 +720,11 @@ Tab page reorder 的 Serializer/ownership 边界纳入回归。当前 Insider Wi
 同日完成 Layout Editor Authoring Quality 第四阶段：稳定资源 key 与本机 preview path 分离、样式来源/
 四状态预览、多选公共几何与 Style 编辑、统一可定位 Validation 诊断进入共享 core；资源路径不会随
 预览句柄泄漏进 JSON。新增核心与 round-trip 回归后 Insider Windows Debug 基线为 `5417 / 5417`。
+
+2026-09-09 完成 Reuse & Responsive 第五阶段：文档内可复用 Widget block、实例 ID 重生成、兼容旧版
+root-only JSON 的版本化文档信封，以及 Compact/Medium/Wide 可见性与 Anchor 覆盖进入共享 core。
+运行时直接读取信封 root，结构化容器会在断点隐藏后重排；非法/重叠规则进入 Validation。新增运行时、
+模型、持久化和 headless round-trip 回归后 Insider Windows Debug 基线为 `5476 / 5476`。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

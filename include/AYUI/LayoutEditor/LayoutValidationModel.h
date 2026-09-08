@@ -23,6 +23,9 @@ enum class LayoutDiagnosticCode {
     EventWithoutController,
     MissingAccessibleName,
     InvalidAnchors,
+    InvalidResponsiveRange,
+    OverlappingResponsiveRules,
+    ResponsiveAnchorWithoutBase,
     OutsideParent,
     GridSlotOverlap,
 };

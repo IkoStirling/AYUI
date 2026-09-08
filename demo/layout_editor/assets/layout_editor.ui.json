@@ -232,7 +232,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 2820 },
+                "size": { "w": 304, "h": 3300 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -304,6 +304,29 @@
                       { "type": "Button", "id": "btn_anchor_none", "style": "__le_command", "text": "Absolute (disable anchors)", "size": { "w": 272, "h": 30 }, "slot": { "width": 272 } }
                     ]
                   },
+                  { "type": "TextLabel", "id": "section_responsive", "style": "__le_accent", "text": "RESPONSIVE RULE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_responsive_breakpoint", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 6,
+                    "children": [
+                      { "type": "ComboBox", "id": "responsive_breakpoint", "style": "__le_input", "size": { "w": 190, "h": 30 }, "slot": { "width": 190 } },
+                      { "type": "Button", "id": "btn_responsive_preview", "style": "__le_command", "text": "Preview", "size": { "w": 76, "h": 30 }, "slot": { "width": 76 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_responsive_visibility", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_responsive_visibility", "style": "__le_label", "text": "Visibility", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "ComboBox", "id": "responsive_visibility", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_responsive_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_responsive_capture", "style": "__le_command", "text": "Use anchors", "size": { "w": 132, "h": 30 }, "slot": { "width": 132 } },
+                      { "type": "Button", "id": "btn_responsive_clear", "style": "__le_command", "text": "Clear rule", "size": { "w": 134, "h": 30 }, "slot": { "width": 134 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "responsive_status", "style": "__le_muted", "text": "No responsive override", "size": { "w": 272, "h": 34 }, "slot": { "height": 34 } },
                   {
                     "type": "HBox", "id": "row_prop_anchor_min", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 4,
                     "children": [
@@ -344,6 +367,19 @@
                       { "type": "TextInput", "id": "prop_pivot_y", "style": "__le_input", "text": "", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } }
                     ]
                   },
+
+                  { "type": "TextLabel", "id": "section_reuse", "style": "__le_accent", "text": "REUSABLE BLOCKS", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "TextInput", "id": "reuse_name", "style": "__le_input", "text": "", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ListView", "id": "reuse_list", "style": "__le_input", "size": { "w": 272, "h": 92 }, "slot": { "height": 92 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_reuse_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_reuse_define", "style": "__le_command", "text": "Save/Update", "size": { "w": 102, "h": 30 }, "slot": { "width": 102 } },
+                      { "type": "Button", "id": "btn_reuse_insert", "style": "__le_command", "text": "Insert", "size": { "w": 78, "h": 30 }, "slot": { "width": 78 } },
+                      { "type": "Button", "id": "btn_reuse_remove", "style": "__le_command", "text": "Remove", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "reuse_status", "style": "__le_muted", "text": "Expanded copies remain independently editable", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
 
                   { "type": "TextLabel", "id": "section_identity", "style": "__le_accent", "text": "IDENTITY", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {

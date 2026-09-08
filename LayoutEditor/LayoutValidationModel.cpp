@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -163,6 +164,37 @@ void LayoutValidationModel::run(
                 add(LayoutDiagnosticSeverity::Error,
                     LayoutDiagnosticCode::InvalidAnchors, widget,
                     name + L" has invalid anchor bounds");
+            }
+        }
+
+        const auto& responsive = widget->getResponsiveLayoutRules();
+        for (size_t index = 0; index < responsive.size(); ++index) {
+            const ResponsiveLayoutRule& rule = responsive[index];
+            if (rule.maxParentWidth > 0.0f &&
+                rule.maxParentWidth <= rule.minParentWidth) {
+                add(LayoutDiagnosticSeverity::Error,
+                    LayoutDiagnosticCode::InvalidResponsiveRange, widget,
+                    name + L" has an invalid responsive width range");
+            }
+            if (rule.overrideAnchors && !widget->hasAnchorLayout()) {
+                add(LayoutDiagnosticSeverity::Warning,
+                    LayoutDiagnosticCode::ResponsiveAnchorWithoutBase, widget,
+                    name + L" overrides responsive anchors without a base anchor");
+            }
+            const float maxWidth = rule.maxParentWidth <= 0.0f
+                ? std::numeric_limits<float>::max() : rule.maxParentWidth;
+            for (size_t other = index + 1; other < responsive.size(); ++other) {
+                const ResponsiveLayoutRule& candidate = responsive[other];
+                const float candidateMax = candidate.maxParentWidth <= 0.0f
+                    ? std::numeric_limits<float>::max()
+                    : candidate.maxParentWidth;
+                if (rule.minParentWidth < candidateMax &&
+                    candidate.minParentWidth < maxWidth) {
+                    add(LayoutDiagnosticSeverity::Warning,
+                        LayoutDiagnosticCode::OverlappingResponsiveRules,
+                        widget,
+                        name + L" has overlapping responsive width rules");
+                }
             }
         }
 

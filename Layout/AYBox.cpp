@@ -264,7 +264,7 @@ void BoxBase::render(IRenderBackend& renderer) {
     if (recordNestedRenderIfNeeded(renderer)) {
         return;
     }
-    if (!_visible) {
+    if (!isVisible()) {
         return;
     }
     // BoxBase owns a slot-ordered child traversal, so it cannot delegate to
@@ -335,7 +335,7 @@ void BoxBase::render(IRenderBackend& renderer) {
 }
 
 Widget* BoxBase::hitTest(const math::FVector2& worldPos) {
-    if (!_visible) {
+    if (!isVisible()) {
         return nullptr;
     }
 

@@ -149,6 +149,15 @@ BoxBase::Gravity parseBoxGravity(const std::string& s)
     return BoxBase::Gravity::TopLeft;
 }
 
+ResponsiveVisibility parseResponsiveVisibility(const std::string& value)
+{
+    if (value == "visible" || value == "show")
+        return ResponsiveVisibility::Visible;
+    if (value == "hidden" || value == "hide")
+        return ResponsiveVisibility::Hidden;
+    return ResponsiveVisibility::Inherit;
+}
+
 // L3 — parseGridHAlign / parseGridVAlign. JSON shape: "Left" / "Center" /
 // "Right" / "Fill" for HAlign; "Top" / "Middle" / "Bottom" / "Fill" for
 // VAlign. Unknown / missing = Fill (default = stretch to cell).
@@ -346,7 +355,15 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     try {
         json j = json::parse(jsonStr);
         LOADER_HEAP_CHECK("after_json_parse");
-        Widget* root = buildWidgetTree(JsonHandle(&j));
+        // Reusable authoring documents wrap the runtime root with a local
+        // block library. Instances are expanded when inserted, so runtime
+        // loading only needs the root and remains independent of the editor.
+        json* rootJson = &j;
+        if (j.is_object() && !j.contains("type") && j.contains("root") &&
+            j["root"].is_object()) {
+            rootJson = &j["root"];
+        }
+        Widget* root = buildWidgetTree(JsonHandle(rootJson));
         LOADER_HEAP_CHECK("after_build_widget_tree");
         // Success: the new tree's buildWidgetTree path already populated
         // _widgetsById during recursion (the early-swap above restored
@@ -388,6 +405,13 @@ bool UILayoutLoader::saveLayout(const std::string& filepath, Widget* root, bool 
 
     std::string jsonStr;
     if (!saveLayoutToString(root, jsonStr, pretty)) return false;
+
+    return saveJsonDocument(filepath, jsonStr);
+}
+
+bool UILayoutLoader::saveJsonDocument(const std::string& filepath,
+                                      const std::string& jsonStr) {
+    if (filepath.empty() || jsonStr.empty()) return false;
 
     namespace fs = std::filesystem;
     const fs::path target = fs::u8path(filepath);
@@ -622,6 +646,44 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         widget->setAnchorLayout(layout);
         widget->setLayoutPositionManaged(false);
         widget->setLayoutSizeManaged(false);
+    }
+
+    if (j.contains("responsive") && j["responsive"].is_array()) {
+        std::vector<ResponsiveLayoutRule> rules;
+        for (const json& value : j["responsive"]) {
+            if (!value.is_object()) continue;
+            ResponsiveLayoutRule rule;
+            rule.name = value.value("name", std::string{});
+            rule.minParentWidth = value.value("minWidth", 0.0f);
+            rule.maxParentWidth = value.value("maxWidth", 0.0f);
+            rule.visibility = parseResponsiveVisibility(
+                value.value("visibility", std::string{"inherit"}));
+            if (value.contains("anchors") && value["anchors"].is_object()) {
+                const json& anchors = value["anchors"];
+                auto readVec2 = [&anchors](const char* key,
+                                           const math::FVector2& fallback) {
+                    math::FVector2 result = fallback;
+                    if (anchors.contains(key) && anchors[key].is_object()) {
+                        result.x = anchors[key].value("x", result.x);
+                        result.y = anchors[key].value("y", result.y);
+                    }
+                    return result;
+                };
+                rule.anchors.anchorMin = readVec2(
+                    "min", rule.anchors.anchorMin);
+                rule.anchors.anchorMax = readVec2(
+                    "max", rule.anchors.anchorMax);
+                rule.anchors.offsetMin = readVec2(
+                    "offsetMin", rule.anchors.offsetMin);
+                rule.anchors.offsetMax = readVec2(
+                    "offsetMax", rule.anchors.offsetMax);
+                rule.anchors.pivot = readVec2(
+                    "pivot", rule.anchors.pivot);
+                rule.overrideAnchors = true;
+            }
+            rules.push_back(std::move(rule));
+        }
+        widget->setResponsiveLayoutRules(std::move(rules));
     }
 
     // Visible

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 
@@ -88,9 +89,12 @@ void compoundDescendLayout(Widget* self) {
     // before the parent's specialized layout pass so Box/Grid layout remains
     // authoritative if malformed input happens to contain both systems.
     for (Widget* child : self->getChildren()) {
-        if (child != nullptr && child->hasAnchorLayout() &&
-            !child->isLayoutPositionManaged() &&
-            !child->isLayoutSizeManaged()) {
+        if (child == nullptr) continue;
+        if (child->hasResponsiveLayoutRules()) {
+            child->applyResponsiveLayout(self->getSize());
+        } else if (child->hasAnchorLayout() &&
+                   !child->isLayoutPositionManaged() &&
+                   !child->isLayoutSizeManaged()) {
             child->applyAnchorLayout(self->getSize());
         }
     }
@@ -262,6 +266,9 @@ void Widget::addChild(Widget* child) {
     child->_parent = this;
     child->_externallyOwned = false;
     _children.push_back(child);
+    if (child->hasResponsiveLayoutRules()) {
+        child->applyResponsiveLayout(_size);
+    }
     // Re-attaching a child invalidates the parent's presentation cache.
     markDirty();
 }
@@ -274,6 +281,9 @@ void Widget::addChildExternal(Widget* child) {
         child->_parent = this;
         child->_externallyOwned = true;
         _children.push_back(child);
+        if (child->hasResponsiveLayoutRules()) {
+            child->applyResponsiveLayout(_size);
+        }
         markDirty();
     }
 }
@@ -437,6 +447,122 @@ void Widget::applyAnchorLayout(const math::FVector2& parentSize) {
                            std::max(0.0f, maxY - minY)));
 }
 
+void Widget::setResponsiveLayoutRules(
+    std::vector<ResponsiveLayoutRule> rules) {
+    const auto finiteOr = [](float value, float fallback) {
+        return std::isfinite(value) ? value : fallback;
+    };
+    for (ResponsiveLayoutRule& rule : rules) {
+        rule.minParentWidth = std::max(
+            0.0f, finiteOr(rule.minParentWidth, 0.0f));
+        rule.maxParentWidth = finiteOr(rule.maxParentWidth, 0.0f);
+        if (rule.maxParentWidth < 0.0f) rule.maxParentWidth = 0.0f;
+
+        auto unit = [](float value, float fallback) {
+            return std::isfinite(value)
+                ? std::clamp(value, 0.0f, 1.0f) : fallback;
+        };
+        auto finite = [](float value) {
+            return std::isfinite(value) ? value : 0.0f;
+        };
+        AnchorLayout& anchor = rule.anchors;
+        anchor.anchorMin.x = unit(anchor.anchorMin.x, 0.0f);
+        anchor.anchorMin.y = unit(anchor.anchorMin.y, 0.0f);
+        anchor.anchorMax.x = unit(anchor.anchorMax.x, anchor.anchorMin.x);
+        anchor.anchorMax.y = unit(anchor.anchorMax.y, anchor.anchorMin.y);
+        anchor.anchorMax.x = std::max(anchor.anchorMin.x, anchor.anchorMax.x);
+        anchor.anchorMax.y = std::max(anchor.anchorMin.y, anchor.anchorMax.y);
+        anchor.offsetMin.x = finite(anchor.offsetMin.x);
+        anchor.offsetMin.y = finite(anchor.offsetMin.y);
+        anchor.offsetMax.x = finite(anchor.offsetMax.x);
+        anchor.offsetMax.y = finite(anchor.offsetMax.y);
+        anchor.pivot.x = unit(anchor.pivot.x, 0.5f);
+        anchor.pivot.y = unit(anchor.pivot.y, 0.5f);
+    }
+    std::stable_sort(rules.begin(), rules.end(),
+        [](const ResponsiveLayoutRule& a, const ResponsiveLayoutRule& b) {
+            if (a.minParentWidth != b.minParentWidth)
+                return a.minParentWidth < b.minParentWidth;
+            const float aMax = a.maxParentWidth <= 0.0f
+                ? std::numeric_limits<float>::max() : a.maxParentWidth;
+            const float bMax = b.maxParentWidth <= 0.0f
+                ? std::numeric_limits<float>::max() : b.maxParentWidth;
+            return aMax < bMax;
+        });
+    _responsiveLayoutRules = std::move(rules);
+    if (_parent != nullptr) applyResponsiveLayout(_parent->getSize());
+    else {
+        _activeResponsiveRuleIndex = -1;
+        _responsiveVisibility = ResponsiveVisibility::Inherit;
+    }
+    markDirty();
+}
+
+void Widget::clearResponsiveLayoutRules() {
+    if (_responsiveLayoutRules.empty() &&
+        _responsiveVisibility == ResponsiveVisibility::Inherit &&
+        _activeResponsiveRuleIndex < 0) return;
+    _responsiveLayoutRules.clear();
+    _activeResponsiveRuleIndex = -1;
+    _responsiveVisibility = ResponsiveVisibility::Inherit;
+    if (_parent != nullptr && hasAnchorLayout() &&
+        !_layoutPositionManaged && !_layoutSizeManaged) {
+        applyAnchorLayout(_parent->getSize());
+    }
+    markDirty();
+}
+
+const ResponsiveLayoutRule* Widget::getActiveResponsiveLayoutRule() const {
+    return _activeResponsiveRuleIndex >= 0 &&
+           _activeResponsiveRuleIndex < static_cast<int>(
+               _responsiveLayoutRules.size())
+        ? &_responsiveLayoutRules[
+            static_cast<size_t>(_activeResponsiveRuleIndex)]
+        : nullptr;
+}
+
+void Widget::applyResponsiveLayout(const math::FVector2& parentSize) {
+    const bool visibleBefore = isVisible();
+    int active = -1;
+    for (size_t i = 0; i < _responsiveLayoutRules.size(); ++i) {
+        const ResponsiveLayoutRule& rule = _responsiveLayoutRules[i];
+        const bool aboveMin = parentSize.x >= rule.minParentWidth;
+        const bool belowMax = rule.maxParentWidth <= 0.0f ||
+                              parentSize.x < rule.maxParentWidth;
+        if (aboveMin && belowMax) {
+            active = static_cast<int>(i);
+            break;
+        }
+    }
+
+    const ResponsiveLayoutRule* rule = active >= 0
+        ? &_responsiveLayoutRules[static_cast<size_t>(active)] : nullptr;
+    _responsiveVisibility = rule != nullptr
+        ? rule->visibility : ResponsiveVisibility::Inherit;
+    const bool visibilityChanged = visibleBefore != isVisible();
+    _activeResponsiveRuleIndex = active;
+
+    const AnchorLayout* effectiveAnchor = _anchorLayoutEnabled
+        ? &_anchorLayout : nullptr;
+    if (rule != nullptr && rule->overrideAnchors)
+        effectiveAnchor = &rule->anchors;
+    if (effectiveAnchor != nullptr && !_layoutPositionManaged &&
+        !_layoutSizeManaged) {
+        const float minX = parentSize.x * effectiveAnchor->anchorMin.x +
+                           effectiveAnchor->offsetMin.x;
+        const float minY = parentSize.y * effectiveAnchor->anchorMin.y +
+                           effectiveAnchor->offsetMin.y;
+        const float maxX = parentSize.x * effectiveAnchor->anchorMax.x +
+                           effectiveAnchor->offsetMax.x;
+        const float maxY = parentSize.y * effectiveAnchor->anchorMax.y +
+                           effectiveAnchor->offsetMax.y;
+        setPosition(math::FVector2(minX, minY));
+        setSize(math::FVector2(std::max(0.0f, maxX - minX),
+                               std::max(0.0f, maxY - minY)));
+    }
+    if (visibilityChanged) markDirty();
+}
+
 math::FVector2 Widget::getWorldPosition() const {
     if (_parent) {
         return _parent->getWorldBounds().getMin() + _position;
@@ -587,7 +713,7 @@ Widget* Widget::hitTest(const math::FVector2& worldPos) {
     // `_hoverWidget` pointer, but every widget paid the cost even when it
     // could never host a hovered child (leaf widgets). With the override
     // split, leaf widgets are honest: they only ever hit-test themselves.
-    if (!_visible) return nullptr;
+    if (!isVisible()) return nullptr;
     math::FRectangle bounds = getWorldBounds();
     if (bounds.contains(worldPos)) {
         return this;
@@ -956,7 +1082,7 @@ void Widget::render(IRenderBackend& renderer) {
     // evaluated by the dynamic command on every replay, so showing it later
     // cannot leave it permanently absent from a container's cached order.
     if (recordNestedRenderIfNeeded(renderer)) return;
-    if (!_visible) return;
+    if (!isVisible()) return;
     if (tryRenderLayerCache(renderer)) return;
     renderSubtreeContent(renderer);
 }

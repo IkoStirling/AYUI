@@ -14,7 +14,9 @@ enum class LayoutEditKind {
     Delete,
     Reorder,
     Transform,
-    Clipboard
+    Clipboard,
+    Reusable,
+    Responsive
 };
 
 struct LayoutEditorSnapshot {

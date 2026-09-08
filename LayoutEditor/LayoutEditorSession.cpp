@@ -610,6 +610,15 @@ void LayoutEditorSession::detach() {
     _suppressValidation = false;
     _validationDirty = true;
     _validationLabels.clear();
+    _reuseList = nullptr;
+    _reuseName = nullptr;
+    _reuseStatus = nullptr;
+    _suppressReuse = false;
+    _responsiveBreakpoint = nullptr;
+    _responsiveVisibility = nullptr;
+    _responsiveStatus = nullptr;
+    _suppressResponsive = false;
+    _responsiveAuthoringIndex = 0;
     _stylePreviewState = StyleState::Normal;
     _previewPreset = nullptr;
     _previewDpi = nullptr;
@@ -619,6 +628,7 @@ void LayoutEditorSession::detach() {
     _hierarchyIndex.clear();
     _commandStack.clear();
     _documentPath.clear();
+    _reuseLibrary.clear();
     _dirty = false;
 }
 
@@ -753,6 +763,129 @@ void LayoutEditorSession::applyPreviewToDocument() {
         _ui->layout();
     }
     syncPreviewChrome();
+    syncResponsiveEditor();
+}
+
+bool LayoutEditorSession::defineReusableBlock(const std::string& name) {
+    if (_selected == nullptr || _selection.size() != 1u) {
+        setStatus(L"Select exactly one widget to create a reusable block");
+        return false;
+    }
+    LayoutReuseLibrary updated = _reuseLibrary;
+    std::string error;
+    if (!updated.define(name, _selected, &error)) {
+        setStatus(utf8ToWide(error));
+        return false;
+    }
+    pushUndo(LayoutEditKind::Reusable, "Save reusable block");
+    _reuseLibrary = std::move(updated);
+    markDirty(true);
+    syncReuseEditor();
+    setStatus(utf8ToWide("Reusable block saved: " + name));
+    return true;
+}
+
+bool LayoutEditorSession::insertReusableBlock(const std::string& name) {
+    Widget* parent = pickParentForAdd();
+    Widget* created = _reuseLibrary.instantiate(name);
+    if (parent == nullptr || created == nullptr) {
+        setStatus(utf8ToWide("Reusable block unavailable: " + name));
+        destroyWidgetTree(created);
+        return false;
+    }
+    remintTreeIds(created);
+    pushUndo(LayoutEditKind::Insert, "Insert reusable block");
+    if (!placeNewWidget(created, parent, -1, nullptr)) {
+        _commandStack.discardLastUndo();
+        destroyWidgetTree(created);
+        return false;
+    }
+    rehydrateRuntimePresentation(created);
+    freezeDocumentInteraction(created);
+    markDirty(true);
+    refreshHierarchy();
+    select(created, false);
+    setStatus(utf8ToWide("Inserted reusable block: " + name));
+    return true;
+}
+
+bool LayoutEditorSession::removeReusableBlock(const std::string& name) {
+    if (_reuseLibrary.find(name) == nullptr) return false;
+    pushUndo(LayoutEditKind::Reusable, "Remove reusable block");
+    if (!_reuseLibrary.remove(name)) {
+        _commandStack.discardLastUndo();
+        return false;
+    }
+    markDirty(true);
+    syncReuseEditor();
+    setStatus(utf8ToWide("Reusable block removed: " + name));
+    return true;
+}
+
+void LayoutEditorSession::setResponsiveVisibility(
+    int breakpointIndex, ResponsiveVisibility visibility) {
+    if (_selected == nullptr || _selected == _docRoot) return;
+    pushUndo(LayoutEditKind::Responsive, "Set responsive visibility");
+    if (!_responsiveModel.setVisibility(
+            *_selected, breakpointIndex, visibility)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+    syncResponsiveEditor();
+    syncSelectionChrome();
+}
+
+void LayoutEditorSession::captureResponsiveAnchors(int breakpointIndex) {
+    if (_selected == nullptr || !canUseAnchorLayout(_selected) ||
+        !_selected->hasAnchorLayout()) {
+        setStatus(L"Choose a base Anchor preset before capturing an override");
+        return;
+    }
+    pushUndo(LayoutEditKind::Responsive, "Capture responsive anchors");
+    if (!_responsiveModel.captureAnchorOverride(
+            *_selected, breakpointIndex)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    syncResponsiveEditor();
+    setStatus(L"Responsive anchor override captured");
+}
+
+void LayoutEditorSession::clearResponsiveRule(int breakpointIndex) {
+    if (_selected == nullptr || _selected == _docRoot) return;
+    pushUndo(LayoutEditKind::Responsive, "Clear responsive rule");
+    if (!_responsiveModel.clearRule(*_selected, breakpointIndex)) {
+        _commandStack.discardLastUndo();
+        return;
+    }
+    markDirty(true);
+    if (_ui != nullptr) {
+        _ui->invalidateLayout();
+        _ui->layout();
+    }
+    syncResponsiveEditor();
+    syncSelectionChrome();
+}
+
+void LayoutEditorSession::previewResponsiveBreakpoint(int breakpointIndex) {
+    const float width = _responsiveModel.previewWidth(breakpointIndex);
+    if (width <= 0.0f) return;
+    LayoutPreviewSettings settings = _previewModel.settings();
+    const float scale = std::max(0.25f, settings.dpiScale);
+    const math::FVector2 currentLogical =
+        _previewModel.logicalSize(_authoredRootSize);
+    settings.pixelWidth = width * scale;
+    settings.pixelHeight = std::max(1.0f, currentLogical.y) * scale;
+    settings.followDocumentSize = false;
+    setPreviewSettings(settings);
+    setStatus(L"Previewing " + _responsiveModel.breakpoints()[
+        static_cast<size_t>(breakpointIndex)].label);
 }
 
 void LayoutEditorSession::refreshTextureResources() {
@@ -1185,6 +1318,85 @@ void LayoutEditorSession::wireChrome() {
         findChromeById("validation_status"));
     bindBtn("btn_validate", [this]() { refreshValidation(); });
 
+    _reuseList = dynamic_cast<ListView*>(findChromeById("reuse_list"));
+    _reuseName = dynamic_cast<TextInput*>(findChromeById("reuse_name"));
+    _reuseStatus = dynamic_cast<TextLabel*>(findChromeById("reuse_status"));
+    if (_reuseList != nullptr) {
+        _reuseList->setSelectionMode(ListView::SelectionMode::Single);
+        _reuseList->setOnSelectionChanged([this](int index) {
+            if (_suppressReuse || index < 0 ||
+                index >= static_cast<int>(_reuseLibrary.blocks().size())) {
+                return;
+            }
+            if (_reuseName != nullptr) {
+                _reuseName->setText(utf8ToWide(
+                    _reuseLibrary.blocks()[static_cast<size_t>(index)].name));
+            }
+            syncReuseEditor();
+        });
+    }
+    bindBtn("btn_reuse_define", [this]() {
+        const std::string name = _reuseName != nullptr
+            ? wideToUtf8(trimWide(_reuseName->getText())) : std::string{};
+        defineReusableBlock(name);
+    });
+    bindBtn("btn_reuse_insert", [this]() {
+        const int index = _reuseList != nullptr
+            ? _reuseList->getSelectedIndex() : -1;
+        if (index >= 0 && index < static_cast<int>(_reuseLibrary.blocks().size())) {
+            insertReusableBlock(
+                _reuseLibrary.blocks()[static_cast<size_t>(index)].name);
+        }
+    });
+    bindBtn("btn_reuse_remove", [this]() {
+        const int index = _reuseList != nullptr
+            ? _reuseList->getSelectedIndex() : -1;
+        if (index >= 0 && index < static_cast<int>(_reuseLibrary.blocks().size())) {
+            removeReusableBlock(
+                _reuseLibrary.blocks()[static_cast<size_t>(index)].name);
+        }
+    });
+
+    _responsiveBreakpoint = dynamic_cast<ComboBox*>(
+        findChromeById("responsive_breakpoint"));
+    _responsiveVisibility = dynamic_cast<ComboBox*>(
+        findChromeById("responsive_visibility"));
+    _responsiveStatus = dynamic_cast<TextLabel*>(
+        findChromeById("responsive_status"));
+    if (_responsiveBreakpoint != nullptr) {
+        std::vector<std::wstring> labels;
+        for (const LayoutBreakpoint& breakpoint :
+             _responsiveModel.breakpoints()) {
+            labels.push_back(breakpoint.label);
+        }
+        _responsiveBreakpoint->setItems(labels);
+        _responsiveBreakpoint->setOnSelectionChanged([this](int index) {
+            if (_suppressResponsive || index < 0 ||
+                index >= static_cast<int>(
+                    _responsiveModel.breakpoints().size())) return;
+            _responsiveAuthoringIndex = index;
+            syncResponsiveEditor();
+        });
+    }
+    if (_responsiveVisibility != nullptr) {
+        _responsiveVisibility->setItems({L"Inherit", L"Visible", L"Hidden"});
+        _responsiveVisibility->setOnSelectionChanged([this](int index) {
+            if (_suppressResponsive || index < 0 || index > 2) return;
+            setResponsiveVisibility(
+                _responsiveAuthoringIndex,
+                static_cast<ResponsiveVisibility>(index));
+        });
+    }
+    bindBtn("btn_responsive_preview", [this]() {
+        previewResponsiveBreakpoint(_responsiveAuthoringIndex);
+    });
+    bindBtn("btn_responsive_capture", [this]() {
+        captureResponsiveAnchors(_responsiveAuthoringIndex);
+    });
+    bindBtn("btn_responsive_clear", [this]() {
+        clearResponsiveRule(_responsiveAuthoringIndex);
+    });
+
     _previewPreset = dynamic_cast<ComboBox*>(
         findChromeById("preview_preset"));
     _previewDpi = dynamic_cast<ComboBox*>(findChromeById("preview_dpi"));
@@ -1234,6 +1446,8 @@ void LayoutEditorSession::wireChrome() {
     _status = dynamic_cast<TextLabel*>(findChromeById("lbl_status"));
     refreshTextureResources();
     syncPreviewControls();
+    syncReuseEditor();
+    syncResponsiveEditor();
     refreshValidation();
 }
 
@@ -1466,6 +1680,7 @@ void LayoutEditorSession::ensureEmptyDocument() {
     panel->setLayoutSizeManaged(false);
     setDocumentRoot(panel);
     _documentPath.clear();
+    _reuseLibrary.clear();
     markDirty(false);
 }
 
@@ -1479,12 +1694,20 @@ bool LayoutEditorSession::open(const std::string& path) {
         setStatus(utf8ToWide("Open failed: " + path));
         return false;
     }
-    Widget* loaded = _docLoader.loadFromString(json);
+    std::string rootJson;
+    std::string decodeError;
+    LayoutReuseLibrary decodedLibrary;
+    if (!decodedLibrary.decodeDocument(json, rootJson, &decodeError)) {
+        setStatus(utf8ToWide("Open failed: " + decodeError));
+        return false;
+    }
+    Widget* loaded = _docLoader.loadFromString(rootJson);
     if (loaded == nullptr) {
         setStatus(utf8ToWide("Open failed: " + path));
         return false;
     }
     _commandStack.clear();
+    _reuseLibrary = std::move(decodedLibrary);
     setDocumentRoot(loaded);
     _documentPath = path;
     markDirty(false);
@@ -1493,6 +1716,7 @@ bool LayoutEditorSession::open(const std::string& path) {
         _ui->layout();
     }
     refreshHierarchy();
+    syncReuseEditor();
     select(_docRoot, false);
     setStatus(utf8ToWide("Opened " + path));
     return true;
@@ -1526,7 +1750,9 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
             _docRoot->performLayout();
         }
         UILayoutLoader saver;
-        if (!saver.saveLayout(path, _docRoot, true)) {
+        const std::string document = _reuseLibrary.encodeDocument(
+            _docRoot, true);
+        if (!saver.saveJsonDocument(path, document)) {
             if (restorePreview) applyPreviewToDocument();
             setStatus(utf8ToWide("Save failed: " + path));
             return false;
@@ -1799,9 +2025,14 @@ void LayoutEditorSession::syncSelectionChrome() {
         }
     }
 
+    const ResponsiveLayoutRule* activeResponsive = _selected != nullptr
+        ? _selected->getActiveResponsiveLayoutRule() : nullptr;
+    const bool hasVisibleAnchor = _selected != nullptr &&
+        (_selected->hasAnchorLayout() ||
+         (activeResponsive != nullptr && activeResponsive->overrideAnchors));
     const bool showAnchors = _selected != nullptr &&
         isUnderCanvas(_selected) && canUseAnchorLayout(_selected) &&
-        _selected->hasAnchorLayout();
+        hasVisibleAnchor;
     if (!showAnchors) {
         if (_anchorBox != nullptr) _anchorBox->setVisible(false);
         for (Panel* point : _anchorPoints) {
@@ -1810,7 +2041,9 @@ void LayoutEditorSession::syncSelectionChrome() {
         return;
     }
 
-    const AnchorLayout& anchor = _selected->getAnchorLayout();
+    const AnchorLayout& anchor = activeResponsive != nullptr &&
+        activeResponsive->overrideAnchors
+        ? activeResponsive->anchors : _selected->getAnchorLayout();
     Widget* parent = _selected->getParent();
     const math::FRectangle parentWorld = parent->getWorldBounds();
     const math::FVector2 parentSize = parent->getSize();
@@ -2386,8 +2619,7 @@ LayoutEditorSession::Snapshot LayoutEditorSession::captureSnapshot() {
             _docRoot->setSize(_authoredRootSize);
             _docRoot->performLayout();
         }
-        UILayoutLoader saver;
-        saver.saveLayoutToString(_docRoot, snap.json, false);
+        snap.json = _reuseLibrary.encodeDocument(_docRoot, false);
         if (restorePreview) {
             _docRoot->setSize(previewSize);
             _docRoot->performLayout();
@@ -2409,11 +2641,18 @@ void LayoutEditorSession::restoreSnapshot(const Snapshot& snap) {
     if (snap.json.empty() || _ui == nullptr) {
         return;
     }
-    Widget* loaded = _docLoader.loadFromString(snap.json);
+    std::string rootJson;
+    LayoutReuseLibrary restoredLibrary;
+    if (!restoredLibrary.decodeDocument(snap.json, rootJson, nullptr)) {
+        setStatus(L"Undo/Redo reusable library restore failed");
+        return;
+    }
+    Widget* loaded = _docLoader.loadFromString(rootJson);
     if (loaded == nullptr) {
         setStatus(L"Undo/Redo restore failed");
         return;
     }
+    _reuseLibrary = std::move(restoredLibrary);
     setDocumentRoot(loaded);
     refreshHierarchy();
     _selection.clear();
@@ -2428,6 +2667,7 @@ void LayoutEditorSession::restoreSnapshot(const Snapshot& snap) {
     }
     syncPropertyStrip();
     syncHierarchySelection();
+    syncReuseEditor();
     markDirty(snap.dirty);
     _ui->invalidateLayout();
     _ui->layout();
@@ -3857,6 +4097,19 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     setChromeVisible("row_prop_offset_min", hasAnchors);
     setChromeVisible("row_prop_offset_max", hasAnchors);
     setChromeVisible("row_prop_pivot", hasAnchors);
+    const bool canResponsive = hasSel && _selection.size() == 1u &&
+                               !isDocumentRoot && !isStructuredRoot;
+    setChromeVisible("section_responsive", canResponsive);
+    setChromeVisible("row_responsive_breakpoint", canResponsive);
+    setChromeVisible("row_responsive_visibility", canResponsive);
+    setChromeVisible("row_responsive_actions", canResponsive);
+    setChromeVisible("responsive_status", canResponsive);
+    const bool hasDocument = _docRoot != nullptr;
+    setChromeVisible("section_reuse", hasDocument);
+    setChromeVisible("reuse_name", hasDocument);
+    setChromeVisible("reuse_list", hasDocument);
+    setChromeVisible("row_reuse_actions", hasDocument);
+    setChromeVisible("reuse_status", hasDocument);
     setChromeVisible("section_identity", hasSel &&
         properties.hasSection(PropertySection::Identity));
     setChromeVisible("section_transform", hasSel &&
@@ -3983,6 +4236,8 @@ void LayoutEditorSession::syncPropertyStrip() {
         syncStructuredEditor();
         syncTextureBrowser();
         syncStyleInspector();
+        syncReuseEditor();
+        syncResponsiveEditor();
         if (_ui != nullptr) {
             _ui->invalidateLayout();
             _ui->layout();
@@ -4125,6 +4380,8 @@ void LayoutEditorSession::syncPropertyStrip() {
     syncStructuredEditor();
     syncTextureBrowser();
     syncStyleInspector();
+    syncReuseEditor();
+    syncResponsiveEditor();
     if (_ui != nullptr) {
         // Visibility and field values are one Inspector transaction. Flush
         // once before returning so rapid canvas/outline selection cannot
@@ -4683,6 +4940,102 @@ void LayoutEditorSession::syncPreviewControls() {
         hint->setText(label.str());
     }
     _suppressPreview = false;
+}
+
+void LayoutEditorSession::syncReuseEditor() {
+    if (_reuseList == nullptr && _reuseStatus == nullptr) return;
+    std::string selectedName;
+    if (_reuseList != nullptr) {
+        const int oldIndex = _reuseList->getSelectedIndex();
+        if (oldIndex >= 0 &&
+            oldIndex < static_cast<int>(_reuseLibrary.blocks().size())) {
+            selectedName = _reuseLibrary.blocks()[
+                static_cast<size_t>(oldIndex)].name;
+        }
+    }
+    std::vector<std::wstring> labels;
+    labels.reserve(_reuseLibrary.blocks().size());
+    for (const LayoutReusableBlock& block : _reuseLibrary.blocks()) {
+        labels.push_back(utf8ToWide(block.name));
+    }
+    _suppressReuse = true;
+    int selectedIndex = -1;
+    if (_reuseList != nullptr) {
+        _reuseList->setItems(labels);
+        for (size_t index = 0; index < _reuseLibrary.blocks().size(); ++index) {
+            if (_reuseLibrary.blocks()[index].name == selectedName) {
+                selectedIndex = static_cast<int>(index);
+                break;
+            }
+        }
+        if (selectedIndex < 0 && !_reuseLibrary.empty()) selectedIndex = 0;
+        _reuseList->setSelectedIndex(selectedIndex);
+    }
+    if (_reuseName != nullptr && selectedIndex >= 0 &&
+        _reuseName->getText().empty()) {
+        _reuseName->setText(labels[static_cast<size_t>(selectedIndex)]);
+    }
+    _suppressReuse = false;
+
+    const bool oneSelected = _selected != nullptr && _selection.size() == 1u;
+    setChromeEnabled("btn_reuse_define", oneSelected);
+    setChromeEnabled("btn_reuse_insert", selectedIndex >= 0);
+    setChromeEnabled("btn_reuse_remove", selectedIndex >= 0);
+    if (_reuseStatus != nullptr) {
+        _reuseStatus->setText(_reuseLibrary.empty()
+            ? L"No blocks — save the selected subtree for reuse"
+            : std::to_wstring(_reuseLibrary.size()) +
+              L" block(s) — inserted copies are independent");
+    }
+}
+
+void LayoutEditorSession::syncResponsiveEditor() {
+    const bool editable = _selected != nullptr && _selected != _docRoot;
+    if (_responsiveAuthoringIndex < 0 ||
+        _responsiveAuthoringIndex >= static_cast<int>(
+            _responsiveModel.breakpoints().size())) {
+        _responsiveAuthoringIndex = 0;
+    }
+    _suppressResponsive = true;
+    if (_responsiveBreakpoint != nullptr) {
+        _responsiveBreakpoint->setSelectedIndex(_responsiveAuthoringIndex);
+    }
+    const ResponsiveLayoutRule* authoredRule = editable
+        ? _responsiveModel.rule(*_selected, _responsiveAuthoringIndex)
+        : nullptr;
+    if (_responsiveVisibility != nullptr) {
+        _responsiveVisibility->setSelectedIndex(static_cast<int>(
+            authoredRule != nullptr ? authoredRule->visibility
+                                    : ResponsiveVisibility::Inherit));
+    }
+    _suppressResponsive = false;
+
+    setChromeEnabled("btn_responsive_preview", editable);
+    setChromeEnabled("btn_responsive_capture",
+        editable && canUseAnchorLayout(_selected) &&
+        _selected->hasAnchorLayout());
+    setChromeEnabled("btn_responsive_clear", authoredRule != nullptr);
+    if (_responsiveStatus != nullptr) {
+        if (!editable) {
+            _responsiveStatus->setText(L"Select a non-root widget");
+        } else {
+            const float parentWidth = _selected->getParent() != nullptr
+                ? _selected->getParent()->getSize().x : 0.0f;
+            const int activeIndex =
+                _responsiveModel.breakpointForWidth(parentWidth);
+            std::wstring text = activeIndex >= 0
+                ? L"Active: " + _responsiveModel.breakpoints()[
+                    static_cast<size_t>(activeIndex)].label
+                : L"No active width band";
+            if (authoredRule != nullptr) {
+                text += authoredRule->overrideAnchors
+                    ? L" · visibility + anchors" : L" · visibility rule";
+            } else {
+                text += L" · inherits authored layout";
+            }
+            _responsiveStatus->setText(text);
+        }
+    }
 }
 
 void LayoutEditorSession::commitPreviewFields() {

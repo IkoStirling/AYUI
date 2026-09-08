@@ -6,7 +6,9 @@
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
+#include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
+#include "AYUI/LayoutEditor/LayoutReuseLibrary.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
 #include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
@@ -257,6 +259,16 @@ TEST_CASE(validation_model_reports_actionable_authoring_issues) {
     first.setId("duplicate");
     first.setSize({80.0f, 30.0f});
     first.setEventBinding("onClick", "handleClick");
+    ResponsiveLayoutRule overlapping;
+    overlapping.name = "Medium";
+    overlapping.minParentWidth = 500.0f;
+    overlapping.maxParentWidth = 800.0f;
+    ResponsiveLayoutRule invalid;
+    invalid.name = "Broken";
+    invalid.minParentWidth = 700.0f;
+    invalid.maxParentWidth = 600.0f;
+    invalid.overrideAnchors = true;
+    first.setResponsiveLayoutRules({overlapping, invalid});
     root.addChildExternal(&first);
 
     Button second;
@@ -288,6 +300,9 @@ TEST_CASE(validation_model_reports_actionable_authoring_issues) {
     size_t missingTextureCount = 0;
     size_t missingControllerCount = 0;
     size_t nonPositiveCount = 0;
+    size_t invalidResponsiveCount = 0;
+    size_t overlappingResponsiveCount = 0;
+    size_t responsiveAnchorWithoutBaseCount = 0;
     for (const LayoutDiagnostic& diagnostic : validation.diagnostics()) {
         if (diagnostic.code == LayoutDiagnosticCode::DuplicateId) {
             ++duplicateCount;
@@ -299,6 +314,15 @@ TEST_CASE(validation_model_reports_actionable_authoring_issues) {
             ++missingControllerCount;
         } else if (diagnostic.code == LayoutDiagnosticCode::NonPositiveSize) {
             ++nonPositiveCount;
+        } else if (diagnostic.code ==
+                   LayoutDiagnosticCode::InvalidResponsiveRange) {
+            ++invalidResponsiveCount;
+        } else if (diagnostic.code ==
+                   LayoutDiagnosticCode::OverlappingResponsiveRules) {
+            ++overlappingResponsiveCount;
+        } else if (diagnostic.code ==
+                   LayoutDiagnosticCode::ResponsiveAnchorWithoutBase) {
+            ++responsiveAnchorWithoutBaseCount;
         }
     }
     CHECK(duplicateCount == 2u);
@@ -306,6 +330,9 @@ TEST_CASE(validation_model_reports_actionable_authoring_issues) {
     CHECK(missingTextureCount == 1u);
     CHECK(missingControllerCount == 1u);
     CHECK(nonPositiveCount == 1u);
+    CHECK(invalidResponsiveCount == 1u);
+    CHECK(overlappingResponsiveCount == 1u);
+    CHECK(responsiveAnchorWithoutBaseCount == 1u);
     CHECK(validation.hasErrors());
 }
 
@@ -325,6 +352,77 @@ TEST_CASE(preview_model_maps_physical_resolution_dpi_and_safe_area_to_dip) {
     const FVector2 custom = preview.logicalSize({1.0f, 1.0f});
     CHECK_FLOAT_EQ(custom.x, 960.0f, 1e-5f);
     CHECK_FLOAT_EQ(custom.y, 540.0f, 1e-5f);
+}
+
+TEST_CASE(responsive_model_authors_standard_breakpoint_visibility_and_anchor) {
+    LayoutResponsiveModel responsive;
+    CHECK(responsive.breakpoints().size() == 3u);
+    CHECK(responsive.breakpointForWidth(390.0f) == 0);
+    CHECK(responsive.breakpointForWidth(800.0f) == 1);
+    CHECK(responsive.breakpointForWidth(1280.0f) == 2);
+
+    Panel parent;
+    Button child;
+    parent.setSize({800.0f, 480.0f});
+    child.setPosition({20.0f, 20.0f});
+    child.setSize({120.0f, 32.0f});
+    child.setLayoutPositionManaged(false);
+    child.setLayoutSizeManaged(false);
+    parent.addChildExternal(&child);
+    child.setAnchorLayoutPreservingRect({0.0f, 0.0f}, {0.0f, 0.0f});
+
+    CHECK(responsive.setVisibility(
+        child, 0, ResponsiveVisibility::Hidden));
+    CHECK(responsive.captureAnchorOverride(child, 0));
+    CHECK(responsive.visibility(child, 0) == ResponsiveVisibility::Hidden);
+    CHECK(responsive.rule(child, 0)->overrideAnchors);
+    parent.setSize({390.0f, 480.0f});
+    CHECK_FALSE(child.isVisible());
+    CHECK(responsive.clearRule(child, 0));
+    CHECK(child.isVisible());
+    CHECK(child.getResponsiveLayoutRules().empty());
+    parent.removeChild(&child);
+}
+
+TEST_CASE(reuse_library_persists_definitions_and_instantiates_expanded_copies) {
+    auto* root = new Panel();
+    root->setId("document_root");
+    auto* source = new Button();
+    source->setId("source_button");
+    source->setText(L"Reusable action");
+    root->addChild(source);
+
+    LayoutReuseLibrary library;
+    std::string error;
+    CHECK(library.define("Primary Action", source, &error));
+    CHECK(error.empty());
+    CHECK(library.size() == 1u);
+    Widget* copy = library.instantiate("Primary Action");
+    CHECK_NOT_NULL(copy);
+    if (copy != nullptr) {
+        CHECK(copy != source);
+        CHECK(copy->getId() == "source_button");
+        auto* button = dynamic_cast<Button*>(copy);
+        CHECK_NOT_NULL(button);
+        if (button != nullptr) CHECK(button->getText() == L"Reusable action");
+    }
+
+    const std::string document = library.encodeDocument(root, false);
+    CHECK(document.find("\"reusable\"") != std::string::npos);
+    LayoutReuseLibrary decoded;
+    std::string rootJson;
+    CHECK(decoded.decodeDocument(document, rootJson, &error));
+    CHECK(decoded.size() == 1u);
+    CHECK(rootJson.find("document_root") != std::string::npos);
+
+    UILayoutLoader loader;
+    Widget* runtimeRoot = loader.loadFromString(document);
+    CHECK_NOT_NULL(runtimeRoot);
+    CHECK(loader.findWidgetById("source_button") != nullptr);
+
+    destroyWidgetTree(copy);
+    destroyWidgetTree(runtimeRoot);
+    destroyWidgetTree(root);
 }
 
 TEST_SUITE_END

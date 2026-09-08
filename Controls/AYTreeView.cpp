@@ -357,7 +357,7 @@ void TreeView::renderChildren(IRenderBackend& renderer) {
 }
 
 Widget* TreeView::hitTest(const math::FVector2& worldPos) {
-    if (!_visible) return nullptr;
+    if (!isVisible()) return nullptr;
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 

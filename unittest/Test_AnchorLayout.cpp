@@ -2,6 +2,7 @@
 
 #include "AYUI/Button.h"
 #include "AYUI/LayoutLoader.h"
+#include "AYUI/MockRenderer.h"
 #include "AYUI/Panel.h"
 #include "AYUI/Widget.h"
 
@@ -115,6 +116,134 @@ TEST_CASE(anchor_values_are_normalized_and_can_be_cleared) {
     CHECK_FLOAT_EQ(normalized.pivot.y, 1.0f, 1e-5f);
     child.clearAnchorLayout();
     CHECK(!child.hasAnchorLayout());
+}
+
+TEST_CASE(responsive_visibility_switches_at_parent_width_without_losing_authored_state) {
+    Panel parent;
+    Button child;
+    parent.setSize({800.0f, 400.0f});
+    parent.addChildExternal(&child);
+
+    ResponsiveLayoutRule compact;
+    compact.name = "Compact";
+    compact.maxParentWidth = 600.0f;
+    compact.visibility = ResponsiveVisibility::Hidden;
+    child.setResponsiveLayoutRules({compact});
+
+    CHECK(child.isAuthoredVisible());
+    CHECK(child.isVisible());
+    parent.setSize({390.0f, 400.0f});
+    CHECK_FALSE(child.isVisible());
+    CHECK(child.isAuthoredVisible());
+    CHECK(child.getActiveResponsiveRuleIndex() == 0);
+
+    parent.setSize({900.0f, 400.0f});
+    CHECK(child.isVisible());
+    CHECK(child.getActiveResponsiveRuleIndex() == -1);
+
+    child.setVisible(false);
+    compact.visibility = ResponsiveVisibility::Visible;
+    child.setResponsiveLayoutRules({compact});
+    parent.setSize({390.0f, 400.0f});
+    CHECK(child.isVisible());
+    parent.setSize({900.0f, 400.0f});
+    CHECK_FALSE(child.isVisible());
+    parent.removeChild(&child);
+}
+
+TEST_CASE(responsive_anchor_override_reverts_to_authored_anchor_outside_band) {
+    Panel parent;
+    Button child;
+    parent.setSize({800.0f, 400.0f});
+    child.setPosition({20.0f, 20.0f});
+    child.setSize({100.0f, 32.0f});
+    child.setLayoutPositionManaged(false);
+    child.setLayoutSizeManaged(false);
+    parent.addChildExternal(&child);
+    child.setAnchorLayoutPreservingRect({0.0f, 0.0f}, {0.0f, 0.0f});
+
+    ResponsiveLayoutRule compact;
+    compact.name = "Compact";
+    compact.maxParentWidth = 600.0f;
+    compact.overrideAnchors = true;
+    compact.anchors.anchorMin = {1.0f, 0.0f};
+    compact.anchors.anchorMax = {1.0f, 0.0f};
+    compact.anchors.offsetMin = {-120.0f, 20.0f};
+    compact.anchors.offsetMax = {-20.0f, 52.0f};
+    child.setResponsiveLayoutRules({compact});
+
+    parent.setSize({390.0f, 400.0f});
+    CHECK_FLOAT_EQ(child.getPosition().x, 270.0f, 1e-5f);
+    CHECK_FLOAT_EQ(child.getSize().x, 100.0f, 1e-5f);
+
+    parent.setSize({800.0f, 400.0f});
+    CHECK_FLOAT_EQ(child.getPosition().x, 20.0f, 1e-5f);
+    CHECK_FLOAT_EQ(child.getSize().x, 100.0f, 1e-5f);
+    parent.removeChild(&child);
+}
+
+TEST_CASE(responsive_visibility_gates_rendering_and_hit_testing) {
+    Panel parent;
+    Button child;
+    parent.setSize({390.0f, 200.0f});
+    child.setPosition({10.0f, 10.0f});
+    child.setSize({100.0f, 32.0f});
+    child.setLayoutPositionManaged(false);
+    child.setLayoutSizeManaged(false);
+    ResponsiveLayoutRule compact;
+    compact.name = "Compact";
+    compact.maxParentWidth = 600.0f;
+    compact.visibility = ResponsiveVisibility::Hidden;
+    child.setResponsiveLayoutRules({compact});
+    parent.addChildExternal(&child);
+
+    MockRenderer renderer;
+    child.render(renderer);
+    CHECK(renderer.getDrawCalls().empty());
+    CHECK(parent.hitTest({20.0f, 20.0f}) == &parent);
+
+    parent.setSize({800.0f, 200.0f});
+    renderer.clear();
+    child.render(renderer);
+    CHECK_FALSE(renderer.getDrawCalls().empty());
+    CHECK(parent.hitTest({20.0f, 20.0f}) == &child);
+    parent.removeChild(&child);
+}
+
+TEST_CASE(responsive_rules_round_trip_through_layout_json) {
+    auto* root = new Panel();
+    root->setId("responsive_root");
+    root->setSize({800.0f, 480.0f});
+    auto* child = new Button();
+    child->setId("responsive_button");
+    child->setLayoutPositionManaged(false);
+    child->setLayoutSizeManaged(false);
+    child->setAnchorLayoutPreservingRect({0.0f, 0.0f}, {0.0f, 0.0f});
+    ResponsiveLayoutRule rule;
+    rule.name = "Compact";
+    rule.maxParentWidth = 600.0f;
+    rule.visibility = ResponsiveVisibility::Hidden;
+    rule.overrideAnchors = true;
+    rule.anchors = child->getAnchorLayout();
+    child->setResponsiveLayoutRules({rule});
+    root->addChild(child);
+
+    UILayoutLoader loader;
+    std::string encoded;
+    CHECK(loader.saveLayoutToString(root, encoded, false));
+    CHECK(encoded.find("\"responsive\"") != std::string::npos);
+    Widget* loaded = loader.loadFromString(encoded);
+    Widget* loadedChild = loader.findWidgetById("responsive_button");
+    CHECK_NOT_NULL(loaded);
+    CHECK_NOT_NULL(loadedChild);
+    if (loaded != nullptr && loadedChild != nullptr) {
+        CHECK(loadedChild->getResponsiveLayoutRules().size() == 1u);
+        CHECK(loadedChild->getResponsiveLayoutRules()[0].name == "Compact");
+        loaded->setSize({390.0f, 480.0f});
+        CHECK_FALSE(loadedChild->isVisible());
+    }
+    destroyWidgetTree(root);
+    destroyWidgetTree(loaded);
 }
 
 TEST_SUITE_END

@@ -69,7 +69,7 @@ math::FRectangle SplitterHandle::interactionBand() const {
 }
 
 Widget* SplitterHandle::hitTest(const math::FVector2& worldPos) {
-    if (!_visible) {
+    if (!isVisible()) {
         return nullptr;
     }
     return interactionBand().contains(worldPos) ? this : nullptr;

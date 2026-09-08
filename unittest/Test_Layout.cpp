@@ -71,6 +71,38 @@ TEST_CASE(test_hbox_layout) {
     destroyWidgetTree(hbox);
 }
 
+TEST_CASE(responsive_visibility_reflows_structured_box_layout) {
+    VBox* vbox = new VBox();
+    vbox->setSize(FVector2(800.0f, 100.0f));
+    vbox->setSpacing(4.0f);
+
+    Widget* compactOptional = new Widget();
+    Widget* persistent = new Widget();
+    ResponsiveLayoutRule compact;
+    compact.name = "Compact";
+    compact.maxParentWidth = 600.0f;
+    compact.visibility = ResponsiveVisibility::Hidden;
+    compactOptional->setResponsiveLayoutRules({compact});
+    vbox->addWidget(compactOptional, 20.0f);
+    vbox->addWidget(persistent, 20.0f);
+
+    vbox->performLayout();
+    CHECK(compactOptional->isVisible());
+    CHECK_FLOAT_EQ(persistent->getPosition().y, 28.0f, 1e-5f);
+
+    vbox->setSize(FVector2(390.0f, 100.0f));
+    vbox->performLayout();
+    CHECK_FALSE(compactOptional->isVisible());
+    CHECK_FLOAT_EQ(persistent->getPosition().y, 4.0f, 1e-5f);
+
+    vbox->setSize(FVector2(800.0f, 100.0f));
+    vbox->performLayout();
+    CHECK(compactOptional->isVisible());
+    CHECK_FLOAT_EQ(persistent->getPosition().y, 28.0f, 1e-5f);
+
+    destroyWidgetTree(vbox);
+}
+
 TEST_CASE(test_window_hit_test) {
     Window* window = new Window();
     window->setPosition(FVector2(100.0f, 100.0f));

@@ -677,7 +677,7 @@ void ListView::renderChildren(IRenderBackend& renderer) {
 }
 
 Widget* ListView::hitTest(const math::FVector2& worldPos) {
-    if (!_visible) return nullptr;
+    if (!isVisible()) return nullptr;
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
 

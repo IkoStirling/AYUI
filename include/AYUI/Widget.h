@@ -120,6 +120,25 @@ struct AnchorLayout {
     math::FVector2 pivot{0.5f, 0.5f};
 };
 
+// Width-query rules evaluated against the direct parent's logical DIP width.
+// maxParentWidth <= 0 means unbounded. Rules can alter effective visibility
+// and, for free-positioned widgets, substitute an AnchorLayout. The authored
+// visibility/anchor remain untouched, so leaving a breakpoint is lossless.
+enum class ResponsiveVisibility {
+    Inherit,
+    Visible,
+    Hidden
+};
+
+struct ResponsiveLayoutRule {
+    std::string name;
+    float minParentWidth = 0.0f;
+    float maxParentWidth = 0.0f;
+    ResponsiveVisibility visibility = ResponsiveVisibility::Inherit;
+    bool overrideAnchors = false;
+    AnchorLayout anchors;
+};
+
 class Widget {
 public:
     Widget();
@@ -214,9 +233,12 @@ public:
         // anchored descendants. Structured layout children keep their
         // position/size-managed flags and are therefore unaffected.
         for (Widget* child : _children) {
-            if (child != nullptr && child->hasAnchorLayout() &&
-                !child->isLayoutPositionManaged() &&
-                !child->isLayoutSizeManaged()) {
+            if (child == nullptr) continue;
+            if (child->hasResponsiveLayoutRules()) {
+                child->applyResponsiveLayout(_size);
+            } else if (child->hasAnchorLayout() &&
+                       !child->isLayoutPositionManaged() &&
+                       !child->isLayoutSizeManaged()) {
                 child->applyAnchorLayout(_size);
             }
         }
@@ -261,6 +283,20 @@ public:
     // or size. applyAnchorLayout() is the parent-layout side of the contract.
     void refreshAnchorOffsetsFromCurrentRect();
     void applyAnchorLayout(const math::FVector2& parentSize);
+
+    const std::vector<ResponsiveLayoutRule>& getResponsiveLayoutRules() const {
+        return _responsiveLayoutRules;
+    }
+    bool hasResponsiveLayoutRules() const {
+        return !_responsiveLayoutRules.empty();
+    }
+    void setResponsiveLayoutRules(std::vector<ResponsiveLayoutRule> rules);
+    void clearResponsiveLayoutRules();
+    int getActiveResponsiveRuleIndex() const {
+        return _activeResponsiveRuleIndex;
+    }
+    const ResponsiveLayoutRule* getActiveResponsiveLayoutRule() const;
+    void applyResponsiveLayout(const math::FVector2& parentSize);
 
     void bringToFront();
 
@@ -315,7 +351,14 @@ public:
     virtual bool isTextEditingWidget() const { return false; }
 
     // Visibility
-    bool isVisible() const { return _visible; }
+    bool isVisible() const {
+        if (_responsiveVisibility == ResponsiveVisibility::Visible) return true;
+        if (_responsiveVisibility == ResponsiveVisibility::Hidden) return false;
+        return _visible;
+    }
+    // Persistence and authoring inspect the declared value, while rendering,
+    // hit testing and parent layout consume isVisible()'s resolved value.
+    bool isAuthoredVisible() const { return _visible; }
     void setVisible(bool visible) {
         if (_visible == visible) {
             return;
@@ -727,6 +770,10 @@ protected:
     bool _layoutSizeManaged = true;
     bool _anchorLayoutEnabled = false;
     AnchorLayout _anchorLayout;
+    std::vector<ResponsiveLayoutRule> _responsiveLayoutRules;
+    ResponsiveVisibility _responsiveVisibility =
+        ResponsiveVisibility::Inherit;
+    int _activeResponsiveRuleIndex = -1;
 
     // PR-anim: tree opacity + fade transition state. _opacity == 1.0 is
     // the fast path (no pushOpacity, byte-identical rendering); the

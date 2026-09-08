@@ -4,7 +4,9 @@
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
+#include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
+#include "AYUI/LayoutEditor/LayoutReuseLibrary.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
 #include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
@@ -108,6 +110,14 @@ public:
     const std::vector<LayoutDiagnostic>& diagnostics() const {
         return _validationModel.diagnostics();
     }
+    bool defineReusableBlock(const std::string& name);
+    bool insertReusableBlock(const std::string& name);
+    bool removeReusableBlock(const std::string& name);
+    const LayoutReuseLibrary& reuseLibrary() const { return _reuseLibrary; }
+    void setResponsiveVisibility(int breakpointIndex,
+                                 ResponsiveVisibility visibility);
+    void captureResponsiveAnchors(int breakpointIndex);
+    void clearResponsiveRule(int breakpointIndex);
 
     // button: 0=LMB, 1=RMB, 2=MMB
     bool onPointerDown(const math::FVector2& worldPos, int button = 0);
@@ -228,6 +238,9 @@ private:
     void commitPreviewFields();
     void applyPreviewToDocument();
     void syncPreviewChrome();
+    void syncReuseEditor();
+    void syncResponsiveEditor();
+    void previewResponsiveBreakpoint(int breakpointIndex);
     math::FVector2 authoredRootSize() const;
     bool previewOverridesDocumentSize() const;
     void bindPropField(const char* id, const char* field, TextInput*& slot,
@@ -370,6 +383,8 @@ private:
     LayoutStyleInspectorModel _styleInspectorModel;
     LayoutValidationModel _validationModel;
     LayoutPreviewModel _previewModel;
+    LayoutResponsiveModel _responsiveModel;
+    LayoutReuseLibrary _reuseLibrary;
     Mode _mode = Mode::Edit;
     std::optional<Snapshot> _interactionSnapshot;
     math::FVector2 _authoredRootSize{640.0f, 480.0f};
@@ -452,6 +467,15 @@ private:
     TextInput* _previewSafeR = nullptr;
     TextInput* _previewSafeB = nullptr;
     bool _suppressPreview = false;
+    ListView* _reuseList = nullptr;
+    TextInput* _reuseName = nullptr;
+    TextLabel* _reuseStatus = nullptr;
+    bool _suppressReuse = false;
+    ComboBox* _responsiveBreakpoint = nullptr;
+    ComboBox* _responsiveVisibility = nullptr;
+    TextLabel* _responsiveStatus = nullptr;
+    bool _suppressResponsive = false;
+    int _responsiveAuthoringIndex = 0;
     std::vector<Widget*> _hierarchyIndex;
     std::vector<std::string> _styleIds;
 

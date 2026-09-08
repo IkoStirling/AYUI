@@ -68,6 +68,23 @@ static std::string toUtf8(const std::wstring& str) {
     }
 }
 
+static ResponsiveVisibility responsiveVisibilityFromString(
+    const std::string& value) {
+    if (value == "visible" || value == "show")
+        return ResponsiveVisibility::Visible;
+    if (value == "hidden" || value == "hide")
+        return ResponsiveVisibility::Hidden;
+    return ResponsiveVisibility::Inherit;
+}
+
+static const char* responsiveVisibilityName(ResponsiveVisibility value) {
+    switch (value) {
+    case ResponsiveVisibility::Visible: return "visible";
+    case ResponsiveVisibility::Hidden: return "hidden";
+    default: return "inherit";
+    }
+}
+
 static bool hasStructuredChildPayload(Widget* widget) {
     return dynamic_cast<ScrollView*>(widget) != nullptr
         || dynamic_cast<ListView*>(widget) != nullptr
@@ -116,6 +133,12 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         json j = json::parse(jsonStr);
         if (!j.is_object()) return nullptr;
 
+        if (!j.contains("type") && j.contains("root") &&
+            j["root"].is_object()) {
+            json rootDocument = j["root"];
+            j = std::move(rootDocument);
+        }
+
         std::string type = j.value("type", "Widget");
         WidgetFactory& factory = WidgetFactory::get();
         Widget* widget = factory.create(type);
@@ -153,6 +176,46 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             layout.offsetMax = readVec2("offsetMax", layout.offsetMax);
             layout.pivot = readVec2("pivot", layout.pivot);
             widget->setAnchorLayout(layout);
+        }
+
+        if (j.contains("responsive") && j["responsive"].is_array()) {
+            std::vector<ResponsiveLayoutRule> rules;
+            for (const auto& value : j["responsive"]) {
+                if (!value.is_object()) continue;
+                ResponsiveLayoutRule rule;
+                rule.name = value.value("name", std::string{});
+                rule.minParentWidth = value.value("minWidth", 0.0f);
+                rule.maxParentWidth = value.value("maxWidth", 0.0f);
+                rule.visibility = responsiveVisibilityFromString(
+                    value.value("visibility", std::string{"inherit"}));
+                if (value.contains("anchors") &&
+                    value["anchors"].is_object()) {
+                    const auto& anchors = value["anchors"];
+                    auto readVec2 = [&anchors](
+                        const char* key, const math::FVector2& fallback) {
+                        math::FVector2 result = fallback;
+                        if (anchors.contains(key) &&
+                            anchors[key].is_object()) {
+                            result.x = anchors[key].value("x", result.x);
+                            result.y = anchors[key].value("y", result.y);
+                        }
+                        return result;
+                    };
+                    rule.anchors.anchorMin = readVec2(
+                        "min", rule.anchors.anchorMin);
+                    rule.anchors.anchorMax = readVec2(
+                        "max", rule.anchors.anchorMax);
+                    rule.anchors.offsetMin = readVec2(
+                        "offsetMin", rule.anchors.offsetMin);
+                    rule.anchors.offsetMax = readVec2(
+                        "offsetMax", rule.anchors.offsetMax);
+                    rule.anchors.pivot = readVec2(
+                        "pivot", rule.anchors.pivot);
+                    rule.overrideAnchors = true;
+                }
+                rules.push_back(std::move(rule));
+            }
+            widget->setResponsiveLayoutRules(std::move(rules));
         }
 
         widget->setVisible(j.value("visible", true));
@@ -1206,7 +1269,7 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
     math::FVector2 size = widget->getSize();
     j["size"] = { {"w", size.x}, {"h", size.y} };
 
-    j["visible"] = widget->isVisible();
+    j["visible"] = widget->isAuthoredVisible();
     j["style"] = widget->getStyleId();
     if (!widget->getControllerId().empty()) {
         j["controller"] = widget->getControllerId();
@@ -1229,6 +1292,35 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
             {"offsetMax", {{"x", anchor.offsetMax.x}, {"y", anchor.offsetMax.y}}},
             {"pivot", {{"x", anchor.pivot.x}, {"y", anchor.pivot.y}}}
         };
+    }
+    if (widget->hasResponsiveLayoutRules()) {
+        j["responsive"] = json::array();
+        for (const ResponsiveLayoutRule& rule :
+             widget->getResponsiveLayoutRules()) {
+            json encoded = {
+                {"name", rule.name},
+                {"minWidth", rule.minParentWidth},
+                {"visibility", responsiveVisibilityName(rule.visibility)}
+            };
+            if (rule.maxParentWidth > 0.0f)
+                encoded["maxWidth"] = rule.maxParentWidth;
+            if (rule.overrideAnchors) {
+                const AnchorLayout& anchor = rule.anchors;
+                encoded["anchors"] = {
+                    {"min", {{"x", anchor.anchorMin.x},
+                              {"y", anchor.anchorMin.y}}},
+                    {"max", {{"x", anchor.anchorMax.x},
+                              {"y", anchor.anchorMax.y}}},
+                    {"offsetMin", {{"x", anchor.offsetMin.x},
+                                    {"y", anchor.offsetMin.y}}},
+                    {"offsetMax", {{"x", anchor.offsetMax.x},
+                                    {"y", anchor.offsetMax.y}}},
+                    {"pivot", {{"x", anchor.pivot.x},
+                                {"y", anchor.pivot.y}}}
+                };
+            }
+            j["responsive"].push_back(std::move(encoded));
+        }
     }
     if (widget->hasExplicitAccessibilityRole()) {
         j["accessibilityRole"] = accessibilityRoleName(widget->getAccessibilityRole());

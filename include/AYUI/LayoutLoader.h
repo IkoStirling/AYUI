@@ -46,6 +46,11 @@ public:
     // for parity with loadFromString's parse-error path).
     bool saveLayout(const std::string& filepath, Widget* root, bool pretty = true);
     bool saveLayoutToString(Widget* root, std::string& outJson, bool pretty = true);
+    // Atomically persist an already-encoded layout document. Authoring tools
+    // use this for the optional { reusable, root } envelope while retaining
+    // the same temporary-file and replace guarantees as saveLayout().
+    bool saveJsonDocument(const std::string& filepath,
+                          const std::string& jsonDocument);
 
     Widget* reload(const std::string& id);
     bool isReloadNeeded();

@@ -94,7 +94,7 @@ Widget* DockOverlay::hitTest(const math::FVector2& worldPos) {
     // K-INV-D3-4 pass-through override. See AYDockOverlay.h for the
     // rationale (F3 freecam isPointOnChrome compatibility + drop
     // semantics for the empty overlay area).
-    if (!_visible) return nullptr;
+    if (!isVisible()) return nullptr;
     const math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
     // Descend into floating cards in reverse insertion order (topmost

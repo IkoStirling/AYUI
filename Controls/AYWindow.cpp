@@ -107,7 +107,7 @@ math::FRectangle Window::getClientRect() const {
 }
 
 Widget* Window::hitTest(const math::FVector2& worldPos) {
-    if (!_visible) return nullptr;
+    if (!isVisible()) return nullptr;
 
     math::FRectangle bounds = getWorldBounds();
     if (!bounds.contains(worldPos)) return nullptr;
@@ -153,7 +153,7 @@ Widget* Window::hitTest(const math::FVector2& worldPos) {
 }
 
 ResizeEdge Window::hitTestResizeEdge(const math::FVector2& worldPos) const {
-    if (!_resizable || !_visible) return ResizeEdge::None;
+    if (!_resizable || !isVisible()) return ResizeEdge::None;
     const math::FRectangle bounds = getWorldBounds();
 
     // PR-B1 — guard against outside-window points. v1 SE-only test never

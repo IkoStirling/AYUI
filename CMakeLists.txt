@@ -214,7 +214,9 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/LayoutSelectionModel.cpp
     LayoutEditor/LayoutCommandStack.cpp
     LayoutEditor/LayoutPreviewModel.cpp
+    LayoutEditor/LayoutResponsiveModel.cpp
     LayoutEditor/LayoutResourceCatalog.cpp
+    LayoutEditor/LayoutReuseLibrary.cpp
     LayoutEditor/LayoutStyleInspectorModel.cpp
     LayoutEditor/LayoutStructuredContentModel.cpp
     LayoutEditor/LayoutValidationModel.cpp
@@ -227,7 +229,9 @@ add_library(AYUILayoutEditorCore STATIC
     include/AYUI/LayoutEditor/LayoutSelectionModel.h
     include/AYUI/LayoutEditor/LayoutCommandStack.h
     include/AYUI/LayoutEditor/LayoutPreviewModel.h
+    include/AYUI/LayoutEditor/LayoutResponsiveModel.h
     include/AYUI/LayoutEditor/LayoutResourceCatalog.h
+    include/AYUI/LayoutEditor/LayoutReuseLibrary.h
     include/AYUI/LayoutEditor/LayoutStyleInspectorModel.h
     include/AYUI/LayoutEditor/LayoutStructuredContentModel.h
     include/AYUI/LayoutEditor/LayoutValidationModel.h

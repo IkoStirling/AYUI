@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -121,7 +122,10 @@ int main() {
     static const char* requiredQualityIds[] = {
         "style_preview_state", "style_preview_swatch",
         "style_source_status", "btn_reset_style", "validation_list",
-        "validation_status", "btn_validate"
+        "validation_status", "btn_validate", "reuse_name", "reuse_list",
+        "btn_reuse_define", "btn_reuse_insert", "responsive_breakpoint",
+        "responsive_visibility", "btn_responsive_preview",
+        "btn_responsive_capture"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {
@@ -694,6 +698,29 @@ int main() {
         return 55;
     }
 
+    // Reusable blocks persist with the document but instantiate expanded,
+    // independently editable copies with reminted IDs.
+    session.selectById("btn_hello");
+    if (!session.defineReusableBlock("Primary Action") ||
+        session.reuseLibrary().size() != 1u ||
+        !session.insertReusableBlock("Primary Action")) {
+        std::fprintf(stderr, "reusable block authoring failed\n");
+        return 86;
+    }
+    ayt::ui::Widget* reusableCopy = session.selected();
+    if (reusableCopy == nullptr || reusableCopy->getId() == "btn_hello") {
+        std::fprintf(stderr, "reusable block ID remint failed\n");
+        return 87;
+    }
+    const std::string reusableCopyId = reusableCopy->getId();
+    session.setResponsiveVisibility(
+        0, ayt::ui::ResponsiveVisibility::Hidden);
+    if (reusableCopy->getResponsiveLayoutRules().size() != 1u ||
+        !reusableCopy->isVisible()) {
+        std::fprintf(stderr, "responsive compact rule authoring failed\n");
+        return 88;
+    }
+
     session.selectById("btn_hello");
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");
@@ -705,6 +732,11 @@ int main() {
         !session.previewSettings().showSafeArea) {
         std::fprintf(stderr, "device preview profile failed\n");
         return 81;
+    }
+    session.selectById(reusableCopyId);
+    if (session.selected() == nullptr || session.selected()->isVisible()) {
+        std::fprintf(stderr, "responsive compact preview failed\n");
+        return 89;
     }
 
     const std::filesystem::path outFile =
@@ -740,6 +772,19 @@ int main() {
         std::fprintf(stderr, "atomic save left %d temporary file(s)\n",
                      temporaryFiles);
         return 73;
+    }
+    {
+        std::ifstream encodedDocument(outFile, std::ios::binary);
+        const std::string encoded(
+            (std::istreambuf_iterator<char>(encodedDocument)),
+            std::istreambuf_iterator<char>());
+        if (encoded.find("\"reusable\"") == std::string::npos ||
+            encoded.find("Primary Action") == std::string::npos ||
+            encoded.find("\"responsive\"") == std::string::npos) {
+            std::fprintf(stderr,
+                "reusable/responsive document envelope was not persisted\n");
+            return 90;
+        }
     }
 
     ayt::ui::UILayoutLoader loader;
@@ -847,6 +892,19 @@ int main() {
         std::fprintf(stderr, "reloaded anchor layout failed\n");
         ayt::ui::destroyWidgetTree(reloaded);
         return 51;
+    }
+    ayt::ui::Widget* loadedReusable = loader.findWidgetById(reusableCopyId);
+    if (loadedReusable == nullptr ||
+        loadedReusable->getResponsiveLayoutRules().size() != 1u) {
+        std::fprintf(stderr, "reloaded responsive reusable copy failed\n");
+        ayt::ui::destroyWidgetTree(reloaded);
+        return 91;
+    }
+    reloaded->setSize({390.0f, reloaded->getSize().y});
+    if (loadedReusable->isVisible()) {
+        std::fprintf(stderr, "reloaded responsive rule did not evaluate\n");
+        ayt::ui::destroyWidgetTree(reloaded);
+        return 92;
     }
 
     std::string json;
