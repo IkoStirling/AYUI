@@ -41,9 +41,11 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   resize 与运行时 MSAA 切换都会先失效租约再执行 bgfx reset
 - Gallery，以及由独立工具和 AYEditor 独立 Designer 窗口共享的 Layout Editor core；Designer
   已覆盖常用叶控件、集合、Tab、容器和 Modal，支持结构化集合/树/Tab/RichText 编辑、可搜索纹理
-  资源浏览、分辨率/DPI/Safe Area 设备预览、可回滚交互预览及声明式 controller/event 元数据
+  资源浏览、分辨率/DPI/Safe Area 设备预览、可回滚交互预览及声明式 controller/event 元数据；
+  Authoring Quality 层进一步提供稳定资源键/本机预览路径隔离、多选公共几何与 Style 编辑、
+  Style 来源和 Normal/Hovered/Pressed/Disabled 状态预览，以及可点击定位的布局诊断列表
 
-2026-09-08 Insider Windows Debug 当前基线为 `5402 / 5402` 条断言通过，Layout Editor headless
+2026-09-08 Insider Windows Debug 当前基线为 `5417 / 5417` 条断言通过，Layout Editor headless
 round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
@@ -302,6 +304,14 @@ Authoring 代码位于独立静态库 `AYUILayoutEditorCore`，不进入游戏�
 默认尺寸/初始化与 Inspector schema 统一来自 `WidgetAuthoringRegistry`，新增类型不再需要同步修改多张
 硬编码表。`PropertySchema` 按字段/section 生成属性行显隐；命令栈已记录 Property/Insert/Delete/Reorder/
 Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
+
+Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳定身份，并把本机文件位置放在
+仅用于解码预览的 `previewPath`；打开文件、Undo/Redo 和复制后都只恢复临时句柄，不把绝对路径写回
+布局。Inspector 多选时用 `—` 表示不一致的 X/Y/Width/Height，提交数值或 Style 会在一个 undo 事务
+内写入全部选中项。Style 状态预览显示来源、继承/本地 token override 数和四种交互背景色。
+`LayoutValidationModel` 对作者语义树检查空/非法/重复 ID、非有限或非正尺寸、缺失 Style/纹理、
+无 Controller 的事件、无可访问名称的交互控件、非法 Anchor、越界控件与 Grid slot 重叠；诊断行可
+直接定位控件，且不会把列表虚拟行、Tab 内部节点或编辑器 overlay 当成用户文档。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 

@@ -118,6 +118,20 @@ int main() {
                      missingProductEntries);
         return 80;
     }
+    static const char* requiredQualityIds[] = {
+        "style_preview_state", "style_preview_swatch",
+        "style_source_status", "btn_reset_style", "validation_list",
+        "validation_status", "btn_validate"
+    };
+    int missingQualityEntries = 0;
+    for (const char* id : requiredQualityIds) {
+        if (ui.findById(id) == nullptr) ++missingQualityEntries;
+    }
+    if (missingQualityEntries != 0) {
+        std::fprintf(stderr, "authoring-quality chrome regression: missing=%d\n",
+                     missingQualityEntries);
+        return 81;
+    }
     if (!session.open("assets/sample_blank.ui.json")) {
         std::fprintf(stderr, "open failed\n");
         return 3;
@@ -300,19 +314,27 @@ int main() {
         std::fprintf(stderr, "Image palette creation failed\n");
         return 14;
     }
-    session.applyProperty("texture", L"textures/ui/test.png");
+    session.setTextureResourceProvider([]() {
+        return std::vector<ayt::ui::LayoutTextureResource>{
+            {"Assets/ui/test.png", L"Project / ui / test.png",
+             "D:/PreviewRoot/ui/test.png", L"PNG"}
+        };
+    });
+    session.applyProperty("texture", L"Assets/ui/test.png");
     session.applyProperty("controller", L"HudController");
     session.applyProperty("event:onClick", L"inspectImage");
-    if (image->getTextureName() != "textures/ui/test.png" ||
+    if (image->getTextureName() != "Assets/ui/test.png" ||
         image->getControllerId() != "HudController" ||
         image->getEventBinding("onClick") != "inspectImage") {
         std::fprintf(stderr, "Image authoring properties failed\n");
         return 15;
     }
     int previewLoads = 0;
+    std::string decodedPreviewPath;
     session.setTexturePreviewLoader(
-        [&previewLoads](const std::string& texturePath) {
+        [&previewLoads, &decodedPreviewPath](const std::string& texturePath) {
             ++previewLoads;
+            decodedPreviewPath = texturePath;
             ayt::ui::ImageTextureHandle handle;
             handle.handle = reinterpret_cast<void*>(
                 static_cast<uintptr_t>(0x1234));
@@ -321,9 +343,23 @@ int main() {
             handle.name = texturePath;
             return handle;
         });
-    if (previewLoads != 1 || !image->hasTexture()) {
+    if (previewLoads != 1 || !image->hasTexture() ||
+        decodedPreviewPath != "D:/PreviewRoot/ui/test.png" ||
+        image->getTextureName() != "Assets/ui/test.png") {
         std::fprintf(stderr, "image preview was not rehydrated\n");
         return 72;
+    }
+    session.refreshValidation();
+    int missingTextureDiagnostics = 0;
+    for (const ayt::ui::LayoutDiagnostic& diagnostic : session.diagnostics()) {
+        if (diagnostic.code == ayt::ui::LayoutDiagnosticCode::MissingTexture &&
+            diagnostic.widget == image) {
+            ++missingTextureDiagnostics;
+        }
+    }
+    if (missingTextureDiagnostics != 0) {
+        std::fprintf(stderr, "stable resource key reported as missing\n");
+        return 82;
     }
     const std::string imageId = image->getId();
 
@@ -741,7 +777,7 @@ int main() {
     ayt::ui::Widget* loadedAnchored = loader.findWidgetById(anchoredId);
 
     if (loadedImage == nullptr ||
-        loadedImage->getTextureName() != "textures/ui/test.png" ||
+        loadedImage->getTextureName() != "Assets/ui/test.png" ||
         loadedImage->getControllerId() != "HudController" ||
         loadedImage->getEventBinding("onClick") != "inspectImage" ||
         loadedList == nullptr || loadedList->getItemCount() != 3u ||
@@ -824,7 +860,7 @@ int main() {
         std::fprintf(stderr, "verify size failed\n%s\n", json.c_str());
         return 7;
     }
-    if (json.find("textures/ui/test.png") == std::string::npos ||
+    if (json.find("Assets/ui/test.png") == std::string::npos ||
         json.find("HudController") == std::string::npos ||
         json.find("inspectImage") == std::string::npos ||
         json.find("selectEntry") == std::string::npos ||

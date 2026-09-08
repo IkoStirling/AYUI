@@ -39,6 +39,7 @@
 #include <sys/stat.h>
 #include <utility>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if defined(_WIN32)
@@ -169,19 +170,28 @@ std::string showOpenTextureDialog(HWND owner) {
 std::vector<ayt::ui::LayoutTextureResource> enumeratePreviewTextures() {
     namespace fs = std::filesystem;
     std::vector<ayt::ui::LayoutTextureResource> resources;
-    const std::vector<fs::path> roots = {
-        fs::path("assets"),
-        fs::path("../AliyatRenderer/assets/core/textures"),
-        fs::path("../../../../../../../AliyatRenderer/assets/core/textures")
+    struct ScanRoot {
+        fs::path path;
+        std::string keyPrefix;
+        std::wstring displayPrefix;
     };
+    const std::vector<ScanRoot> roots = {
+        {fs::path("assets"), "Assets/", L"Assets / "},
+        {fs::path("../AliyatRenderer/assets/core/textures"),
+         "Engine/CoreTextures/", L"Engine / CoreTextures / "},
+        {fs::path("../../../../../../../AliyatRenderer/assets/core/textures"),
+         "Engine/CoreTextures/", L"Engine / CoreTextures / "}
+    };
+    std::unordered_set<std::string> seenKeys;
     std::error_code error;
-    for (const fs::path& root : roots) {
-        if (!fs::is_directory(root, error)) {
+    for (const ScanRoot& scanRoot : roots) {
+        if (!fs::is_directory(scanRoot.path, error)) {
             error.clear();
             continue;
         }
         for (fs::recursive_directory_iterator it(
-                 root, fs::directory_options::skip_permission_denied, error), end;
+                 scanRoot.path, fs::directory_options::skip_permission_denied,
+                 error), end;
              it != end && resources.size() < 2048u; it.increment(error)) {
             if (error) {
                 error.clear();
@@ -196,9 +206,23 @@ std::vector<ayt::ui::LayoutTextureResource> enumeratePreviewTextures() {
             if (extension != ".png" && extension != ".jpg" &&
                 extension != ".jpeg" && extension != ".bmp" &&
                 extension != ".tga") continue;
+            const fs::path relative = fs::relative(
+                it->path(), scanRoot.path, error);
+            if (error) {
+                error.clear();
+                continue;
+            }
+            const std::string key = scanRoot.keyPrefix +
+                relative.generic_string();
+            if (!seenKeys.insert(key).second) continue;
             ayt::ui::LayoutTextureResource resource;
-            resource.key = it->path().lexically_normal().string();
-            resource.displayName = it->path().filename().wstring();
+            resource.key = key;
+            resource.displayName = scanRoot.displayPrefix +
+                relative.generic_wstring();
+            resource.previewPath = fs::absolute(it->path(), error)
+                .lexically_normal().string();
+            error.clear();
+            resource.detail = it->path().extension().wstring();
             resources.push_back(std::move(resource));
         }
     }

@@ -8,9 +8,12 @@
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
+#include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
+#include "AYUI/LayoutEditor/LayoutValidationModel.h"
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
 #include "AYUI/ListView.h"
+#include "AYUI/Image.h"
 #include "AYUI/Panel.h"
 #include "AYUI/RichText.h"
 #include "AYUI/TabControl.h"
@@ -194,17 +197,116 @@ TEST_CASE(structured_content_model_edits_lists_trees_tabs_and_rich_runs) {
 TEST_CASE(resource_catalog_filters_case_insensitively_and_keeps_stable_keys) {
     LayoutResourceCatalog catalog;
     catalog.setEntries({
-        {"textures/button.png", L"Button"},
-        {"textures/Hero.PNG", L"Hero portrait"},
-        {"textures/button.png", L"Duplicate"}
+        {"Assets/button.png", L"Button", "D:/Project/Assets/button.png"},
+        {"Assets/Hero.PNG", L"Hero portrait", "D:/Project/Assets/Hero.PNG",
+         L"PNG"},
+        {"Assets/button.png", L"Duplicate"}
     });
     CHECK(catalog.entries().size() == 2u);
-    CHECK(catalog.contains("textures/Hero.PNG"));
+    CHECK(catalog.contains("Assets/Hero.PNG"));
+    CHECK(catalog.resolvePreviewPath("Assets/Hero.PNG") ==
+          "D:/Project/Assets/Hero.PNG");
+    CHECK(catalog.resolvePreviewPath("legacy/path.png") == "legacy/path.png");
+    CHECK(catalog.findByPreviewPath("D:/Project/Assets/button.png") != nullptr);
     catalog.setFilter(L"hero");
     CHECK(catalog.visibleIndices().size() == 1u);
     const LayoutTextureResource* result = catalog.visibleEntry(0);
     CHECK_NOT_NULL(result);
-    if (result != nullptr) CHECK(result->key == "textures/Hero.PNG");
+    if (result != nullptr) CHECK(result->key == "Assets/Hero.PNG");
+}
+
+TEST_CASE(style_inspector_reports_source_overrides_and_state_colors) {
+    StyleSheet sheet;
+    WidgetStyle style = StyleBuilder::makeButton();
+    style.backgroundColor = FVector4(0.1f, 0.2f, 0.3f, 1.0f);
+    style.bgToken = "color.accent";
+    style.backgroundStates.enabled = true;
+    style.backgroundStates.normal = style.backgroundColor;
+    style.backgroundStates.hovered = FVector4(0.3f, 0.4f, 0.5f, 1.0f);
+    style.backgroundStates.pressed = FVector4(0.05f, 0.1f, 0.2f, 1.0f);
+    style.backgroundStates.disabled = FVector4(0.2f, 0.2f, 0.2f, 0.5f);
+    sheet.setStyle("quality_button", style);
+
+    Panel parent;
+    Button button;
+    parent.setStyleTokenOverride("color.accent", FVector4(1, 0, 0, 1));
+    parent.addChildExternal(&button);
+    button.setStyleId("quality_button");
+
+    LayoutStyleInspectorModel inspector;
+    LayoutStyleInspection inherited = inspector.inspect(&button, &sheet);
+    CHECK(inherited.styleExists);
+    CHECK(inherited.source == LayoutStyleSource::InheritedTokenOverride);
+    CHECK(inherited.inheritedOverrideCount == 1u);
+    const FVector4 hovered = inspector.backgroundForState(
+        inherited, StyleState::Hovered);
+    CHECK_FLOAT_EQ(hovered.x, 0.3f, 1e-5f);
+
+    button.setStyleTokenOverride("color.accent", FVector4(0, 1, 0, 1));
+    const LayoutStyleInspection local = inspector.inspect(&button, &sheet);
+    CHECK(local.source == LayoutStyleSource::LocalTokenOverride);
+    CHECK(local.localOverrideCount == 1u);
+}
+
+TEST_CASE(validation_model_reports_actionable_authoring_issues) {
+    Panel root;
+    root.setId("document_root");
+    root.setSize({320.0f, 200.0f});
+
+    Button first;
+    first.setId("duplicate");
+    first.setSize({80.0f, 30.0f});
+    first.setEventBinding("onClick", "handleClick");
+    root.addChildExternal(&first);
+
+    Button second;
+    second.setId("duplicate");
+    second.setSize({0.0f, 30.0f});
+    second.setStyleId("missing_style");
+    root.addChildExternal(&second);
+
+    Image image;
+    image.setId("preview");
+    image.setSize({64.0f, 64.0f});
+    image.setTexture("Assets/missing.png");
+    root.addChildExternal(&image);
+
+    LayoutResourceCatalog resources;
+    resources.setEntries({
+        {"Assets/ready.png", L"Ready", "D:/Assets/ready.png"}
+    });
+    StyleSheet styles;
+    LayoutValidationContext context;
+    context.textureCatalog = &resources;
+    context.styleSheet = &styles;
+
+    LayoutValidationModel validation;
+    validation.run({&root, &first, &second, &image}, context);
+
+    size_t duplicateCount = 0;
+    size_t missingStyleCount = 0;
+    size_t missingTextureCount = 0;
+    size_t missingControllerCount = 0;
+    size_t nonPositiveCount = 0;
+    for (const LayoutDiagnostic& diagnostic : validation.diagnostics()) {
+        if (diagnostic.code == LayoutDiagnosticCode::DuplicateId) {
+            ++duplicateCount;
+        } else if (diagnostic.code == LayoutDiagnosticCode::MissingStyle) {
+            ++missingStyleCount;
+        } else if (diagnostic.code == LayoutDiagnosticCode::MissingTexture) {
+            ++missingTextureCount;
+        } else if (diagnostic.code == LayoutDiagnosticCode::EventWithoutController) {
+            ++missingControllerCount;
+        } else if (diagnostic.code == LayoutDiagnosticCode::NonPositiveSize) {
+            ++nonPositiveCount;
+        }
+    }
+    CHECK(duplicateCount == 2u);
+    CHECK(missingStyleCount == 1u);
+    CHECK(missingTextureCount == 1u);
+    CHECK(missingControllerCount == 1u);
+    CHECK(nonPositiveCount == 1u);
+    CHECK(validation.hasErrors());
 }
 
 TEST_CASE(preview_model_maps_physical_resolution_dpi_and_safe_area_to_dip) {

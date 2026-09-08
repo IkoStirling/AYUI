@@ -6,7 +6,9 @@
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
+#include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
+#include "AYUI/LayoutEditor/LayoutValidationModel.h"
 #include "AYUI/UIManager.h"
 
 #include <functional>
@@ -102,6 +104,10 @@ public:
     }
     void setSafeAreaVisible(bool visible);
     void refreshTextureResources();
+    void refreshValidation();
+    const std::vector<LayoutDiagnostic>& diagnostics() const {
+        return _validationModel.diagnostics();
+    }
 
     // button: 0=LMB, 1=RMB, 2=MMB
     bool onPointerDown(const math::FVector2& worldPos, int button = 0);
@@ -187,6 +193,7 @@ private:
     void setChromeEnabled(const char* id, bool enabled);
     void syncHierarchySelection();
     void syncStyleCombo();
+    void syncStyleInspector();
     void syncTextAlignCombos();
     void syncEnumCombos();
     void refreshWindowTitle();
@@ -360,6 +367,8 @@ private:
 
     LayoutStructuredContentModel _structuredModel;
     LayoutResourceCatalog _textureCatalog;
+    LayoutStyleInspectorModel _styleInspectorModel;
+    LayoutValidationModel _validationModel;
     LayoutPreviewModel _previewModel;
     Mode _mode = Mode::Edit;
     std::optional<Snapshot> _interactionSnapshot;
@@ -424,6 +433,16 @@ private:
     TextInput* _textureSearch = nullptr;
     TextLabel* _textureStatus = nullptr;
     bool _suppressTextureResources = false;
+    ComboBox* _stylePreviewStateCombo = nullptr;
+    Panel* _stylePreviewSwatch = nullptr;
+    TextLabel* _styleSourceStatus = nullptr;
+    TextLabel* _styleColorStatus = nullptr;
+    StyleState _stylePreviewState = StyleState::Normal;
+    ListView* _validationList = nullptr;
+    TextLabel* _validationStatus = nullptr;
+    bool _suppressValidation = false;
+    bool _validationDirty = true;
+    std::vector<std::wstring> _validationLabels;
     ComboBox* _previewPreset = nullptr;
     ComboBox* _previewDpi = nullptr;
     TextInput* _previewWidth = nullptr;

@@ -123,6 +123,9 @@ public:
 
     // Get style by ID
     const WidgetStyle* getStyle(const std::string& styleId) const;
+    bool containsStyle(const std::string& styleId) const {
+        return !styleId.empty() && _styles.find(styleId) != _styles.end();
+    }
 
     // Add or update style
     void setStyle(const std::string& styleId, const WidgetStyle& style);

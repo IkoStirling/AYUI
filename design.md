@@ -542,6 +542,25 @@ Inspector 根据选中类型暴露 `controller` 和有效事件字段。Session 
 对象；运行时由 UILayoutLoader 使用 8.1 的三层优先级绑定。这样 Designer 可以完成交互契约创作，
 同时维持“JSON 不执行任意脚本”的安全边界。
 
+第四阶段 Authoring Quality 把资源解析、样式检查和文档诊断继续拆成独立模型。纹理目录项同时保存
+可序列化 `key` 与只在当前宿主有效的 `previewPath`；Image 始终保留 key，即使 decoder 返回以绝对
+路径命名的句柄，也会在装入前恢复稳定身份。文件选择器返回的路径若能反查目录项会自动归一为 key，
+无法归一的旧绝对路径仍可打开，但会以 missing resource 诊断显式暴露。standalone 使用
+`Assets/`、`Engine/CoreTextures/`，AYEditor 使用 `Assets/`、`EngineAssets/` 命名空间；目录扫描和
+真实路径仍由宿主负责。
+
+`LayoutStyleInspectorModel` 区分 default、missing、style sheet、继承 token override 和本地 token
+override，Inspector 可预览 Normal/Hovered/Pressed/Disabled 的声明式背景色并一键恢复默认 Style。
+多选 Inspector 对不一致的 X/Y/Width/Height 显示混合值，数值和 Style 提交对当前选择集执行一次
+事务；ID 仍只允许单选修改，避免隐式生成名称。
+
+`LayoutValidationModel` 只消费 Session 导出的 authored widget 集，不递归猜测控件内部结构，因此
+ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay 不会产生误报。当前诊断覆盖
+空/非法/重复 ID、非有限/非正几何、缺失 Style/纹理、事件缺 Controller、交互控件无可访问名称、
+非法 Anchor、自由控件越过父级以及 Grid span 重叠。诊断列表和 View/Validate Layout 共用同一结果，
+点击诊断通过运行时 Widget 引用定位；引用仅存在于 authoring session，不进入 JSON。Controller/handler
+是否真实存在仍需未来由宿主注册表提供解析结果，AYUI 不依赖游戏反射系统。
+
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
 必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section
 显隐并执行一次 invalidate/layout，保证 Inspector 不会短暂保留上一类型的行结构。VBox 的可伸缩
@@ -683,6 +702,10 @@ AYEditor 全量回归为 `1940 / 1940`。
 物理分辨率/DPI/Safe Area 设备预览和 snapshot 回滚式 Interact 模式进入共享 core；Tree 折叠后代与
 Tab page reorder 的 Serializer/ownership 边界纳入回归。当前 Insider Windows Debug 基线为
 `5402 / 5402`，`AYUI_LayoutEditor_RoundTrip` 同步验证 transient preview 保存隔离与交互退出回滚。
+
+同日完成 Layout Editor Authoring Quality 第四阶段：稳定资源 key 与本机 preview path 分离、样式来源/
+四状态预览、多选公共几何与 Style 编辑、统一可定位 Validation 诊断进入共享 core；资源路径不会随
+预览句柄泄漏进 JSON。新增核心与 round-trip 回归后 Insider Windows Debug 基线为 `5417 / 5417`。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

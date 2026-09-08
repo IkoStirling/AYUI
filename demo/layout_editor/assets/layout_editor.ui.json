@@ -49,7 +49,8 @@
               "title": "View",
               "items": [
                 { "text": "Interact Preview", "shortcut": "F6" },
-                { "text": "Safe Area" }
+                { "text": "Safe Area" },
+                { "text": "Validate Layout" }
               ]
             }
           ]
@@ -231,7 +232,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 2400 },
+                "size": { "w": 304, "h": 2820 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -483,6 +484,23 @@
                       { "type": "ComboBox", "id": "prop_style_combo", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
+                  { "type": "TextLabel", "id": "section_style_quality", "style": "__le_accent", "text": "STYLE SOURCE & STATE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_style_preview_state", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
+                    "children": [
+                      { "type": "TextLabel", "id": "lbl_style_preview_state", "style": "__le_label", "text": "Preview", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "ComboBox", "id": "style_preview_state", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_style_preview", "size": { "h": 38 }, "slot": { "height": 38 }, "spacing": 10,
+                    "children": [
+                      { "type": "Panel", "id": "style_preview_swatch", "style": "__le_panel", "size": { "w": 56, "h": 32 }, "slot": { "width": 56 } },
+                      { "type": "TextLabel", "id": "style_color_status", "style": "__le_muted", "text": "Background", "size": { "w": 0, "h": 32 }, "slot": { "width": 0 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "style_source_status", "style": "__le_muted", "text": "Default widget appearance", "size": { "w": 272, "h": 36 }, "slot": { "height": 36 } },
+                  { "type": "Button", "id": "btn_reset_style", "style": "__le_command", "text": "Reset to default", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   {
                     "type": "HBox", "id": "row_prop_checked", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
                     "children": [
@@ -597,7 +615,11 @@
                         ]
                       }
                     ]
-                  }
+                  },
+                  { "type": "TextLabel", "id": "section_validation", "style": "__le_accent", "text": "LAYOUT VALIDATION", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "ListView", "id": "validation_list", "style": "__le_input", "size": { "w": 272, "h": 150 }, "slot": { "height": 150 }, "itemHeight": 28 },
+                  { "type": "TextLabel", "id": "validation_status", "style": "__le_muted", "text": "No authoring issues", "size": { "w": 272, "h": 34 }, "slot": { "height": 34 } },
+                  { "type": "Button", "id": "btn_validate", "style": "__le_command", "text": "Refresh validation", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } }
                 ]
               }
             }
