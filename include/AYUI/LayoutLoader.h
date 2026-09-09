@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AYUI/Version.h"
+
 #include "AYUI/Widget.h"
 #include "AYUI/DockJsonHandle.h"
 #include "AYUI/UIAnimation.h"

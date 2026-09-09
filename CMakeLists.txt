@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 project(AYUI
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "AYUI — retained-mode engine UI, data-driven layouts, docking, styling and animation"
 )
 
@@ -84,6 +84,7 @@ set(SRC_FILES
 
 set(HEAD_FILES
     AYUI.h
+    include/AYUI/Version.h
     include/AYUI/Animation.h
     include/AYUI/UIAnimation.h
     include/AYUI/Event.h
@@ -175,6 +176,7 @@ set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
 find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
+target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=110)
 target_include_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -211,6 +213,7 @@ endif()
 # AYEditor and headless regression tools. Keep it separate from AYUI runtime:
 # games that only load .ui.json do not pay for editor models or chrome logic.
 add_library(AYUILayoutEditorCore STATIC
+    LayoutEditor/LayoutAnimationTimelineView.cpp
     LayoutEditor/LayoutCanvasViewport.cpp
     LayoutEditor/LayoutDocumentModel.cpp
     LayoutEditor/LayoutSelectionModel.cpp
@@ -225,6 +228,7 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/PropertySchema.cpp
     LayoutEditor/WidgetAuthoringRegistry.cpp
     LayoutEditor/LayoutEditorSession.cpp
+    include/AYUI/LayoutEditor/LayoutAnimationTimelineView.h
     include/AYUI/LayoutEditor/LayoutEditorSession.h
     include/AYUI/LayoutEditor/LayoutCanvasViewport.h
     include/AYUI/LayoutEditor/LayoutDocumentModel.h

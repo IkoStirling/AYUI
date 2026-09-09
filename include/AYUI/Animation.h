@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AYUI/Version.h"
+
 #include "AYMath/MathTypes.h"
 #include "AYUI/IRenderBackend.h"
 

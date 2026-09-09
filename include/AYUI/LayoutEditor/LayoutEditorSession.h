@@ -1,6 +1,8 @@
 #pragma once
 
+#include "AYUI/Version.h"
 #include "AYUI/ImageTexture.h"
+#include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
@@ -67,11 +69,14 @@ public:
     bool attach(UIManager& ui);
     bool attach(UIManager& ui, Widget* chromeRoot);
     void detach();
-    void pumpDeferred();
+    void pumpDeferred(float deltaSeconds = 0.0f);
 
     bool open(const std::string& path);
     bool save();
     bool saveAs(const std::string& path);
+    // Writes the current in-memory layout without changing its document path,
+    // dirty state, command history, or active preview mode.
+    bool writeRecoveryCopy(const std::string& path) const;
 
     void select(Widget* widget, bool additive = false);
     void selectById(const std::string& id);
@@ -130,7 +135,19 @@ public:
     bool setAnimationPlayback(int clipIndex, int repeatCount, bool yoyo,
                               AnimationImportance importance);
     bool previewAnimationFrame(int clipIndex, float timeMs);
+    bool playAnimationPreview(int clipIndex);
+    void pauseAnimationPreview();
     void stopAnimationPreview();
+    void advanceAnimationPreview(float deltaSeconds);
+    void setAnimationPreviewLoop(bool enabled);
+    bool animationPreviewLoop() const { return _animationPreviewLoop; }
+    bool isAnimationPreviewPlaying() const;
+    bool isAnimationPreviewPaused() const;
+    float animationPreviewTimeMs() const { return _animationPreviewTimeMs; }
+    bool beginAnimationKeyframeDrag(int clipIndex, int trackIndex,
+                                    int keyframeIndex);
+    int updateAnimationKeyframeDrag(float timeMs);
+    void endAnimationKeyframeDrag();
     bool isAnimationPreviewing() const {
         return _animationPreviewBaseline.has_value();
     }
@@ -260,6 +277,11 @@ private:
     void syncReuseEditor();
     void syncResponsiveEditor();
     void syncAnimationEditor();
+    void ensureAnimationTimelineView();
+    void syncAnimationTimelineGeometry();
+    void relayoutAfterAnimationSample();
+    bool captureAnimationPreviewBaseline(int clipIndex);
+    float animationDisplayDurationMs(const UIAnimationClip* clip) const;
     void previewResponsiveBreakpoint(int breakpointIndex);
     math::FVector2 authoredRootSize() const;
     bool previewOverridesDocumentSize() const;
@@ -408,7 +430,22 @@ private:
     UIAnimationLibrary _animationLibrary;
     Mode _mode = Mode::Edit;
     std::optional<Snapshot> _interactionSnapshot;
-    std::optional<Snapshot> _animationPreviewBaseline;
+    struct AnimationPreviewValue {
+        std::string targetId;
+        UIAnimationProperty property = UIAnimationProperty::Opacity;
+        math::FVector4 value{0.0f, 0.0f, 0.0f, 0.0f};
+    };
+    std::optional<std::vector<AnimationPreviewValue>>
+        _animationPreviewBaseline;
+    std::optional<AnimationTimeline> _animationRuntimePreview;
+    int _animationPreviewClipIndex = -1;
+    float _animationPreviewTimeMs = 0.0f;
+    bool _animationPreviewLoop = false;
+    bool _animationKeyDragActive = false;
+    bool _animationKeyDragChanged = false;
+    int _animationKeyDragClip = -1;
+    int _animationKeyDragTrack = -1;
+    int _animationKeyDragKey = -1;
     math::FVector2 _authoredRootSize{640.0f, 480.0f};
 
     struct InteractionState {
@@ -509,6 +546,9 @@ private:
     ComboBox* _animationYoyo = nullptr;
     ComboBox* _animationImportance = nullptr;
     TextLabel* _animationStatus = nullptr;
+    TextLabel* _animationTransportStatus = nullptr;
+    Widget* _animationTimelineHost = nullptr;
+    LayoutAnimationTimelineView* _animationTimelineView = nullptr;
     bool _suppressAnimation = false;
     int _animationClipIndex = -1;
     int _animationTrackIndex = -1;

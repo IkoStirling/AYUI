@@ -2,6 +2,8 @@
 
 // AYUI - ayt::ui namespace
 
+#include "AYUI/Version.h"
+
 #include "AYUI/Accessibility.h"
 #include "AYUI/AccessibilityAdapter.h"
 #include "AYUI/UnicodeText.h"

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYUI/Version.h"
 #include "AYUI/Animation.h"
 
 #include <cstddef>
@@ -68,6 +69,11 @@ public:
                         std::string* error = nullptr);
     int upsertKeyframe(int clipIndex, int trackIndex,
                        UIAnimationKeyframe keyframe);
+    // Re-times one key while preserving sorted order. If it lands on an
+    // existing key, the moved key replaces that key and the two collapse.
+    // Returns the key's new index, or -1 for an invalid address.
+    int moveKeyframeTime(int clipIndex, int trackIndex, int keyframeIndex,
+                         float timeMs);
     bool removeKeyframe(int clipIndex, int trackIndex, int keyframeIndex);
 
     std::string serialize(bool pretty = false) const;

@@ -267,6 +267,23 @@ int UIAnimationLibrary::upsertKeyframe(
     return static_cast<int>(keys.insert(at, std::move(keyframe)) - keys.begin());
 }
 
+int UIAnimationLibrary::moveKeyframeTime(
+    int clipIndex, int trackIndex, int keyframeIndex, float timeMs) {
+    if (clipIndex < 0 || clipIndex >= static_cast<int>(_clips.size()))
+        return -1;
+    auto& tracks = _clips[static_cast<size_t>(clipIndex)].tracks;
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(tracks.size()))
+        return -1;
+    auto& keys = tracks[static_cast<size_t>(trackIndex)].keyframes;
+    if (keyframeIndex < 0 || keyframeIndex >= static_cast<int>(keys.size()))
+        return -1;
+
+    UIAnimationKeyframe moved = keys[static_cast<size_t>(keyframeIndex)];
+    moved.timeMs = timeMs;
+    keys.erase(keys.begin() + keyframeIndex);
+    return upsertKeyframe(clipIndex, trackIndex, std::move(moved));
+}
+
 bool UIAnimationLibrary::removeKeyframe(
     int clipIndex, int trackIndex, int keyframeIndex) {
     if (clipIndex < 0 || clipIndex >= static_cast<int>(_clips.size()))

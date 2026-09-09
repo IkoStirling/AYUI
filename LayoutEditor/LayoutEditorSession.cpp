@@ -551,6 +551,13 @@ Widget* LayoutEditorSession::findChromeById(const std::string& id) const {
 }
 
 void LayoutEditorSession::detach() {
+    if (_animationTimelineView != nullptr) {
+        _animationTimelineView->clearCallbacks();
+    }
+    if (_animationRuntimePreview.has_value()) {
+        _animationRuntimePreview->cancel();
+    }
+    _animationRuntimePreview.reset();
     _animationPreviewBaseline.reset();
     if (_mode == Mode::Interact) {
         _mode = Mode::Edit;
@@ -642,10 +649,21 @@ void LayoutEditorSession::detach() {
     _animationYoyo = nullptr;
     _animationImportance = nullptr;
     _animationStatus = nullptr;
+    _animationTransportStatus = nullptr;
+    _animationTimelineHost = nullptr;
+    _animationTimelineView = nullptr;
     _suppressAnimation = false;
     _animationClipIndex = -1;
     _animationTrackIndex = -1;
     _animationKeyIndex = -1;
+    _animationPreviewClipIndex = -1;
+    _animationPreviewTimeMs = 0.0f;
+    _animationPreviewLoop = false;
+    _animationKeyDragActive = false;
+    _animationKeyDragChanged = false;
+    _animationKeyDragClip = -1;
+    _animationKeyDragTrack = -1;
+    _animationKeyDragKey = -1;
     _stylePreviewState = StyleState::Normal;
     _previewPreset = nullptr;
     _previewDpi = nullptr;
@@ -660,8 +678,10 @@ void LayoutEditorSession::detach() {
     _dirty = false;
 }
 
-void LayoutEditorSession::pumpDeferred() {
+void LayoutEditorSession::pumpDeferred(float deltaSeconds) {
     syncCanvasViewportGeometry();
+    syncAnimationTimelineGeometry();
+    advanceAnimationPreview(deltaSeconds);
     if (_validationDirty) refreshValidation();
     const DeferredAction action = _deferred;
     _deferred = DeferredAction::None;
@@ -1091,16 +1111,18 @@ bool LayoutEditorSession::previewAnimationFrame(
         setStatus(L"Select an animation clip with at least one track");
         return false;
     }
-
-    Snapshot baseline;
-    if (_animationPreviewBaseline.has_value()) {
-        baseline = *_animationPreviewBaseline;
-        _animationPreviewBaseline.reset();
-        restoreSnapshot(baseline);
-    } else {
-        baseline = captureSnapshot();
+    if (_animationPreviewBaseline.has_value() &&
+        _animationPreviewClipIndex != clipIndex) {
+        stopAnimationPreview();
     }
-    _animationPreviewBaseline = baseline;
+    if (!_animationPreviewBaseline.has_value() &&
+        !captureAnimationPreviewBaseline(clipIndex)) {
+        return false;
+    }
+    if (_animationRuntimePreview.has_value()) {
+        _animationRuntimePreview->cancel();
+        _animationRuntimePreview.reset();
+    }
     _animationClipIndex = clipIndex;
 
     std::size_t unresolved = 0;
@@ -1109,25 +1131,253 @@ bool LayoutEditorSession::previewAnimationFrame(
         [this](const std::string& id) { return findInDocument(id); },
         &unresolved);
     timeline.seek(timeMs);
+    _animationPreviewTimeMs = timeline.getCurrentTimeMs();
+    _animationRuntimePreview = std::move(timeline);
+    relayoutAfterAnimationSample();
+    if (_animationTimelineView != nullptr) {
+        _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+    }
+    if (_animationTime != nullptr) {
+        _animationTime->setText(formatFloat(_animationPreviewTimeMs));
+    }
+    setChromeEnabled("btn_animation_reset", true);
+    setStatus(L"Animation scrub preview at " +
+              std::to_wstring(static_cast<int>(
+                  std::lround(_animationPreviewTimeMs))) +
+              L" ms" + (unresolved > 0u ? L" (missing tracks skipped)" : L""));
+    return true;
+}
+
+bool LayoutEditorSession::captureAnimationPreviewBaseline(int clipIndex) {
+    if (clipIndex < 0 || clipIndex >= static_cast<int>(_animationLibrary.size()))
+        return false;
+    std::vector<AnimationPreviewValue> values;
+    for (const UIAnimationTrack& track :
+         _animationLibrary.clips()[static_cast<size_t>(clipIndex)].tracks) {
+        Widget* target = findInDocument(track.targetId);
+        if (target == nullptr) continue;
+        AnimationPreviewValue value;
+        value.targetId = track.targetId;
+        value.property = track.property;
+        if (track.property == UIAnimationProperty::Opacity) {
+            value.value.x = target->getOpacity();
+        } else if (track.property == UIAnimationProperty::Position) {
+            value.value.x = target->getPosition().x;
+            value.value.y = target->getPosition().y;
+        } else {
+            value.value.x = target->getSize().x;
+            value.value.y = target->getSize().y;
+        }
+        values.push_back(std::move(value));
+    }
+    _animationPreviewBaseline = std::move(values);
+    _animationPreviewClipIndex = clipIndex;
+    _animationPreviewTimeMs = 0.0f;
+    return true;
+}
+
+void LayoutEditorSession::relayoutAfterAnimationSample() {
     if (_docRoot != nullptr) _docRoot->performLayout();
     if (_ui != nullptr) {
         _ui->invalidateLayout();
         _ui->layout();
     }
     syncSelectionChrome();
+}
+
+bool LayoutEditorSession::playAnimationPreview(int clipIndex) {
+    if (clipIndex < 0 || clipIndex >= static_cast<int>(_animationLibrary.size()) ||
+        _animationLibrary.clips()[static_cast<size_t>(clipIndex)].tracks.empty()) {
+        setStatus(L"Select an animation clip with at least one track");
+        return false;
+    }
+    if (_animationRuntimePreview.has_value() &&
+        _animationPreviewClipIndex == clipIndex &&
+        _animationRuntimePreview->isPaused()) {
+        _animationRuntimePreview->resume();
+        syncAnimationEditor();
+        setStatus(L"Animation preview resumed");
+        return true;
+    }
+    if (_animationPreviewBaseline.has_value() &&
+        _animationPreviewClipIndex != clipIndex) {
+        stopAnimationPreview();
+    }
+    if (!_animationPreviewBaseline.has_value() &&
+        !captureAnimationPreviewBaseline(clipIndex)) {
+        return false;
+    }
+    if (_animationRuntimePreview.has_value()) {
+        _animationRuntimePreview->cancel();
+    }
+    std::size_t unresolved = 0;
+    AnimationTimeline timeline = _animationLibrary.createTimeline(
+        clipIndex,
+        [this](const std::string& id) { return findInDocument(id); },
+        &unresolved);
+    if (_animationPreviewLoop) {
+        timeline.setRepeatCount(AnimationTimeline::RepeatForever);
+    }
+    timeline.play();
+    _animationRuntimePreview = std::move(timeline);
+    _animationPreviewClipIndex = clipIndex;
+    _animationPreviewTimeMs = _animationRuntimePreview->getCurrentTimeMs();
+    relayoutAfterAnimationSample();
     syncAnimationEditor();
-    setStatus(L"Animation scrub preview at " +
-              std::to_wstring(static_cast<int>(std::lround(timeMs))) +
-              L" ms" + (unresolved > 0u ? L" (missing tracks skipped)" : L""));
+    setStatus(L"Animation preview playing" +
+              (unresolved > 0u ? L" (missing tracks skipped)" : L""));
     return true;
+}
+
+void LayoutEditorSession::pauseAnimationPreview() {
+    if (!_animationRuntimePreview.has_value() ||
+        _animationRuntimePreview->getState() !=
+            AnimationPlaybackState::Running) return;
+    _animationRuntimePreview->pause();
+    syncAnimationEditor();
+    setStatus(L"Animation preview paused");
 }
 
 void LayoutEditorSession::stopAnimationPreview() {
     if (!_animationPreviewBaseline.has_value()) return;
-    Snapshot baseline = std::move(*_animationPreviewBaseline);
+    if (_animationRuntimePreview.has_value()) {
+        _animationRuntimePreview->cancel();
+        _animationRuntimePreview.reset();
+    }
+    std::vector<AnimationPreviewValue> baseline =
+        std::move(*_animationPreviewBaseline);
     _animationPreviewBaseline.reset();
-    restoreSnapshot(baseline);
+    for (const AnimationPreviewValue& value : baseline) {
+        Widget* target = findInDocument(value.targetId);
+        if (target == nullptr) continue;
+        if (value.property == UIAnimationProperty::Opacity) {
+            target->setOpacity(value.value.x);
+        } else if (value.property == UIAnimationProperty::Position) {
+            target->setPosition({value.value.x, value.value.y});
+        } else {
+            target->setSize({value.value.x, value.value.y});
+        }
+    }
+    _animationPreviewClipIndex = -1;
+    _animationPreviewTimeMs = 0.0f;
+    relayoutAfterAnimationSample();
+    if (_animationTimelineView != nullptr) {
+        _animationTimelineView->setCurrentTimeMs(0.0f);
+    }
+    syncAnimationEditor();
     setStatus(L"Animation preview reset to authored values");
+}
+
+void LayoutEditorSession::advanceAnimationPreview(float deltaSeconds) {
+    if (!_animationRuntimePreview.has_value() ||
+        _animationRuntimePreview->getState() !=
+            AnimationPlaybackState::Running ||
+        !std::isfinite(deltaSeconds) || deltaSeconds <= 0.0f) return;
+    const AnimationPlaybackState before =
+        _animationRuntimePreview->getState();
+    _animationRuntimePreview->tick(std::min(deltaSeconds, 0.1f));
+    _animationPreviewTimeMs = _animationRuntimePreview->getCurrentTimeMs();
+    relayoutAfterAnimationSample();
+    if (_animationTimelineView != nullptr) {
+        _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+    }
+    if (_animationTransportStatus != nullptr) {
+        _animationTransportStatus->setText(
+            std::to_wstring(static_cast<int>(
+                std::lround(_animationPreviewTimeMs))) + L" ms");
+    }
+    if (before != AnimationPlaybackState::Completed &&
+        _animationRuntimePreview->getState() ==
+            AnimationPlaybackState::Completed) {
+        syncAnimationEditor();
+        setStatus(L"Animation preview completed");
+    }
+}
+
+void LayoutEditorSession::setAnimationPreviewLoop(bool enabled) {
+    if (_animationPreviewLoop == enabled) return;
+    _animationPreviewLoop = enabled;
+    if (auto* button = dynamic_cast<Button*>(
+            findChromeById("btn_animation_loop"))) {
+        button->setText(enabled ? L"Loop: On" : L"Loop: Off");
+    }
+    syncAnimationEditor();
+}
+
+bool LayoutEditorSession::isAnimationPreviewPlaying() const {
+    return _animationRuntimePreview.has_value() &&
+        _animationRuntimePreview->getState() == AnimationPlaybackState::Running;
+}
+
+bool LayoutEditorSession::isAnimationPreviewPaused() const {
+    return _animationRuntimePreview.has_value() &&
+        _animationRuntimePreview->getState() == AnimationPlaybackState::Paused;
+}
+
+bool LayoutEditorSession::beginAnimationKeyframeDrag(
+    int clipIndex, int trackIndex, int keyframeIndex) {
+    if (_animationKeyDragActive || clipIndex < 0 ||
+        clipIndex >= static_cast<int>(_animationLibrary.size())) return false;
+    const auto& tracks = _animationLibrary.clips()[
+        static_cast<size_t>(clipIndex)].tracks;
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(tracks.size()) ||
+        keyframeIndex < 0 || keyframeIndex >= static_cast<int>(
+            tracks[static_cast<size_t>(trackIndex)].keyframes.size())) {
+        return false;
+    }
+    stopAnimationPreview();
+    beginMutation(LayoutEditKind::Animation, "Move animation keyframe");
+    _animationKeyDragActive = true;
+    _animationKeyDragChanged = false;
+    _animationKeyDragClip = clipIndex;
+    _animationKeyDragTrack = trackIndex;
+    _animationKeyDragKey = keyframeIndex;
+    _animationClipIndex = clipIndex;
+    _animationTrackIndex = trackIndex;
+    _animationKeyIndex = keyframeIndex;
+    return true;
+}
+
+int LayoutEditorSession::updateAnimationKeyframeDrag(float timeMs) {
+    if (!_animationKeyDragActive) return -1;
+    const auto& keys = _animationLibrary.clips()[
+        static_cast<size_t>(_animationKeyDragClip)].tracks[
+            static_cast<size_t>(_animationKeyDragTrack)].keyframes;
+    if (_animationKeyDragKey < 0 ||
+        _animationKeyDragKey >= static_cast<int>(keys.size())) return -1;
+    const float nextTime = std::max(0.0f,
+        std::isfinite(timeMs) ? std::round(timeMs) : 0.0f);
+    if (std::fabs(keys[static_cast<size_t>(_animationKeyDragKey)].timeMs -
+                  nextTime) < 0.001f) {
+        return _animationKeyDragKey;
+    }
+    const int moved = _animationLibrary.moveKeyframeTime(
+        _animationKeyDragClip, _animationKeyDragTrack,
+        _animationKeyDragKey, nextTime);
+    if (moved < 0) return -1;
+    _animationKeyDragKey = moved;
+    _animationKeyIndex = moved;
+    _animationKeyDragChanged = true;
+    markDirty(true);
+    syncAnimationEditor();
+    previewAnimationFrame(_animationKeyDragClip, nextTime);
+    return moved;
+}
+
+void LayoutEditorSession::endAnimationKeyframeDrag() {
+    if (!_animationKeyDragActive) return;
+    if (_animationKeyDragChanged) {
+        endMutation();
+        syncAnimationEditor();
+        setStatus(L"Animation keyframe moved");
+    } else {
+        _commandStack.discardLastUndo();
+    }
+    _animationKeyDragActive = false;
+    _animationKeyDragChanged = false;
+    _animationKeyDragClip = -1;
+    _animationKeyDragTrack = -1;
+    _animationKeyDragKey = -1;
 }
 
 void LayoutEditorSession::refreshTextureResources() {
@@ -1817,6 +2067,7 @@ void LayoutEditorSession::wireChrome() {
     });
 
     _status = dynamic_cast<TextLabel*>(findChromeById("lbl_status"));
+    ensureAnimationTimelineView();
     refreshTextureResources();
     syncPreviewControls();
     syncReuseEditor();
@@ -1832,7 +2083,9 @@ void LayoutEditorSession::clearDocument() {
     cancelToolDrag();
     _dragMode = DragMode::None;
     _dragTarget = nullptr;
+    _animationRuntimePreview.reset();
     _animationPreviewBaseline.reset();
+    _animationPreviewClipIndex = -1;
     // Tear down selection chrome first so destroyWidgetTree doesn't
     // double-free panels we still hold pointers to.
     destroySelectionChrome();
@@ -2162,6 +2415,18 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
     markDirty(false);
     setStatus(utf8ToWide("Saved " + path));
     return true;
+}
+
+bool LayoutEditorSession::writeRecoveryCopy(const std::string& path) const {
+    if (_docRoot == nullptr || path.empty()) return false;
+    try {
+        UILayoutLoader saver;
+        return saver.saveJsonDocument(
+            path, _reuseLibrary.encodeDocument(
+                _docRoot, _animationLibrary, true));
+    } catch (...) {
+        return false;
+    }
 }
 
 bool LayoutEditorSession::selectionContains(Widget* widget) const {
@@ -5453,6 +5718,80 @@ void LayoutEditorSession::syncResponsiveEditor() {
     }
 }
 
+float LayoutEditorSession::animationDisplayDurationMs(
+    const UIAnimationClip* clip) const {
+    float duration = 1000.0f;
+    if (clip != nullptr) {
+        for (const UIAnimationTrack& track : clip->tracks) {
+            if (!track.keyframes.empty()) {
+                duration = std::max(duration,
+                    track.keyframes.back().timeMs * 1.1f + 50.0f);
+            }
+        }
+    }
+    return duration;
+}
+
+void LayoutEditorSession::ensureAnimationTimelineView() {
+    _animationTimelineHost = findChromeById("animation_timeline_host");
+    _animationTransportStatus = dynamic_cast<TextLabel*>(
+        findChromeById("animation_transport_status"));
+    if (_animationTimelineHost == nullptr) {
+        _animationTimelineView = nullptr;
+        return;
+    }
+    for (Widget* child : _animationTimelineHost->getChildren()) {
+        if (child != nullptr &&
+            child->getId() == "__le_animation_timeline_view") {
+            _animationTimelineView =
+                dynamic_cast<LayoutAnimationTimelineView*>(child);
+            break;
+        }
+    }
+    if (_animationTimelineView == nullptr) {
+        _animationTimelineView = new LayoutAnimationTimelineView();
+        _animationTimelineHost->addChild(_animationTimelineView);
+    }
+    _animationTimelineView->setOnSeek([this](float timeMs) {
+        previewAnimationFrame(_animationClipIndex, timeMs);
+    });
+    _animationTimelineView->setOnSelectionChanged(
+        [this](int trackIndex, int keyIndex) {
+            _animationTrackIndex = trackIndex;
+            _animationKeyIndex = keyIndex;
+            syncAnimationEditor();
+        });
+    _animationTimelineView->setOnKeyDragged(
+        [this](int trackIndex, int keyIndex, float timeMs,
+               LayoutAnimationKeyDragPhase phase) -> int {
+            if (phase == LayoutAnimationKeyDragPhase::Begin) {
+                return beginAnimationKeyframeDrag(
+                    _animationClipIndex, trackIndex, keyIndex)
+                    ? keyIndex : -1;
+            }
+            if (phase == LayoutAnimationKeyDragPhase::Update) {
+                return updateAnimationKeyframeDrag(timeMs);
+            }
+            endAnimationKeyframeDrag();
+            return _animationKeyIndex;
+        });
+    syncAnimationTimelineGeometry();
+}
+
+void LayoutEditorSession::syncAnimationTimelineGeometry() {
+    if (_animationTimelineHost == nullptr ||
+        _animationTimelineView == nullptr) return;
+    const math::FVector2 hostSize = _animationTimelineHost->getSize();
+    if (_animationTimelineView->getPosition().x != 0.0f ||
+        _animationTimelineView->getPosition().y != 0.0f) {
+        _animationTimelineView->setPosition({0.0f, 0.0f});
+    }
+    if (std::fabs(_animationTimelineView->getSize().x - hostSize.x) > 0.01f ||
+        std::fabs(_animationTimelineView->getSize().y - hostSize.y) > 0.01f) {
+        _animationTimelineView->setSize(hostSize);
+    }
+}
+
 void LayoutEditorSession::syncAnimationEditor() {
     if (_animationClipList == nullptr && _animationStatus == nullptr) return;
 
@@ -5551,6 +5890,34 @@ void LayoutEditorSession::syncAnimationEditor() {
     }
     _suppressAnimation = false;
 
+    if (_animationTimelineView != nullptr) {
+        std::vector<LayoutAnimationTimelineTrackView> tracks;
+        if (clip != nullptr) {
+            tracks.reserve(clip->tracks.size());
+            for (const UIAnimationTrack& item : clip->tracks) {
+                LayoutAnimationTimelineTrackView row;
+                row.label = utf8ToWide(item.targetId) + L"  ·  " +
+                    utf8ToWide(UIAnimationLibrary::propertyName(item.property));
+                row.keyTimesMs.reserve(item.keyframes.size());
+                for (const UIAnimationKeyframe& key : item.keyframes) {
+                    row.keyTimesMs.push_back(key.timeMs);
+                }
+                tracks.push_back(std::move(row));
+            }
+        }
+        _animationTimelineView->setDurationMs(
+            animationDisplayDurationMs(clip));
+        _animationTimelineView->setTracks(std::move(tracks));
+        _animationTimelineView->setSelection(
+            _animationTrackIndex, _animationKeyIndex);
+        _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+        if (_animationKeyIndex >= 0 && track != nullptr) {
+            _animationTimelineView->setSelectedCurve(
+                track->keyframes[static_cast<size_t>(
+                    _animationKeyIndex)].curve);
+        }
+    }
+
     const bool hasClip = clip != nullptr;
     const bool hasTrack = track != nullptr;
     const bool canBind = hasClip && _selected != nullptr &&
@@ -5563,6 +5930,24 @@ void LayoutEditorSession::syncAnimationEditor() {
     setChromeEnabled("btn_animation_key_remove", _animationKeyIndex >= 0);
     setChromeEnabled("btn_animation_preview", hasTrack && keyCount > 0);
     setChromeEnabled("btn_animation_reset", isAnimationPreviewing());
+    setChromeEnabled("btn_animation_play", hasTrack && keyCount > 0 &&
+                     !isAnimationPreviewPlaying());
+    setChromeEnabled("btn_animation_pause", isAnimationPreviewPlaying());
+    setChromeEnabled("btn_animation_stop", isAnimationPreviewing());
+    setChromeEnabled("btn_animation_loop", hasClip);
+    setChromeVisible("animation_timeline_workspace", hasClip);
+    if (auto* loop = dynamic_cast<Button*>(findChromeById(
+            "btn_animation_loop"))) {
+        loop->setText(_animationPreviewLoop ? L"Loop: On" : L"Loop: Off");
+    }
+    if (_animationTransportStatus != nullptr) {
+        std::wstring transport = std::to_wstring(static_cast<int>(
+            std::lround(_animationPreviewTimeMs))) + L" ms";
+        if (isAnimationPreviewPlaying()) transport += L"  ·  Playing";
+        else if (isAnimationPreviewPaused()) transport += L"  ·  Paused";
+        else if (isAnimationPreviewing()) transport += L"  ·  Scrub";
+        _animationTransportStatus->setText(transport);
+    }
     if (_animationStatus != nullptr) {
         if (!hasClip) {
             _animationStatus->setText(
@@ -5574,7 +5959,9 @@ void LayoutEditorSession::syncAnimationEditor() {
             _animationStatus->setText(
                 std::to_wstring(clip->tracks.size()) + L" track(s)  ·  " +
                 std::to_wstring(totalKeys) + L" key(s)" +
-                (isAnimationPreviewing() ? L"  ·  scrub preview" : L""));
+                (isAnimationPreviewPlaying() ? L"  ·  playing" :
+                 isAnimationPreviewPaused() ? L"  ·  paused" :
+                 isAnimationPreviewing() ? L"  ·  scrub preview" : L""));
         }
     }
 }
