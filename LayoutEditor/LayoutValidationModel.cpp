@@ -9,6 +9,7 @@
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
 #include "AYUI/RadioButton.h"
 #include "AYUI/Style.h"
+#include "AYUI/UIAnimation.h"
 #include "AYUI/Widget.h"
 
 #include <algorithm>
@@ -61,12 +62,14 @@ bool overlaps(int aRow, int aCol, const GridPanel::CellInfo& a,
 
 void LayoutValidationModel::add(LayoutDiagnosticSeverity severity,
                                 LayoutDiagnosticCode code, Widget* widget,
-                                std::wstring message) {
+                                std::wstring message,
+                                std::string widgetId) {
     LayoutDiagnostic diagnostic;
     diagnostic.severity = severity;
     diagnostic.code = code;
     diagnostic.widget = widget;
-    if (widget != nullptr) diagnostic.widgetId = widget->getId();
+    diagnostic.widgetId = widget != nullptr ? widget->getId()
+                                            : std::move(widgetId);
     diagnostic.message = std::move(message);
     _diagnostics.push_back(std::move(diagnostic));
     if (severity == LayoutDiagnosticSeverity::Error) ++_errorCount;
@@ -81,11 +84,15 @@ void LayoutValidationModel::run(
     _warningCount = 0;
 
     std::unordered_map<std::string, size_t> idCounts;
+    std::unordered_map<std::string, Widget*> widgetsById;
     std::unordered_set<Widget*> authored;
     for (Widget* widget : authoredWidgets) {
         if (widget == nullptr) continue;
         authored.insert(widget);
-        if (!widget->getId().empty()) ++idCounts[widget->getId()];
+        if (!widget->getId().empty()) {
+            ++idCounts[widget->getId()];
+            widgetsById.try_emplace(widget->getId(), widget);
+        }
     }
 
     for (Widget* widget : authoredWidgets) {
@@ -239,6 +246,50 @@ void LayoutValidationModel::run(
                     reported = true;
                     break;
                 }
+            }
+        }
+    }
+
+    if (context.animations == nullptr) return;
+    for (const UIAnimationClip& clip : context.animations->clips()) {
+        for (const UIAnimationTrack& track : clip.tracks) {
+            const auto targetIt = widgetsById.find(track.targetId);
+            Widget* target = targetIt != widgetsById.end()
+                ? targetIt->second : nullptr;
+            const std::wstring clipName(clip.name.begin(), clip.name.end());
+            const std::wstring targetName(
+                track.targetId.begin(), track.targetId.end());
+            if (target == nullptr) {
+                add(LayoutDiagnosticSeverity::Error,
+                    LayoutDiagnosticCode::AnimationTargetMissing, nullptr,
+                    L"Animation " + clipName + L" targets missing Widget: " +
+                        targetName,
+                    track.targetId);
+                continue;
+            }
+            if (track.keyframes.empty()) {
+                add(LayoutDiagnosticSeverity::Warning,
+                    LayoutDiagnosticCode::AnimationTrackEmpty, target,
+                    L"Animation " + clipName + L" has an empty track for " +
+                        targetName);
+            } else if (track.keyframes.size() == 1u) {
+                add(LayoutDiagnosticSeverity::Warning,
+                    LayoutDiagnosticCode::AnimationTrackSingleKey, target,
+                    L"Animation " + clipName + L" needs another key for " +
+                        targetName);
+            }
+            const bool animatesPosition =
+                track.property == UIAnimationProperty::Position;
+            const bool animatesSize = track.property == UIAnimationProperty::Size;
+            if ((animatesPosition && (target->isLayoutPositionManaged() ||
+                                      target->hasAnchorLayout())) ||
+                (animatesSize && (target->isLayoutSizeManaged() ||
+                                  target->hasAnchorLayout()))) {
+                add(LayoutDiagnosticSeverity::Warning,
+                    LayoutDiagnosticCode::AnimationLayoutConflict, target,
+                    L"Animation " + clipName + L" conflicts with layout-owned " +
+                        (animatesPosition ? L"position: " : L"size: ") +
+                        targetName);
             }
         }
     }

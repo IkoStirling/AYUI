@@ -45,9 +45,10 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   Authoring Quality 层进一步提供稳定资源键/本机预览路径隔离、多选公共几何与 Style 编辑、
   Style 来源和 Normal/Hovered/Pressed/Disabled 状态预览，以及可点击定位的布局诊断列表；
   Reuse & Responsive 层提供文档内可复用 Widget block、Compact/Medium/Wide 断点预览、
-  断点可见性和锚点覆盖
+  断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
+  轨道、关键帧/曲线、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
-2026-09-09 Insider Windows Debug 当前基线为 `5476 / 5476` 条断言通过，Layout Editor headless
+2026-09-09 Insider Windows Debug 当前基线为 `5510 / 5510` 条断言通过，Layout Editor headless
 round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
@@ -172,6 +173,17 @@ intro.play();
 
 Widget 的简单属性动画仍可直接使用 `animateOpacity/animatePositionTo`；传入 `AnimationOptions` 可设置
 完成/取消回调、importance，并通过 `pauseAnimations/resumeAnimations/cancelAnimations` 控制播放。
+
+Designer 保存的文档级动画由 `UILayoutLoader` 一并读取。运行时按 clip 名创建绑定到本次加载树的
+时间线；时间线不能晚于对应 Widget 树销毁：
+
+```cpp
+UILayoutLoader loader;
+Widget* root = loader.loadFromFile("hud.ui.json");
+AnimationTimeline intro = loader.createAnimationTimeline("Intro");
+intro.play();
+// 每帧 intro.tick(deltaSeconds)
+```
 
 大数据网格使用 `TileView`。控件只分配“可见行 + overscan”的 `TileCell`，滚动时重绑逻辑索引；
 宿主通过 binder 把自己的数据模型投影到这些临时 cell，不应保存某个 index 对应的 `TileCell*`：
@@ -326,6 +338,14 @@ Reuse & Responsive 阶段加入文档内 `LayoutReuseLibrary`。选中的完整 
 捕获断点专用 Anchor。离开区间后恢复 authored visibility 和基础 Anchor，不会把预览结果写回源属性；
 VBox/HBox/Grid 等结构化父级继续拥有几何布局权，但响应式隐藏会退出布局占位并触发重排。规则随
 Widget JSON 往返，非法区间、重叠区间和没有基础 Anchor 的覆盖会进入 Validation 诊断。
+
+Animation Authoring 在同一版本化文档信封中保存 `animations`。每个 clip 由稳定 Widget ID、
+`opacity/position/size` 属性轨道和按时间排序的关键帧组成，支持 Linear/Ease/Spring 曲线及
+repeat/yoyo/Decorative/Essential 播放元数据。Designer 的 Scrub 先保存 authored snapshot，再按时间点
+采样，Reset 或下一次编辑会恢复源值；预览结果不进入 dirty 文档。缺失目标、空/单关键帧轨道以及与
+Anchor、VBox/HBox/Grid 几何权属冲突的轨道都会进入 Validation；重命名 Widget ID 会原子更新轨道引用。
+当前面板是结构化轨道/关键帧编辑，
+连续播放 transport、拖拽式时间尺和曲线图仍属于后续交互增强。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 

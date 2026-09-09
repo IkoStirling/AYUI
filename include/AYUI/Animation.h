@@ -139,6 +139,10 @@ public:
     void resume();
     void cancel();
     void tick(float dt);
+    // Samples the authored first iteration without changing playback state.
+    // Editors use this for deterministic scrubbing; runtime playback remains
+    // controlled by play/pause/resume/tick.
+    void seek(float timeMs);
 
     AnimationPlaybackState getState() const { return _state; }
     bool isRunning() const {

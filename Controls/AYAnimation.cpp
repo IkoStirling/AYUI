@@ -310,6 +310,14 @@ void AnimationTimeline::tick(float dt) {
     (void)advance(dt);
 }
 
+void AnimationTimeline::seek(float timeMs) {
+    const float finiteTime = std::isfinite(timeMs) ? timeMs : 0.0f;
+    _currentTimeMs = std::clamp(finiteTime, 0.0f, _durationMs);
+    _currentIteration = 0;
+    _playingReverse = false;
+    sample(_currentTimeMs);
+}
+
 AnimationSequence& AnimationSequence::append(AnimationTimeline timeline) {
     _steps.push_back(std::move(timeline));
     return *this;

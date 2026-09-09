@@ -7,6 +7,7 @@
 namespace ayt::ui {
 
 class Widget;
+class UIAnimationLibrary;
 
 struct LayoutReusableBlock {
     std::string name;
@@ -32,8 +33,15 @@ public:
     bool empty() const { return _blocks.empty(); }
 
     std::string encodeDocument(Widget* root, bool pretty = true) const;
+    std::string encodeDocument(Widget* root,
+                               const UIAnimationLibrary& animations,
+                               bool pretty = true) const;
     bool decodeDocument(const std::string& documentJson,
                         std::string& outRootJson,
+                        std::string* error = nullptr);
+    bool decodeDocument(const std::string& documentJson,
+                        std::string& outRootJson,
+                        UIAnimationLibrary& outAnimations,
                         std::string* error = nullptr);
 
     static bool validateName(const std::string& name,

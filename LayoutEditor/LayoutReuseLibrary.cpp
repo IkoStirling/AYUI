@@ -1,5 +1,6 @@
 #include "AYUI/LayoutEditor/LayoutReuseLibrary.h"
 
+#include "AYUI/UIAnimation.h"
 #include "AYUI/WidgetSerializer.h"
 
 #include <algorithm>
@@ -99,9 +100,16 @@ Widget* LayoutReuseLibrary::instantiate(const std::string& name) const {
 
 std::string LayoutReuseLibrary::encodeDocument(Widget* root,
                                                bool pretty) const {
+    UIAnimationLibrary animations;
+    return encodeDocument(root, animations, pretty);
+}
+
+std::string LayoutReuseLibrary::encodeDocument(
+    Widget* root, const UIAnimationLibrary& animations, bool pretty) const {
     if (root == nullptr) return {};
     const json rootJson = json::parse(WidgetSerializer::serialize(root, false));
-    if (_blocks.empty()) return pretty ? rootJson.dump(4) : rootJson.dump();
+    if (_blocks.empty() && animations.empty())
+        return pretty ? rootJson.dump(4) : rootJson.dump();
 
     json reusable = json::object();
     for (const LayoutReusableBlock& block : _blocks) {
@@ -113,12 +121,21 @@ std::string LayoutReuseLibrary::encodeDocument(Widget* root,
         {"reusable", std::move(reusable)},
         {"root", rootJson}
     };
+    if (!animations.empty())
+        document["animations"] = json::parse(animations.serialize(false));
     return pretty ? document.dump(4) : document.dump();
 }
 
 bool LayoutReuseLibrary::decodeDocument(const std::string& documentJson,
                                         std::string& outRootJson,
                                         std::string* error) {
+    UIAnimationLibrary animations;
+    return decodeDocument(documentJson, outRootJson, animations, error);
+}
+
+bool LayoutReuseLibrary::decodeDocument(
+    const std::string& documentJson, std::string& outRootJson,
+    UIAnimationLibrary& outAnimations, std::string* error) {
     try {
         const json document = json::parse(documentJson);
         if (!document.is_object())
@@ -126,6 +143,7 @@ bool LayoutReuseLibrary::decodeDocument(const std::string& documentJson,
 
         if (document.contains("type") || !document.contains("root")) {
             _blocks.clear();
+            outAnimations.clear();
             outRootJson = document.dump();
             return true;
         }
@@ -146,7 +164,14 @@ bool LayoutReuseLibrary::decodeDocument(const std::string& documentJson,
                 }
             }
         }
+        UIAnimationLibrary decodedAnimations;
+        if (document.contains("animations") &&
+            !decodedAnimations.deserialize(
+                document["animations"].dump(), error)) {
+            return false;
+        }
         _blocks = std::move(decoded._blocks);
+        outAnimations = std::move(decodedAnimations);
         outRootJson = document["root"].dump();
         return true;
     } catch (const std::exception& ex) {

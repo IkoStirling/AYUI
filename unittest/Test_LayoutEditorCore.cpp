@@ -14,12 +14,14 @@
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/LayoutEditor/LayoutValidationModel.h"
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
+#include "AYUI/LayoutLoader.h"
 #include "AYUI/ListView.h"
 #include "AYUI/Image.h"
 #include "AYUI/Panel.h"
 #include "AYUI/RichText.h"
 #include "AYUI/TabControl.h"
 #include "AYUI/TreeView.h"
+#include "AYUI/UIAnimation.h"
 #include "AYUI/Widget.h"
 
 #include <string>
@@ -423,6 +425,118 @@ TEST_CASE(reuse_library_persists_definitions_and_instantiates_expanded_copies) {
     destroyWidgetTree(copy);
     destroyWidgetTree(runtimeRoot);
     destroyWidgetTree(root);
+}
+
+TEST_CASE(document_animation_library_round_trips_and_builds_runtime_timeline) {
+    auto* root = new Panel();
+    root->setId("document_root");
+    root->setSize({640.0f, 480.0f});
+    auto* button = new Button();
+    button->setId("animated_button");
+    button->setPosition({10.0f, 20.0f});
+    button->setSize({120.0f, 32.0f});
+    root->addChild(button);
+
+    UIAnimationLibrary animations;
+    std::string error;
+    const int clip = animations.addClip("Intro", &error);
+    CHECK(clip == 0);
+    CHECK(animations.addClip("Intro", &error) == -1);
+    const int track = animations.addTrack(
+        clip, "animated_button", UIAnimationProperty::Position, &error);
+    CHECK(track == 0);
+    UIAnimationKeyframe start;
+    start.timeMs = 0.0f;
+    start.value = FVector4(10.0f, 20.0f, 0.0f, 0.0f);
+    CHECK(animations.upsertKeyframe(clip, track, start) == 0);
+    UIAnimationKeyframe end;
+    end.timeMs = 100.0f;
+    end.value = FVector4(110.0f, 60.0f, 0.0f, 0.0f);
+    end.curve = AnimationCurve::Linear;
+    CHECK(animations.upsertKeyframe(clip, track, end) == 1);
+    CHECK(animations.setPlayback(clip, 1, true,
+                                 AnimationImportance::Essential));
+    CHECK(animations.retargetWidget(
+        "animated_button", "renamed_button", &error));
+    button->setId("renamed_button");
+    CHECK(animations.clips()[0].tracks[0].targetId == "renamed_button");
+
+    LayoutReuseLibrary reusable;
+    const std::string document = reusable.encodeDocument(
+        root, animations, false);
+    CHECK(document.find("\"animations\"") != std::string::npos);
+
+    LayoutReuseLibrary decodedReuse;
+    UIAnimationLibrary decodedAnimations;
+    std::string rootJson;
+    CHECK(decodedReuse.decodeDocument(
+        document, rootJson, decodedAnimations, &error));
+    CHECK(decodedAnimations.size() == 1u);
+    CHECK(decodedAnimations.clips()[0].tracks[0].keyframes.size() == 2u);
+    CHECK(decodedAnimations.clips()[0].repeatCount == 1);
+    CHECK(decodedAnimations.clips()[0].yoyo);
+    CHECK(decodedAnimations.clips()[0].importance ==
+          AnimationImportance::Essential);
+
+    UILayoutLoader loader;
+    Widget* runtimeRoot = loader.loadFromString(document);
+    CHECK_NOT_NULL(runtimeRoot);
+    Widget* runtimeButton = loader.findWidgetById("renamed_button");
+    CHECK_NOT_NULL(runtimeButton);
+    std::size_t unresolved = 99u;
+    AnimationTimeline timeline = loader.createAnimationTimeline(
+        "Intro", &unresolved);
+    CHECK(unresolved == 0u);
+    timeline.seek(50.0f);
+    if (runtimeButton != nullptr) {
+        CHECK_FLOAT_EQ(runtimeButton->getPosition().x, 60.0f, 1e-5f);
+        CHECK_FLOAT_EQ(runtimeButton->getPosition().y, 40.0f, 1e-5f);
+    }
+
+    destroyWidgetTree(runtimeRoot);
+    destroyWidgetTree(root);
+}
+
+TEST_CASE(validation_reports_animation_target_key_and_layout_conflicts) {
+    Panel root;
+    root.setId("document_root");
+    root.setSize({640.0f, 480.0f});
+    Button anchored;
+    anchored.setId("anchored");
+    anchored.setSize({120.0f, 32.0f});
+    root.addChildExternal(&anchored);
+    anchored.setAnchorLayoutPreservingRect({0.5f, 0.5f}, {0.5f, 0.5f});
+
+    UIAnimationLibrary animations;
+    const int clip = animations.addClip("Motion");
+    const int single = animations.addTrack(
+        clip, "anchored", UIAnimationProperty::Position);
+    UIAnimationKeyframe key;
+    CHECK(animations.upsertKeyframe(clip, single, key) == 0);
+    CHECK(animations.addTrack(
+        clip, "missing", UIAnimationProperty::Opacity) == 1);
+
+    LayoutValidationContext context;
+    context.animations = &animations;
+    LayoutValidationModel validation;
+    validation.run({&root, &anchored}, context);
+
+    size_t missing = 0;
+    size_t singleKey = 0;
+    size_t layoutConflict = 0;
+    for (const LayoutDiagnostic& diagnostic : validation.diagnostics()) {
+        if (diagnostic.code == LayoutDiagnosticCode::AnimationTargetMissing)
+            ++missing;
+        else if (diagnostic.code == LayoutDiagnosticCode::AnimationTrackSingleKey)
+            ++singleKey;
+        else if (diagnostic.code == LayoutDiagnosticCode::AnimationLayoutConflict)
+            ++layoutConflict;
+    }
+    CHECK(missing == 1u);
+    CHECK(singleKey == 1u);
+    CHECK(layoutConflict == 1u);
+    CHECK(validation.hasErrors());
+    root.removeChild(&anchored);
 }
 
 TEST_SUITE_END

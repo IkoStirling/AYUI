@@ -125,7 +125,11 @@ int main() {
         "validation_status", "btn_validate", "reuse_name", "reuse_list",
         "btn_reuse_define", "btn_reuse_insert", "responsive_breakpoint",
         "responsive_visibility", "btn_responsive_preview",
-        "btn_responsive_capture"
+        "btn_responsive_capture", "animation_clip_name",
+        "animation_clip_list", "animation_track_property",
+        "animation_track_list", "animation_time", "animation_curve",
+        "animation_key_list", "btn_animation_key_capture",
+        "btn_animation_preview", "btn_animation_reset"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {
@@ -722,6 +726,38 @@ int main() {
     }
 
     session.selectById("btn_hello");
+    ayt::ui::Widget* animationTarget = session.selected();
+    if (animationTarget == nullptr ||
+        !session.createAnimationClip("Intro") ||
+        !session.addAnimationTrack(
+            0, ayt::ui::UIAnimationProperty::Opacity) ||
+        !session.captureAnimationKeyframe(
+            0, 0, 0.0f, ayt::ui::AnimationCurve::Linear)) {
+        std::fprintf(stderr, "animation clip/track authoring failed\n");
+        return 93;
+    }
+    animationTarget->setOpacity(0.0f);
+    if (!session.captureAnimationKeyframe(
+            0, 0, 100.0f, ayt::ui::AnimationCurve::Linear) ||
+        !session.setAnimationPlayback(
+            0, 1, true, ayt::ui::AnimationImportance::Essential)) {
+        std::fprintf(stderr, "animation key/playback authoring failed\n");
+        return 94;
+    }
+    animationTarget->setOpacity(1.0f);
+    if (!session.previewAnimationFrame(0, 50.0f) ||
+        std::fabs(session.selected()->getOpacity() - 0.5f) > 0.001f) {
+        std::fprintf(stderr, "animation scrub preview failed\n");
+        return 95;
+    }
+    session.stopAnimationPreview();
+    session.selectById("btn_hello");
+    if (session.selected() == nullptr ||
+        std::fabs(session.selected()->getOpacity() - 1.0f) > 0.001f ||
+        session.animationLibrary().size() != 1u) {
+        std::fprintf(stderr, "animation scrub reset failed\n");
+        return 96;
+    }
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");
     const ayt::math::FVector2 authoredRootSize =
@@ -780,9 +816,11 @@ int main() {
             std::istreambuf_iterator<char>());
         if (encoded.find("\"reusable\"") == std::string::npos ||
             encoded.find("Primary Action") == std::string::npos ||
-            encoded.find("\"responsive\"") == std::string::npos) {
+            encoded.find("\"responsive\"") == std::string::npos ||
+            encoded.find("\"animations\"") == std::string::npos ||
+            encoded.find("\"Intro\"") == std::string::npos) {
             std::fprintf(stderr,
-                "reusable/responsive document envelope was not persisted\n");
+                "reusable/responsive/animation envelope was not persisted\n");
             return 90;
         }
     }
@@ -820,6 +858,17 @@ int main() {
     auto* loadedDialog = dynamic_cast<ayt::ui::ModalDialog*>(
         loader.findWidgetById(dialogId));
     ayt::ui::Widget* loadedAnchored = loader.findWidgetById(anchoredId);
+    ayt::ui::Widget* loadedAnimated = loader.findWidgetById("btn_hello");
+    std::size_t unresolvedAnimationTracks = 99u;
+    ayt::ui::AnimationTimeline loadedTimeline =
+        loader.createAnimationTimeline("Intro", &unresolvedAnimationTracks);
+    loadedTimeline.seek(50.0f);
+    if (loadedAnimated == nullptr || unresolvedAnimationTracks != 0u ||
+        std::fabs(loadedAnimated->getOpacity() - 0.5f) > 0.001f) {
+        std::fprintf(stderr, "runtime animation timeline reload failed\n");
+        ayt::ui::destroyWidgetTree(reloaded);
+        return 97;
+    }
 
     if (loadedImage == nullptr ||
         loadedImage->getTextureName() != "Assets/ui/test.png" ||

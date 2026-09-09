@@ -594,6 +594,16 @@ Anchor 始终保留，离开断点后无损恢复。VBox/HBox/Grid 等结构布�
 三个产品断点，preview width 属于 transient host state，不进入 snapshot 或布局 JSON；规则编辑、block
 定义/插入/删除均进入命令栈。Validation 对无效区间、区间重叠和无基础 Anchor 的覆盖给出诊断。
 
+第六阶段 Animation Authoring 把动画作为文档级声明数据加入同一信封，而不是把回调或 Widget 指针
+序列化。`UIAnimationLibrary` 用稳定 ID 记录 clip、opacity/position/size 轨道、排序关键帧、曲线和
+repeat/yoyo/importance；`UILayoutLoader` 构建完 Widget ID 索引后再生成引用本次树的
+`AnimationTimeline`。Designer 的结构化面板负责新建 clip、绑定当前单选 Widget、捕获当前属性值和
+确定性 scrub。`AnimationTimeline::seek()` 只采样第一轮且不改变 Idle/Running/Paused 状态；Session
+在首次 scrub 前保存完整 authored snapshot，后续 scrub 先还原基线，Reset 后也恢复基线，因此预览
+不会累积误差或污染保存结果。Widget ID 重命名通过 library 预检后原子重定向全部相关轨道，避免编辑
+身份字段后静默断链。Validation 对缺失目标、空/单关键帧以及 Anchor/容器拥有的几何轨道
+给出诊断。连续播放 transport、拖拽时间尺、曲线图和事件触发图不混入这一数据闭环。
+
 编辑可靠性以文档事务为边界：ID 在提交前校验格式、保留前缀和全树唯一性，切换选中项会结束正在
 合并的属性事务；Duplicate 直接复制当前 selection snapshot，不改写系统剪贴板，Paste 每次优先读取
 系统剪贴板，避免复用过期的内部 payload。Image 的 `textureName` 在打开、恢复和粘贴后通过宿主
@@ -635,6 +645,8 @@ opacity 回归测试。动画产品化层随后完成：
   keyframe 的 curve。时间线支持有限 repeat、`RepeatForever` 和逐轮反向的 yoyo；当前轮次从累计
   播放时钟直接求值，因此单帧跨越多个周期时不依赖逐周期循环，也不会丢失时间。reduced-motion
   对有限循环落到其真实最终方向，永久装饰循环落到作者结束姿态后完成。
+- `AnimationTimeline::seek()` 提供不改变播放状态的确定性第一轮采样，用于 authoring scrub 和测试；
+  文档级 `UIAnimationLibrary` 可从稳定 Widget ID 创建同一套 Timeline，不复制运行时插值实现。
 - `SpringParameters` 为 Timeline 的目标 keyframe 提供 mass/stiffness/damping/initialVelocity 二阶
   响应和可选 overshoot clamp。参数只影响该段 Timeline；原有轻量 `AnimationCurve::Spring`、Widget
   tween 与 renderer handle 的点一致兼容路径保持不变。
@@ -726,6 +738,11 @@ root-only JSON 的版本化文档信封，以及 Compact/Medium/Wide 可见性�
 运行时直接读取信封 root，结构化容器会在断点隐藏后重排；非法/重叠规则进入 Validation。新增运行时、
 模型、持久化和 headless round-trip 回归后 Insider Windows Debug 基线为 `5476 / 5476`。
 
+同日完成 Animation Authoring 第六阶段：文档级 clip/track/keyframe 模型、版本化信封持久化、
+`UILayoutLoader` 运行时 timeline 实例化、Designer 结构化创作与 snapshot scrub、动画专用 Validation
+诊断进入共享 core。新增 seek、模型、持久化、运行时绑定和 headless round-trip 回归后 Insider
+Windows Debug 基线为 `5510 / 5510`。
+
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
@@ -815,10 +832,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 7. 动画产品化已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/串联 API、
-   全局 animation scale、reduced-motion、repeat/yoyo、物理弹簧参数与跨 Sequence 步骤的时间守恒。
-   后续可选扩展只剩 OS reduced-motion 偏好自动桥接和可视化时间线编辑器；时间线编辑器应复用
-   第三阶段的 structured authoring、preview mode 与 resource catalog，在属性/资源/预览基础闭环后
-   再实现，不要求修改 Widget tween 主路径。
+   全局 animation scale、reduced-motion、repeat/yoyo、物理弹簧参数与跨 Sequence 步骤的时间守恒；
+   文档级 clip/track/keyframe、Designer 结构化创作和确定性 scrub 也已闭环。后续是 OS
+   reduced-motion 偏好自动桥接，以及在现有模型上增加连续播放 transport、拖拽时间尺、曲线图和
+   事件触发图，不要求修改 Widget tween 或另建一套动画求值路径。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

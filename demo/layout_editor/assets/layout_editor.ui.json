@@ -232,7 +232,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 3300 },
+                "size": { "w": 304, "h": 4050 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -380,6 +380,59 @@
                     ]
                   },
                   { "type": "TextLabel", "id": "reuse_status", "style": "__le_muted", "text": "Expanded copies remain independently editable", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
+
+                  { "type": "TextLabel", "id": "section_animation", "style": "__le_accent", "text": "ANIMATION TIMELINE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "TextInput", "id": "animation_clip_name", "style": "__le_input", "text": "Intro", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ListView", "id": "animation_clip_list", "style": "__le_input", "size": { "w": 272, "h": 70 }, "slot": { "height": 70 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_animation_clip_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_animation_clip_add", "style": "__le_primary", "text": "New clip", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_animation_clip_remove", "style": "__le_command", "text": "Remove", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "lbl_animation_playback", "style": "__le_label", "text": "Repeat (-1 forever)  ·  Yoyo  ·  Motion", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_animation_playback", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextInput", "id": "animation_repeat", "style": "__le_input", "text": "0", "size": { "w": 48, "h": 30 }, "slot": { "width": 48 } },
+                      { "type": "ComboBox", "id": "animation_yoyo", "style": "__le_input", "size": { "w": 88, "h": 30 }, "slot": { "width": 88 } },
+                      { "type": "ComboBox", "id": "animation_importance", "style": "__le_input", "size": { "w": 128, "h": 30 }, "slot": { "width": 128 } }
+                    ]
+                  },
+                  { "type": "Button", "id": "btn_animation_playback_apply", "style": "__le_command", "text": "Apply playback", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ComboBox", "id": "animation_track_property", "style": "__le_input", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ListView", "id": "animation_track_list", "style": "__le_input", "size": { "w": 272, "h": 70 }, "slot": { "height": 70 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_animation_track_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_animation_track_add", "style": "__le_primary", "text": "Bind selection", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_animation_track_remove", "style": "__le_command", "text": "Remove track", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_animation_key_settings", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextInput", "id": "animation_time", "style": "__le_input", "text": "0", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "ComboBox", "id": "animation_curve", "style": "__le_input", "size": { "w": 174, "h": 30 }, "slot": { "width": 174 } }
+                    ]
+                  },
+                  { "type": "ListView", "id": "animation_key_list", "style": "__le_input", "size": { "w": 272, "h": 90 }, "slot": { "height": 90 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_animation_key_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_animation_key_capture", "style": "__le_primary", "text": "Capture key", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_animation_key_remove", "style": "__le_command", "text": "Remove key", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_animation_preview", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_animation_preview", "style": "__le_command", "text": "Scrub time", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_animation_reset", "style": "__le_command", "text": "Reset preview", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "animation_status", "style": "__le_muted", "text": "Create a clip, bind a Widget, then capture keys", "size": { "w": 272, "h": 42 }, "slot": { "height": 42 } },
 
                   { "type": "TextLabel", "id": "section_identity", "style": "__le_accent", "text": "IDENTITY", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {

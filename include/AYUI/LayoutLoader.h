@@ -2,6 +2,7 @@
 
 #include "AYUI/Widget.h"
 #include "AYUI/DockJsonHandle.h"
+#include "AYUI/UIAnimation.h"
 #include <string>
 #include <memory>
 #include <unordered_map>
@@ -69,6 +70,14 @@ public:
     void clearWidgetRegistry();
 
     Widget* findWidgetById(const std::string& id) const;
+    const UIAnimationLibrary& getAnimationLibrary() const {
+        return _animationLibrary;
+    }
+    // Returned callbacks reference widgets owned by the most recently loaded
+    // root. Destroy the timeline before destroying or replacing that tree.
+    AnimationTimeline createAnimationTimeline(
+        const std::string& clipName,
+        std::size_t* unresolvedTrackCount = nullptr) const;
 
 private:
     Widget* buildWidgetTree(JsonHandle j);
@@ -84,6 +93,7 @@ private:
 
     std::unordered_map<std::string, std::function<void()>> _eventBindings;
     std::unordered_map<std::string, Widget*> _widgetsById;
+    UIAnimationLibrary _animationLibrary;
 
     std::string _lastJson;
     std::string _lastFilePath;

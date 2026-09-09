@@ -8,6 +8,7 @@ namespace ayt::ui {
 
 class LayoutResourceCatalog;
 class StyleSheet;
+class UIAnimationLibrary;
 class Widget;
 
 enum class LayoutDiagnosticSeverity { Info, Warning, Error };
@@ -28,6 +29,10 @@ enum class LayoutDiagnosticCode {
     ResponsiveAnchorWithoutBase,
     OutsideParent,
     GridSlotOverlap,
+    AnimationTargetMissing,
+    AnimationTrackEmpty,
+    AnimationTrackSingleKey,
+    AnimationLayoutConflict,
 };
 
 struct LayoutDiagnostic {
@@ -41,6 +46,7 @@ struct LayoutDiagnostic {
 struct LayoutValidationContext {
     const LayoutResourceCatalog* textureCatalog = nullptr;
     const StyleSheet* styleSheet = nullptr;
+    const UIAnimationLibrary* animations = nullptr;
     bool reportAnonymousWidgets = true;
     bool reportOutsideParent = true;
 };
@@ -60,7 +66,8 @@ public:
 
 private:
     void add(LayoutDiagnosticSeverity severity, LayoutDiagnosticCode code,
-             Widget* widget, std::wstring message);
+             Widget* widget, std::wstring message,
+             std::string widgetId = {});
 
     std::vector<LayoutDiagnostic> _diagnostics;
     size_t _errorCount = 0;

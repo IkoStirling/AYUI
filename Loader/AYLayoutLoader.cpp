@@ -38,6 +38,7 @@ using nlohmann::json;
 #include "AYUI/DockArea.h"
 #include "AYUI/DockCard.h"
 #include "AYUI/DockOverlay.h"
+#include "AYUI/UIAnimation.h"
 
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/LayoutLoader.h"
@@ -54,6 +55,7 @@ using nlohmann::json;
 #include <cstring>
 #include <filesystem>
 #include <locale>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -351,6 +353,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     // wipe is the highest-value half of the fix.
     std::unordered_map<std::string, Widget*> oldIndex;
     oldIndex.swap(_widgetsById);
+    UIAnimationLibrary oldAnimations = std::move(_animationLibrary);
 
     try {
         json j = json::parse(jsonStr);
@@ -359,11 +362,24 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         // block library. Instances are expanded when inserted, so runtime
         // loading only needs the root and remains independent of the editor.
         json* rootJson = &j;
+        UIAnimationLibrary decodedAnimations;
         if (j.is_object() && !j.contains("type") && j.contains("root") &&
             j["root"].is_object()) {
             rootJson = &j["root"];
+            if (j.contains("animations")) {
+                std::string animationError;
+                if (!decodedAnimations.deserialize(
+                        j["animations"].dump(), &animationError)) {
+                    throw std::runtime_error(animationError);
+                }
+            }
         }
         Widget* root = buildWidgetTree(JsonHandle(rootJson));
+        if (root == nullptr) {
+            _widgetsById = std::move(oldIndex);
+            _animationLibrary = std::move(oldAnimations);
+            return nullptr;
+        }
         LOADER_HEAP_CHECK("after_build_widget_tree");
         // Success: the new tree's buildWidgetTree path already populated
         // _widgetsById during recursion (the early-swap above restored
@@ -372,6 +388,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         // (Note: buildWidgetTree used _widgetsById after the swap, so
         // the new index IS what _widgetsById holds now.)
         (void)oldIndex;
+        _animationLibrary = std::move(decodedAnimations);
         return root;
     }
     catch (const std::exception& e) {
@@ -388,6 +405,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         // previous tree can still find them. Wipe the (incomplete)
         // index that buildWidgetTree may have partially populated.
         _widgetsById = std::move(oldIndex);
+        _animationLibrary = std::move(oldAnimations);
         return nullptr;
     }
 }
@@ -542,6 +560,15 @@ void UILayoutLoader::clearWidgetRegistry() {
 Widget* UILayoutLoader::findWidgetById(const std::string& id) const {
     auto it = _widgetsById.find(id);
     return (it != _widgetsById.end()) ? it->second : nullptr;
+}
+
+AnimationTimeline UILayoutLoader::createAnimationTimeline(
+    const std::string& clipName,
+    std::size_t* unresolvedTrackCount) const {
+    return _animationLibrary.createTimeline(
+        _animationLibrary.findClipIndex(clipName),
+        [this](const std::string& id) { return findWidgetById(id); },
+        unresolvedTrackCount);
 }
 
 Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {

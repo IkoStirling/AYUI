@@ -405,6 +405,28 @@ TEST_CASE(reduced_motion_timeline_completes_synchronously) {
     AnimationSettings::get().reset();
 }
 
+TEST_CASE(timeline_seek_scrubs_without_changing_playback_state) {
+    float value = -1.0f;
+    AnimationTimeline timeline;
+    timeline.addFloatTrack(
+        {{0.0f, 0.0f}, {100.0f, 10.0f, AnimationCurve::Linear}},
+        [&](float sampled) { value = sampled; });
+
+    CHECK(timeline.getState() == AnimationPlaybackState::Idle);
+    timeline.seek(25.0f);
+    CHECK_FLOAT_EQ(value, 2.5f, 1e-5f);
+    CHECK(timeline.getState() == AnimationPlaybackState::Idle);
+    CHECK_FLOAT_EQ(timeline.getCurrentTimeMs(), 25.0f, 1e-5f);
+
+    timeline.play();
+    timeline.pause();
+    timeline.seek(250.0f);
+    CHECK_FLOAT_EQ(value, 10.0f, 1e-5f);
+    CHECK(timeline.getState() == AnimationPlaybackState::Paused);
+    CHECK(timeline.getCurrentIteration() == 0u);
+    CHECK_FALSE(timeline.isPlayingReverse());
+}
+
 TEST_CASE(stylesheet_parses_state_colors_and_declarative_transition) {
     StyleSheet sheet;
     const char* json = R"({

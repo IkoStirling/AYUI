@@ -11,6 +11,7 @@
 #include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/LayoutEditor/LayoutValidationModel.h"
+#include "AYUI/UIAnimation.h"
 #include "AYUI/UIManager.h"
 
 #include <functional>
@@ -118,6 +119,24 @@ public:
                                  ResponsiveVisibility visibility);
     void captureResponsiveAnchors(int breakpointIndex);
     void clearResponsiveRule(int breakpointIndex);
+    bool createAnimationClip(const std::string& name);
+    bool removeAnimationClip(int clipIndex);
+    bool addAnimationTrack(int clipIndex, UIAnimationProperty property);
+    bool removeAnimationTrack(int clipIndex, int trackIndex);
+    bool captureAnimationKeyframe(int clipIndex, int trackIndex,
+                                  float timeMs, AnimationCurve curve);
+    bool removeAnimationKeyframe(int clipIndex, int trackIndex,
+                                 int keyframeIndex);
+    bool setAnimationPlayback(int clipIndex, int repeatCount, bool yoyo,
+                              AnimationImportance importance);
+    bool previewAnimationFrame(int clipIndex, float timeMs);
+    void stopAnimationPreview();
+    bool isAnimationPreviewing() const {
+        return _animationPreviewBaseline.has_value();
+    }
+    const UIAnimationLibrary& animationLibrary() const {
+        return _animationLibrary;
+    }
 
     // button: 0=LMB, 1=RMB, 2=MMB
     bool onPointerDown(const math::FVector2& worldPos, int button = 0);
@@ -240,6 +259,7 @@ private:
     void syncPreviewChrome();
     void syncReuseEditor();
     void syncResponsiveEditor();
+    void syncAnimationEditor();
     void previewResponsiveBreakpoint(int breakpointIndex);
     math::FVector2 authoredRootSize() const;
     bool previewOverridesDocumentSize() const;
@@ -385,8 +405,10 @@ private:
     LayoutPreviewModel _previewModel;
     LayoutResponsiveModel _responsiveModel;
     LayoutReuseLibrary _reuseLibrary;
+    UIAnimationLibrary _animationLibrary;
     Mode _mode = Mode::Edit;
     std::optional<Snapshot> _interactionSnapshot;
+    std::optional<Snapshot> _animationPreviewBaseline;
     math::FVector2 _authoredRootSize{640.0f, 480.0f};
 
     struct InteractionState {
@@ -476,6 +498,21 @@ private:
     TextLabel* _responsiveStatus = nullptr;
     bool _suppressResponsive = false;
     int _responsiveAuthoringIndex = 0;
+    ListView* _animationClipList = nullptr;
+    TextInput* _animationClipName = nullptr;
+    ListView* _animationTrackList = nullptr;
+    ComboBox* _animationProperty = nullptr;
+    ListView* _animationKeyList = nullptr;
+    TextInput* _animationTime = nullptr;
+    ComboBox* _animationCurve = nullptr;
+    TextInput* _animationRepeat = nullptr;
+    ComboBox* _animationYoyo = nullptr;
+    ComboBox* _animationImportance = nullptr;
+    TextLabel* _animationStatus = nullptr;
+    bool _suppressAnimation = false;
+    int _animationClipIndex = -1;
+    int _animationTrackIndex = -1;
+    int _animationKeyIndex = -1;
     std::vector<Widget*> _hierarchyIndex;
     std::vector<std::string> _styleIds;
 
