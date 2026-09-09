@@ -607,9 +607,11 @@ repeat/yoyo/importance；`UILayoutLoader` 构建完 Widget ID 索引后再生成
 
 第七阶段把结构化动画数据接入图形时间轴。Play/Pause/Stop/Loop 与 scrub 共用同一
 `AnimationTimeline` 求值路径，并由宿主真实帧时钟推进；时间轴提供标尺 seek、关键帧拖动、滚轮缩放、
-中键平移和选中曲线预览。关键帧移动保持时间排序并合并同时间碰撞，完整拖动只生成一个 Animation
-撤销事务；移动过程中仅同步时间轴和属性预览，释放后再刷新 Clip/Track/Key 编辑列表，避免交互热路径
-反复重建列表项。时间轴是 authoring-only Widget，不进入布局 JSON 或运行时 WidgetFactory。
+中键平移、纵向轨道滚动和选中曲线预览。关键帧移动保持时间排序并合并同时间碰撞，完整拖动只生成一个
+Animation 撤销事务；窗口失焦等 capture cancel 会回滚完整事务而不提交伪造坐标。移动过程中只增量同步
+被修改轨道和属性预览，释放后再刷新 Clip/Track/Key 编辑列表，避免交互热路径反复复制全部轨道或重建
+列表项。预览时钟不截断宿主已流逝时间，播放期间切换 Loop 会立即更新活动 Timeline。时间轴是
+authoring-only Widget，不进入布局 JSON 或运行时 WidgetFactory。
 
 编辑可靠性以文档事务为边界：ID 在提交前校验格式、保留前缀和全树唯一性，切换选中项会结束正在
 合并的属性事务；Duplicate 直接复制当前 selection snapshot，不改写系统剪贴板，Paste 每次优先读取

@@ -278,10 +278,14 @@ private:
     void syncResponsiveEditor();
     void syncAnimationEditor();
     void syncAnimationTimelineView();
+    void syncAnimationTimelineTrack(int trackIndex);
+    void syncAnimationTransportStatus();
     void ensureAnimationTimelineView();
     void syncAnimationTimelineGeometry();
     void relayoutAfterAnimationSample();
+    void previewAnimationKeyframeDrag(float timeMs);
     bool captureAnimationPreviewBaseline(int clipIndex);
+    void cancelAnimationKeyframeDrag();
     float animationDisplayDurationMs(const UIAnimationClip* clip) const;
     void previewResponsiveBreakpoint(int breakpointIndex);
     math::FVector2 authoredRootSize() const;
@@ -444,9 +448,11 @@ private:
     bool _animationPreviewLoop = false;
     bool _animationKeyDragActive = false;
     bool _animationKeyDragChanged = false;
+    std::optional<Snapshot> _animationKeyDragSnapshot;
     int _animationKeyDragClip = -1;
     int _animationKeyDragTrack = -1;
     int _animationKeyDragKey = -1;
+    int _animationKeyDragOriginalKey = -1;
     math::FVector2 _authoredRootSize{640.0f, 480.0f};
 
     struct InteractionState {

@@ -531,6 +531,7 @@ TEST_CASE(animation_key_retime_and_timeline_surface_keep_sorted_interaction) {
     int beginCount = 0;
     int updateCount = 0;
     int endCount = 0;
+    int cancelCount = 0;
     float draggedTime = 0.0f;
     view.setOnKeyDragged(
         [&](int trackIndex, int keyIndex, float timeMs,
@@ -540,7 +541,8 @@ TEST_CASE(animation_key_retime_and_timeline_surface_keep_sorted_interaction) {
             draggedTime = timeMs;
             if (phase == LayoutAnimationKeyDragPhase::Begin) ++beginCount;
             else if (phase == LayoutAnimationKeyDragPhase::Update) ++updateCount;
-            else ++endCount;
+            else if (phase == LayoutAnimationKeyDragPhase::End) ++endCount;
+            else ++cancelCount;
             return keyIndex;
         });
     const FRectangle key = view.keyframeBounds(0, 1);
@@ -555,10 +557,54 @@ TEST_CASE(animation_key_retime_and_timeline_surface_keep_sorted_interaction) {
     CHECK(beginCount == 1);
     CHECK(updateCount == 1);
     CHECK(endCount == 1);
+    CHECK(cancelCount == 0);
     CHECK_FLOAT_EQ(draggedTime, 750.0f, 1.0f);
+
+    CHECK(view.onMouseButtonDown(UIMouseEvent(keyCenter, 0)));
+    CHECK(view.onMouseMove(UIMouseEvent({targetX, keyCenter.y}, 0)));
+    view.onCaptureCancelled();
+    CHECK(beginCount == 2);
+    CHECK(endCount == 1);
+    CHECK(cancelCount == 1);
     CHECK(view.onMouseWheel(UIMouseWheelEvent(
         {plot.minX + 20.0f, plot.minY + 10.0f}, -40.0f)));
     CHECK(view.zoom() > 1.0f);
+
+    MockRenderer renderer;
+    view.render(renderer);
+    CHECK(renderer.getDrawCalls().size() > 10u);
+}
+
+TEST_CASE(animation_timeline_scrolls_tracks_and_updates_one_track_in_place) {
+    LayoutAnimationTimelineView view;
+    view.setPosition({10.0f, 20.0f});
+    view.setSize({650.0f, 150.0f});
+    view.setDurationMs(1000.0f);
+
+    std::vector<LayoutAnimationTimelineTrackView> tracks;
+    for (int i = 0; i < 12; ++i) {
+        tracks.push_back({L"track " + std::to_wstring(i),
+                          {static_cast<float>(i * 50)}});
+    }
+    view.setTracks(std::move(tracks));
+    CHECK(view.maxVerticalScrollOffset() > 0.0f);
+    CHECK_FLOAT_EQ(view.verticalScrollOffset(), 0.0f, 1e-5f);
+
+    const FRectangle plot = view.plotBounds();
+    CHECK(view.onMouseWheel(UIMouseWheelEvent(
+        {view.getWorldBounds().minX + 20.0f, plot.minY + 20.0f}, 40.0f)));
+    CHECK(view.verticalScrollOffset() > 0.0f);
+
+    view.setSelection(11, 0);
+    const FRectangle lastKey = view.keyframeBounds(11, 0);
+    const float lastCenterY = (lastKey.minY + lastKey.maxY) * 0.5f;
+    CHECK(lastCenterY >= plot.minY);
+    CHECK(lastCenterY <= plot.maxY);
+
+    const float untouched = view.tracks()[6].keyTimesMs[0];
+    CHECK(view.setTrackKeyTimes(5, {125.0f, 375.0f}));
+    CHECK(view.tracks()[5].keyTimesMs.size() == 2u);
+    CHECK_FLOAT_EQ(view.tracks()[6].keyTimesMs[0], untouched, 1e-5f);
 
     MockRenderer renderer;
     view.render(renderer);

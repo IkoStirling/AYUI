@@ -46,7 +46,24 @@ void LayoutAnimationTimelineView::setTracks(
                    _tracks[static_cast<size_t>(_selectedTrack)].keyTimesMs.size())) {
         _selectedKey = -1;
     }
+    _verticalScrollOffset = verticalScrollOffset();
     markDirty();
+}
+
+bool LayoutAnimationTimelineView::setTrackKeyTimes(
+    int trackIndex, std::vector<float> keyTimesMs) {
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(_tracks.size())) {
+        return false;
+    }
+    auto& track = _tracks[static_cast<size_t>(trackIndex)];
+    track.keyTimesMs = std::move(keyTimesMs);
+    if (_selectedTrack == trackIndex &&
+        _selectedKey >= static_cast<int>(track.keyTimesMs.size())) {
+        _selectedKey = track.keyTimesMs.empty()
+            ? -1 : static_cast<int>(track.keyTimesMs.size()) - 1;
+    }
+    markDirty();
+    return true;
 }
 
 void LayoutAnimationTimelineView::setDurationMs(float durationMs) {
@@ -74,10 +91,12 @@ void LayoutAnimationTimelineView::setSelection(int trackIndex, int keyIndex) {
                    _tracks[static_cast<size_t>(trackIndex)].keyTimesMs.size())) {
         keyIndex = -1;
     }
-    if (_selectedTrack == trackIndex && _selectedKey == keyIndex) return;
+    const bool changed =
+        _selectedTrack != trackIndex || _selectedKey != keyIndex;
     _selectedTrack = trackIndex;
     _selectedKey = keyIndex;
-    markDirty();
+    ensureTrackVisible(trackIndex);
+    if (changed) markDirty();
 }
 
 void LayoutAnimationTimelineView::setSelectedCurve(AnimationCurve curve) {
@@ -94,10 +113,13 @@ void LayoutAnimationTimelineView::clearCallbacks() {
 
 math::FRectangle LayoutAnimationTimelineView::plotBounds() const {
     const math::FRectangle bounds = getWorldBounds();
+    const float right = hasVerticalOverflow()
+        ? std::max(bounds.minX, bounds.maxX - kScrollBarWidth - 2.0f)
+        : bounds.maxX;
     return math::FRectangle(
-        std::min(bounds.maxX, bounds.minX + kLabelWidth),
+        std::min(right, bounds.minX + kLabelWidth),
         std::min(bounds.maxY, bounds.minY + kHeaderHeight),
-        bounds.maxX, bounds.maxY);
+        right, bounds.maxY);
 }
 
 float LayoutAnimationTimelineView::visibleDurationMs() const {
@@ -107,6 +129,93 @@ float LayoutAnimationTimelineView::visibleDurationMs() const {
 float LayoutAnimationTimelineView::clampViewStart(float value) const {
     return std::clamp(finiteOr(value, 0.0f), 0.0f,
                       std::max(0.0f, _durationMs - visibleDurationMs()));
+}
+
+float LayoutAnimationTimelineView::maxVerticalScrollOffset() const {
+    const math::FRectangle bounds = getWorldBounds();
+    const float viewportHeight = std::max(
+        0.0f, bounds.maxY - bounds.minY - kHeaderHeight);
+    const float contentHeight =
+        static_cast<float>(_tracks.size()) * kTrackHeight;
+    return std::max(0.0f, contentHeight - viewportHeight);
+}
+
+float LayoutAnimationTimelineView::verticalScrollOffset() const {
+    return std::clamp(finiteOr(_verticalScrollOffset, 0.0f), 0.0f,
+                      maxVerticalScrollOffset());
+}
+
+void LayoutAnimationTimelineView::setVerticalScrollOffset(float value) {
+    const float next = std::clamp(finiteOr(value, 0.0f), 0.0f,
+                                  maxVerticalScrollOffset());
+    if (std::fabs(next - _verticalScrollOffset) < 0.001f) return;
+    _verticalScrollOffset = next;
+    markDirty();
+}
+
+void LayoutAnimationTimelineView::ensureTrackVisible(int trackIndex) {
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(_tracks.size())) {
+        return;
+    }
+    const math::FRectangle bounds = getWorldBounds();
+    const float viewportHeight = std::max(
+        0.0f, bounds.maxY - bounds.minY - kHeaderHeight);
+    if (viewportHeight <= 0.0f) return;
+    const float top = static_cast<float>(trackIndex) * kTrackHeight;
+    const float bottom = top + kTrackHeight;
+    const float offset = verticalScrollOffset();
+    if (top < offset) {
+        setVerticalScrollOffset(top);
+    } else if (bottom > offset + viewportHeight) {
+        setVerticalScrollOffset(bottom - viewportHeight);
+    }
+}
+
+bool LayoutAnimationTimelineView::hasVerticalOverflow() const {
+    return maxVerticalScrollOffset() > 0.001f;
+}
+
+math::FRectangle LayoutAnimationTimelineView::verticalScrollBarBounds() const {
+    const math::FRectangle bounds = getWorldBounds();
+    return math::FRectangle(
+        std::max(bounds.minX, bounds.maxX - kScrollBarWidth),
+        std::min(bounds.maxY, bounds.minY + kHeaderHeight),
+        bounds.maxX, bounds.maxY);
+}
+
+math::FRectangle LayoutAnimationTimelineView::verticalScrollThumbBounds() const {
+    const math::FRectangle bar = verticalScrollBarBounds();
+    const float barHeight = std::max(0.0f, bar.maxY - bar.minY);
+    const float contentHeight =
+        static_cast<float>(_tracks.size()) * kTrackHeight;
+    if (barHeight <= 0.0f || contentHeight <= 0.0f) return bar;
+    const float thumbHeight = std::min(
+        barHeight, std::max(kMinScrollThumbHeight,
+            barHeight * barHeight / contentHeight));
+    const float travel = std::max(0.0f, barHeight - thumbHeight);
+    const float maxOffset = maxVerticalScrollOffset();
+    const float fraction = maxOffset > 0.0f
+        ? verticalScrollOffset() / maxOffset : 0.0f;
+    const float top = bar.minY + travel * fraction;
+    return math::FRectangle(bar.minX, top, bar.maxX, top + thumbHeight);
+}
+
+void LayoutAnimationTimelineView::updateVerticalScrollFromPointer(
+    float pointerY) {
+    const math::FRectangle bar = verticalScrollBarBounds();
+    const math::FRectangle thumb = verticalScrollThumbBounds();
+    const float thumbHeight = std::max(0.0f, thumb.maxY - thumb.minY);
+    const float travel = std::max(
+        0.0f, bar.maxY - bar.minY - thumbHeight);
+    if (travel <= 0.0f) {
+        setVerticalScrollOffset(0.0f);
+        return;
+    }
+    const float top = std::clamp(
+        pointerY - _scrollThumbGrabOffset,
+        bar.minY, bar.maxY - thumbHeight);
+    setVerticalScrollOffset(
+        (top - bar.minY) / travel * maxVerticalScrollOffset());
 }
 
 float LayoutAnimationTimelineView::worldXForTime(float timeMs) const {
@@ -135,7 +244,8 @@ math::FRectangle LayoutAnimationTimelineView::keyframeBounds(
     const math::FRectangle bounds = getWorldBounds();
     const float cx = worldXForTime(keys[static_cast<size_t>(keyIndex)]);
     const float cy = bounds.minY + kHeaderHeight +
-        (static_cast<float>(trackIndex) + 0.5f) * kTrackHeight;
+        (static_cast<float>(trackIndex) + 0.5f) * kTrackHeight -
+        verticalScrollOffset();
     return math::FRectangle(cx - kKeySize * 0.5f, cy - kKeySize * 0.5f,
                             cx + kKeySize * 0.5f, cy + kKeySize * 0.5f);
 }
@@ -143,9 +253,13 @@ math::FRectangle LayoutAnimationTimelineView::keyframeBounds(
 bool LayoutAnimationTimelineView::hitKeyframe(
     const math::FVector2& point, int& trackIndex, int& keyIndex) const {
     for (int track = 0; track < static_cast<int>(_tracks.size()); ++track) {
-        const float rowBottom = getWorldBounds().minY + kHeaderHeight +
-            static_cast<float>(track + 1) * kTrackHeight;
-        if (rowBottom > getWorldBounds().maxY) break;
+        const math::FRectangle bounds = getWorldBounds();
+        const float rowTop = bounds.minY + kHeaderHeight +
+            static_cast<float>(track) * kTrackHeight -
+            verticalScrollOffset();
+        const float rowBottom = rowTop + kTrackHeight;
+        if (rowBottom <= bounds.minY + kHeaderHeight) continue;
+        if (rowTop >= bounds.maxY) break;
         const auto& keys = _tracks[static_cast<size_t>(track)].keyTimesMs;
         for (int key = 0; key < static_cast<int>(keys.size()); ++key) {
             math::FRectangle hit = keyframeBounds(track, key);
@@ -172,6 +286,19 @@ void LayoutAnimationTimelineView::emitSeek(float worldX) {
 bool LayoutAnimationTimelineView::onMouseButtonDown(
     const UIMouseEvent& event) {
     if (!getWorldBounds().contains(event.mousePos)) return false;
+    if (event.mouseButton == 0 && hasVerticalOverflow() &&
+        verticalScrollBarBounds().contains(event.mousePos)) {
+        const math::FRectangle thumb = verticalScrollThumbBounds();
+        _scrollingTracks = true;
+        if (thumb.contains(event.mousePos)) {
+            _scrollThumbGrabOffset = event.mousePos.y - thumb.minY;
+        } else {
+            _scrollThumbGrabOffset =
+                std::max(0.0f, thumb.maxY - thumb.minY) * 0.5f;
+            updateVerticalScrollFromPointer(event.mousePos.y);
+        }
+        return true;
+    }
     if (event.mouseButton == 2) {
         _panning = true;
         _lastPointerX = event.mousePos.x;
@@ -205,6 +332,10 @@ bool LayoutAnimationTimelineView::onMouseButtonDown(
 }
 
 bool LayoutAnimationTimelineView::onMouseMove(const UIMouseEvent& event) {
+    if (_scrollingTracks) {
+        updateVerticalScrollFromPointer(event.mousePos.y);
+        return true;
+    }
     if (_panning) {
         const math::FRectangle plot = plotBounds();
         const float width = std::max(1.0f, plot.maxX - plot.minX);
@@ -241,6 +372,10 @@ bool LayoutAnimationTimelineView::onMouseButtonUp(
         return true;
     }
     if (event.mouseButton != 0) return false;
+    if (_scrollingTracks) {
+        _scrollingTracks = false;
+        return true;
+    }
     if (_draggingKey) {
         _draggingKey = false;
         const float finalTime = std::round(timeAtWorldX(event.mousePos.x));
@@ -271,13 +406,19 @@ bool LayoutAnimationTimelineView::onMouseButtonUp(
 
 bool LayoutAnimationTimelineView::onMouseWheel(
     const UIMouseWheelEvent& event) {
-    if (!plotBounds().contains(event.mousePos)) return false;
+    if (!getWorldBounds().contains(event.mousePos)) return false;
+    const math::FRectangle plot = plotBounds();
+    if (hasVerticalOverflow() && !plot.contains(event.mousePos)) {
+        setVerticalScrollOffset(
+            verticalScrollOffset() + event.deltaY);
+        return true;
+    }
+    if (!plot.contains(event.mousePos)) return false;
     const float anchorTime = timeAtWorldX(event.mousePos.x);
     const float oldZoom = _zoom;
     _zoom = std::clamp(
         _zoom * std::pow(1.1f, -event.deltaY / 40.0f), 1.0f, 16.0f);
     if (std::fabs(_zoom - oldZoom) < 0.0001f) return true;
-    const math::FRectangle plot = plotBounds();
     const float normalized = std::clamp(
         (event.mousePos.x - plot.minX) /
             std::max(1.0f, plot.maxX - plot.minX),
@@ -286,6 +427,28 @@ bool LayoutAnimationTimelineView::onMouseWheel(
         anchorTime - normalized * visibleDurationMs());
     markDirty();
     return true;
+}
+
+void LayoutAnimationTimelineView::onCaptureCancelled() {
+    const bool wasActive = _scrubbing || _panning || _draggingKey ||
+        _scrollingTracks;
+    const bool cancelKeyDrag = _draggingKey;
+    const int track = _dragTrack;
+    const int key = _dragKey;
+    const float time = _dragLastTimeMs;
+
+    _scrubbing = false;
+    _panning = false;
+    _draggingKey = false;
+    _scrollingTracks = false;
+    _dragTrack = -1;
+    _dragKey = -1;
+
+    if (cancelKeyDrag && _onKeyDragged) {
+        (void)_onKeyDragged(
+            track, key, time, LayoutAnimationKeyDragPhase::Cancel);
+    }
+    if (wasActive) markDirty();
 }
 
 void LayoutAnimationTimelineView::onMouseLeave() {
@@ -362,26 +525,31 @@ void LayoutAnimationTimelineView::onRender(IRenderBackend& renderer) {
             math::FVector4(0.14f, 0.17f, 0.22f, 1.0f));
         renderer.drawText(
             math::FRectangle(x + 4.0f, bounds.minY,
-                             std::min(bounds.maxX, x + 64.0f),
+                             std::min(plot.maxX, x + 64.0f),
                              bounds.minY + kHeaderHeight),
             timeLabel(tick), 10,
             math::FVector4(0.48f, 0.55f, 0.65f, 1.0f));
     }
 
+    renderer.pushClip(math::FRectangle(
+        bounds.minX, std::min(bounds.maxY, bounds.minY + kHeaderHeight),
+        plot.maxX, bounds.maxY));
+    const float verticalOffset = verticalScrollOffset();
     for (int track = 0; track < static_cast<int>(_tracks.size()); ++track) {
         const float y = bounds.minY + kHeaderHeight +
-            static_cast<float>(track) * kTrackHeight;
+            static_cast<float>(track) * kTrackHeight - verticalOffset;
+        if (y + kTrackHeight <= bounds.minY + kHeaderHeight) continue;
         if (y >= bounds.maxY) break;
         const bool selected = track == _selectedTrack;
         if (selected) {
             renderer.drawRect(
-                math::FRectangle(bounds.minX, y, bounds.maxX,
+                math::FRectangle(bounds.minX, y, plot.maxX,
                                  std::min(bounds.maxY, y + kTrackHeight)),
                 math::FVector4(0.08f, 0.18f, 0.29f, 0.86f));
         }
         renderer.drawRect(
             math::FRectangle(bounds.minX, y + kTrackHeight - 1.0f,
-                             bounds.maxX, y + kTrackHeight),
+                             plot.maxX, y + kTrackHeight),
             math::FVector4(0.11f, 0.14f, 0.19f, 1.0f));
         renderer.drawText(
             math::FRectangle(bounds.minX + 10.0f, y,
@@ -409,6 +577,20 @@ void LayoutAnimationTimelineView::onRender(IRenderBackend& renderer) {
                     math::FVector4(1.0f, 0.88f, 0.62f, 1.0f), 1.0f, 3.0f);
             }
         }
+    }
+    renderer.popClip();
+
+    if (hasVerticalOverflow()) {
+        const math::FRectangle bar = verticalScrollBarBounds();
+        const math::FRectangle thumb = verticalScrollThumbBounds();
+        renderer.drawRoundedRect(
+            bar, math::FVector4(0.075f, 0.09f, 0.12f, 1.0f), 4.0f);
+        renderer.drawRoundedRect(
+            thumb,
+            _scrollingTracks
+                ? math::FVector4(0.40f, 0.66f, 0.92f, 1.0f)
+                : math::FVector4(0.28f, 0.38f, 0.52f, 1.0f),
+            4.0f);
     }
 
     const float playheadX = worldXForTime(_currentTimeMs);

@@ -1,5 +1,6 @@
 // Headless round-trip check for LayoutEditorSession (no HWND).
 #include "AYUI/LayoutEditor/LayoutEditorSession.h"
+#include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/Button.h"
@@ -15,6 +16,7 @@
 #include "AYUI/Separator.h"
 #include "AYUI/TabControl.h"
 #include "AYUI/TabStrip.h"
+#include "AYUI/TextLabel.h"
 #include "AYUI/Theme.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYUI/UIManager.h"
@@ -805,6 +807,41 @@ int main() {
         std::fprintf(stderr, "animation stop authored-value restore failed\n");
         return 101;
     }
+
+    if (!session.playAnimationPreview(0)) {
+        std::fprintf(stderr, "animation large-delta preview failed to start\n");
+        return 106;
+    }
+    session.advanceAnimationPreview(0.15f);
+    auto* transportStatus = dynamic_cast<ayt::ui::TextLabel*>(
+        ui.findById("animation_transport_status"));
+    if (!session.isAnimationPreviewPlaying() ||
+        std::fabs(session.selected()->getOpacity() - 0.5f) > 0.001f ||
+        transportStatus == nullptr ||
+        transportStatus->getText().find(L"Playing") == std::wstring::npos) {
+        std::fprintf(stderr, "animation real-delta/status update failed\n");
+        return 107;
+    }
+    session.stopAnimationPreview();
+
+    session.setAnimationPreviewLoop(true);
+    if (!session.playAnimationPreview(0)) {
+        std::fprintf(stderr, "animation loop preview failed to start\n");
+        return 108;
+    }
+    session.advanceAnimationPreview(0.25f);
+    if (!session.isAnimationPreviewPlaying()) {
+        std::fprintf(stderr, "animation live loop enable failed\n");
+        return 109;
+    }
+    session.setAnimationPreviewLoop(false);
+    session.advanceAnimationPreview(0.001f);
+    if (session.isAnimationPreviewPlaying()) {
+        std::fprintf(stderr, "animation live loop disable failed\n");
+        return 110;
+    }
+    session.stopAnimationPreview();
+
     if (!session.beginAnimationKeyframeDrag(0, 0, 1) ||
         session.updateAnimationKeyframeDrag(200.0f) != 1) {
         std::fprintf(stderr, "animation key drag failed\n");
@@ -824,6 +861,59 @@ int main() {
         session.selected() == nullptr) {
         std::fprintf(stderr, "animation key drag undo failed\n");
         return 104;
+    }
+
+    // Refresh the timeline after snapshot restore, then exercise the actual
+    // host routing contract: Session must leave middle-button presses outside
+    // Canvas to the timeline, and capture cancellation must roll a retime back.
+    session.setAnimationPreviewLoop(true);
+    session.setAnimationPreviewLoop(false);
+    ayt::ui::LayoutAnimationTimelineView* timelineView = nullptr;
+    for (ayt::ui::Widget* child : timelineHost->getChildren()) {
+        if (child != nullptr &&
+            child->getId() == "__le_animation_timeline_view") {
+            timelineView =
+                dynamic_cast<ayt::ui::LayoutAnimationTimelineView*>(child);
+            break;
+        }
+    }
+    if (timelineView == nullptr) {
+        std::fprintf(stderr, "animation timeline view unavailable\n");
+        return 111;
+    }
+    session.pumpDeferred(0.0f);
+    const ayt::math::FRectangle timelineBounds = timelineView->getWorldBounds();
+    const ayt::math::FVector2 timelinePanPoint(
+        timelineBounds.minX + 8.0f, timelineBounds.minY + 8.0f);
+    if (session.onPointerDown(timelinePanPoint, 2) ||
+        !ui.onMouseButtonDown(timelinePanPoint.x, timelinePanPoint.y, 2)) {
+        std::fprintf(stderr, "animation timeline middle-pan routing failed\n");
+        return 112;
+    }
+    ui.cancelCapture();
+
+    const ayt::math::FRectangle keyBounds =
+        timelineView->keyframeBounds(0, 0);
+    const ayt::math::FVector2 keyCenter(
+        (keyBounds.minX + keyBounds.maxX) * 0.5f,
+        (keyBounds.minY + keyBounds.maxY) * 0.5f);
+    const ayt::math::FRectangle timelinePlot = timelineView->plotBounds();
+    const float movedX = timelinePlot.minX +
+        (timelinePlot.maxX - timelinePlot.minX) * 0.2f;
+    if (!ui.onMouseButtonDown(keyCenter.x, keyCenter.y, 0) ||
+        !ui.onMouseMove(movedX, keyCenter.y) ||
+        session.animationLibrary().clips()[0].tracks[0]
+                .keyframes[0].timeMs == 0.0f) {
+        std::fprintf(stderr, "animation timeline cancel setup failed\n");
+        return 113;
+    }
+    ui.cancelCapture();
+    const auto& cancelledKeys =
+        session.animationLibrary().clips()[0].tracks[0].keyframes;
+    if (cancelledKeys.size() != 2u || cancelledKeys[0].timeMs != 0.0f ||
+        cancelledKeys[1].timeMs != 100.0f) {
+        std::fprintf(stderr, "animation key drag cancel rollback failed\n");
+        return 114;
     }
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");

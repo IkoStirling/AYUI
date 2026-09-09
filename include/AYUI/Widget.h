@@ -373,6 +373,12 @@ public:
     virtual bool onMouseMove(const UIMouseEvent& e);
     virtual bool onMouseButtonDown(const UIMouseEvent& e);
     virtual bool onMouseButtonUp(const UIMouseEvent& e);
+    // Called when the host must terminate pointer capture without a real
+    // release event (for example, when a window loses focus). The default
+    // preserves the historical behaviour for drag controls by synthesizing
+    // a release outside the widget. Transactional controls can override this
+    // to roll their operation back instead of committing at a fake position.
+    virtual void onCaptureCancelled();
     virtual bool onKeyDown(int keyCode);
     virtual bool onKeyUp(int keyCode);
     virtual bool onTextInput(wchar_t ch);

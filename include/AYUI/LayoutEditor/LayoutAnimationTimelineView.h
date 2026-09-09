@@ -16,7 +16,8 @@ struct LayoutAnimationTimelineTrackView {
 enum class LayoutAnimationKeyDragPhase {
     Begin,
     Update,
-    End
+    End,
+    Cancel
 };
 
 // Authoring-only timeline surface. It owns no document data and never creates
@@ -32,6 +33,7 @@ public:
     LayoutAnimationTimelineView();
 
     void setTracks(std::vector<LayoutAnimationTimelineTrackView> tracks);
+    bool setTrackKeyTimes(int trackIndex, std::vector<float> keyTimesMs);
     const std::vector<LayoutAnimationTimelineTrackView>& tracks() const {
         return _tracks;
     }
@@ -56,6 +58,8 @@ public:
 
     float zoom() const { return _zoom; }
     float viewStartMs() const { return _viewStartMs; }
+    float verticalScrollOffset() const;
+    float maxVerticalScrollOffset() const;
     math::FRectangle plotBounds() const;
     math::FRectangle keyframeBounds(int trackIndex, int keyIndex) const;
     float timeAtWorldX(float worldX) const;
@@ -64,6 +68,7 @@ public:
     bool onMouseMove(const UIMouseEvent& event) override;
     bool onMouseButtonUp(const UIMouseEvent& event) override;
     bool onMouseWheel(const UIMouseWheelEvent& event) override;
+    void onCaptureCancelled() override;
     void onMouseLeave() override;
     UiCursorHint getCursorHint() const override;
 
@@ -74,6 +79,12 @@ private:
     float visibleDurationMs() const;
     float worldXForTime(float timeMs) const;
     float clampViewStart(float value) const;
+    void setVerticalScrollOffset(float value);
+    void ensureTrackVisible(int trackIndex);
+    bool hasVerticalOverflow() const;
+    math::FRectangle verticalScrollBarBounds() const;
+    math::FRectangle verticalScrollThumbBounds() const;
+    void updateVerticalScrollFromPointer(float pointerY);
     bool hitKeyframe(const math::FVector2& point,
                      int& trackIndex, int& keyIndex) const;
     void emitSeek(float worldX);
@@ -85,6 +96,7 @@ private:
     float _currentTimeMs = 0.0f;
     float _zoom = 1.0f;
     float _viewStartMs = 0.0f;
+    float _verticalScrollOffset = 0.0f;
     int _selectedTrack = -1;
     int _selectedKey = -1;
     AnimationCurve _selectedCurve = AnimationCurve::Linear;
@@ -92,10 +104,12 @@ private:
     bool _scrubbing = false;
     bool _panning = false;
     bool _draggingKey = false;
+    bool _scrollingTracks = false;
     int _dragTrack = -1;
     int _dragKey = -1;
     float _dragLastTimeMs = 0.0f;
     float _lastPointerX = 0.0f;
+    float _scrollThumbGrabOffset = 0.0f;
 
     SeekCallback _onSeek;
     SelectionCallback _onSelectionChanged;
@@ -105,6 +119,8 @@ private:
     static constexpr float kHeaderHeight = 30.0f;
     static constexpr float kTrackHeight = 28.0f;
     static constexpr float kKeySize = 9.0f;
+    static constexpr float kScrollBarWidth = 9.0f;
+    static constexpr float kMinScrollThumbHeight = 18.0f;
 };
 
 } // namespace ayt::ui

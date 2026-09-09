@@ -342,11 +342,13 @@ Widget JSON 往返，非法区间、重叠区间和没有基础 Anchor 的覆盖
 Animation Authoring 在同一版本化文档信封中保存 `animations`。每个 clip 由稳定 Widget ID、
 `opacity/position/size` 属性轨道和按时间排序的关键帧组成，支持 Linear/Ease/Spring 曲线及
 repeat/yoyo/Decorative/Essential 播放元数据。Designer 的时间轴支持 Play/Pause/Stop/Loop、标尺
-scrub、关键帧拖动、滚轮缩放、中键平移和当前曲线预览；播放由宿主真实帧时钟驱动。首次预览只保存
+scrub、关键帧拖动、滚轮缩放、中键平移、纵向轨道滚动和当前曲线预览；播放由不丢时的宿主真实帧
+时钟驱动，播放中切换 Loop 立即生效。首次预览只保存
 轨道涉及的 authored 属性，后续采样不会反序列化或重建 Widget 树，Stop 或下一次编辑会恢复源值，
 预览结果不进入 dirty 文档。缺失目标、空/单关键帧轨道以及与
 Anchor、VBox/HBox/Grid 几何权属冲突的轨道都会进入 Validation；重命名 Widget ID 会原子更新轨道引用。
-拖动关键帧作为单次可撤销事务提交，连续移动仅刷新时间轴与预览，释放后才重建结构化编辑列表。
+拖动关键帧作为单次可撤销事务提交，连续移动仅增量刷新当前轨道与预览，释放后才重建结构化编辑列表；
+窗口失焦或 capture cancel 会回滚该事务。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 

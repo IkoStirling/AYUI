@@ -763,6 +763,10 @@ bool Widget::onMouseButtonUp(const UIMouseEvent& e) {
     return false;
 }
 
+void Widget::onCaptureCancelled() {
+    (void)onMouseButtonUp(UIMouseEvent(math::FVector2(0.0f, 0.0f), 0));
+}
+
 bool Widget::onKeyDown(int keyCode) {
     AYUNREFERENCED_PARAM(keyCode);
     return false;

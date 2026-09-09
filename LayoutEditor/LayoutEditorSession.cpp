@@ -661,9 +661,11 @@ void LayoutEditorSession::detach() {
     _animationPreviewLoop = false;
     _animationKeyDragActive = false;
     _animationKeyDragChanged = false;
+    _animationKeyDragSnapshot.reset();
     _animationKeyDragClip = -1;
     _animationKeyDragTrack = -1;
     _animationKeyDragKey = -1;
+    _animationKeyDragOriginalKey = -1;
     _stylePreviewState = StyleState::Normal;
     _previewPreset = nullptr;
     _previewDpi = nullptr;
@@ -1148,6 +1150,56 @@ bool LayoutEditorSession::previewAnimationFrame(
     return true;
 }
 
+void LayoutEditorSession::previewAnimationKeyframeDrag(float timeMs) {
+    if (!_animationKeyDragActive || !_animationRuntimePreview.has_value() ||
+        _animationKeyDragClip < 0 ||
+        _animationKeyDragClip >= static_cast<int>(_animationLibrary.size())) {
+        return;
+    }
+    const UIAnimationClip& clip = _animationLibrary.clips()[
+        static_cast<size_t>(_animationKeyDragClip)];
+    if (_animationKeyDragTrack < 0 ||
+        _animationKeyDragTrack >= static_cast<int>(clip.tracks.size())) {
+        return;
+    }
+    const UIAnimationTrack& track = clip.tracks[
+        static_cast<size_t>(_animationKeyDragTrack)];
+    if (_animationKeyDragKey < 0 ||
+        _animationKeyDragKey >= static_cast<int>(track.keyframes.size())) {
+        return;
+    }
+
+    const float nextTime = std::clamp(
+        std::isfinite(timeMs) ? timeMs : 0.0f,
+        0.0f, animationDisplayDurationMs(&clip));
+    // Other tracks are unchanged during a one-key retime, so the evaluator
+    // created at drag begin remains valid for them. At the moved key's exact
+    // time, this track must equal the key value; apply it directly after the
+    // shared evaluator samples the other tracks.
+    _animationRuntimePreview->seek(nextTime);
+    _animationPreviewTimeMs = nextTime;
+    const UIAnimationKeyframe& key = track.keyframes[
+        static_cast<size_t>(_animationKeyDragKey)];
+    if (Widget* target = findInDocument(track.targetId)) {
+        if (track.property == UIAnimationProperty::Opacity) {
+            target->setOpacity(key.value.x);
+        } else if (track.property == UIAnimationProperty::Position) {
+            target->setPosition({key.value.x, key.value.y});
+        } else {
+            target->setSize({key.value.x, key.value.y});
+        }
+    }
+    relayoutAfterAnimationSample();
+    if (_animationTimelineView != nullptr) {
+        _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+    }
+    if (_animationTime != nullptr) {
+        _animationTime->setText(formatFloat(_animationPreviewTimeMs));
+    }
+    setChromeEnabled("btn_animation_reset", true);
+    syncAnimationTransportStatus();
+}
+
 bool LayoutEditorSession::captureAnimationPreviewBaseline(int clipIndex) {
     if (clipIndex < 0 || clipIndex >= static_cast<int>(_animationLibrary.size()))
         return false;
@@ -1275,17 +1327,13 @@ void LayoutEditorSession::advanceAnimationPreview(float deltaSeconds) {
         !std::isfinite(deltaSeconds) || deltaSeconds <= 0.0f) return;
     const AnimationPlaybackState before =
         _animationRuntimePreview->getState();
-    _animationRuntimePreview->tick(std::min(deltaSeconds, 0.1f));
+    _animationRuntimePreview->tick(deltaSeconds);
     _animationPreviewTimeMs = _animationRuntimePreview->getCurrentTimeMs();
     relayoutAfterAnimationSample();
     if (_animationTimelineView != nullptr) {
         _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
     }
-    if (_animationTransportStatus != nullptr) {
-        _animationTransportStatus->setText(
-            std::to_wstring(static_cast<int>(
-                std::lround(_animationPreviewTimeMs))) + L" ms");
-    }
+    syncAnimationTransportStatus();
     if (before != AnimationPlaybackState::Completed &&
         _animationRuntimePreview->getState() ==
             AnimationPlaybackState::Completed) {
@@ -1297,6 +1345,19 @@ void LayoutEditorSession::advanceAnimationPreview(float deltaSeconds) {
 void LayoutEditorSession::setAnimationPreviewLoop(bool enabled) {
     if (_animationPreviewLoop == enabled) return;
     _animationPreviewLoop = enabled;
+    if (_animationRuntimePreview.has_value() &&
+        _animationRuntimePreview->isRunning()) {
+        int authoredRepeatCount = 0;
+        if (_animationPreviewClipIndex >= 0 &&
+            _animationPreviewClipIndex < static_cast<int>(
+                _animationLibrary.size())) {
+            authoredRepeatCount = _animationLibrary.clips()[
+                static_cast<size_t>(_animationPreviewClipIndex)].repeatCount;
+        }
+        _animationRuntimePreview->setRepeatCount(
+            enabled ? AnimationTimeline::RepeatForever
+                    : authoredRepeatCount);
+    }
     if (auto* button = dynamic_cast<Button*>(
             findChromeById("btn_animation_loop"))) {
         button->setText(enabled ? L"Loop: On" : L"Loop: Off");
@@ -1326,15 +1387,23 @@ bool LayoutEditorSession::beginAnimationKeyframeDrag(
         return false;
     }
     stopAnimationPreview();
-    beginMutation(LayoutEditKind::Animation, "Move animation keyframe");
+    Snapshot before = captureSnapshot();
+    _animationKeyDragSnapshot = before;
+    _commandStack.begin(std::move(before), LayoutEditKind::Animation,
+                        "Move animation keyframe");
     _animationKeyDragActive = true;
     _animationKeyDragChanged = false;
     _animationKeyDragClip = clipIndex;
     _animationKeyDragTrack = trackIndex;
     _animationKeyDragKey = keyframeIndex;
+    _animationKeyDragOriginalKey = keyframeIndex;
     _animationClipIndex = clipIndex;
     _animationTrackIndex = trackIndex;
     _animationKeyIndex = keyframeIndex;
+    (void)previewAnimationFrame(
+        clipIndex,
+        tracks[static_cast<size_t>(trackIndex)].keyframes[
+            static_cast<size_t>(keyframeIndex)].timeMs);
     return true;
 }
 
@@ -1359,8 +1428,8 @@ int LayoutEditorSession::updateAnimationKeyframeDrag(float timeMs) {
     _animationKeyIndex = moved;
     _animationKeyDragChanged = true;
     markDirty(true);
-    syncAnimationTimelineView();
-    previewAnimationFrame(_animationKeyDragClip, nextTime);
+    syncAnimationTimelineTrack(_animationKeyDragTrack);
+    previewAnimationKeyframeDrag(nextTime);
     return moved;
 }
 
@@ -1368,6 +1437,8 @@ void LayoutEditorSession::endAnimationKeyframeDrag() {
     if (!_animationKeyDragActive) return;
     if (_animationKeyDragChanged) {
         endMutation();
+        (void)previewAnimationFrame(
+            _animationKeyDragClip, _animationPreviewTimeMs);
         syncAnimationEditor();
         setStatus(L"Animation keyframe moved");
     } else {
@@ -1375,9 +1446,40 @@ void LayoutEditorSession::endAnimationKeyframeDrag() {
     }
     _animationKeyDragActive = false;
     _animationKeyDragChanged = false;
+    _animationKeyDragSnapshot.reset();
     _animationKeyDragClip = -1;
     _animationKeyDragTrack = -1;
     _animationKeyDragKey = -1;
+    _animationKeyDragOriginalKey = -1;
+}
+
+void LayoutEditorSession::cancelAnimationKeyframeDrag() {
+    if (!_animationKeyDragActive) return;
+
+    const bool changed = _animationKeyDragChanged;
+    const int clipIndex = _animationKeyDragClip;
+    const int trackIndex = _animationKeyDragTrack;
+    const int keyIndex = _animationKeyDragOriginalKey;
+    std::optional<Snapshot> rollback = std::move(_animationKeyDragSnapshot);
+
+    if (_animationPreviewBaseline.has_value()) stopAnimationPreview();
+    _commandStack.discardLastUndo();
+    _animationKeyDragActive = false;
+    _animationKeyDragChanged = false;
+    _animationKeyDragSnapshot.reset();
+    _animationKeyDragClip = -1;
+    _animationKeyDragTrack = -1;
+    _animationKeyDragKey = -1;
+    _animationKeyDragOriginalKey = -1;
+
+    if (changed && rollback.has_value()) {
+        restoreSnapshot(*rollback);
+        _animationClipIndex = clipIndex;
+        _animationTrackIndex = trackIndex;
+        _animationKeyIndex = keyIndex;
+    }
+    syncAnimationEditor();
+    setStatus(L"Animation keyframe move cancelled");
 }
 
 void LayoutEditorSession::refreshTextureResources() {
@@ -4172,7 +4274,8 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
 
     // Middle mouse or Space+LMB pans the editor viewport. It must never
     // rewrite the authored root position or participate in undo/dirty state.
-    if (button == 2 || (button == 0 && modifiersSpace() && isCanvasHit(worldPos))) {
+    if ((button == 2 && isCanvasHit(worldPos)) ||
+        (button == 0 && modifiersSpace() && isCanvasHit(worldPos))) {
         if (_docRoot != nullptr) {
             _dragMode = DragMode::Pan;
             _dragLastMouse = worldPos;
@@ -5782,6 +5885,10 @@ void LayoutEditorSession::ensureAnimationTimelineView() {
             if (phase == LayoutAnimationKeyDragPhase::Update) {
                 return updateAnimationKeyframeDrag(timeMs);
             }
+            if (phase == LayoutAnimationKeyDragPhase::Cancel) {
+                cancelAnimationKeyframeDrag();
+                return _animationKeyIndex;
+            }
             endAnimationKeyframeDrag();
             return _animationKeyIndex;
         });
@@ -5844,6 +5951,47 @@ void LayoutEditorSession::syncAnimationTimelineView() {
     } else {
         _animationTimelineView->setSelectedCurve(AnimationCurve::Linear);
     }
+}
+
+void LayoutEditorSession::syncAnimationTimelineTrack(int trackIndex) {
+    if (_animationTimelineView == nullptr || _animationClipIndex < 0 ||
+        _animationClipIndex >= static_cast<int>(_animationLibrary.size())) {
+        return;
+    }
+    const UIAnimationClip& clip = _animationLibrary.clips()[
+        static_cast<size_t>(_animationClipIndex)];
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(clip.tracks.size()) ||
+        _animationTimelineView->tracks().size() != clip.tracks.size()) {
+        syncAnimationTimelineView();
+        return;
+    }
+
+    std::vector<float> keyTimes;
+    const UIAnimationTrack& track = clip.tracks[
+        static_cast<size_t>(trackIndex)];
+    keyTimes.reserve(track.keyframes.size());
+    for (const UIAnimationKeyframe& key : track.keyframes) {
+        keyTimes.push_back(key.timeMs);
+    }
+    if (!_animationTimelineView->setTrackKeyTimes(
+            trackIndex, std::move(keyTimes))) {
+        syncAnimationTimelineView();
+        return;
+    }
+    _animationTimelineView->setDurationMs(animationDisplayDurationMs(&clip));
+    _animationTimelineView->setSelection(
+        _animationTrackIndex, _animationKeyIndex);
+    _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+}
+
+void LayoutEditorSession::syncAnimationTransportStatus() {
+    if (_animationTransportStatus == nullptr) return;
+    std::wstring transport = std::to_wstring(static_cast<int>(
+        std::lround(_animationPreviewTimeMs))) + L" ms";
+    if (isAnimationPreviewPlaying()) transport += L"  ·  Playing";
+    else if (isAnimationPreviewPaused()) transport += L"  ·  Paused";
+    else if (isAnimationPreviewing()) transport += L"  ·  Scrub";
+    _animationTransportStatus->setText(transport);
 }
 
 void LayoutEditorSession::syncAnimationEditor() {
@@ -5969,14 +6117,7 @@ void LayoutEditorSession::syncAnimationEditor() {
             "btn_animation_loop"))) {
         loop->setText(_animationPreviewLoop ? L"Loop: On" : L"Loop: Off");
     }
-    if (_animationTransportStatus != nullptr) {
-        std::wstring transport = std::to_wstring(static_cast<int>(
-            std::lround(_animationPreviewTimeMs))) + L" ms";
-        if (isAnimationPreviewPlaying()) transport += L"  ·  Playing";
-        else if (isAnimationPreviewPaused()) transport += L"  ·  Paused";
-        else if (isAnimationPreviewing()) transport += L"  ·  Scrub";
-        _animationTransportStatus->setText(transport);
-    }
+    syncAnimationTransportStatus();
     if (_animationStatus != nullptr) {
         if (!hasClip) {
             _animationStatus->setText(

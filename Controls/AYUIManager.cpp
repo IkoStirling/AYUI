@@ -827,8 +827,8 @@ void UIManager::update(float dt) {
         // tree. The captured widget (typically a Window being dragged) is
         // about to be freed; without this, _capturedWidget stays non-null
         // and the next onMouseButtonUp dereferences a dangling pointer.
-        // cancelCapture() synthesizes a mouse-up on the captured widget so
-        // its transient drag state is reset cleanly.
+        // cancelCapture() notifies the captured widget so transactional
+        // gestures can roll back while ordinary drag controls still reset.
         if (_capturedWidget != nullptr) {
             cancelCapture();
         }
@@ -2292,7 +2292,7 @@ void UIManager::cancelCapture() {
 
     Widget* captured = _capturedWidget;
     _capturedWidget = nullptr;
-    captured->onMouseButtonUp(UIMouseEvent(math::FVector2(0.0f, 0.0f), 0));
+    captured->onCaptureCancelled();
 }
 
 // Phase D (D2) — clearFocusNoDispatch. R3 landmine avoidance. NOT a

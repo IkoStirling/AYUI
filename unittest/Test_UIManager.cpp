@@ -199,8 +199,8 @@ TEST_CASE(test_uimanager_reload_during_capture) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     // R-7 fix path: update() detects a pending reload, calls
-    // cancelCapture() (synthesizing a mouse-up so the old Window's
-    // _isDragging clears), clears _hoverWidget, then destroys the tree.
+    // cancelCapture() notifies the old Window so its _isDragging state
+    // clears, then clears _hoverWidget before destroying the tree.
     ui.update(0.0f);
 
     // After reload the capture must be gone. The previous _capturedWidget
