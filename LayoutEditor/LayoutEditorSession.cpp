@@ -1224,7 +1224,7 @@ bool LayoutEditorSession::playAnimationPreview(int clipIndex) {
     _animationPreviewTimeMs = _animationRuntimePreview->getCurrentTimeMs();
     relayoutAfterAnimationSample();
     syncAnimationEditor();
-    setStatus(L"Animation preview playing" +
+    setStatus(std::wstring(L"Animation preview playing") +
               (unresolved > 0u ? L" (missing tracks skipped)" : L""));
     return true;
 }
@@ -1359,7 +1359,7 @@ int LayoutEditorSession::updateAnimationKeyframeDrag(float timeMs) {
     _animationKeyIndex = moved;
     _animationKeyDragChanged = true;
     markDirty(true);
-    syncAnimationEditor();
+    syncAnimationTimelineView();
     previewAnimationFrame(_animationKeyDragClip, nextTime);
     return moved;
 }
@@ -2019,6 +2019,14 @@ void LayoutEditorSession::wireChrome() {
         previewAnimationFrame(_animationClipIndex, timeMs);
     });
     bindBtn("btn_animation_reset", [this]() { stopAnimationPreview(); });
+    bindBtn("btn_animation_play", [this]() {
+        playAnimationPreview(_animationClipIndex);
+    });
+    bindBtn("btn_animation_pause", [this]() { pauseAnimationPreview(); });
+    bindBtn("btn_animation_stop", [this]() { stopAnimationPreview(); });
+    bindBtn("btn_animation_loop", [this]() {
+        setAnimationPreviewLoop(!_animationPreviewLoop);
+    });
 
     _previewPreset = dynamic_cast<ComboBox*>(
         findChromeById("preview_preset"));
@@ -3360,6 +3368,7 @@ void LayoutEditorSession::endMutation() {
 }
 
 void LayoutEditorSession::undo() {
+    stopAnimationPreview();
     if (!_commandStack.canUndo() || _docRoot == nullptr) {
         setStatus(L"Nothing to undo");
         return;
@@ -3373,6 +3382,7 @@ void LayoutEditorSession::undo() {
 }
 
 void LayoutEditorSession::redo() {
+    stopAnimationPreview();
     if (!_commandStack.canRedo() || _docRoot == nullptr) {
         setStatus(L"Nothing to redo");
         return;
@@ -5792,6 +5802,50 @@ void LayoutEditorSession::syncAnimationTimelineGeometry() {
     }
 }
 
+void LayoutEditorSession::syncAnimationTimelineView() {
+    if (_animationTimelineView == nullptr) return;
+
+    const UIAnimationClip* clip = _animationClipIndex >= 0 &&
+        _animationClipIndex < static_cast<int>(_animationLibrary.size())
+            ? &_animationLibrary.clips()[static_cast<size_t>(
+                  _animationClipIndex)]
+            : nullptr;
+    std::vector<LayoutAnimationTimelineTrackView> tracks;
+    if (clip != nullptr) {
+        tracks.reserve(clip->tracks.size());
+        for (const UIAnimationTrack& item : clip->tracks) {
+            LayoutAnimationTimelineTrackView row;
+            row.label = utf8ToWide(item.targetId) + L"  ·  " +
+                utf8ToWide(UIAnimationLibrary::propertyName(item.property));
+            row.keyTimesMs.reserve(item.keyframes.size());
+            for (const UIAnimationKeyframe& key : item.keyframes) {
+                row.keyTimesMs.push_back(key.timeMs);
+            }
+            tracks.push_back(std::move(row));
+        }
+    }
+    _animationTimelineView->setDurationMs(animationDisplayDurationMs(clip));
+    _animationTimelineView->setTracks(std::move(tracks));
+    _animationTimelineView->setSelection(
+        _animationTrackIndex, _animationKeyIndex);
+    _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
+
+    const UIAnimationTrack* selectedTrack = clip != nullptr &&
+        _animationTrackIndex >= 0 &&
+        _animationTrackIndex < static_cast<int>(clip->tracks.size())
+            ? &clip->tracks[static_cast<size_t>(_animationTrackIndex)]
+            : nullptr;
+    if (selectedTrack != nullptr && _animationKeyIndex >= 0 &&
+        _animationKeyIndex < static_cast<int>(
+            selectedTrack->keyframes.size())) {
+        _animationTimelineView->setSelectedCurve(
+            selectedTrack->keyframes[static_cast<size_t>(
+                _animationKeyIndex)].curve);
+    } else {
+        _animationTimelineView->setSelectedCurve(AnimationCurve::Linear);
+    }
+}
+
 void LayoutEditorSession::syncAnimationEditor() {
     if (_animationClipList == nullptr && _animationStatus == nullptr) return;
 
@@ -5890,33 +5944,7 @@ void LayoutEditorSession::syncAnimationEditor() {
     }
     _suppressAnimation = false;
 
-    if (_animationTimelineView != nullptr) {
-        std::vector<LayoutAnimationTimelineTrackView> tracks;
-        if (clip != nullptr) {
-            tracks.reserve(clip->tracks.size());
-            for (const UIAnimationTrack& item : clip->tracks) {
-                LayoutAnimationTimelineTrackView row;
-                row.label = utf8ToWide(item.targetId) + L"  ·  " +
-                    utf8ToWide(UIAnimationLibrary::propertyName(item.property));
-                row.keyTimesMs.reserve(item.keyframes.size());
-                for (const UIAnimationKeyframe& key : item.keyframes) {
-                    row.keyTimesMs.push_back(key.timeMs);
-                }
-                tracks.push_back(std::move(row));
-            }
-        }
-        _animationTimelineView->setDurationMs(
-            animationDisplayDurationMs(clip));
-        _animationTimelineView->setTracks(std::move(tracks));
-        _animationTimelineView->setSelection(
-            _animationTrackIndex, _animationKeyIndex);
-        _animationTimelineView->setCurrentTimeMs(_animationPreviewTimeMs);
-        if (_animationKeyIndex >= 0 && track != nullptr) {
-            _animationTimelineView->setSelectedCurve(
-                track->keyframes[static_cast<size_t>(
-                    _animationKeyIndex)].curve);
-        }
-    }
+    syncAnimationTimelineView();
 
     const bool hasClip = clip != nullptr;
     const bool hasTrack = track != nullptr;
@@ -5935,6 +5963,7 @@ void LayoutEditorSession::syncAnimationEditor() {
     setChromeEnabled("btn_animation_pause", isAnimationPreviewPlaying());
     setChromeEnabled("btn_animation_stop", isAnimationPreviewing());
     setChromeEnabled("btn_animation_loop", hasClip);
+    setChromeVisible("animation_timeline_separator", hasClip);
     setChromeVisible("animation_timeline_workspace", hasClip);
     if (auto* loop = dynamic_cast<Button*>(findChromeById(
             "btn_animation_loop"))) {

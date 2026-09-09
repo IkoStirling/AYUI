@@ -518,9 +518,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     while (state.running && window.isWindowValid()) {
         devices.pollEvents();
-        if (state.session != nullptr) {
-            state.session->pumpDeferred();
-        }
 
         if (reproPhase >= 0) {
             ++reproFrames;
@@ -579,6 +576,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         }
         if (dt > 0.1f) {
             dt = 0.1f;
+        }
+        if (state.session != nullptr) {
+            state.session->pumpDeferred(dt);
         }
 
         ayt::render::ClearDesc clear;

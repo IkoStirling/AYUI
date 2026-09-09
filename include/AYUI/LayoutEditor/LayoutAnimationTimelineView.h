@@ -94,6 +94,7 @@ private:
     bool _draggingKey = false;
     int _dragTrack = -1;
     int _dragKey = -1;
+    float _dragLastTimeMs = 0.0f;
     float _lastPointerX = 0.0f;
 
     SeekCallback _onSeek;

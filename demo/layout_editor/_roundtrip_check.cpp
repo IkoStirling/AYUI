@@ -129,7 +129,11 @@ int main() {
         "animation_clip_list", "animation_track_property",
         "animation_track_list", "animation_time", "animation_curve",
         "animation_key_list", "btn_animation_key_capture",
-        "btn_animation_preview", "btn_animation_reset"
+        "btn_animation_preview", "btn_animation_reset",
+        "animation_timeline_workspace", "animation_timeline_host",
+        "btn_animation_play", "btn_animation_pause",
+        "btn_animation_stop", "btn_animation_loop",
+        "animation_transport_status"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {
@@ -139,6 +143,21 @@ int main() {
         std::fprintf(stderr, "authoring-quality chrome regression: missing=%d\n",
                      missingQualityEntries);
         return 81;
+    }
+    ayt::ui::Widget* timelineHost = ui.findById("animation_timeline_host");
+    bool timelineSurfaceMounted = false;
+    if (timelineHost != nullptr) {
+        for (ayt::ui::Widget* child : timelineHost->getChildren()) {
+            if (child != nullptr &&
+                child->getId() == "__le_animation_timeline_view") {
+                timelineSurfaceMounted = true;
+                break;
+            }
+        }
+    }
+    if (!timelineSurfaceMounted) {
+        std::fprintf(stderr, "animation timeline surface was not mounted\n");
+        return 105;
     }
     if (!session.open("assets/sample_blank.ui.json")) {
         std::fprintf(stderr, "open failed\n");
@@ -757,6 +776,54 @@ int main() {
         session.animationLibrary().size() != 1u) {
         std::fprintf(stderr, "animation scrub reset failed\n");
         return 96;
+    }
+    if (!session.playAnimationPreview(0)) {
+        std::fprintf(stderr, "animation continuous play failed\n");
+        return 97;
+    }
+    session.advanceAnimationPreview(0.05f);
+    if (!session.isAnimationPreviewPlaying() ||
+        std::fabs(session.selected()->getOpacity() - 0.5f) > 0.001f) {
+        std::fprintf(stderr, "animation continuous midpoint failed\n");
+        return 98;
+    }
+    session.pauseAnimationPreview();
+    const float pausedOpacity = session.selected()->getOpacity();
+    session.advanceAnimationPreview(0.05f);
+    if (!session.isAnimationPreviewPaused() ||
+        std::fabs(session.selected()->getOpacity() - pausedOpacity) > 0.001f) {
+        std::fprintf(stderr, "animation pause gate failed\n");
+        return 99;
+    }
+    if (!session.playAnimationPreview(0)) {
+        std::fprintf(stderr, "animation resume failed\n");
+        return 100;
+    }
+    session.advanceAnimationPreview(0.05f);
+    session.stopAnimationPreview();
+    if (std::fabs(session.selected()->getOpacity() - 1.0f) > 0.001f) {
+        std::fprintf(stderr, "animation stop authored-value restore failed\n");
+        return 101;
+    }
+    if (!session.beginAnimationKeyframeDrag(0, 0, 1) ||
+        session.updateAnimationKeyframeDrag(200.0f) != 1) {
+        std::fprintf(stderr, "animation key drag failed\n");
+        return 102;
+    }
+    session.endAnimationKeyframeDrag();
+    session.stopAnimationPreview();
+    if (session.animationLibrary().clips()[0].tracks[0]
+            .keyframes[1].timeMs != 200.0f) {
+        std::fprintf(stderr, "animation key drag ordering failed\n");
+        return 103;
+    }
+    session.undo();
+    session.selectById("btn_hello");
+    if (session.animationLibrary().clips()[0].tracks[0]
+            .keyframes[1].timeMs != 100.0f ||
+        session.selected() == nullptr) {
+        std::fprintf(stderr, "animation key drag undo failed\n");
+        return 104;
     }
     session.applyProperty("text", L"RoundTrip");
     session.applyProperty("w", L"150");

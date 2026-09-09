@@ -188,11 +188,11 @@ bool LayoutAnimationTimelineView::onMouseButtonDown(
         _draggingKey = true;
         _dragTrack = track;
         _dragKey = key;
+        _dragLastTimeMs = _tracks[static_cast<size_t>(track)].keyTimesMs[
+            static_cast<size_t>(key)];
         if (_onKeyDragged) {
             const int updated = _onKeyDragged(
-                track, key,
-                _tracks[static_cast<size_t>(track)].keyTimesMs[
-                    static_cast<size_t>(key)],
+                track, key, _dragLastTimeMs,
                 LayoutAnimationKeyDragPhase::Begin);
             if (updated >= 0) _dragKey = updated;
         }
@@ -217,11 +217,12 @@ bool LayoutAnimationTimelineView::onMouseMove(const UIMouseEvent& event) {
     }
     if (_draggingKey) {
         const float time = std::round(timeAtWorldX(event.mousePos.x));
-        if (_onKeyDragged) {
+        if (_onKeyDragged && std::fabs(time - _dragLastTimeMs) >= 0.001f) {
             const int updated = _onKeyDragged(
                 _dragTrack, _dragKey, time,
                 LayoutAnimationKeyDragPhase::Update);
             if (updated >= 0) _dragKey = updated;
+            _dragLastTimeMs = time;
         }
         setCurrentTimeMs(time);
         return true;
@@ -242,9 +243,17 @@ bool LayoutAnimationTimelineView::onMouseButtonUp(
     if (event.mouseButton != 0) return false;
     if (_draggingKey) {
         _draggingKey = false;
+        const float finalTime = std::round(timeAtWorldX(event.mousePos.x));
         if (_onKeyDragged) {
+            if (std::fabs(finalTime - _dragLastTimeMs) >= 0.001f) {
+                const int updated = _onKeyDragged(
+                    _dragTrack, _dragKey, finalTime,
+                    LayoutAnimationKeyDragPhase::Update);
+                if (updated >= 0) _dragKey = updated;
+                _dragLastTimeMs = finalTime;
+            }
             const int updated = _onKeyDragged(
-                _dragTrack, _dragKey, timeAtWorldX(event.mousePos.x),
+                _dragTrack, _dragKey, finalTime,
                 LayoutAnimationKeyDragPhase::End);
             if (updated >= 0) _dragKey = updated;
         }

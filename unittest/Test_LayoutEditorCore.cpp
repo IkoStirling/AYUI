@@ -3,6 +3,7 @@
 #include "AYUI/Button.h"
 #include "AYUI/GridPanel.h"
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
+#include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
@@ -16,6 +17,7 @@
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/ListView.h"
+#include "AYUI/MockRenderer.h"
 #include "AYUI/Image.h"
 #include "AYUI/Panel.h"
 #include "AYUI/RichText.h"
@@ -495,6 +497,72 @@ TEST_CASE(document_animation_library_round_trips_and_builds_runtime_timeline) {
 
     destroyWidgetTree(runtimeRoot);
     destroyWidgetTree(root);
+}
+
+TEST_CASE(animation_key_retime_and_timeline_surface_keep_sorted_interaction) {
+    UIAnimationLibrary animations;
+    const int clip = animations.addClip("Motion");
+    const int track = animations.addTrack(
+        clip, "target", UIAnimationProperty::Opacity);
+    UIAnimationKeyframe first;
+    first.timeMs = 100.0f;
+    first.value.x = 0.25f;
+    UIAnimationKeyframe second;
+    second.timeMs = 500.0f;
+    second.value.x = 0.75f;
+    CHECK(animations.upsertKeyframe(clip, track, first) == 0);
+    CHECK(animations.upsertKeyframe(clip, track, second) == 1);
+    CHECK(animations.moveKeyframeTime(clip, track, 1, 50.0f) == 0);
+    CHECK_FLOAT_EQ(
+        animations.clips()[0].tracks[0].keyframes[0].timeMs, 50.0f, 1e-5f);
+    CHECK_FLOAT_EQ(
+        animations.clips()[0].tracks[0].keyframes[1].timeMs, 100.0f, 1e-5f);
+    CHECK(animations.moveKeyframeTime(clip, track, 0, 100.0f) == 0);
+    CHECK(animations.clips()[0].tracks[0].keyframes.size() == 1u);
+    CHECK_FLOAT_EQ(
+        animations.clips()[0].tracks[0].keyframes[0].value.x, 0.75f, 1e-5f);
+
+    LayoutAnimationTimelineView view;
+    view.setPosition({10.0f, 20.0f});
+    view.setSize({650.0f, 150.0f});
+    view.setDurationMs(1000.0f);
+    view.setTracks({{L"target · opacity", {100.0f, 500.0f}}});
+    view.setSelection(0, 1);
+    int beginCount = 0;
+    int updateCount = 0;
+    int endCount = 0;
+    float draggedTime = 0.0f;
+    view.setOnKeyDragged(
+        [&](int trackIndex, int keyIndex, float timeMs,
+            LayoutAnimationKeyDragPhase phase) {
+            CHECK(trackIndex == 0);
+            CHECK(keyIndex >= 0);
+            draggedTime = timeMs;
+            if (phase == LayoutAnimationKeyDragPhase::Begin) ++beginCount;
+            else if (phase == LayoutAnimationKeyDragPhase::Update) ++updateCount;
+            else ++endCount;
+            return keyIndex;
+        });
+    const FRectangle key = view.keyframeBounds(0, 1);
+    const FVector2 keyCenter(
+        (key.minX + key.maxX) * 0.5f, (key.minY + key.maxY) * 0.5f);
+    CHECK(view.onMouseButtonDown(UIMouseEvent(keyCenter, 0)));
+    const FRectangle plot = view.plotBounds();
+    const float targetX = plot.minX +
+        (plot.maxX - plot.minX) * 0.75f;
+    CHECK(view.onMouseMove(UIMouseEvent({targetX, keyCenter.y}, 0)));
+    CHECK(view.onMouseButtonUp(UIMouseEvent({targetX, keyCenter.y}, 0)));
+    CHECK(beginCount == 1);
+    CHECK(updateCount == 1);
+    CHECK(endCount == 1);
+    CHECK_FLOAT_EQ(draggedTime, 750.0f, 1.0f);
+    CHECK(view.onMouseWheel(UIMouseWheelEvent(
+        {plot.minX + 20.0f, plot.minY + 10.0f}, -40.0f)));
+    CHECK(view.zoom() > 1.0f);
+
+    MockRenderer renderer;
+    view.render(renderer);
+    CHECK(renderer.getDrawCalls().size() > 10u);
 }
 
 TEST_CASE(validation_reports_animation_target_key_and_layout_conflicts) {

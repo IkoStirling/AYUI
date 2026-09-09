@@ -195,6 +195,43 @@
               "backgroundEnabled": true,
               "borderEnabled": true,
               "children": []
+            },
+            { "type": "Separator", "id": "animation_timeline_separator", "size": { "h": 1 }, "slot": { "height": 1 } },
+            {
+              "type": "VBox",
+              "id": "animation_timeline_workspace",
+              "style": "__le_root",
+              "size": { "h": 196 },
+              "slot": { "height": 196 },
+              "spacing": 6,
+              "padding": { "left": 0, "top": 8, "right": 0, "bottom": 0 },
+              "children": [
+                {
+                  "type": "HBox",
+                  "id": "animation_transport",
+                  "size": { "h": 30 },
+                  "slot": { "height": 30 },
+                  "spacing": 6,
+                  "children": [
+                    { "type": "TextLabel", "id": "lbl_animation_timeline", "style": "__le_heading", "text": "Timeline", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "Button", "id": "btn_animation_play", "style": "__le_primary", "text": "Play", "size": { "w": 58, "h": 30 }, "slot": { "width": 58 } },
+                    { "type": "Button", "id": "btn_animation_pause", "style": "__le_command", "text": "Pause", "size": { "w": 62, "h": 30 }, "slot": { "width": 62 } },
+                    { "type": "Button", "id": "btn_animation_stop", "style": "__le_command", "text": "Stop", "size": { "w": 58, "h": 30 }, "slot": { "width": 58 } },
+                    { "type": "Button", "id": "btn_animation_loop", "style": "__le_command", "text": "Loop: Off", "size": { "w": 84, "h": 30 }, "slot": { "width": 84 } },
+                    { "type": "TextLabel", "id": "animation_transport_status", "style": "__le_muted", "text": "0 ms", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ]
+                },
+                {
+                  "type": "Panel",
+                  "id": "animation_timeline_host",
+                  "style": "__le_canvas",
+                  "size": { "h": 0 },
+                  "slot": { "height": 0 },
+                  "backgroundEnabled": true,
+                  "borderEnabled": true,
+                  "children": []
+                }
+              ]
             }
           ]
         },

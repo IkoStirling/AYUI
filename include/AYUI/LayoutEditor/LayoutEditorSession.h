@@ -277,6 +277,7 @@ private:
     void syncReuseEditor();
     void syncResponsiveEditor();
     void syncAnimationEditor();
+    void syncAnimationTimelineView();
     void ensureAnimationTimelineView();
     void syncAnimationTimelineGeometry();
     void relayoutAfterAnimationSample();

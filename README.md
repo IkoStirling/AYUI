@@ -48,8 +48,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
   轨道、关键帧/曲线、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
-2026-09-09 Insider Windows Debug 当前基线为 `5510 / 5510` 条断言通过，Layout Editor headless
-round-trip 同步通过。2026-08-29 审计快照为
+2026-09-09 Insider Windows Debug 当前基线为 AYUI `5534 / 5534`、AYEditor `2099 / 2099` 条断言通过，
+Layout Editor headless round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -341,11 +341,12 @@ Widget JSON 往返，非法区间、重叠区间和没有基础 Anchor 的覆盖
 
 Animation Authoring 在同一版本化文档信封中保存 `animations`。每个 clip 由稳定 Widget ID、
 `opacity/position/size` 属性轨道和按时间排序的关键帧组成，支持 Linear/Ease/Spring 曲线及
-repeat/yoyo/Decorative/Essential 播放元数据。Designer 的 Scrub 先保存 authored snapshot，再按时间点
-采样，Reset 或下一次编辑会恢复源值；预览结果不进入 dirty 文档。缺失目标、空/单关键帧轨道以及与
+repeat/yoyo/Decorative/Essential 播放元数据。Designer 的时间轴支持 Play/Pause/Stop/Loop、标尺
+scrub、关键帧拖动、滚轮缩放、中键平移和当前曲线预览；播放由宿主真实帧时钟驱动。首次预览只保存
+轨道涉及的 authored 属性，后续采样不会反序列化或重建 Widget 树，Stop 或下一次编辑会恢复源值，
+预览结果不进入 dirty 文档。缺失目标、空/单关键帧轨道以及与
 Anchor、VBox/HBox/Grid 几何权属冲突的轨道都会进入 Validation；重命名 Widget ID 会原子更新轨道引用。
-当前面板是结构化轨道/关键帧编辑，
-连续播放 transport、拖拽式时间尺和曲线图仍属于后续交互增强。
+拖动关键帧作为单次可撤销事务提交，连续移动仅刷新时间轴与预览，释放后才重建结构化编辑列表。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 
