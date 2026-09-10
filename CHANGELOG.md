@@ -50,15 +50,20 @@
 ### Validation
 
 - Windows Debug：AYUI `5147 / 5147` 条断言通过。
-- VS 2026 Insider Windows Debug：AYUI `5660 / 5660`，Layout Editor headless round-trip 通过。
-- AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
+- VS 2026 Insider Windows Debug：AYUI `5660 / 5660`、AYRenderer `4333 / 4333`、
+  AYEditor `2549 / 2549`、Default Editor Module Assembly `13 / 13`；Layout Editor headless
+  round-trip 与 AYEditor level-4（三帧 GPU UI 合成及完整 shutdown）通过。
+- AYRenderer Noop：`4333 / 4333` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。
 - Gallery 十条 GPU 路径在 `OrderedRuns` 与 `OverlapAware` 下逐像素一致。
-- Layer 真实图像矩阵在 Auto 与显式 D3D11、1.0×/1.5× 下通过；相同 1280×720 DIP 画布使用
+- Layer 真实图像矩阵在显式 D3D11、D3D12、Vulkan、OpenGL 的 1.0×/1.5× 下通过；相同 1280×720 DIP 画布使用
   1280×720/1920×1080 framebuffer，immediate/full/clean/partial 覆盖
   checker、alpha sprite、atlas、gradient、text 和 stencil path clip；语义差异不超过 1 RGBA8 LSB，
-  full repaint 与 clean retained reuse 字节完全一致。
+  RGBA8 group opacity 不超过 2 LSB，clean retained reuse、isolated blend 与 Preserve 字节完全一致；
+  四后端 root 提交基线均为 `28 / 29 / 1 / 11`。
+- 独立 Designer、Editor Shell，以及从 Editor 顶部 `UI` 工具入口创建独立 Designer 子窗的窗口级
+  截图验收通过；三栏布局、Canvas 选择边框/缩放柄、Inspector 和宿主 UI/Scene 合成均完整。
 
 ## v1.6 capability milestone - 2026-08-28
 

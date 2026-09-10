@@ -811,8 +811,10 @@ AYUI `5611 / 5611`，headless round-trip 通过。
 Controller/Event contract 与只读触发图随后进入 authoring core，源码 ABI 更新到 117；当前基线为
 AYUI `5626 / 5626`，headless round-trip 通过。
 曲线参数与系统 reduced-motion 阶段新增 Cubic Bezier 时间反解、物理 Spring 参数面板、时间轴真实曲线
-预览、参数 JSON 往返和 Windows/宿主偏好桥；源码 ABI 更新到 118。Insider Windows Debug 当前基线为
-AYUI `5660 / 5660`，headless round-trip 通过；AYEditor/AYRenderer 全量重链接按集成窗口延后。
+预览、参数 JSON 往返和 Windows/宿主偏好桥；源码 ABI 更新到 118。2026-09-10 的 VS 2026 Insider
+Windows Debug 全量集成基线为 AYUI `5660 / 5660`、AYRenderer `4333 / 4333`、AYEditor
+`2549 / 2549`、Default Editor Module Assembly `13 / 13`；headless round-trip、AYEditor level-4
+三帧 GPU UI shutdown、Gallery/独立 Designer/Editor Shell 全量重链接均通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
@@ -879,9 +881,10 @@ AYUI `5660 / 5660`，headless round-trip 通过；AYEditor/AYRenderer 全量重�
 回归测试失败必须让进程返回非零；不得通过 batch wrapper 抹掉退出码。
 
 合批视觉回归由 `demo/RunBatchVisualRegression.ps1` 驱动。它固定 Gallery 的时间步、页面、
-交互动作和截图帧，在独立隐藏进程中运行两种 batch mode；当前十条路径均为字节级一致，
-draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定的是当前 Gallery 复杂控件路径，
-不应被解释为所有未来自定义控件都会得到相同降幅。
+交互动作和截图帧，在独立隐藏进程中运行两种 batch mode；2026-09-10 的十条路径均为字节级一致。
+Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7`，Animation 为
+`102 → 44`，Overlay + Modal 为 `18 → 15`。因此大幅降幅会在相邻且可安全重排的复杂动画图元中
+稳定复现，普通页面没有额外收益；该结果锁定当前 Gallery 场景，不应外推为所有自定义控件的固定比例。
 
 ## 14. 已知限制与后续工作
 

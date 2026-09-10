@@ -48,9 +48,11 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
   轨道、关键帧、Cubic Bezier/物理弹簧参数、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
-2026-09-10 Insider Windows Debug 当前提交基线为 AYUI `5660 / 5660`；AYEditor 最近完整基线仍为
-`2099 / 2099` 条断言通过，
-Layout Editor headless round-trip 同步通过。2026-08-29 审计快照为
+2026-09-10 VS 2026 Insider Windows Debug 全量集成基线为 AYUI `5660 / 5660`、
+AYRenderer `4333 / 4333`、AYEditor `2549 / 2549`，Default Editor Module Assembly `13 / 13`；
+Layout Editor headless round-trip 与 AYEditor level-4（三帧 GPU UI 合成及完整 shutdown）同步通过。
+AYUI、AYRenderer、AYEditor、Gallery、独立 Designer 和 Editor Shell 已在同一构建树全量重链接。
+2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
 
@@ -485,9 +487,14 @@ Layer、嵌套 opacity 与 Additive/Multiply/Screen 隔离组；生命周期矩�
 DPI、device reset、MSAA reset 后的 pool lease 恢复，以及 Transparent/Color/Preserve 局部 clear。
 除 RGBA8 group opacity 的双重量化上限为 2 LSB 外，其余即时语义对照最多 1 LSB；isolated blend、
 Preserve 和 clean retained reuse 字节完全一致。D3D11、D3D12、Vulkan、OpenGL 已通过同一矩阵；各
-后端 root 基线均为 immediate 30、full Layer 31、clean Layer 1、partial Layer 11 次 UI draw call。
+后端 root 基线均为 immediate 28、full Layer 29、clean Layer 1、partial Layer 11 次 UI draw call。
 OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph quad 吸附物理像素网格，保证
 默认 framebuffer 与 FBO 在 1.0×/1.5× 下使用一致覆盖。
+
+2026-09-10 的完整视觉验收还包括独立 `AYUI_LayoutEditor` 最大化截图、`AYEditorShell_Demo`
+完整工作区截图，以及从 Editor 顶部 `UI` 工具入口实际创建、最大化并关闭独立 `AYUI Designer`
+子窗。三栏 Designer、Canvas 选择边框/缩放柄、Inspector、Scene View 与 Assets/Inspector 宿主合成
+均正常；截图和指标保存在构建树的 `out/validation/ui-abi118-20260910`，不进入源码发布物。
 
 ## 目录
 
