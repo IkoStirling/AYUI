@@ -1171,7 +1171,22 @@ void UIManager::flushFrame() {
 }
 
 Widget* UIManager::findById(const std::string& id) const {
-    return _loader.findWidgetById(id);
+    if (Widget* indexed = _loader.findWidgetById(id)) return indexed;
+    if (id.empty() || _root == nullptr) return nullptr;
+
+    // Loader-authored widgets stay O(1) through the registry above. Runtime
+    // chrome, virtual hosts and other dynamically attached widgets are not
+    // loader entries, so fall back to the live tree before reporting a miss.
+    std::vector<Widget*> pending{_root};
+    while (!pending.empty()) {
+        Widget* widget = pending.back();
+        pending.pop_back();
+        if (widget == nullptr) continue;
+        if (widget->getId() == id) return widget;
+        const auto& children = widget->getChildren();
+        pending.insert(pending.end(), children.begin(), children.end());
+    }
+    return nullptr;
 }
 
 math::FVector2 UIManager::getDragLastMousePos() const {

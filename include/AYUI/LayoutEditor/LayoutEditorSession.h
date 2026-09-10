@@ -242,6 +242,7 @@ private:
     void syncStyleInspector();
     void syncTextAlignCombos();
     void syncEnumCombos();
+    void ensureSchemaPropertyChrome();
     void bindSchemaPropertyFields();
     void syncSchemaPropertyFields();
     std::wstring schemaPropertyValue(const std::string& field) const;

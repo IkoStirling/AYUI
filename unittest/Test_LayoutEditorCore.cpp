@@ -161,6 +161,10 @@ TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
         propertyFieldSchema(AuthoringProperty::SelectionMode);
     CHECK(selection.editorKind == PropertyEditorKind::Enum);
     CHECK(selection.enumOptions.size() == 2u);
+    CHECK(selection.displayName != nullptr);
+    if (selection.displayName != nullptr) {
+        CHECK(std::string(selection.displayName) == "Selection");
+    }
     if (selection.enumOptions.size() == 2u) {
         CHECK(selection.enumOptions[0] == "Single");
         CHECK(selection.enumOptions[1] == "Extended");
@@ -168,6 +172,13 @@ TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
     CHECK(findPropertyFieldSchema("imageTint") != nullptr);
     CHECK(findPropertyFieldSchema("richWrapMode") != nullptr);
     CHECK(findPropertyFieldSchema("notAProperty") == nullptr);
+
+    int generatedRows = 0;
+    for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
+        if (schema.displayName != nullptr) ++generatedRows;
+    }
+    CHECK(generatedRows == 25);
+    CHECK(width.displayName == nullptr);
 
     WidgetAuthoringRegistry& registry = WidgetAuthoringRegistry::get();
     const WidgetAuthoringDescriptor* slider = registry.find("Slider");

@@ -43,6 +43,19 @@ TEST_CASE(test_uimanager_load_and_render) {
     ui.shutdown();
 }
 
+TEST_CASE(uimanager_find_by_id_falls_back_to_runtime_widget_tree) {
+    UIManager ui;
+    ui.initialize(nullptr);
+
+    auto* runtimeButton = new Button();
+    runtimeButton->setId("runtime_button");
+    ui.root()->addChildExternal(runtimeButton);
+
+    CHECK(ui.findById("runtime_button") == runtimeButton);
+    CHECK(ui.findById("missing_runtime_widget") == nullptr);
+    ui.shutdown();
+}
+
 TEST_CASE(test_uimanager_mouse_click) {
     MockRenderer backend;
     UIManager ui;

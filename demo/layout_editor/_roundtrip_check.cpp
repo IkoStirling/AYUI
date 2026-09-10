@@ -5,6 +5,7 @@
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/Button.h"
 #include "AYUI/Clipboard.h"
+#include "AYUI/ComboBox.h"
 #include "AYUI/GridPanel.h"
 #include "AYUI/Image.h"
 #include "AYUI/ListView.h"
@@ -20,6 +21,7 @@
 #include "AYUI/TabControl.h"
 #include "AYUI/TabStrip.h"
 #include "AYUI/TextLabel.h"
+#include "AYUI/TextInput.h"
 #include "AYUI/TileView.h"
 #include "AYUI/Theme.h"
 #include "AYUI/UIKeyCode.h"
@@ -175,6 +177,33 @@ int main() {
         std::fprintf(stderr, "typed inspector regression: missing=%d\n",
                      missingTypedInspectorEntries);
         return 115;
+    }
+    std::ifstream chromeSourceFile("assets/layout_editor.ui.json",
+                                   std::ios::binary);
+    const bool chromeSourceOpened = chromeSourceFile.is_open();
+    const std::string chromeSource{
+        std::istreambuf_iterator<char>(chromeSourceFile),
+        std::istreambuf_iterator<char>()};
+    int serializedGeneratedControls = 0;
+    for (const char* id : requiredTypedInspectorIds) {
+        if (chromeSource.find(std::string("\"") + id + "\"") !=
+            std::string::npos) {
+            ++serializedGeneratedControls;
+        }
+    }
+    auto* generatedSection = dynamic_cast<ayt::ui::TextLabel*>(
+        ui.findById("section_schema_properties"));
+    auto* generatedMinimum = dynamic_cast<ayt::ui::TextInput*>(
+        ui.findById("prop_min"));
+    auto* generatedSelection = dynamic_cast<ayt::ui::ComboBox*>(
+        ui.findById("prop_selection_mode"));
+    if (!chromeSourceOpened || serializedGeneratedControls != 0 ||
+        generatedSection == nullptr || generatedMinimum == nullptr ||
+        generatedSelection == nullptr || generatedSection->isVisible()) {
+        std::fprintf(stderr,
+            "schema-generated inspector chrome regression: serialized=%d\n",
+            serializedGeneratedControls);
+        return 116;
     }
     ayt::ui::Widget* timelineHost = ui.findById("animation_timeline_host");
     bool timelineSurfaceMounted = false;
@@ -369,6 +398,16 @@ int main() {
 
     session.addWidget("Slider");
     auto* slider = dynamic_cast<ayt::ui::Slider*>(session.selected());
+    ayt::ui::Widget* generatedMinRow =
+        ui.findById("row_prop_min");
+    ayt::ui::Widget* generatedTintRow =
+        ui.findById("row_prop_image_tint");
+    if (generatedSection == nullptr || !generatedSection->isVisible() ||
+        generatedMinRow == nullptr || !generatedMinRow->isVisible() ||
+        generatedTintRow == nullptr || generatedTintRow->isVisible()) {
+        std::fprintf(stderr, "schema-generated row visibility failed\n");
+        return 117;
+    }
     session.applyProperty("min", L"-2");
     session.applyProperty("max", L"8");
     session.applyProperty("value", L"6.5");

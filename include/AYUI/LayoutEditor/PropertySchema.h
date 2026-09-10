@@ -97,6 +97,10 @@ struct PropertyFieldSchema {
     float maximum = 0.0f;
     float step = 0.0f;
     std::vector<std::string> enumOptions;
+    // Non-null for fields whose complete Inspector row is generated from the
+    // schema. Legacy/custom rows keep this null and remain authored in the
+    // chrome JSON while they are migrated incrementally.
+    const char* displayName = nullptr;
 };
 
 class PropertySchema {

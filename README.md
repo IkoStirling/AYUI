@@ -317,12 +317,15 @@ Authoring 代码位于独立静态库 `AYUILayoutEditorCore`，不进入游戏�
 `LayoutDocumentModel`、`LayoutSelectionModel`、`LayoutCommandStack` 与 `LayoutCanvasViewport`
 从宿主 Session 中拆开；standalone 与 AYEditor 只负责窗口、backend 和资源选择器。Palette、类型图标、
 默认尺寸/初始化与 Inspector schema 统一来自 `WidgetAuthoringRegistry`，新增类型不再需要同步修改多张
-硬编码表。`PropertySchema` 同时声明字段 section、编辑器种类、数值范围/步长和枚举选项；现有 chrome
-据此绑定输入与枚举，不再由 Session 维护重复选项表。类型化 Inspector 已覆盖 Slider/ProgressBar 的
+硬编码表。`PropertySchema` 同时声明字段 section、显示名、编辑器种类、数值范围/步长和枚举选项；
+类型专用属性行在 Session attach 时由 schema 自动生成，chrome JSON 不再复制这些控件定义。现有静态
+基础/复合行仍可渐进迁移，输入绑定与枚举不再由 Session 维护重复选项表。类型化 Inspector 已覆盖 Slider/ProgressBar 的
 min/max/value、Image tint/UV、List/Tile 选择与尺寸、ScrollView 滚动条策略、TabStrip overflow、
 Grid 行列/间距以及 RichText wrap/overflow/line-height/max-lines。Grid 缩小时会拒绝丢弃已占用 cell；
 Image tint/UV 与 Grid 间距均已补齐 Loader/Serializer 往返。命令栈已记录 Property/Insert/Delete/Reorder/
 Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
+`UIManager::findById()` 对 Loader 控件使用索引快路径，并在 miss 时搜索实时 Widget 树，因此 schema
+生成行和其他运行时挂载控件也可由宿主按 ID 查询。
 
 Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳定身份，并把本机文件位置放在
 仅用于解码预览的 `previewPath`；打开文件、Undo/Redo 和复制后都只恢复临时句柄，不把绝对路径写回

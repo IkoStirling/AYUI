@@ -493,8 +493,11 @@ Boolean/Enum/Color/Resource 编辑器种类、可选数值范围/步长和枚举
 TileView 选择模式和集合尺寸、Tree/List item height、ScrollView 两轴 scrollbar policy、TabStrip overflow/
 min width、Grid 行列/间距以及 RichText wrap/overflow/line-height/max-lines。数值输入按 schema 约束归一；
 Grid 不允许缩小到会丢弃已占用 cell 的尺寸。Image color/UV 和 Grid spacing 在 `UILayoutLoader` 与
-`WidgetSerializer` 中对称往返，避免“Inspector 可编辑但保存丢失”的半实现状态。当前 chrome 仍为
-声明式 JSON；后续可从相同 schema 自动生成属性行，而无需改变文档模型或属性写入协议。
+`WidgetSerializer` 中对称往返，避免“Inspector 可编辑但保存丢失”的半实现状态。第二阶段把显示名也
+纳入 schema，并在 Session attach 时自动创建这 25 个类型专用属性行；两份 chrome JSON 不再复制其
+label/control 定义。复杂基础行仍保留声明式 JSON，旧版或部分迁移的 chrome 若已提供相同 row id，
+生成器会复用它而不会创建重复控件，文档模型和属性写入协议保持不变。`UIManager::findById()` 保持
+Loader registry 的 O(1) 快路径，并在 miss 时遍历实时树，使动态生成控件与静态控件具有一致查询语义。
 
 命令栈已经区分 `Property`、`Insert`、`Delete`、`Reorder`、`Transform`、`Clipboard` 与
 `SnapshotFallback` edit intent。当前 entry 同时保存完整 JSON snapshot，作为复杂复合控件和旧路径的
@@ -770,6 +773,10 @@ AYEditor `2099 / 2099`，Layout Editor headless round-trip 同步通过。
 Image tint/UV 与 Grid spacing 的 Loader/Serializer 对称性、Grid occupied-cell 缩小保护及 headless
 属性/保存/重载回归同时落地。Insider Windows Debug 当前提交基线为 AYUI `5579 / 5579`，Layout Editor
 headless round-trip 通过。
+
+同日完成类型化 Inspector 第二阶段：25 个类型专用属性行改由 `PropertySchema` 的显示名和控件契约
+自动生成，静态 chrome 仅保留基础与复合编辑界面。回归同时验证源 JSON 不再包含生成控件、attach 后
+完整 Widget 树和按选中类型显隐均正确；源码 ABI 更新到 113，当前提交链基线为 AYUI `5593 / 5593`。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
