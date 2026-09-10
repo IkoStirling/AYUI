@@ -44,7 +44,10 @@ public:
     void setSelection(int trackIndex, int keyIndex);
     int selectedTrackIndex() const { return _selectedTrack; }
     int selectedKeyIndex() const { return _selectedKey; }
-    void setSelectedCurve(AnimationCurve curve);
+    void setSelectedCurve(AnimationCurve curve,
+                          const CubicBezierParameters& bezier = {},
+                          const SpringParameters& spring = {},
+                          float segmentDurationMs = 1000.0f);
     AnimationCurve selectedCurve() const { return _selectedCurve; }
 
     void setOnSeek(SeekCallback callback) { _onSeek = std::move(callback); }
@@ -100,6 +103,9 @@ private:
     int _selectedTrack = -1;
     int _selectedKey = -1;
     AnimationCurve _selectedCurve = AnimationCurve::Linear;
+    CubicBezierParameters _selectedBezier;
+    SpringParameters _selectedSpring;
+    float _selectedSegmentDurationMs = 1000.0f;
 
     bool _scrubbing = false;
     bool _panning = false;

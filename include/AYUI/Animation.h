@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -56,11 +57,29 @@ struct SpringParameters {
     bool clampOvershoot = false;
 };
 
+// CSS-compatible cubic-bezier timing function. X control points are
+// normalized to [0, 1] to keep time monotonic; Y may leave that range to
+// author anticipation or overshoot.
+struct CubicBezierParameters {
+    float x1 = 0.25f;
+    float y1 = 0.10f;
+    float x2 = 0.25f;
+    float y2 = 1.00f;
+};
+
+float evaluateCubicBezier(float progress,
+                          const CubicBezierParameters& parameters);
+float evaluateSpring(float progress, float durationMs,
+                     const SpringParameters& parameters);
+
 // Process-wide UI animation policy. AYUI is driven from one UI thread, so the
 // policy intentionally avoids locks. durationScale uses CSS-like semantics:
 // 1 = authored speed, 2 = twice as long, 0 = finish finite tweens immediately.
 class AnimationSettings {
 public:
+    using ReducedMotionProvider =
+        std::function<std::optional<bool>()>;
+
     static AnimationSettings& get();
 
     void setDurationScale(float scale);
@@ -68,6 +87,16 @@ public:
 
     void setReducedMotion(bool enabled) { _reducedMotion = enabled; }
     bool isReducedMotion() const { return _reducedMotion; }
+
+    // Call at host startup and after the platform accessibility/settings
+    // notification. A supplied provider has priority; otherwise Windows
+    // queries SPI_GETCLIENTAREAANIMATION. Other platforms can install their
+    // native bridge without adding platform dependencies to AYUI.
+    void setReducedMotionProvider(ReducedMotionProvider provider) {
+        _reducedMotionProvider = std::move(provider);
+    }
+    void clearReducedMotionProvider() { _reducedMotionProvider = {}; }
+    bool refreshReducedMotionPreference();
 
     bool shouldAnimate(AnimationImportance importance) const;
     float playbackDelta(float dt, AnimationImportance importance) const;
@@ -79,6 +108,7 @@ public:
 private:
     float _durationScale = 1.0f;
     bool _reducedMotion = false;
+    ReducedMotionProvider _reducedMotionProvider;
 };
 
 template <typename T>
@@ -89,6 +119,8 @@ struct AnimationKeyframe {
     AnimationCurve curve = AnimationCurve::Linear;
     SpringParameters spring;
     bool hasSpringParameters = false;
+    CubicBezierParameters bezier;
+    bool hasBezierParameters = false;
 
     AnimationKeyframe() = default;
     AnimationKeyframe(float atMs, const T& v,
@@ -97,6 +129,10 @@ struct AnimationKeyframe {
     AnimationKeyframe(float atMs, const T& v, const SpringParameters& parameters)
         : timeMs(atMs), value(v), curve(AnimationCurve::Spring),
           spring(parameters), hasSpringParameters(true) {}
+    AnimationKeyframe(float atMs, const T& v,
+                      const CubicBezierParameters& parameters)
+        : timeMs(atMs), value(v), curve(AnimationCurve::CubicBezier),
+          bezier(parameters), hasBezierParameters(true) {}
 };
 
 // A host-owned, CPU-side timeline. Tracks are sampled together from one clock,

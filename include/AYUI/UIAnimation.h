@@ -24,6 +24,8 @@ struct UIAnimationKeyframe {
     AnimationCurve curve = AnimationCurve::Linear;
     SpringParameters spring;
     bool hasSpringParameters = false;
+    CubicBezierParameters bezier;
+    bool hasBezierParameters = false;
 };
 
 struct UIAnimationTrack {
@@ -74,6 +76,10 @@ public:
     // Returns the key's new index, or -1 for an invalid address.
     int moveKeyframeTime(int clipIndex, int trackIndex, int keyframeIndex,
                          float timeMs);
+    bool setKeyframeCurve(int clipIndex, int trackIndex, int keyframeIndex,
+                          AnimationCurve curve,
+                          const CubicBezierParameters& bezier = {},
+                          const SpringParameters& spring = {});
     bool removeKeyframe(int clipIndex, int trackIndex, int keyframeIndex);
 
     std::string serialize(bool pretty = false) const;

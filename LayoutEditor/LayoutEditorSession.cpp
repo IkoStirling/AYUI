@@ -1086,6 +1086,8 @@ bool LayoutEditorSession::captureAnimationKeyframe(
     UIAnimationKeyframe keyframe;
     keyframe.timeMs = timeMs;
     keyframe.curve = curve;
+    keyframe.hasSpringParameters = curve == AnimationCurve::Spring;
+    keyframe.hasBezierParameters = curve == AnimationCurve::CubicBezier;
     if (track.property == UIAnimationProperty::Opacity) {
         keyframe.value.x = target->getOpacity();
     } else if (track.property == UIAnimationProperty::Position) {
@@ -1108,6 +1110,30 @@ bool LayoutEditorSession::captureAnimationKeyframe(
     markDirty(true);
     syncAnimationEditor();
     setStatus(L"Animation keyframe captured from the target Widget");
+    return true;
+}
+
+bool LayoutEditorSession::setAnimationKeyframeCurve(
+    int clipIndex, int trackIndex, int keyframeIndex, AnimationCurve curve,
+    const CubicBezierParameters& bezier,
+    const SpringParameters& spring) {
+    stopAnimationPreview();
+    UIAnimationLibrary updated = _animationLibrary;
+    if (!updated.setKeyframeCurve(
+            clipIndex, trackIndex, keyframeIndex, curve, bezier, spring)) {
+        return false;
+    }
+    if (updated.serialize(false) == _animationLibrary.serialize(false)) {
+        return false;
+    }
+    pushUndo(LayoutEditKind::Animation, "Edit animation curve");
+    _animationLibrary = std::move(updated);
+    _animationClipIndex = clipIndex;
+    _animationTrackIndex = trackIndex;
+    _animationKeyIndex = keyframeIndex;
+    markDirty(true);
+    syncAnimationEditor();
+    setStatus(L"Animation curve parameters updated");
     return true;
 }
 
@@ -2124,6 +2150,24 @@ void LayoutEditorSession::wireChrome() {
         findChromeById("animation_time"));
     _animationCurve = dynamic_cast<ComboBox*>(
         findChromeById("animation_curve"));
+    _animationBezierX1 = dynamic_cast<TextInput*>(
+        findChromeById("animation_bezier_x1"));
+    _animationBezierY1 = dynamic_cast<TextInput*>(
+        findChromeById("animation_bezier_y1"));
+    _animationBezierX2 = dynamic_cast<TextInput*>(
+        findChromeById("animation_bezier_x2"));
+    _animationBezierY2 = dynamic_cast<TextInput*>(
+        findChromeById("animation_bezier_y2"));
+    _animationSpringMass = dynamic_cast<TextInput*>(
+        findChromeById("animation_spring_mass"));
+    _animationSpringStiffness = dynamic_cast<TextInput*>(
+        findChromeById("animation_spring_stiffness"));
+    _animationSpringDamping = dynamic_cast<TextInput*>(
+        findChromeById("animation_spring_damping"));
+    _animationSpringVelocity = dynamic_cast<TextInput*>(
+        findChromeById("animation_spring_velocity"));
+    _animationSpringClamp = dynamic_cast<ComboBox*>(
+        findChromeById("animation_spring_clamp"));
     _animationRepeat = dynamic_cast<TextInput*>(
         findChromeById("animation_repeat"));
     _animationYoyo = dynamic_cast<ComboBox*>(
@@ -2168,8 +2212,19 @@ void LayoutEditorSession::wireChrome() {
     }
     if (_animationCurve != nullptr) {
         _animationCurve->setItems(
-            {L"Linear", L"Ease In", L"Ease Out", L"Ease In Out", L"Spring"});
+            {L"Linear", L"Ease In", L"Ease Out", L"Ease In Out", L"Spring",
+             L"Cubic Bezier"});
         _animationCurve->setSelectedIndex(0);
+        _animationCurve->setOnSelectionChanged([this](int index) {
+            if (_suppressAnimation || index < 0 || index > 5) return;
+            syncAnimationCurveParameterVisibility(
+                static_cast<AnimationCurve>(index),
+                _animationKeyIndex >= 0);
+        });
+    }
+    if (_animationSpringClamp != nullptr) {
+        _animationSpringClamp->setItems({L"Allow overshoot", L"Clamp 0..1"});
+        _animationSpringClamp->setSelectedIndex(0);
     }
     if (_animationYoyo != nullptr) {
         _animationYoyo->setItems({L"No yoyo", L"Yoyo"});
@@ -2203,7 +2258,7 @@ void LayoutEditorSession::wireChrome() {
             ? _animationCurve->getSelectedIndex() : 0;
         if (_animationTime == nullptr ||
             !parseFloat(_animationTime->getText(), timeMs) || timeMs < 0.0f ||
-            curve < 0 || curve > 4) {
+            curve < 0 || curve > 5) {
             setStatus(L"Animation key time must be a non-negative number");
             return;
         }
@@ -2213,6 +2268,9 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_animation_key_remove", [this]() {
         removeAnimationKeyframe(_animationClipIndex, _animationTrackIndex,
                                 _animationKeyIndex);
+    });
+    bindBtn("btn_animation_curve_apply", [this]() {
+        commitAnimationCurveParameters();
     });
     bindBtn("btn_animation_playback_apply", [this]() {
         int repeat = 0;
@@ -6462,9 +6520,14 @@ void LayoutEditorSession::syncAnimationTimelineView() {
     if (selectedTrack != nullptr && _animationKeyIndex >= 0 &&
         _animationKeyIndex < static_cast<int>(
             selectedTrack->keyframes.size())) {
+        const UIAnimationKeyframe& key = selectedTrack->keyframes[
+            static_cast<size_t>(_animationKeyIndex)];
+        const float segmentDuration = _animationKeyIndex > 0
+            ? key.timeMs - selectedTrack->keyframes[
+                static_cast<size_t>(_animationKeyIndex - 1)].timeMs
+            : 1000.0f;
         _animationTimelineView->setSelectedCurve(
-            selectedTrack->keyframes[static_cast<size_t>(
-                _animationKeyIndex)].curve);
+            key.curve, key.bezier, key.spring, segmentDuration);
     } else {
         _animationTimelineView->setSelectedCurve(AnimationCurve::Linear);
     }
@@ -6509,6 +6572,69 @@ void LayoutEditorSession::syncAnimationTransportStatus() {
     else if (isAnimationPreviewPaused()) transport += L"  ·  Paused";
     else if (isAnimationPreviewing()) transport += L"  ·  Scrub";
     _animationTransportStatus->setText(transport);
+}
+
+void LayoutEditorSession::syncAnimationCurveParameterVisibility(
+    AnimationCurve curve, bool hasKeyframe) {
+    const bool bezier = hasKeyframe &&
+        curve == AnimationCurve::CubicBezier;
+    const bool spring = hasKeyframe && curve == AnimationCurve::Spring;
+    setChromeVisible("animation_curve_parameter_label", bezier || spring);
+    setChromeVisible("row_animation_bezier", bezier);
+    setChromeVisible("row_animation_spring_a", spring);
+    setChromeVisible("row_animation_spring_b", spring);
+    setChromeVisible("row_animation_curve_apply", hasKeyframe);
+    setChromeVisible("animation_spring_clamp", spring);
+    setChromeEnabled("btn_animation_curve_apply", hasKeyframe);
+    if (auto* label = dynamic_cast<TextLabel*>(
+            findChromeById("animation_curve_parameter_label"))) {
+        label->setText(bezier
+            ? L"Bezier control points  x1 · y1 · x2 · y2"
+            : L"Spring parameters  mass · stiffness · damping · velocity");
+    }
+}
+
+void LayoutEditorSession::commitAnimationCurveParameters() {
+    if (_animationCurve == nullptr || _animationKeyIndex < 0) return;
+    const int curveIndex = _animationCurve->getSelectedIndex();
+    if (curveIndex < 0 || curveIndex > 5) return;
+    const AnimationCurve curve = static_cast<AnimationCurve>(curveIndex);
+    CubicBezierParameters bezier;
+    SpringParameters spring;
+    if (curve == AnimationCurve::CubicBezier) {
+        if (_animationBezierX1 == nullptr || _animationBezierY1 == nullptr ||
+            _animationBezierX2 == nullptr || _animationBezierY2 == nullptr ||
+            !parseFloat(_animationBezierX1->getText(), bezier.x1) ||
+            !parseFloat(_animationBezierY1->getText(), bezier.y1) ||
+            !parseFloat(_animationBezierX2->getText(), bezier.x2) ||
+            !parseFloat(_animationBezierY2->getText(), bezier.y2) ||
+            bezier.x1 < 0.0f || bezier.x1 > 1.0f ||
+            bezier.x2 < 0.0f || bezier.x2 > 1.0f) {
+            setStatus(L"Bezier x1/x2 must be in 0..1; y1/y2 must be numbers");
+            return;
+        }
+    } else if (curve == AnimationCurve::Spring) {
+        if (_animationSpringMass == nullptr ||
+            _animationSpringStiffness == nullptr ||
+            _animationSpringDamping == nullptr ||
+            _animationSpringVelocity == nullptr ||
+            !parseFloat(_animationSpringMass->getText(), spring.mass) ||
+            !parseFloat(_animationSpringStiffness->getText(),
+                        spring.stiffness) ||
+            !parseFloat(_animationSpringDamping->getText(), spring.damping) ||
+            !parseFloat(_animationSpringVelocity->getText(),
+                        spring.initialVelocity) ||
+            spring.mass <= 0.0f || spring.stiffness <= 0.0f ||
+            spring.damping < 0.0f) {
+            setStatus(L"Spring mass/stiffness must be positive; damping >= 0");
+            return;
+        }
+        spring.clampOvershoot = _animationSpringClamp != nullptr &&
+            _animationSpringClamp->getSelectedIndex() == 1;
+    }
+    setAnimationKeyframeCurve(
+        _animationClipIndex, _animationTrackIndex, _animationKeyIndex,
+        curve, bezier, spring);
 }
 
 void LayoutEditorSession::syncAnimationEditor() {
@@ -6604,10 +6730,37 @@ void LayoutEditorSession::syncAnimationEditor() {
             _animationTime->setText(formatFloat(key.timeMs));
         if (_animationCurve != nullptr)
             _animationCurve->setSelectedIndex(static_cast<int>(key.curve));
+        if (_animationBezierX1 != nullptr)
+            _animationBezierX1->setText(formatFloat(key.bezier.x1));
+        if (_animationBezierY1 != nullptr)
+            _animationBezierY1->setText(formatFloat(key.bezier.y1));
+        if (_animationBezierX2 != nullptr)
+            _animationBezierX2->setText(formatFloat(key.bezier.x2));
+        if (_animationBezierY2 != nullptr)
+            _animationBezierY2->setText(formatFloat(key.bezier.y2));
+        if (_animationSpringMass != nullptr)
+            _animationSpringMass->setText(formatFloat(key.spring.mass));
+        if (_animationSpringStiffness != nullptr)
+            _animationSpringStiffness->setText(
+                formatFloat(key.spring.stiffness));
+        if (_animationSpringDamping != nullptr)
+            _animationSpringDamping->setText(formatFloat(key.spring.damping));
+        if (_animationSpringVelocity != nullptr)
+            _animationSpringVelocity->setText(
+                formatFloat(key.spring.initialVelocity));
+        if (_animationSpringClamp != nullptr)
+            _animationSpringClamp->setSelectedIndex(
+                key.spring.clampOvershoot ? 1 : 0);
     } else if (_animationTime != nullptr && _animationTime->getText().empty()) {
         _animationTime->setText(L"0");
     }
     _suppressAnimation = false;
+
+    const bool hasSelectedKey = _animationKeyIndex >= 0 && track != nullptr;
+    const AnimationCurve selectedCurve = hasSelectedKey
+        ? track->keyframes[static_cast<size_t>(_animationKeyIndex)].curve
+        : AnimationCurve::Linear;
+    syncAnimationCurveParameterVisibility(selectedCurve, hasSelectedKey);
 
     syncAnimationTimelineView();
 

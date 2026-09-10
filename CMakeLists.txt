@@ -176,7 +176,7 @@ set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
 find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
-target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=117)
+target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=118)
 target_include_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -206,7 +206,7 @@ target_link_libraries(${MODULE_NAME} PRIVATE AYIO)
 
 if(WIN32)
     # Native Unicode itemization, bidi levels and UAX #14 line-break data.
-    target_link_libraries(${MODULE_NAME} PRIVATE usp10 uiautomationcore oleaut32)
+    target_link_libraries(${MODULE_NAME} PRIVATE usp10 uiautomationcore oleaut32 user32)
 endif()
 
 # Product-grade layout authoring core shared by the standalone Designer,

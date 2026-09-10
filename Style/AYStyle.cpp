@@ -69,6 +69,8 @@ AnimationCurve parseAnimationCurve(const json& value) {
     if (curve == "easeInOut" || curve == "ease-in-out")
         return AnimationCurve::EaseInOut;
     if (curve == "spring") return AnimationCurve::Spring;
+    if (curve == "cubicBezier" || curve == "cubic-bezier")
+        return AnimationCurve::CubicBezier;
     return AnimationCurve::EaseOut;
 }
 

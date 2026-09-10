@@ -31,6 +31,8 @@ inline float easeCurve(float t, AnimationCurve curve)
     case AnimationCurve::Spring:
         // Simplified spring — same formula as MockRenderer.
         return t + std::sin(t * 6.28f) * 0.1f * (1.0f - t);
+    case AnimationCurve::CubicBezier:
+        return evaluateCubicBezier(t, CubicBezierParameters{});
     case AnimationCurve::Linear:
     default:
         return t;

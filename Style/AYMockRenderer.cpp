@@ -1,4 +1,5 @@
 #include "AYUI/MockRenderer.h"
+#include "AYUI/Animation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -865,6 +866,9 @@ bool MockRenderer::updateAnimation(AnimationHandle anim, float deltaTime) {
         case AnimationCurve::Spring:
             // Simplified spring
             t = t + math::sin(t * 6.28f) * 0.1f * (1.0f - t);
+            break;
+        case AnimationCurve::CubicBezier:
+            t = evaluateCubicBezier(t, CubicBezierParameters{});
             break;
         case AnimationCurve::Linear:
         default:

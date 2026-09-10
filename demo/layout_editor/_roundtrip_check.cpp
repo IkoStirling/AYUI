@@ -147,6 +147,11 @@ int main() {
         "btn_responsive_capture", "animation_clip_name",
         "animation_clip_list", "animation_track_property",
         "animation_track_list", "animation_time", "animation_curve",
+        "animation_bezier_x1", "animation_bezier_y1",
+        "animation_bezier_x2", "animation_bezier_y2",
+        "animation_spring_mass", "animation_spring_stiffness",
+        "animation_spring_damping", "animation_spring_velocity",
+        "animation_spring_clamp", "btn_animation_curve_apply",
         "animation_key_list", "btn_animation_key_capture",
         "btn_animation_preview", "btn_animation_reset",
         "animation_timeline_workspace", "animation_timeline_host",
@@ -1025,6 +1030,32 @@ int main() {
         return 110;
     }
     session.stopAnimationPreview();
+
+    ayt::ui::CubicBezierParameters easeIn;
+    easeIn.x1 = 0.42f;
+    easeIn.y1 = 0.0f;
+    easeIn.x2 = 1.0f;
+    easeIn.y2 = 1.0f;
+    const bool authoredBezier = session.setAnimationKeyframeCurve(
+        0, 0, 1, ayt::ui::AnimationCurve::CubicBezier, easeIn);
+    const bool previewedBezier = session.previewAnimationFrame(0, 50.0f);
+    const float bezierOpacity = session.selected()->getOpacity();
+    const float expectedBezierOpacity = 1.0f -
+        ayt::ui::evaluateCubicBezier(0.5f, easeIn);
+    if (!authoredBezier || !previewedBezier ||
+        std::fabs(bezierOpacity - expectedBezierOpacity) > 0.001f) {
+        std::fprintf(stderr,
+            "animation Bezier authoring failed (authored=%d previewed=%d opacity=%.6f)\n",
+            authoredBezier ? 1 : 0, previewedBezier ? 1 : 0,
+            static_cast<double>(bezierOpacity));
+        return 119;
+    }
+    session.stopAnimationPreview();
+    if (!session.setAnimationKeyframeCurve(
+            0, 0, 1, ayt::ui::AnimationCurve::Linear)) {
+        std::fprintf(stderr, "animation curve reset failed\n");
+        return 120;
+    }
 
     if (!session.beginAnimationKeyframeDrag(0, 0, 1) ||
         session.updateAnimationKeyframeDrag(200.0f) != 1) {

@@ -312,6 +312,45 @@ TEST_CASE(physical_spring_parameters_control_overshoot) {
     clampedTimeline.tick(0.25f);
     CHECK_FLOAT_EQ(looseValue, 1.0f, 1e-5f);
     CHECK_FLOAT_EQ(clampedValue, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(evaluateSpring(0.0f, 500.0f, loose), 0.0f, 1e-6f);
+    CHECK_FLOAT_EQ(evaluateSpring(1.0f, 500.0f, loose), 1.0f, 1e-6f);
+}
+
+TEST_CASE(cubic_bezier_parameters_drive_timeline_sampling) {
+    AnimationSettings::get().reset();
+    CubicBezierParameters easeIn;
+    easeIn.x1 = 0.42f;
+    easeIn.y1 = 0.0f;
+    easeIn.x2 = 1.0f;
+    easeIn.y2 = 1.0f;
+
+    float value = 0.0f;
+    AnimationTimeline timeline;
+    timeline.addFloatTrack(
+        {AnimationKeyframe<float>(0.0f, 0.0f),
+         AnimationKeyframe<float>(1000.0f, 1.0f, easeIn)},
+        [&](float sampled) { value = sampled; });
+    timeline.seek(500.0f);
+    CHECK(value > 0.30f);
+    CHECK(value < 0.33f);
+    CHECK_FLOAT_EQ(evaluateCubicBezier(0.0f, easeIn), 0.0f, 1e-6f);
+    CHECK_FLOAT_EQ(evaluateCubicBezier(1.0f, easeIn), 1.0f, 1e-6f);
+}
+
+TEST_CASE(reduced_motion_provider_bridges_host_platform_preference) {
+    AnimationSettings& settings = AnimationSettings::get();
+    settings.reset();
+    settings.setReducedMotionProvider([]() -> std::optional<bool> {
+        return true;
+    });
+    CHECK(settings.refreshReducedMotionPreference());
+    CHECK(settings.isReducedMotion());
+    settings.setReducedMotionProvider([]() -> std::optional<bool> {
+        return false;
+    });
+    CHECK(settings.refreshReducedMotionPreference());
+    CHECK_FALSE(settings.isReducedMotion());
+    settings.reset();
 }
 
 TEST_CASE(sequence_carries_large_delta_into_the_next_step) {
@@ -452,6 +491,26 @@ TEST_CASE(stylesheet_parses_state_colors_and_declarative_transition) {
     CHECK(style->backgroundTransition.enabled);
     CHECK_FLOAT_EQ(style->backgroundTransition.durationMs, 120.0f, 1e-5f);
     CHECK(style->backgroundTransition.curve == AnimationCurve::Linear);
+}
+
+TEST_CASE(stylesheet_accepts_cubic_bezier_transition_curve_name) {
+    StyleSheet sheet;
+    const char* json = R"({
+        "styles": {
+            "bezier_button": {
+                "transition": {
+                    "backgroundColor": {
+                        "durationMs": 180,
+                        "curve": "cubic-bezier"
+                    }
+                }
+            }
+        }
+    })";
+    CHECK(sheet.loadFromString(json, std::strlen(json)));
+    const WidgetStyle* style = sheet.getStyle("bezier_button");
+    CHECK_NOT_NULL(style);
+    CHECK(style->backgroundTransition.curve == AnimationCurve::CubicBezier);
 }
 
 TEST_CASE(button_honors_stateful_style_transition_and_reduced_motion) {

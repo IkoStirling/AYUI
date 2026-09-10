@@ -5,7 +5,112 @@
 #include <cmath>
 #include <limits>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
+
 namespace ayt::ui {
+
+float evaluateCubicBezier(
+    float progress, const CubicBezierParameters& authored) {
+    progress = std::clamp(std::isfinite(progress) ? progress : 0.0f,
+                          0.0f, 1.0f);
+    if (progress <= 0.0f || progress >= 1.0f) return progress;
+    const float x1 = std::clamp(
+        std::isfinite(authored.x1) ? authored.x1 : 0.25f, 0.0f, 1.0f);
+    const float x2 = std::clamp(
+        std::isfinite(authored.x2) ? authored.x2 : 0.25f, 0.0f, 1.0f);
+    const float y1 = std::clamp(
+        std::isfinite(authored.y1) ? authored.y1 : 0.10f, -100.0f, 100.0f);
+    const float y2 = std::clamp(
+        std::isfinite(authored.y2) ? authored.y2 : 1.00f, -100.0f, 100.0f);
+    const auto cubic = [](float t, float p1, float p2) {
+        const float inverse = 1.0f - t;
+        return 3.0f * inverse * inverse * t * p1 +
+               3.0f * inverse * t * t * p2 + t * t * t;
+    };
+    const auto derivative = [](float t, float p1, float p2) {
+        const float inverse = 1.0f - t;
+        return 3.0f * inverse * inverse * p1 +
+               6.0f * inverse * t * (p2 - p1) +
+               3.0f * t * t * (1.0f - p2);
+    };
+
+    float parameter = progress;
+    for (int iteration = 0; iteration < 8; ++iteration) {
+        const float error = cubic(parameter, x1, x2) - progress;
+        if (std::fabs(error) <= 1e-6f) break;
+        const float slope = derivative(parameter, x1, x2);
+        if (std::fabs(slope) <= 1e-6f) break;
+        const float candidate = parameter - error / slope;
+        if (candidate < 0.0f || candidate > 1.0f) break;
+        parameter = candidate;
+    }
+    if (std::fabs(cubic(parameter, x1, x2) - progress) > 1e-5f) {
+        float low = 0.0f;
+        float high = 1.0f;
+        for (int iteration = 0; iteration < 18; ++iteration) {
+            parameter = (low + high) * 0.5f;
+            if (cubic(parameter, x1, x2) < progress) low = parameter;
+            else high = parameter;
+        }
+    }
+    return cubic(parameter, y1, y2);
+}
+
+float evaluateSpring(float progress, float durationMs,
+                     const SpringParameters& authored) {
+    const auto finiteOr = [](float value, float fallback) {
+        return std::isfinite(value) ? value : fallback;
+    };
+    progress = std::clamp(finiteOr(progress, 0.0f), 0.0f, 1.0f);
+    if (progress <= 0.0f || progress >= 1.0f) return progress;
+    const double mass = std::clamp(
+        static_cast<double>(finiteOr(authored.mass, 1.0f)), 0.001, 1000.0);
+    const double stiffness = std::clamp(
+        static_cast<double>(finiteOr(authored.stiffness, 170.0f)),
+        0.001, 1000000.0);
+    const double damping = std::clamp(
+        static_cast<double>(finiteOr(authored.damping, 18.0f)),
+        0.0, 100000.0);
+    const double initialVelocity = std::clamp(
+        static_cast<double>(finiteOr(authored.initialVelocity, 0.0f)),
+        -100000.0, 100000.0);
+    const double seconds = static_cast<double>(
+        progress *
+        std::max(0.0f, finiteOr(durationMs, 0.0f))) * 0.001;
+    const double omega0 = std::sqrt(stiffness / mass);
+    const double zeta = damping / (2.0 * std::sqrt(stiffness * mass));
+    double displacement = 0.0;
+
+    if (zeta < 1.0 - 1e-6) {
+        const double omegaD = omega0 * std::sqrt(1.0 - zeta * zeta);
+        const double a = -1.0;
+        const double b = (initialVelocity - zeta * omega0) / omegaD;
+        displacement = std::exp(-zeta * omega0 * seconds) *
+            (a * std::cos(omegaD * seconds) +
+             b * std::sin(omegaD * seconds));
+    } else if (zeta <= 1.0 + 1e-6) {
+        const double a = -1.0;
+        const double b = initialVelocity - omega0;
+        displacement = (a + b * seconds) * std::exp(-omega0 * seconds);
+    } else {
+        const double root = std::sqrt(zeta * zeta - 1.0);
+        const double r1 = -omega0 * (zeta - root);
+        const double r2 = -omega0 * (zeta + root);
+        const double c1 = (initialVelocity + r2) / (r1 - r2);
+        const double c2 = -1.0 - c1;
+        displacement = c1 * std::exp(r1 * seconds) +
+                       c2 * std::exp(r2 * seconds);
+    }
+
+    const double response = 1.0 + displacement;
+    float result = std::isfinite(response)
+        ? static_cast<float>(response) : progress;
+    if (authored.clampOvershoot) result = std::clamp(result, 0.0f, 1.0f);
+    return result;
+}
 
 AnimationSettings& AnimationSettings::get() {
     static AnimationSettings settings;
@@ -27,9 +132,34 @@ float AnimationSettings::playbackDelta(
     return dt / _durationScale;
 }
 
+bool AnimationSettings::refreshReducedMotionPreference() {
+    if (_reducedMotionProvider) {
+        try {
+            const std::optional<bool> preference = _reducedMotionProvider();
+            if (!preference.has_value()) return false;
+            _reducedMotion = *preference;
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+#if defined(_WIN32)
+    BOOL clientAreaAnimation = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0,
+                               &clientAreaAnimation, 0)) {
+        return false;
+    }
+    _reducedMotion = clientAreaAnimation == FALSE;
+    return true;
+#else
+    return false;
+#endif
+}
+
 void AnimationSettings::reset() {
     _durationScale = 1.0f;
     _reducedMotion = false;
+    _reducedMotionProvider = {};
 }
 
 namespace {
@@ -59,54 +189,13 @@ T sampleKeyframes(const std::vector<AnimationKeyframe<T>>& keys, float timeMs) {
     const float linear = (timeMs - left->timeMs) / span;
 
     float factor = easeCurve(linear, right->curve);
+    if (right->curve == AnimationCurve::CubicBezier &&
+        right->hasBezierParameters) {
+        factor = evaluateCubicBezier(linear, right->bezier);
+    }
     if (right->curve == AnimationCurve::Spring
         && right->hasSpringParameters) {
-        const SpringParameters& authored = right->spring;
-        const auto finiteOr = [](float value, float fallback) {
-            return std::isfinite(value) ? value : fallback;
-        };
-        const double mass = std::clamp(
-            static_cast<double>(finiteOr(authored.mass, 1.0f)), 0.001, 1000.0);
-        const double stiffness = std::clamp(
-            static_cast<double>(finiteOr(authored.stiffness, 170.0f)),
-            0.001, 1000000.0);
-        const double damping = std::clamp(
-            static_cast<double>(finiteOr(authored.damping, 18.0f)),
-            0.0, 100000.0);
-        const double initialVelocity = std::clamp(
-            static_cast<double>(finiteOr(authored.initialVelocity, 0.0f)),
-            -100000.0, 100000.0);
-        const double seconds = static_cast<double>(linear * span) * 0.001;
-        const double omega0 = std::sqrt(stiffness / mass);
-        const double zeta = damping / (2.0 * std::sqrt(stiffness * mass));
-        double displacement = 0.0;
-
-        if (zeta < 1.0 - 1e-6) {
-            const double omegaD = omega0 * std::sqrt(1.0 - zeta * zeta);
-            const double a = -1.0;
-            const double b = (initialVelocity - zeta * omega0) / omegaD;
-            displacement = std::exp(-zeta * omega0 * seconds)
-                * (a * std::cos(omegaD * seconds)
-                   + b * std::sin(omegaD * seconds));
-        } else if (zeta <= 1.0 + 1e-6) {
-            const double a = -1.0;
-            const double b = initialVelocity - omega0;
-            displacement = (a + b * seconds) * std::exp(-omega0 * seconds);
-        } else {
-            const double root = std::sqrt(zeta * zeta - 1.0);
-            const double r1 = -omega0 * (zeta - root);
-            const double r2 = -omega0 * (zeta + root);
-            const double c1 = (initialVelocity + r2) / (r1 - r2);
-            const double c2 = -1.0 - c1;
-            displacement = c1 * std::exp(r1 * seconds)
-                + c2 * std::exp(r2 * seconds);
-        }
-
-        const double response = 1.0 + displacement;
-        factor = std::isfinite(response)
-            ? static_cast<float>(response) : linear;
-        if (authored.clampOvershoot)
-            factor = std::clamp(factor, 0.0f, 1.0f);
+        factor = evaluateSpring(linear, span, right->spring);
     }
     return tweenLerp(left->value, right->value, factor);
 }

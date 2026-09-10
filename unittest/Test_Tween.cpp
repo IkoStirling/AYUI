@@ -21,6 +21,7 @@ TEST_CASE(ease_curve_table_matches_mockrenderer) {
         AnimationCurve::EaseOut,
         AnimationCurve::EaseInOut,
         AnimationCurve::Spring,
+        AnimationCurve::CubicBezier,
         AnimationCurve::Linear,
     };
     const float ts[] = { 0.1f, 0.3f, 0.5f, 0.7f, 0.9f };

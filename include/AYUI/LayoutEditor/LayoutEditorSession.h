@@ -142,6 +142,11 @@ public:
     bool removeAnimationTrack(int clipIndex, int trackIndex);
     bool captureAnimationKeyframe(int clipIndex, int trackIndex,
                                   float timeMs, AnimationCurve curve);
+    bool setAnimationKeyframeCurve(
+        int clipIndex, int trackIndex, int keyframeIndex,
+        AnimationCurve curve,
+        const CubicBezierParameters& bezier = {},
+        const SpringParameters& spring = {});
     bool removeAnimationKeyframe(int clipIndex, int trackIndex,
                                  int keyframeIndex);
     bool setAnimationPlayback(int clipIndex, int repeatCount, bool yoyo,
@@ -296,6 +301,9 @@ private:
     void syncAnimationTimelineView();
     void syncAnimationTimelineTrack(int trackIndex);
     void syncAnimationTransportStatus();
+    void syncAnimationCurveParameterVisibility(AnimationCurve curve,
+                                               bool hasKeyframe);
+    void commitAnimationCurveParameters();
     void ensureAnimationTimelineView();
     void syncAnimationTimelineGeometry();
     void relayoutAfterAnimationSample();
@@ -598,6 +606,15 @@ private:
     ListView* _animationKeyList = nullptr;
     TextInput* _animationTime = nullptr;
     ComboBox* _animationCurve = nullptr;
+    TextInput* _animationBezierX1 = nullptr;
+    TextInput* _animationBezierY1 = nullptr;
+    TextInput* _animationBezierX2 = nullptr;
+    TextInput* _animationBezierY2 = nullptr;
+    TextInput* _animationSpringMass = nullptr;
+    TextInput* _animationSpringStiffness = nullptr;
+    TextInput* _animationSpringDamping = nullptr;
+    TextInput* _animationSpringVelocity = nullptr;
+    ComboBox* _animationSpringClamp = nullptr;
     TextInput* _animationRepeat = nullptr;
     ComboBox* _animationYoyo = nullptr;
     ComboBox* _animationImportance = nullptr;

@@ -31,7 +31,7 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - RichText run 级 font family/weight/italic/language，以及 AYRenderer 多 face、多 atlas 一致测量/绘制
 - Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
-- 多轨 Timeline/Keyframe、Sequence 串联、repeat/yoyo、物理弹簧、完成/取消/暂停控制、全局动画倍率与 reduced-motion
+- 多轨 Timeline/Keyframe、Sequence 串联、repeat/yoyo、可编辑 Cubic Bezier/物理弹簧、完成/取消/暂停控制、全局动画倍率与系统 reduced-motion 桥接
 - 声明式 normal/hovered/pressed/disabled Style 状态色和 backgroundColor transition
 - 默认启用 Widget-local retained display-list，保留即时绘制兜底
 - 后端无关的 retained vector-path recipe，以及 AYRenderer 的凹多边形/曲线 tessellation、孔洞与 stencil path clip
@@ -46,9 +46,9 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   Style 来源和 Normal/Hovered/Pressed/Disabled 状态预览，以及可点击定位的布局诊断列表；
   Reuse & Responsive 层提供文档内可复用 Widget block、Compact/Medium/Wide 断点预览、
   断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
-  轨道、关键帧/曲线、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
+  轨道、关键帧、Cubic Bezier/物理弹簧参数、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
-2026-09-10 Insider Windows Debug 当前提交基线为 AYUI `5579 / 5579`；AYEditor 最近完整基线仍为
+2026-09-10 Insider Windows Debug 当前提交基线为 AYUI `5660 / 5660`；AYEditor 最近完整基线仍为
 `2099 / 2099` 条断言通过，
 Layout Editor headless round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
@@ -141,7 +141,7 @@ JSON 中不保存或执行代码。Widget 只持久化 `controller` 与 `events`
 
 ```cpp
 AnimationSettings::get().setDurationScale(1.0f);
-AnimationSettings::get().setReducedMotion(userPrefersReducedMotion);
+AnimationSettings::get().refreshReducedMotionPreference(); // Windows SPI or host provider
 
 AnimationTimeline fade;
 fade.addFloatTrack({{0, 0}, {160, 1, AnimationCurve::EaseOut}},
@@ -160,6 +160,12 @@ pulse.addFloatTrack(
     [&progress](float value) { progress.setValue(value); });
 pulse.setRepeatCount(3).setYoyo(true); // 首轮 + 3 次，方向交替
 
+CubicBezierParameters easeIn{0.42f, 0.0f, 1.0f, 1.0f};
+AnimationTimeline reveal;
+reveal.addFloatTrack(
+    {AnimationKeyframe<float>(0, 0), AnimationKeyframe<float>(240, 1, easeIn)},
+    [&panel](float alpha) { panel.setOpacity(alpha); });
+
 AnimationSequence intro;
 intro.append(std::move(fade)).then(std::move(slide));
 intro.play();
@@ -170,7 +176,10 @@ intro.play();
 时间线以总播放时钟求当前轮次，因此一次 `tick` 跨越多个周期不会丢时间；Sequence 也会把跨步骤终点的
 剩余帧时间继续交给下一步。带 `SpringParameters` 的关键帧使用 mass/stiffness/damping/initialVelocity
 二阶响应，`clampOvershoot` 可将插值因子限制在 `[0, 1]`。未提供参数的 `AnimationCurve::Spring`
-继续保留原来的轻量曲线，Widget tween 和 renderer 兼容路径不受影响。
+继续保留原来的轻量曲线，Widget tween 和 renderer 兼容路径不受影响。`CubicBezierParameters` 使用
+CSS timing-function 语义，x1/x2 限制在 `[0, 1]`，y1/y2 可超出该范围以表达 anticipation/overshoot。
+Windows 默认通过 `SPI_GETCLIENTAREAANIMATION` 刷新 reduced-motion；其他平台或产品设置可安装
+`ReducedMotionProvider`，并在启动及系统设置通知后调用 `refreshReducedMotionPreference()`。
 
 Widget 的简单属性动画仍可直接使用 `animateOpacity/animatePositionTo`；传入 `AnimationOptions` 可设置
 完成/取消回调、importance，并通过 `pauseAnimations/resumeAnimations/cancelAnimations` 控制播放。
@@ -359,7 +368,8 @@ VBox/HBox/Grid 等结构化父级继续拥有几何布局权，但响应式隐�
 Widget JSON 往返，非法区间、重叠区间和没有基础 Anchor 的覆盖会进入 Validation 诊断。
 
 Animation Authoring 在同一版本化文档信封中保存 `animations`。每个 clip 由稳定 Widget ID、
-`opacity/position/size` 属性轨道和按时间排序的关键帧组成，支持 Linear/Ease/Spring 曲线及
+`opacity/position/size` 属性轨道和按时间排序的关键帧组成，支持 Linear/Ease、CSS-compatible
+Cubic Bezier 与物理 Spring 曲线及
 repeat/yoyo/Decorative/Essential 播放元数据。Designer 的时间轴支持 Play/Pause/Stop/Loop、标尺
 scrub、关键帧拖动、滚轮缩放、中键平移、纵向轨道滚动和当前曲线预览；播放由不丢时的宿主真实帧
 时钟驱动，播放中切换 Loop 立即生效。首次预览只保存
@@ -367,7 +377,9 @@ scrub、关键帧拖动、滚轮缩放、中键平移、纵向轨道滚动和当
 预览结果不进入 dirty 文档。缺失目标、空/单关键帧轨道以及与
 Anchor、VBox/HBox/Grid 几何权属冲突的轨道都会进入 Validation；重命名 Widget ID 会原子更新轨道引用。
 拖动关键帧作为单次可撤销事务提交，连续移动仅增量刷新当前轨道与预览，释放后才重建结构化编辑列表；
-窗口失焦或 capture cancel 会回滚该事务。
+窗口失焦或 capture cancel 会回滚该事务。选中关键帧后可直接编辑 Bezier 的四个控制点，或 Spring
+的 mass/stiffness/damping/initialVelocity 和 overshoot clamp；参数、时间轴预览、运行时采样与 JSON
+往返共用同一求值路径。
 
 `WidgetFactory` 是类型名到构造器的唯一注册点。内置控件由模块自动注册；宿主扩展控件可调用 `registerCreator` 或使用 `REGISTER_WIDGET`。
 

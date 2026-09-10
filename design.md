@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-09-08
+**文档修订：** 2026-09-10
 
 **CMake 目标版本：** 1.0.0
 
@@ -9,7 +9,7 @@
 **状态：** 根工程集成、Widget-local retained display-list、Production root/subtree UI Layer、共享
 RenderTargetPool、Serializer 完整化、AYRenderer 合批与 vector-path/stencil clip、DPI/UI scale、无障碍语义、主题继承、
 Tab/RichText 产品化、Unicode shaping、Windows UI Automation adapter、POSIX Clipboard、Docking、
-Layout Editor（扩展工具箱、图片预览、声明式 controller/event）、动画与完整单测均可构建。
+Layout Editor（schema Inspector、typed undo、宿主交互契约/触发图、响应式与动画参数创作）、动画与完整单测均可构建。
 
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
@@ -580,7 +580,8 @@ ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay �
 空/非法/重复 ID、非有限/非正几何、缺失 Style/纹理、事件缺 Controller、交互控件无可访问名称、
 非法 Anchor、自由控件越过父级以及 Grid span 重叠。诊断列表和 View/Validate Layout 共用同一结果，
 点击诊断通过运行时 Widget 引用定位；引用仅存在于 authoring session，不进入 JSON。Controller/handler
-是否真实存在仍需未来由宿主注册表提供解析结果，AYUI 不依赖游戏反射系统。
+是否真实存在由宿主注入 `LayoutControllerContract` 或刷新 provider；AYUI 仅校验契约并构建只读触发图，
+不依赖游戏反射系统，也不持有 Controller 实例。
 
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
 必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section
@@ -634,6 +635,13 @@ Animation 撤销事务；窗口失焦等 capture cancel 会回滚完整事务而
 列表项。预览时钟不截断宿主已流逝时间，播放期间切换 Loop 会立即更新活动 Timeline。时间轴是
 authoring-only Widget，不进入布局 JSON 或运行时 WidgetFactory。
 
+第八阶段补齐曲线参数创作：关键帧可保存 CSS-compatible `CubicBezierParameters`，或
+mass/stiffness/damping/initialVelocity/clampOvershoot 物理 `SpringParameters`。Inspector 数值编辑、
+时间轴曲线预览、文档 JSON 和运行时 Timeline 共用 `evaluateCubicBezier`/`evaluateSpring`，不维护
+editor-only 近似器。曲线参数变更作为一个 Animation snapshot command 撤销；切换回普通 Ease/Linear
+会清除不适用参数标记。`AnimationSettings::refreshReducedMotionPreference()` 优先调用可注入 provider，
+Windows 无 provider 时查询 `SPI_GETCLIENTAREAANIMATION`；宿主应在启动和系统设置通知后刷新。
+
 编辑可靠性以文档事务为边界：ID 在提交前校验格式、保留前缀和全树唯一性，切换选中项会结束正在
 合并的属性事务；Duplicate 直接复制当前 selection snapshot，不改写系统剪贴板，Paste 每次优先读取
 系统剪贴板，避免复用过期的内部 payload。Image 的 `textureName` 在打开、恢复和粘贴后通过宿主
@@ -680,6 +688,10 @@ opacity 回归测试。动画产品化层随后完成：
 - `SpringParameters` 为 Timeline 的目标 keyframe 提供 mass/stiffness/damping/initialVelocity 二阶
   响应和可选 overshoot clamp。参数只影响该段 Timeline；原有轻量 `AnimationCurve::Spring`、Widget
   tween 与 renderer handle 的点一致兼容路径保持不变。
+- `CubicBezierParameters` 使用 CSS timing-function 的时间反解语义；x 控制点限制在 `[0, 1]`，y 控制点
+  允许超出范围。文档、Designer 预览和运行时 Timeline 调用同一个求值函数。
+- reduced-motion 可由宿主 provider 覆盖；Windows 默认桥接系统 client-area animation 偏好。AYUI
+  不自行轮询，宿主在启动与平台设置变化时显式刷新，避免把窗口消息机制耦合进 UI 语义层。
 - `AnimationSequence::append().then()` 串行播放 Timeline，并提供序列级完成/取消与 pause/resume；
   一帧越过步骤终点时，未消费的 `dt` 会继续推进后续步骤，避免低帧率下序列被人为拉长。
 - Style JSON 支持 `states.normal/hovered/pressed/disabled.backgroundColor`（以及紧凑的
@@ -798,6 +810,9 @@ AYUI `5611 / 5611`，headless round-trip 通过。
 兜底；源码 ABI 更新到 116，当前基线为 AYUI `5619 / 5619`，headless round-trip 通过。
 Controller/Event contract 与只读触发图随后进入 authoring core，源码 ABI 更新到 117；当前基线为
 AYUI `5626 / 5626`，headless round-trip 通过。
+曲线参数与系统 reduced-motion 阶段新增 Cubic Bezier 时间反解、物理 Spring 参数面板、时间轴真实曲线
+预览、参数 JSON 往返和 Windows/宿主偏好桥；源码 ABI 更新到 118。Insider Windows Debug 当前基线为
+AYUI `5660 / 5660`，headless round-trip 通过；AYEditor/AYRenderer 全量重链接按集成窗口延后。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
@@ -888,10 +903,10 @@ draw call 从保守路径的 60–94 次降至 23–41 次。这个结果锁定�
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
 7. 动画产品化已完成状态化 Style transition、多轨 timeline/keyframe、完成/取消/暂停/串联 API、
-   全局 animation scale、reduced-motion、repeat/yoyo、物理弹簧参数与跨 Sequence 步骤的时间守恒；
-   文档级 clip/track/keyframe、Designer 结构化创作、图形时间轴、连续 transport、关键帧拖动和曲线
-   预览也已闭环。后续是 OS reduced-motion 偏好自动桥接、可编辑 Bezier/物理参数与事件触发图，
-   不要求修改 Widget tween 或另建一套动画求值路径。
+   全局 animation scale、系统/宿主 reduced-motion 桥接、repeat/yoyo、可编辑 Cubic Bezier/物理弹簧
+   参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
+   预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
+   clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

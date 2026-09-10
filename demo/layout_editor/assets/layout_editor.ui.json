@@ -454,6 +454,37 @@
                       { "type": "ComboBox", "id": "animation_curve", "style": "__le_input", "size": { "w": 174, "h": 30 }, "slot": { "width": 174 } }
                     ]
                   },
+                  { "type": "TextLabel", "id": "animation_curve_parameter_label", "style": "__le_muted", "text": "Bezier control points", "visible": false, "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_animation_bezier", "visible": false, "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 4,
+                    "children": [
+                      { "type": "TextInput", "id": "animation_bezier_x1", "style": "__le_input", "text": "0.25", "size": { "w": 65, "h": 30 }, "slot": { "width": 65 } },
+                      { "type": "TextInput", "id": "animation_bezier_y1", "style": "__le_input", "text": "0.10", "size": { "w": 65, "h": 30 }, "slot": { "width": 65 } },
+                      { "type": "TextInput", "id": "animation_bezier_x2", "style": "__le_input", "text": "0.25", "size": { "w": 65, "h": 30 }, "slot": { "width": 65 } },
+                      { "type": "TextInput", "id": "animation_bezier_y2", "style": "__le_input", "text": "1.00", "size": { "w": 65, "h": 30 }, "slot": { "width": 65 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_animation_spring_a", "visible": false, "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextInput", "id": "animation_spring_mass", "style": "__le_input", "text": "1", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "TextInput", "id": "animation_spring_stiffness", "style": "__le_input", "text": "170", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_animation_spring_b", "visible": false, "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "TextInput", "id": "animation_spring_damping", "style": "__le_input", "text": "18", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "TextInput", "id": "animation_spring_velocity", "style": "__le_input", "text": "0", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_animation_curve_apply", "visible": false, "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "ComboBox", "id": "animation_spring_clamp", "style": "__le_input", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_animation_curve_apply", "style": "__le_command", "text": "Apply curve", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                    ]
+                  },
                   { "type": "ListView", "id": "animation_key_list", "style": "__le_input", "size": { "w": 272, "h": 90 }, "slot": { "height": 90 }, "itemHeight": 26 },
                   {
                     "type": "HBox", "id": "row_animation_key_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,

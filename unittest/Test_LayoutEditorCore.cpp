@@ -672,6 +672,70 @@ TEST_CASE(document_animation_library_round_trips_and_builds_runtime_timeline) {
     destroyWidgetTree(root);
 }
 
+TEST_CASE(document_animation_bezier_parameters_round_trip_and_sample) {
+    UIAnimationLibrary animations;
+    const int clip = animations.addClip("Bezier");
+    const int track = animations.addTrack(
+        clip, "fade_target", UIAnimationProperty::Opacity);
+    UIAnimationKeyframe start;
+    start.value.x = 0.0f;
+    UIAnimationKeyframe end;
+    end.timeMs = 1000.0f;
+    end.value.x = 1.0f;
+    CHECK(animations.upsertKeyframe(clip, track, start) == 0);
+    CHECK(animations.upsertKeyframe(clip, track, end) == 1);
+
+    CubicBezierParameters easeIn;
+    easeIn.x1 = 0.42f;
+    easeIn.y1 = 0.0f;
+    easeIn.x2 = 1.0f;
+    easeIn.y2 = 1.0f;
+    CHECK(animations.setKeyframeCurve(
+        clip, track, 1, AnimationCurve::CubicBezier, easeIn));
+    const std::string encoded = animations.serialize(false);
+    CHECK(encoded.find("cubicBezier") != std::string::npos);
+    CHECK(encoded.find("\"bezier\"") != std::string::npos);
+
+    UIAnimationLibrary decoded;
+    std::string error;
+    CHECK(decoded.deserialize(encoded, &error));
+    const UIAnimationKeyframe& restored =
+        decoded.clips()[0].tracks[0].keyframes[1];
+    CHECK(restored.curve == AnimationCurve::CubicBezier);
+    CHECK(restored.hasBezierParameters);
+    CHECK_FLOAT_EQ(restored.bezier.x1, 0.42f, 1e-5f);
+
+    Widget target;
+    target.setId("fade_target");
+    AnimationTimeline timeline = decoded.createTimeline(
+        0, [&target](const std::string&) { return &target; });
+    timeline.seek(500.0f);
+    CHECK(target.getOpacity() > 0.30f);
+    CHECK(target.getOpacity() < 0.33f);
+
+    SpringParameters spring;
+    spring.mass = 1.5f;
+    spring.stiffness = 210.0f;
+    spring.clampOvershoot = true;
+    CHECK(decoded.setKeyframeCurve(
+        0, 0, 1, AnimationCurve::Spring, {}, spring));
+    const UIAnimationKeyframe& springKey =
+        decoded.clips()[0].tracks[0].keyframes[1];
+    CHECK(springKey.hasSpringParameters);
+    CHECK_FALSE(springKey.hasBezierParameters);
+    CHECK_FLOAT_EQ(springKey.spring.stiffness, 210.0f, 1e-5f);
+    const std::string springEncoded = decoded.serialize(false);
+    CHECK(springEncoded.find("\"spring\"") != std::string::npos);
+    UIAnimationLibrary springDecoded;
+    CHECK(springDecoded.deserialize(springEncoded, &error));
+    const UIAnimationKeyframe& restoredSpring =
+        springDecoded.clips()[0].tracks[0].keyframes[1];
+    CHECK(restoredSpring.hasSpringParameters);
+    CHECK_FLOAT_EQ(restoredSpring.spring.mass, 1.5f, 1e-5f);
+    CHECK_FLOAT_EQ(restoredSpring.spring.stiffness, 210.0f, 1e-5f);
+    CHECK(restoredSpring.spring.clampOvershoot);
+}
+
 TEST_CASE(animation_key_retime_and_timeline_surface_keep_sorted_interaction) {
     UIAnimationLibrary animations;
     const int clip = animations.addClip("Motion");

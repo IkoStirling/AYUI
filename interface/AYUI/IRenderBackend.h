@@ -53,7 +53,14 @@ enum class PathStrokeJoin { Miter, Round, Bevel };
 
 enum class BlurType { Gaussian, Box, Motion };
 
-enum class AnimationCurve { Linear, EaseIn, EaseOut, EaseInOut, Spring };
+enum class AnimationCurve {
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+    Spring,
+    CubicBezier,
+};
 
 enum class AnimationFlags { None = 0, Reverse = 1, Loop = 2, PingPong = 4 };
 

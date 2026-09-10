@@ -99,9 +99,24 @@ void LayoutAnimationTimelineView::setSelection(int trackIndex, int keyIndex) {
     if (changed) markDirty();
 }
 
-void LayoutAnimationTimelineView::setSelectedCurve(AnimationCurve curve) {
-    if (_selectedCurve == curve) return;
+void LayoutAnimationTimelineView::setSelectedCurve(
+    AnimationCurve curve, const CubicBezierParameters& bezier,
+    const SpringParameters& spring, float segmentDurationMs) {
+    const float duration = std::max(1.0f, segmentDurationMs);
+    const bool changed = _selectedCurve != curve ||
+        _selectedBezier.x1 != bezier.x1 || _selectedBezier.y1 != bezier.y1 ||
+        _selectedBezier.x2 != bezier.x2 || _selectedBezier.y2 != bezier.y2 ||
+        _selectedSpring.mass != spring.mass ||
+        _selectedSpring.stiffness != spring.stiffness ||
+        _selectedSpring.damping != spring.damping ||
+        _selectedSpring.initialVelocity != spring.initialVelocity ||
+        _selectedSpring.clampOvershoot != spring.clampOvershoot ||
+        _selectedSegmentDurationMs != duration;
+    if (!changed) return;
     _selectedCurve = curve;
+    _selectedBezier = bezier;
+    _selectedSpring = spring;
+    _selectedSegmentDurationMs = duration;
     markDirty();
 }
 
@@ -468,7 +483,14 @@ void LayoutAnimationTimelineView::drawCurvePreview(
     const float height = std::max(1.0f, bounds.maxY - bounds.minY - 6.0f);
     for (int i = 0; i <= 22; ++i) {
         const float x = static_cast<float>(i) / 22.0f;
-        const float y = std::clamp(easeCurve(x, _selectedCurve), 0.0f, 1.0f);
+        float sample = easeCurve(x, _selectedCurve);
+        if (_selectedCurve == AnimationCurve::CubicBezier) {
+            sample = evaluateCubicBezier(x, _selectedBezier);
+        } else if (_selectedCurve == AnimationCurve::Spring) {
+            sample = evaluateSpring(
+                x, _selectedSegmentDurationMs, _selectedSpring);
+        }
+        const float y = std::clamp(sample, 0.0f, 1.0f);
         const float px = bounds.minX + 3.0f + x * width;
         const float py = bounds.maxY - 3.0f - y * height;
         renderer.drawRoundedRect(

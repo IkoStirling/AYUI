@@ -66,6 +66,7 @@ const char* UIAnimationLibrary::curveName(AnimationCurve curve) {
     case AnimationCurve::EaseOut: return "easeOut";
     case AnimationCurve::EaseInOut: return "easeInOut";
     case AnimationCurve::Spring: return "spring";
+    case AnimationCurve::CubicBezier: return "cubicBezier";
     default: return "linear";
     }
 }
@@ -77,6 +78,7 @@ bool UIAnimationLibrary::curveFromName(
     else if (name == "easeOut") curve = AnimationCurve::EaseOut;
     else if (name == "easeInOut") curve = AnimationCurve::EaseInOut;
     else if (name == "spring") curve = AnimationCurve::Spring;
+    else if (name == "cubicBezier") curve = AnimationCurve::CubicBezier;
     else return false;
     return true;
 }
@@ -116,6 +118,16 @@ void UIAnimationLibrary::normalizeKeyframe(
         keyframe.spring.initialVelocity);
     if (keyframe.curve != AnimationCurve::Spring)
         keyframe.hasSpringParameters = false;
+    keyframe.bezier.x1 = std::clamp(
+        finiteOr(keyframe.bezier.x1, 0.25f), 0.0f, 1.0f);
+    keyframe.bezier.y1 = std::clamp(
+        finiteOr(keyframe.bezier.y1, 0.10f), -100.0f, 100.0f);
+    keyframe.bezier.x2 = std::clamp(
+        finiteOr(keyframe.bezier.x2, 0.25f), 0.0f, 1.0f);
+    keyframe.bezier.y2 = std::clamp(
+        finiteOr(keyframe.bezier.y2, 1.00f), -100.0f, 100.0f);
+    if (keyframe.curve != AnimationCurve::CubicBezier)
+        keyframe.hasBezierParameters = false;
 }
 
 int UIAnimationLibrary::addClip(
@@ -284,6 +296,28 @@ int UIAnimationLibrary::moveKeyframeTime(
     return upsertKeyframe(clipIndex, trackIndex, std::move(moved));
 }
 
+bool UIAnimationLibrary::setKeyframeCurve(
+    int clipIndex, int trackIndex, int keyframeIndex, AnimationCurve curve,
+    const CubicBezierParameters& bezier,
+    const SpringParameters& spring) {
+    if (clipIndex < 0 || clipIndex >= static_cast<int>(_clips.size()))
+        return false;
+    auto& tracks = _clips[static_cast<size_t>(clipIndex)].tracks;
+    if (trackIndex < 0 || trackIndex >= static_cast<int>(tracks.size()))
+        return false;
+    auto& keys = tracks[static_cast<size_t>(trackIndex)].keyframes;
+    if (keyframeIndex < 0 || keyframeIndex >= static_cast<int>(keys.size()))
+        return false;
+    UIAnimationKeyframe& key = keys[static_cast<size_t>(keyframeIndex)];
+    key.curve = curve;
+    key.bezier = bezier;
+    key.spring = spring;
+    key.hasBezierParameters = curve == AnimationCurve::CubicBezier;
+    key.hasSpringParameters = curve == AnimationCurve::Spring;
+    normalizeKeyframe(tracks[static_cast<size_t>(trackIndex)].property, key);
+    return true;
+}
+
 bool UIAnimationLibrary::removeKeyframe(
     int clipIndex, int trackIndex, int keyframeIndex) {
     if (clipIndex < 0 || clipIndex >= static_cast<int>(_clips.size()))
@@ -318,6 +352,15 @@ std::string UIAnimationLibrary::serialize(bool pretty) const {
                         {"damping", keyframe.spring.damping},
                         {"initialVelocity", keyframe.spring.initialVelocity},
                         {"clampOvershoot", keyframe.spring.clampOvershoot}
+                    };
+                }
+                if (keyframe.curve == AnimationCurve::CubicBezier &&
+                    keyframe.hasBezierParameters) {
+                    key["bezier"] = {
+                        {"x1", keyframe.bezier.x1},
+                        {"y1", keyframe.bezier.y1},
+                        {"x2", keyframe.bezier.x2},
+                        {"y2", keyframe.bezier.y2}
                     };
                 }
                 keys.push_back(std::move(key));
@@ -414,6 +457,15 @@ bool UIAnimationLibrary::deserialize(
                             "clampOvershoot", false);
                         keyframe.hasSpringParameters = true;
                     }
+                    if (keyJson.contains("bezier") &&
+                        keyJson["bezier"].is_object()) {
+                        const json& bezier = keyJson["bezier"];
+                        keyframe.bezier.x1 = bezier.value("x1", 0.25f);
+                        keyframe.bezier.y1 = bezier.value("y1", 0.10f);
+                        keyframe.bezier.x2 = bezier.value("x2", 0.25f);
+                        keyframe.bezier.y2 = bezier.value("y2", 1.00f);
+                        keyframe.hasBezierParameters = true;
+                    }
                     if (decoded.upsertKeyframe(
                             clipIndex, trackIndex, std::move(keyframe)) < 0) {
                         return fail(error, "Animation keyframe limit exceeded");
@@ -455,6 +507,8 @@ AnimationTimeline UIAnimationLibrary::createTimeline(
                                               source.curve);
                 key.spring = source.spring;
                 key.hasSpringParameters = source.hasSpringParameters;
+                key.bezier = source.bezier;
+                key.hasBezierParameters = source.hasBezierParameters;
                 keys.push_back(key);
             }
             timeline.addFloatTrack(std::move(keys), [target](float value) {
@@ -470,6 +524,8 @@ AnimationTimeline UIAnimationLibrary::createTimeline(
                     source.curve);
                 key.spring = source.spring;
                 key.hasSpringParameters = source.hasSpringParameters;
+                key.bezier = source.bezier;
+                key.hasBezierParameters = source.hasBezierParameters;
                 keys.push_back(key);
             }
             if (track.property == UIAnimationProperty::Position) {
