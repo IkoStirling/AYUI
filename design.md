@@ -435,6 +435,22 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
+### 8.5 Application UI Flow（阶段一）
+
+`*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
+编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
+结构/引用诊断以及项目描述符兼容迁移。核心数据对象是 Screen、Layer、Slot、Scope、Context、Entry、
+Signal、Action、并行 Region、层级 State、Transition 和可扩展 Graph。Graph 节点类型保持字符串，
+properties 支持递归 JSON，因此游戏或插件节点不需要把 World/Entity 语义放进 AYUI。
+
+依赖边界固定为 AYUI 提供数据契约，AYApplication/游戏宿主持有跨 World 的 UIRuntime 并注册信号与
+动作，AYEditor 只做同一格式的创作、验证和预览。这里的逻辑 Layer 不是 renderer pixel Layer；
+UI Flow 不直接依赖 Scene、World、Entity、AYRenderer 或编辑器。旧项目的 `world.ui` 会在 AYEditor
+解析为一个隐式 World-scope Screen/Context，不自动改写文件；新 `ui.flow` 与旧字段混用会被拒绝。
+
+阶段一不包含运行时挂载、Transition/Graph 执行、Scene 订阅或可视化 Flow Editor。完整格式、迁移规则
+和后续阶段见 [docs/UIFlow.md](docs/UIFlow.md)。
+
 ## 9. Popup、Modal 与 Docking
 
 ### 9.1 Overlay
@@ -909,7 +925,10 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    全局 animation scale、系统/宿主 reduced-motion 桥接、repeat/yoyo、可编辑 Cubic Bezier/物理弹簧
    参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
    预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
-   clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
+    clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
+8. Application UI Flow 已完成阶段一数据契约、schema/serializer/validator 和旧 `world.ui` 兼容迁移；
+   下一步是 AYApplication 持有的持久 UIRuntime、Context/Slot 仲裁、Scope 清理和可扩展 signal/action
+   registry。Scene 只发布通用信号，不直接操作 Widget；Flow Editor 复用同一 wire contract。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 
@@ -975,6 +994,7 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
 | Clipboard | Win32 原生；macOS/Wayland/X11 helper backend，UTF-8、失败显式返回 |
 | 文本编码 | 文件/JSON UTF-8，Widget 文本 `std::wstring` |
 | 事件 | Widget 内部冒泡；宿主回调用 id + bindEvent |
+| 应用 UI 编排 | `*.uiflow.json`；AYUI 定义纯数据，持久 UIRuntime 归 AYApplication/游戏宿主，Scene 通过 Signal 解耦 |
 | Popup | UIManager overlay 集中管理 |
 | 颜色创作 | 通用 ColorPicker；HSV/Hex/命名色组归控件，像素采样和持久化归宿主 |
 | Dock tree | VBox/HBox/Splitter 直接作为 Widget tree |
@@ -986,5 +1006,6 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
 
 - [README.md](README.md)
 - [AYUI-v1-Design.md](AYUI-v1-Design.md)
+- [UI Flow contract](docs/UIFlow.md)
 - [AYRenderer README](../AYRenderer/README.md)
 - [AYEntity design](../AYEntity/design.md)

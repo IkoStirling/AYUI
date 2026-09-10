@@ -36,6 +36,9 @@
   JSON 往返与运行时 Timeline 共用同一求值路径。
 - `AnimationSettings` 增加可注入 reduced-motion provider，并在 Windows 默认桥接系统动画偏好；
   公共动画类型扩展后源码 ABI 更新为 118。
+- 增加 Application UI Flow 阶段一纯数据契约：`*.uiflow.json` 可描述 Screen、Layer、Slot、Scope、
+  Context、Entry、Signal/Action、并行层级状态机和可扩展 Action Graph；自定义节点的递归 JSON 属性
+  可无损往返，交叉引用、层级循环、类型默认值与数值范围具有统一诊断。源码 ABI 更新为 119。
 
 ### Fixed
 
@@ -53,6 +56,7 @@
 - VS 2026 Insider Windows Debug：AYUI `5660 / 5660`、AYRenderer `4333 / 4333`、
   AYEditor `2549 / 2549`、Default Editor Module Assembly `13 / 13`；Layout Editor headless
   round-trip 与 AYEditor level-4（三帧 GPU UI 合成及完整 shutdown）通过。
+- VS 2026 Insider Windows Debug：Application UI Flow 契约加入后 AYUI `5697 / 5697` 通过。
 - AYRenderer Noop：`4333 / 4333` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。
