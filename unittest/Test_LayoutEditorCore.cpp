@@ -5,6 +5,7 @@
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
+#include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
@@ -22,6 +23,7 @@
 #include "AYUI/Panel.h"
 #include "AYUI/RichText.h"
 #include "AYUI/TabControl.h"
+#include "AYUI/TextInput.h"
 #include "AYUI/TreeView.h"
 #include "AYUI/UIAnimation.h"
 #include "AYUI/Widget.h"
@@ -212,6 +214,33 @@ TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
     if (rich != nullptr) {
         CHECK(rich->properties.contains(AuthoringProperty::RichTextWrapMode));
         CHECK(rich->properties.contains(AuthoringProperty::MaxLines));
+    }
+}
+
+TEST_CASE(layout_property_editors_expose_stable_value_controls) {
+    LayoutColorPropertyEditor color("color_value");
+    CHECK_NOT_NULL(color.valueInput());
+    CHECK_NOT_NULL(color.swatchButton());
+    color.setColor(FVector4(0.25f, 0.5f, 0.75f, 1.0f));
+    CHECK(color.valueInput()->getId() == "color_value");
+    CHECK(color.valueInput()->getText() == L"#4080BFFF");
+
+    LayoutResourcePropertyEditor resource("resource_value");
+    CHECK_NOT_NULL(resource.valueInput());
+    CHECK_NOT_NULL(resource.browseButton());
+    CHECK_NOT_NULL(resource.clearButton());
+    CHECK(resource.valueInput()->getId() == "resource_value");
+    CHECK(resource.browseButton()->getId() == "btn_pick_texture");
+    CHECK(resource.clearButton()->getId() == "btn_clear_texture");
+
+    LayoutVectorPropertyEditor vector(
+        {"vec_x", "vec_y"}, {"X", "Y"});
+    CHECK(vector.inputs().size() == 2u);
+    if (vector.inputs().size() == 2u) {
+        CHECK(vector.inputs()[0]->getId() == "vec_x");
+        CHECK(vector.inputs()[0]->getPlaceholder() == L"X");
+        CHECK(vector.inputs()[1]->getId() == "vec_y");
+        CHECK(vector.inputs()[1]->getPlaceholder() == L"Y");
     }
 }
 

@@ -25,8 +25,10 @@
 - 全部 51 个普通 Inspector 属性行改由 schema 显示名、section、行高和控件契约自动生成；
   `Padding` 四分量复合行也由 schema 描述，chrome JSON 只保留资源浏览、结构化内容等工具面板。
   旧 chrome 中已有的同 ID 行仍会被兼容复用。
+- Layout Editor 增加 authoring-only Color/Resource/Vector 字段控件：Color 使用共享 `ColorPicker`
+  popup 并合并连续编辑事务，Resource 内建 Browse/Clear，Vector 为复合分量保留稳定子控件 ID。
 - `UIManager::findById()` 在 Loader 索引未命中时查询实时 Widget 树，覆盖运行时挂载控件。
-- public authoring schema 扩展后源码 ABI 版本更新为 114。
+- public authoring 控件与 schema 扩展后源码 ABI 版本更新为 115。
 
 ### Fixed
 
@@ -41,7 +43,7 @@
 ### Validation
 
 - Windows Debug：AYUI `5147 / 5147` 条断言通过。
-- VS 2026 Insider Windows Debug：AYUI `5596 / 5596`，Layout Editor headless round-trip 通过。
+- VS 2026 Insider Windows Debug：AYUI `5611 / 5611`，Layout Editor headless round-trip 通过。
 - AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

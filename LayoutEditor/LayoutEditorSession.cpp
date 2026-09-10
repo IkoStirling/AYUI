@@ -1,12 +1,14 @@
 #include "AYUI/LayoutEditor/LayoutEditorSession.h"
 
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
+#include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
 
 #include "AYUI/Box.h"
 #include "AYUI/Button.h"
 #include "AYUI/CheckBox.h"
 #include "AYUI/Clipboard.h"
+#include "AYUI/ColorPicker.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/GridPanel.h"
 #include "AYUI/Image.h"
@@ -5210,8 +5212,6 @@ void LayoutEditorSession::updatePropPanelVisibility() {
         }
         row(field.rowId, field.labelId, field.controlId, visible);
     }
-    const bool hasTexture = hasProperty(AuthoringProperty::Texture);
-    setChromeVisible("row_prop_texture_actions", hasTexture);
     setChromeVisible("section_structured",
                      structuredKind != LayoutStructuredKind::None);
     if (auto* title = dynamic_cast<TextLabel*>(_ui != nullptr
@@ -7705,7 +7705,7 @@ void LayoutEditorSession::ensureSchemaPropertyChrome() {
         case PropertySection::Transform:
             return findChromeById("section_content");
         case PropertySection::Content:
-            return findChromeById("row_prop_texture_actions");
+            return findChromeById("section_texture_resources");
         case PropertySection::Appearance:
             return findChromeById("section_style_quality");
         case PropertySection::Interaction:
@@ -7751,39 +7751,38 @@ void LayoutEditorSession::ensureSchemaPropertyChrome() {
             label->setSize({272.0f, 24.0f});
             row->addWidget(label, 24.0f);
 
-            auto* components = new HBox();
+            auto* components = new LayoutVectorPropertyEditor(
+                schema->componentControlIds, schema->componentLabels);
             components->setId(std::string(schema->rowId) + "_inputs");
             components->setSize({272.0f, 32.0f});
-            components->setSpacing(6.0f);
-            for (size_t componentIndex = 0;
-                 componentIndex < schema->componentControlIds.size();
-                 ++componentIndex) {
-                const std::string& controlId =
-                    schema->componentControlIds[componentIndex];
-                auto* input = new TextInput();
-                input->setId(controlId);
-                input->setStyleId("__le_input");
-                if (componentIndex < schema->componentLabels.size()) {
-                    input->setPlaceholder(utf8ToWide(
-                        schema->componentLabels[componentIndex]));
-                }
-                input->setSize({63.0f, 30.0f});
-                components->addWidget(input, 63.0f);
-            }
             row->addWidget(components, 32.0f);
         } else {
             label->setSize({86.0f, 30.0f});
             row->addWidget(label, 86.0f);
 
             Widget* control = nullptr;
-            if (schema->editorKind == PropertyEditorKind::Enum ||
+            if (schema->editorKind == PropertyEditorKind::Color) {
+                auto* editor = new LayoutColorPropertyEditor(
+                    schema->controlId);
+                editor->setId(std::string(schema->controlId) + "_editor");
+                editor->setManager(_ui);
+                control = editor;
+            } else if (schema->editorKind == PropertyEditorKind::Resource) {
+                auto* editor = new LayoutResourcePropertyEditor(
+                    schema->controlId);
+                editor->setId(std::string(schema->controlId) + "_editor");
+                control = editor;
+            } else if (schema->editorKind == PropertyEditorKind::Enum ||
                 schema->editorKind == PropertyEditorKind::Boolean) {
                 control = new ComboBox();
             } else {
                 control = new TextInput();
             }
-            control->setId(schema->controlId);
-            control->setStyleId("__le_input");
+            if (schema->editorKind != PropertyEditorKind::Color &&
+                schema->editorKind != PropertyEditorKind::Resource) {
+                control->setId(schema->controlId);
+                control->setStyleId("__le_input");
+            }
             control->setSize({0.0f, 30.0f});
             row->addWidget(control, 0.0f);
         }
@@ -7833,6 +7832,28 @@ void LayoutEditorSession::bindSchemaPropertyFields() {
         bindPropField(schema.controlId, schema.key, input, numeric);
         if (input != nullptr) {
             _schemaPropertyInputs.emplace(schema.key, input);
+        }
+        if (schema.editorKind == PropertyEditorKind::Color) {
+            auto* editor = dynamic_cast<LayoutColorPropertyEditor*>(
+                findChromeById(std::string(schema.controlId) + "_editor"));
+            if (editor == nullptr) continue;
+            const std::string key = schema.key;
+            editor->setOnInteractionStarted([this]() {
+                beginMutation(LayoutEditKind::Property, "Edit color");
+            });
+            editor->setOnColorChanged([this, key](const math::FVector4& color) {
+                if (!_commandStack.transactionOpen()) {
+                    beginMutation(LayoutEditKind::Property, "Edit color");
+                }
+                applyProperty(key, ColorPicker::formatHexCode(color));
+            });
+            editor->setOnColorCommitted([this, key](const math::FVector4& color) {
+                if (!_commandStack.transactionOpen()) {
+                    beginMutation(LayoutEditKind::Property, "Edit color");
+                }
+                applyProperty(key, ColorPicker::formatHexCode(color));
+                endMutation();
+            });
         }
     }
 }
@@ -7953,6 +7974,16 @@ void LayoutEditorSession::syncSchemaPropertyFields() {
             }
         }
         combo->setSelectedIndex(selected);
+    }
+    for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
+        if (schema.editorKind != PropertyEditorKind::Color) continue;
+        auto* editor = dynamic_cast<LayoutColorPropertyEditor*>(
+            findChromeById(std::string(schema.controlId) + "_editor"));
+        if (editor == nullptr) continue;
+        math::FVector4 color;
+        if (ColorPicker::parseHexCode(schemaPropertyValue(schema.key), color)) {
+            editor->setColor(color);
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 #include "AYUI/LayoutEditor/LayoutEditorSession.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/PropertySchema.h"
+#include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/Button.h"
@@ -193,8 +194,15 @@ int main() {
         ui.findById("prop_min"));
     auto* generatedSelection = dynamic_cast<ayt::ui::ComboBox*>(
         ui.findById("prop_selection_mode"));
+    auto* generatedColorEditor =
+        dynamic_cast<ayt::ui::LayoutColorPropertyEditor*>(
+            ui.findById("prop_image_tint_editor"));
+    auto* generatedResourceEditor =
+        dynamic_cast<ayt::ui::LayoutResourcePropertyEditor*>(
+            ui.findById("prop_texture_editor"));
     if (!chromeSourceOpened || serializedGeneratedControls != 0 ||
-        generatedMinimum == nullptr || generatedSelection == nullptr) {
+        generatedMinimum == nullptr || generatedSelection == nullptr ||
+        generatedColorEditor == nullptr || generatedResourceEditor == nullptr) {
         std::fprintf(stderr,
             "schema-generated inspector chrome regression: serialized=%d\n",
             serializedGeneratedControls);

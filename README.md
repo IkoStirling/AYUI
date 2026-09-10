@@ -328,6 +328,10 @@ Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON sna
 `UIManager::findById()` 对 Loader 控件使用索引快路径，并在 miss 时搜索实时 Widget 树，因此 schema
 生成行和其他运行时挂载控件也可由宿主按 ID 查询。
 
+Schema 的 `Color`、`Resource` 和 `Vector4` 不再退化成同一种文本行：颜色字段以内嵌色样打开共享
+`ColorPicker`，资源字段把稳定 key 输入与 Browse/Clear 收在同一控件，Vector4 为 Padding 等复合值
+提供带分量提示的四输入编辑器。它们位于 authoring core，不进入游戏布局的 WidgetFactory 或 JSON。
+
 Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳定身份，并把本机文件位置放在
 仅用于解码预览的 `previewPath`；打开文件、Undo/Redo 和复制后都只恢复临时句柄，不把绝对路径写回
 布局。Inspector 多选时用 `—` 表示不一致的 X/Y/Width/Height，提交数值或 Style 会在一个 undo 事务

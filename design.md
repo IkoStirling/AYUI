@@ -782,6 +782,11 @@ headless round-trip 通过。
 完整 Widget 树和按选中类型显隐均正确；源码 ABI 更新到 113，当前提交链基线为 AYUI `5593 / 5593`。
 随后完成 Inspector Schema 第三阶段，51 个普通属性行和 Padding 复合行全部脱离 chrome JSON；
 源码 ABI 更新到 114，当前基线为 AYUI `5596 / 5596`，headless round-trip 通过。
+专用字段阶段新增 `LayoutColorPropertyEditor`、`LayoutResourcePropertyEditor` 与
+`LayoutVectorPropertyEditor`：Color 复用全局 `ColorPicker` popup，连续拖动只开启一个属性事务；
+Resource 把 key、Browse/Clear 收敛到单行；Vector 保留各分量稳定 ID。三者只编入
+`AYUILayoutEditorCore`，不会扩大 runtime wire contract。源码 ABI 更新到 115，当前基线为
+AYUI `5611 / 5611`，headless round-trip 通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

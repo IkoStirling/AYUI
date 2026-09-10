@@ -474,14 +474,6 @@
                   { "type": "TextLabel", "id": "section_identity", "style": "__le_accent", "text": "IDENTITY", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   { "type": "TextLabel", "id": "section_transform", "style": "__le_accent", "text": "TRANSFORM", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   { "type": "TextLabel", "id": "section_content", "style": "__le_accent", "text": "CONTENT", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
-                  {
-                    "type": "HBox", "id": "row_prop_texture_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
-                    "children": [
-                      { "type": "TextLabel", "id": "texture_action_spacer", "style": "__le_label", "text": "", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
-                      { "type": "Button", "id": "btn_pick_texture", "style": "__le_command", "text": "Browse…", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
-                      { "type": "Button", "id": "btn_clear_texture", "style": "__le_command", "text": "Clear", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
-                    ]
-                  },
                   { "type": "TextLabel", "id": "section_texture_resources", "style": "__le_accent", "text": "TEXTURE RESOURCES", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {
                     "type": "HBox", "id": "row_texture_resource_search", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 6,
