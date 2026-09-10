@@ -29,6 +29,7 @@
   popup 并合并连续编辑事务，Resource 内建 Browse/Clear，Vector 为复合分量保留稳定子控件 ID。
 - `UIManager::findById()` 在 Loader 索引未命中时查询实时 Widget 树，覆盖运行时挂载控件。
 - public authoring 控件与 schema 扩展后源码 ABI 版本更新为 115。
+- Layout Editor 常规属性使用稳定 Widget ID 的 typed undo/redo command；源码 ABI 更新为 116。
 
 ### Fixed
 

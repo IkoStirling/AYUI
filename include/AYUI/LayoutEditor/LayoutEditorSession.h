@@ -303,6 +303,29 @@ private:
     void beginMutation(LayoutEditKind kind = LayoutEditKind::Property,
                        const char* label = nullptr);
     void endMutation();
+    struct PropertyValueChange {
+        std::string widgetId;
+        std::string field;
+        std::wstring beforeValue;
+        std::wstring afterValue;
+    };
+    struct PendingPropertyMutation {
+        std::string field;
+        std::string label;
+        std::vector<PropertyValueChange> changes;
+        bool dirtyBefore = false;
+    };
+    void beginPropertyMutation(const std::string& field,
+                               const char* label = nullptr);
+    void endPropertyMutation();
+    bool propertyMutationOpen() const {
+        return _pendingPropertyMutation.has_value();
+    }
+    std::wstring propertyValueForWidget(
+        Widget* widget, const std::string& field) const;
+    void applyTypedPropertyChanges(
+        const std::vector<PropertyValueChange>& changes,
+        bool useAfterValues, bool dirtyState);
     void pushUndo(LayoutEditKind kind = LayoutEditKind::SnapshotFallback,
                   const char* label = nullptr);
     Snapshot captureSnapshot();
@@ -381,6 +404,7 @@ private:
     Widget*& _selected;
     std::vector<Widget*>& _selection;
     LayoutCommandStack _commandStack;
+    std::optional<PendingPropertyMutation> _pendingPropertyMutation;
 
     UIManager* _ui = nullptr;
     Widget* _canvasHost = nullptr;

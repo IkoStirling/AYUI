@@ -503,9 +503,10 @@ Transform、Content、Appearance、Interaction 和 Layout 的全部 51 个普通
 Loader registry 的 O(1) 快路径，并在 miss 时遍历实时树，使动态生成控件与静态控件具有一致查询语义。
 
 命令栈已经区分 `Property`、`Insert`、`Delete`、`Reorder`、`Transform`、`Clipboard` 与
-`SnapshotFallback` edit intent。当前 entry 同时保存完整 JSON snapshot，作为复杂复合控件和旧路径的
-可靠恢复兜底；后续可以逐类替换为小粒度 typed command，而不改变 Session/宿主接口。snapshot 包含
-dirty 状态，undo 到已保存版本会恢复 clean，redo 才重新进入 dirty。
+`SnapshotFallback` edit intent。常规 Inspector 属性 entry 使用稳定 Widget ID、字段名与前后值组成的
+小粒度 typed command，不再为每次文本提交、数值 scrub、枚举切换或颜色拖动复制整棵 Widget 树；
+连续交互仍 coalesce 为一个命令，并恢复命令前后的 dirty 状态。结构编辑、复杂内容和画布变换继续保存
+完整 JSON snapshot 作为可靠兜底，两种 entry 在同一 undo/redo 栈中严格保持时间顺序。
 
 Chrome 本身采用 File/Edit 菜单栏、单列 Widget Library + Document Outline、Canvas、滚动
 Inspector、状态栏布局。`UILayoutLoader` 与 Serializer 都支持 MenuBar 的结构化 `menus/items`
@@ -787,6 +788,8 @@ headless round-trip 通过。
 Resource 把 key、Browse/Clear 收敛到单行；Vector 保留各分量稳定 ID。三者只编入
 `AYUILayoutEditorCore`，不会扩大 runtime wire contract。源码 ABI 更新到 115，当前基线为
 AYUI `5611 / 5611`，headless round-trip 通过。
+随后属性命令阶段把常规 Inspector 编辑迁移到小粒度 typed command，结构与复合编辑继续走 snapshot
+兜底；源码 ABI 更新到 116，当前基线为 AYUI `5619 / 5619`，headless round-trip 通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

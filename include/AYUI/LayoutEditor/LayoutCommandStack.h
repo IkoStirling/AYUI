@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -45,6 +46,18 @@ public:
     void end();
     void discardLastUndo();
 
+    // Small-grained commands keep stable document identifiers in the owner
+    // callback instead of retaining a whole serialized Widget tree. The stack
+    // owns the callbacks only for the lifetime of its LayoutEditorSession.
+    void pushTyped(std::function<void()> undoAction,
+                   std::function<void()> redoAction,
+                   LayoutEditKind kind = LayoutEditKind::Property,
+                   std::string label = {});
+    bool nextUndoIsTyped() const;
+    bool nextRedoIsTyped() const;
+    bool undoTyped();
+    bool redoTyped();
+
     std::optional<LayoutEditorSnapshot> undo(LayoutEditorSnapshot current);
     std::optional<LayoutEditorSnapshot> redo(LayoutEditorSnapshot current);
 
@@ -60,6 +73,13 @@ private:
         LayoutEditorSnapshot snapshot;
         LayoutEditKind kind = LayoutEditKind::SnapshotFallback;
         std::string label;
+        std::function<void()> undoAction;
+        std::function<void()> redoAction;
+
+        bool isTyped() const {
+            return static_cast<bool>(undoAction) &&
+                   static_cast<bool>(redoAction);
+        }
     };
 
     void appendUndo(Entry entry);

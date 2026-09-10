@@ -174,7 +174,7 @@ int main() {
     if (missingTypedInspectorEntries != 0) {
         std::fprintf(stderr, "typed inspector regression: missing=%d\n",
                      missingTypedInspectorEntries);
-        return 115;
+        return 116;
     }
     std::ifstream chromeSourceFile("assets/layout_editor.ui.json",
                                    std::ios::binary);

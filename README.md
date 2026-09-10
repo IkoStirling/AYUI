@@ -324,7 +324,9 @@ Inspector 已覆盖 Slider/ProgressBar 的
 min/max/value、Image tint/UV、List/Tile 选择与尺寸、ScrollView 滚动条策略、TabStrip overflow、
 Grid 行列/间距以及 RichText wrap/overflow/line-height/max-lines。Grid 缩小时会拒绝丢弃已占用 cell；
 Image tint/UV 与 Grid 间距均已补齐 Loader/Serializer 往返。命令栈已记录 Property/Insert/Delete/Reorder/
-Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
+Transform/Clipboard 等类型化 edit intent。Inspector 的常规属性修改已经使用以稳定 Widget ID 为目标的
+小粒度 typed command，连续文本输入、数值 scrub 和颜色拖动各自合并为一次事务；结构编辑、复杂内容与
+画布变换仍保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
 `UIManager::findById()` 对 Loader 控件使用索引快路径，并在 miss 时搜索实时 Widget 树，因此 schema
 生成行和其他运行时挂载控件也可由宿主按 ID 查询。
 

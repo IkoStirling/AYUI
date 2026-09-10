@@ -116,6 +116,24 @@ TEST_CASE(command_stack_preserves_kind_and_snapshot_fallback) {
     CHECK(redo->dirty);
 }
 
+TEST_CASE(command_stack_executes_typed_commands_without_document_snapshots) {
+    LayoutCommandStack commands(4);
+    int value = 7;
+    commands.pushTyped(
+        [&value]() { value = 3; },
+        [&value]() { value = 7; },
+        LayoutEditKind::Property, "Edit width");
+
+    CHECK(commands.nextUndoIsTyped());
+    CHECK_FALSE(commands.nextRedoIsTyped());
+    CHECK(commands.undoTyped());
+    CHECK(value == 3);
+    CHECK(commands.nextRedoIsTyped());
+    CHECK(commands.redoTyped());
+    CHECK(value == 7);
+    CHECK(commands.nextUndoKind() == LayoutEditKind::Property);
+}
+
 TEST_CASE(authoring_registry_is_the_single_palette_and_schema_source) {
     WidgetAuthoringRegistry& registry = WidgetAuthoringRegistry::get();
     std::unordered_set<std::string> types;

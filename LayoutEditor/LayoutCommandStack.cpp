@@ -41,9 +41,52 @@ void LayoutCommandStack::discardLastUndo() {
     _transactionOpen = false;
 }
 
+void LayoutCommandStack::pushTyped(std::function<void()> undoAction,
+                                   std::function<void()> redoAction,
+                                   LayoutEditKind kind,
+                                   std::string label) {
+    _transactionOpen = false;
+    Entry entry;
+    entry.kind = kind;
+    entry.label = std::move(label);
+    entry.undoAction = std::move(undoAction);
+    entry.redoAction = std::move(redoAction);
+    appendUndo(std::move(entry));
+    _redo.clear();
+}
+
+bool LayoutCommandStack::nextUndoIsTyped() const {
+    return !_undo.empty() && _undo.back().isTyped();
+}
+
+bool LayoutCommandStack::nextRedoIsTyped() const {
+    return !_redo.empty() && _redo.back().isTyped();
+}
+
+bool LayoutCommandStack::undoTyped() {
+    if (!nextUndoIsTyped()) return false;
+    Entry entry = std::move(_undo.back());
+    _undo.pop_back();
+    entry.undoAction();
+    _redo.push_back(std::move(entry));
+    _transactionOpen = false;
+    return true;
+}
+
+bool LayoutCommandStack::redoTyped() {
+    if (!nextRedoIsTyped()) return false;
+    Entry entry = std::move(_redo.back());
+    _redo.pop_back();
+    entry.redoAction();
+    appendUndo(std::move(entry));
+    _transactionOpen = false;
+    return true;
+}
+
 std::optional<LayoutEditorSnapshot> LayoutCommandStack::undo(
     LayoutEditorSnapshot current) {
     if (_undo.empty()) return std::nullopt;
+    if (_undo.back().isTyped()) return std::nullopt;
     Entry entry = std::move(_undo.back());
     _undo.pop_back();
     _redo.push_back({std::move(current), entry.kind, entry.label});
@@ -54,6 +97,7 @@ std::optional<LayoutEditorSnapshot> LayoutCommandStack::undo(
 std::optional<LayoutEditorSnapshot> LayoutCommandStack::redo(
     LayoutEditorSnapshot current) {
     if (_redo.empty()) return std::nullopt;
+    if (_redo.back().isTyped()) return std::nullopt;
     Entry entry = std::move(_redo.back());
     _redo.pop_back();
     appendUndo({std::move(current), entry.kind, entry.label});

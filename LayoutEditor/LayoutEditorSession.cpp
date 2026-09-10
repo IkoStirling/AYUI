@@ -1557,7 +1557,7 @@ void LayoutEditorSession::bindPropField(const char* id, const char* field,
     });
     ti->setOnFocusLostNotify([this, fieldName, ti]() {
         commitPropField(fieldName, ti);
-        endMutation();
+        endPropertyMutation();
     });
     ti->setOnTextChanged({});
 
@@ -1576,7 +1576,7 @@ void LayoutEditorSession::bindPropField(const char* id, const char* field,
                     v = std::round(v);
                 }
             }
-            beginMutation();
+            beginPropertyMutation(fieldName);
             applyProperty(fieldName, formatFloat(v));
             _suppressProp = true;
             ti->setText(formatFloat(v));
@@ -1605,7 +1605,7 @@ void LayoutEditorSession::commitPropField(const std::string& field,
             return;
         }
     }
-    beginMutation();
+    beginPropertyMutation(field);
     applyProperty(field, slot->getText());
 }
 
@@ -1801,9 +1801,9 @@ void LayoutEditorSession::wireChrome() {
                 index >= static_cast<int>(_styleIds.size())) {
                 return;
             }
-            beginMutation();
+            beginPropertyMutation("style");
             applyProperty("style", utf8ToWide(_styleIds[static_cast<size_t>(index)]));
-            endMutation();
+            endPropertyMutation();
         });
         syncStyleCombo();
     }
@@ -1827,9 +1827,9 @@ void LayoutEditorSession::wireChrome() {
     }
     bindBtn("btn_reset_style", [this]() {
         if (_selected == nullptr) return;
-        beginMutation();
+        beginPropertyMutation("style");
         applyProperty("style", L"");
-        endMutation();
+        endPropertyMutation();
         syncPropertyStrip();
     });
 
@@ -1846,10 +1846,10 @@ void LayoutEditorSession::wireChrome() {
             }
             const PropertyFieldSchema& schema =
                 propertyFieldSchema(AuthoringProperty::TextHAlign);
-            beginMutation();
+            beginPropertyMutation("hAlign");
             applyProperty("hAlign", utf8ToWide(
                 schema.enumOptions[static_cast<size_t>(index)]));
-            endMutation();
+            endPropertyMutation();
         });
     }
     if (_propTextVAlign != nullptr) {
@@ -1861,10 +1861,10 @@ void LayoutEditorSession::wireChrome() {
             }
             const PropertyFieldSchema& schema =
                 propertyFieldSchema(AuthoringProperty::TextVAlign);
-            beginMutation();
+            beginPropertyMutation("vAlign");
             applyProperty("vAlign", utf8ToWide(
                 schema.enumOptions[static_cast<size_t>(index)]));
-            endMutation();
+            endPropertyMutation();
         });
     }
 
@@ -1937,8 +1937,9 @@ void LayoutEditorSession::wireChrome() {
                 _textureCatalog.visibleEntry(static_cast<size_t>(index));
             if (resource == nullptr || dynamic_cast<Image*>(_selected) == nullptr)
                 return;
-            pushUndo(LayoutEditKind::Property, "Assign texture resource");
+            beginPropertyMutation("texture", "Assign texture resource");
             applyTextureName(resource->key);
+            endPropertyMutation();
             syncPropertyStrip();
         });
     }
@@ -2658,7 +2659,7 @@ void LayoutEditorSession::select(Widget* widget, bool additive) {
     }
     // Selection changes are a hard transaction boundary even if a host
     // backend did not emit focus-lost for the previous inspector field.
-    endMutation();
+    endPropertyMutation();
 
     // Inactive TabControl pages are part of the authored model but are not
     // mounted under the body panel. Selecting a page (or one of its authored
@@ -3751,10 +3752,192 @@ void LayoutEditorSession::endMutation() {
     _commandStack.end();
 }
 
+std::wstring LayoutEditorSession::propertyValueForWidget(
+    Widget* widget, const std::string& field) const {
+    if (widget == nullptr) return {};
+    if (field == "x") return formatFloat(widget->getPosition().x);
+    if (field == "y") return formatFloat(widget->getPosition().y);
+    if (field == "w") {
+        return formatFloat(widget == _docRoot
+            ? authoredRootSize().x : widget->getSize().x);
+    }
+    if (field == "h") {
+        return formatFloat(widget == _docRoot
+            ? authoredRootSize().y : widget->getSize().y);
+    }
+    if (field == "style") return utf8ToWide(widget->getStyleId());
+    if (field == "controller") return utf8ToWide(widget->getControllerId());
+    if (field.rfind("event:", 0) == 0) {
+        return utf8ToWide(widget->getEventBinding(field.substr(6)));
+    }
+    if (field == "text") {
+        std::wstring text;
+        getTextPayload(widget, text);
+        return text;
+    }
+    if (field == "texture") {
+        if (auto* image = dynamic_cast<Image*>(widget)) {
+            return utf8ToWide(image->getTextureName());
+        }
+        return {};
+    }
+    if (field == "checked") {
+        if (auto* check = dynamic_cast<CheckBox*>(widget))
+            return check->isChecked() ? L"true" : L"false";
+        if (auto* radio = dynamic_cast<RadioButton*>(widget))
+            return radio->isChecked() ? L"true" : L"false";
+    }
+    if (field == "password") {
+        if (auto* input = dynamic_cast<TextInput*>(widget))
+            return input->isPasswordMode() ? L"true" : L"false";
+    }
+    if (field == "readOnly") {
+        if (auto* input = dynamic_cast<TextInput*>(widget))
+            return input->isReadOnly() ? L"true" : L"false";
+        if (auto* area = dynamic_cast<TextArea*>(widget))
+            return area->isReadOnly() ? L"true" : L"false";
+    }
+    if (field == "hAlign") {
+        if (auto* label = dynamic_cast<TextLabel*>(widget)) {
+            switch (label->getHorizontalAlignment()) {
+            case TextLabel::HAlignment::Center: return L"Center";
+            case TextLabel::HAlignment::Right: return L"Right";
+            default: return L"Left";
+            }
+        }
+        if (auto* input = dynamic_cast<TextInput*>(widget)) {
+            switch (input->getHAlign()) {
+            case TextInput::HAlign::Center: return L"Center";
+            case TextInput::HAlign::Right: return L"Right";
+            default: return L"Left";
+            }
+        }
+    }
+    if (field == "vAlign") {
+        if (auto* label = dynamic_cast<TextLabel*>(widget)) {
+            switch (label->getVerticalAlignment()) {
+            case TextLabel::VAlignment::Center: return L"Center";
+            case TextLabel::VAlignment::Bottom: return L"Bottom";
+            default: return L"Top";
+            }
+        }
+    }
+    if (auto* box = dynamic_cast<BoxBase*>(widget)) {
+        if (field == "spacing") return formatFloat(box->getSpacing());
+        const math::FVector4& padding = box->getPadding();
+        if (field == "padL") return formatFloat(padding.x);
+        if (field == "padT") return formatFloat(padding.y);
+        if (field == "padR") return formatFloat(padding.z);
+        if (field == "padB") return formatFloat(padding.w);
+        if (field == "gravity") {
+            switch (box->getGravity()) {
+            case BoxBase::Gravity::TopCenter: return L"TopCenter";
+            case BoxBase::Gravity::TopRight: return L"TopRight";
+            case BoxBase::Gravity::CenterLeft: return L"CenterLeft";
+            case BoxBase::Gravity::Center: return L"Center";
+            case BoxBase::Gravity::CenterRight: return L"CenterRight";
+            case BoxBase::Gravity::BottomLeft: return L"BottomLeft";
+            case BoxBase::Gravity::BottomCenter: return L"BottomCenter";
+            case BoxBase::Gravity::BottomRight: return L"BottomRight";
+            default: return L"TopLeft";
+            }
+        }
+    }
+    if (widget == _selected) return schemaPropertyValue(field);
+    return {};
+}
+
+void LayoutEditorSession::beginPropertyMutation(
+    const std::string& field, const char* label) {
+    if (_pendingPropertyMutation.has_value()) {
+        if (_pendingPropertyMutation->field == field) return;
+        endPropertyMutation();
+    }
+    if (field == "id" || field == "items" || _selected == nullptr) {
+        beginMutation(LayoutEditKind::Property, label);
+        return;
+    }
+
+    const bool multiTarget = field == "x" || field == "y" ||
+        field == "w" || field == "h" || field == "style";
+    const std::vector<Widget*> targets = multiTarget && _selection.size() > 1u
+        ? _selection : std::vector<Widget*>{_selected};
+    PendingPropertyMutation pending;
+    pending.field = field;
+    pending.label = label != nullptr ? label : "Edit property";
+    pending.dirtyBefore = _dirty;
+    for (Widget* target : targets) {
+        if (target == nullptr || target->getId().empty()) {
+            beginMutation(LayoutEditKind::Property, label);
+            return;
+        }
+        pending.changes.push_back({target->getId(), field,
+            propertyValueForWidget(target, field), {}});
+    }
+    _pendingPropertyMutation = std::move(pending);
+}
+
+void LayoutEditorSession::endPropertyMutation() {
+    if (!_pendingPropertyMutation.has_value()) {
+        endMutation();
+        return;
+    }
+    PendingPropertyMutation pending =
+        std::move(*_pendingPropertyMutation);
+    _pendingPropertyMutation.reset();
+
+    bool changed = false;
+    for (PropertyValueChange& value : pending.changes) {
+        Widget* target = findInDocument(value.widgetId);
+        value.afterValue = propertyValueForWidget(target, value.field);
+        changed = changed || value.beforeValue != value.afterValue;
+    }
+    if (!changed) return;
+
+    const bool dirtyAfter = _dirty;
+    const std::vector<PropertyValueChange> changes = pending.changes;
+    _commandStack.pushTyped(
+        [this, changes, dirty = pending.dirtyBefore]() {
+            applyTypedPropertyChanges(changes, false, dirty);
+        },
+        [this, changes, dirtyAfter]() {
+            applyTypedPropertyChanges(changes, true, dirtyAfter);
+        }, LayoutEditKind::Property, std::move(pending.label));
+}
+
+void LayoutEditorSession::applyTypedPropertyChanges(
+    const std::vector<PropertyValueChange>& changes,
+    bool useAfterValues, bool dirtyState) {
+    const std::vector<Widget*> savedSelection = _selection;
+    Widget* savedPrimary = _selected;
+    for (const PropertyValueChange& change : changes) {
+        Widget* target = findInDocument(change.widgetId);
+        if (target == nullptr) continue;
+        _selected = target;
+        _selection.assign(1u, target);
+        applyProperty(change.field,
+            useAfterValues ? change.afterValue : change.beforeValue);
+    }
+    _selection = savedSelection;
+    _selected = savedPrimary;
+    markDirty(dirtyState);
+    syncPropertyStrip();
+    syncSelectionChrome();
+    refreshValidation();
+}
+
 void LayoutEditorSession::undo() {
     stopAnimationPreview();
+    endPropertyMutation();
     if (!_commandStack.canUndo() || _docRoot == nullptr) {
         setStatus(L"Nothing to undo");
+        return;
+    }
+    if (_commandStack.nextUndoIsTyped()) {
+        if (_commandStack.undoTyped()) {
+            _dragMode = DragMode::None;
+            setStatus(L"Undo");
+        }
         return;
     }
     const std::optional<Snapshot> snap =
@@ -3767,8 +3950,16 @@ void LayoutEditorSession::undo() {
 
 void LayoutEditorSession::redo() {
     stopAnimationPreview();
+    endPropertyMutation();
     if (!_commandStack.canRedo() || _docRoot == nullptr) {
         setStatus(L"Nothing to redo");
+        return;
+    }
+    if (_commandStack.nextRedoIsTyped()) {
+        if (_commandStack.redoTyped()) {
+            _dragMode = DragMode::None;
+            setStatus(L"Redo");
+        }
         return;
     }
     const std::optional<Snapshot> snap =
@@ -5728,17 +5919,17 @@ void LayoutEditorSession::chooseTexture() {
     if (path.empty()) return;
     const LayoutTextureResource* catalogEntry =
         _textureCatalog.findByPreviewPath(path);
-    beginMutation();
+    beginPropertyMutation("texture", "Assign texture resource");
     applyTextureName(catalogEntry != nullptr ? catalogEntry->key : path);
-    endMutation();
+    endPropertyMutation();
     syncPropertyStrip();
 }
 
 void LayoutEditorSession::clearTexture() {
     if (dynamic_cast<Image*>(_selected) == nullptr) return;
-    beginMutation();
+    beginPropertyMutation("texture", "Clear texture resource");
     applyTextureName({});
-    endMutation();
+    endPropertyMutation();
     syncPropertyStrip();
 }
 
@@ -7817,10 +8008,10 @@ void LayoutEditorSession::bindSchemaPropertyFields() {
                     index >= static_cast<int>(current->enumOptions.size())) {
                     return;
                 }
-                beginMutation();
+                beginPropertyMutation(key);
                 applyProperty(key, utf8ToWide(
                     current->enumOptions[static_cast<size_t>(index)]));
-                endMutation();
+                endPropertyMutation();
             });
             _schemaPropertyCombos.emplace(key, combo);
             continue;
@@ -7838,21 +8029,21 @@ void LayoutEditorSession::bindSchemaPropertyFields() {
                 findChromeById(std::string(schema.controlId) + "_editor"));
             if (editor == nullptr) continue;
             const std::string key = schema.key;
-            editor->setOnInteractionStarted([this]() {
-                beginMutation(LayoutEditKind::Property, "Edit color");
+            editor->setOnInteractionStarted([this, key]() {
+                beginPropertyMutation(key, "Edit color");
             });
             editor->setOnColorChanged([this, key](const math::FVector4& color) {
-                if (!_commandStack.transactionOpen()) {
-                    beginMutation(LayoutEditKind::Property, "Edit color");
+                if (!propertyMutationOpen()) {
+                    beginPropertyMutation(key, "Edit color");
                 }
                 applyProperty(key, ColorPicker::formatHexCode(color));
             });
             editor->setOnColorCommitted([this, key](const math::FVector4& color) {
-                if (!_commandStack.transactionOpen()) {
-                    beginMutation(LayoutEditKind::Property, "Edit color");
+                if (!propertyMutationOpen()) {
+                    beginPropertyMutation(key, "Edit color");
                 }
                 applyProperty(key, ColorPicker::formatHexCode(color));
-                endMutation();
+                endPropertyMutation();
             });
         }
     }
@@ -8007,10 +8198,10 @@ void LayoutEditorSession::bindBoolCombo(ComboBox*& slot, const char* id,
             return;
         }
         const PropertyFieldSchema& schema = propertyFieldSchema(property);
-        beginMutation();
+        beginPropertyMutation(fieldName);
         applyProperty(fieldName, utf8ToWide(
             schema.enumOptions[static_cast<size_t>(index)]));
-        endMutation();
+        endPropertyMutation();
     });
 }
 
@@ -8030,10 +8221,10 @@ void LayoutEditorSession::bindGravityCombo() {
         }
         const PropertyFieldSchema& schema =
             propertyFieldSchema(AuthoringProperty::Gravity);
-        beginMutation();
+        beginPropertyMutation("gravity");
         applyProperty("gravity", utf8ToWide(
             schema.enumOptions[static_cast<size_t>(index)]));
-        endMutation();
+        endPropertyMutation();
     });
 }
 
