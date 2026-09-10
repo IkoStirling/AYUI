@@ -29,6 +29,14 @@ ToolBar::~ToolBar() {
     //
     // Note: ~Widget() now calls detachFromParent() FIRST (commit 3844a95),
     // so removing the children here is safe even mid-unwind.
+    // destroyWidgetTree() recursively releases owned children before it
+    // deletes their parent. In that path _scrollView has already gone by
+    // the time this destructor runs, while a direct `delete ToolBar` still
+    // leaves it attached. Inspect our live child list before dereferencing
+    // the cached pointer so both destruction contracts are safe.
+    const bool scrollViewStillAlive = _scrollView != nullptr
+        && std::find(getChildren().begin(), getChildren().end(), _scrollView)
+            != getChildren().end();
     clearOwnedItems();
     if (_contentStrip != nullptr) {
         if (_contentStrip->getParent() != nullptr) {
@@ -37,13 +45,13 @@ ToolBar::~ToolBar() {
         delete _contentStrip;
         _contentStrip = nullptr;
     }
-    if (_scrollView != nullptr) {
+    if (scrollViewStillAlive) {
         if (_scrollView->getParent() != nullptr) {
             _scrollView->getParent()->removeChild(_scrollView);
         }
         delete _scrollView;
-        _scrollView = nullptr;
     }
+    _scrollView = nullptr;
     _items.clear();
 }
 

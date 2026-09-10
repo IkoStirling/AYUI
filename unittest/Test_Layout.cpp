@@ -330,6 +330,43 @@ TEST_CASE(test_hbox_splitter_drag_respects_min_panel_size) {
     CHECK(left.getWidth() >= BoxBase::kMinPanelSize - 0.5f);
 }
 
+TEST_CASE(hbox_automatic_narrow_layout_does_not_overwrite_requested_widths) {
+    HBox hbox;
+    hbox.setSpacing(0.0f);
+    hbox.setPadding(0.0f, 0.0f, 0.0f, 0.0f);
+
+    Widget left;
+    SplitterHandle splitLeft;
+    Widget center;
+    SplitterHandle splitRight;
+    Widget right;
+
+    BoxSlotLimits leftLimits;
+    leftLimits.minWidth = 240.0f;
+    BoxSlotLimits centerLimits;
+    centerLimits.minWidth = 360.0f;
+    BoxSlotLimits rightLimits;
+    rightLimits.minWidth = 220.0f;
+
+    hbox.addWidget(&left, 300.0f, leftLimits);
+    hbox.addWidget(&splitLeft, SplitterHandle::kDefaultWidth);
+    hbox.addWidget(&center, 0.0f, centerLimits);
+    hbox.addWidget(&splitRight, SplitterHandle::kDefaultWidth);
+    hbox.addWidget(&right, 260.0f, rightLimits);
+
+    hbox.setSize(FVector2(760.0f, 400.0f));
+    hbox.performLayout();
+    CHECK(left.getWidth() < 300.0f);
+    CHECK(hbox.slotSize(0) == 300.0f);
+    CHECK(hbox.slotSize(4) == 260.0f);
+
+    hbox.setSize(FVector2(1280.0f, 400.0f));
+    hbox.performLayout();
+    CHECK(left.getWidth() == 300.0f);
+    CHECK(right.getWidth() == 260.0f);
+    CHECK(center.getWidth() > 600.0f);
+}
+
 TEST_CASE(test_hbox_toolbar_has_no_splits_by_default) {
     HBox toolbar;
     toolbar.setSize(FVector2(640.0f, 44.0f));

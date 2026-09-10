@@ -75,6 +75,15 @@ TEST_CASE(toolbar_factory_registered) {
     destroyWidgetTree(widget);
 }
 
+TEST_CASE(toolbar_destroy_widget_tree_releases_wrapped_items_safely) {
+    auto* toolbar = new ToolBar();
+    toolbar->addButton(L"One", []() {});
+    toolbar->addButton(L"Two", []() {});
+    CHECK(toolbar->getItemCount() == 2u);
+    destroyWidgetTree(toolbar);
+    CHECK(true);
+}
+
 // =============================================================================
 // G3 — ToolBar overflow (ScrollView wrap)
 // =============================================================================
@@ -128,4 +137,3 @@ TEST_CASE(toolbar_add_button_returns_existing_widget) {
 }
 
 TEST_SUITE_END
-

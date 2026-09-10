@@ -675,6 +675,13 @@ void VBox::layoutChildren() {
     if (childCount == 0) { _naturalHeight = 0.0f; return; }
 
     // Keep fill panels at their floor when fixed siblings would crush them.
+    // This is a layout-time accommodation, not a new requested slot size:
+    // preserve the request so a later parent grow restores the authored
+    // geometry. Splitter drags remain sticky because applySplitterDrag()
+    // updates Slot::size before this temporary snapshot.
+    std::vector<float> requestedSizes;
+    requestedSizes.reserve(_slots.size());
+    for (const Slot& slot : _slots) requestedSizes.push_back(slot.size);
     stealFromFixedToSatisfyFillMins(availableHeight);
 
     float totalFixedHeight = 0.0f;
@@ -766,6 +773,10 @@ void VBox::layoutChildren() {
 
         y += childHeight + _spacing;
     }
+
+    for (size_t i = 0; i < _slots.size(); ++i) {
+        _slots[i].size = requestedSizes[i];
+    }
 }
 
 HBox::HBox() {
@@ -792,8 +803,12 @@ void HBox::layoutChildren() {
     }
 
     const float availableWidth = size.x - _padding.x - _padding.z;
-    // Keep fill panels at their floor when fixed siblings would crush them
-    // (e.g. dragging the right splitter leftward until Center → 0).
+    // Keep fill panels at their floor when fixed siblings would crush them.
+    // Automatic narrow-window layout must not overwrite requested widths;
+    // otherwise sidebars stay compressed after the window grows again.
+    std::vector<float> requestedSizes;
+    requestedSizes.reserve(_slots.size());
+    for (const Slot& slot : _slots) requestedSizes.push_back(slot.size);
     stealFromFixedToSatisfyFillMins(availableWidth);
 
     float totalFixedWidth = 0.0f;
@@ -848,6 +863,10 @@ void HBox::layoutChildren() {
         }
 
         x += childWidth + _spacing;
+    }
+
+    for (size_t i = 0; i < _slots.size(); ++i) {
+        _slots[i].size = requestedSizes[i];
     }
 }
 
