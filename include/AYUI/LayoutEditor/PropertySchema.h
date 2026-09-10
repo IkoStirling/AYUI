@@ -84,6 +84,11 @@ enum class PropertyEditorKind : std::uint8_t {
     Resource
 };
 
+enum class PropertyRowKind : std::uint8_t {
+    Standard,
+    Vector4
+};
+
 struct PropertyFieldSchema {
     AuthoringProperty property;
     PropertySection section;
@@ -97,10 +102,13 @@ struct PropertyFieldSchema {
     float maximum = 0.0f;
     float step = 0.0f;
     std::vector<std::string> enumOptions;
-    // Non-null for fields whose complete Inspector row is generated from the
-    // schema. Legacy/custom rows keep this null and remain authored in the
-    // chrome JSON while they are migrated incrementally.
     const char* displayName = nullptr;
+    PropertyRowKind rowKind = PropertyRowKind::Standard;
+    float rowHeight = 32.0f;
+    // Standard rows use controlId. Vector4 rows use these component IDs and
+    // labels, allowing compound property chrome to remain schema-owned.
+    std::vector<std::string> componentControlIds;
+    std::vector<std::string> componentLabels;
 };
 
 class PropertySchema {

@@ -22,10 +22,11 @@
   跨周期稳定，`AnimationSequence` 会把跨步骤后的剩余帧时间继续交给下一步。
 - Layout Editor `PropertySchema` 增加编辑器种类、数值约束和枚举选项；Inspector 新增 Slider/
   ProgressBar、Image tint/UV、集合布局、滚动条策略、Tab overflow、Grid 与 RichText 类型化属性。
-- 25 个类型专用 Inspector 行改由 schema 显示名和控件契约自动生成；chrome JSON 只保留基础和复合行，
+- 全部 51 个普通 Inspector 属性行改由 schema 显示名、section、行高和控件契约自动生成；
+  `Padding` 四分量复合行也由 schema 描述，chrome JSON 只保留资源浏览、结构化内容等工具面板。
   旧 chrome 中已有的同 ID 行仍会被兼容复用。
 - `UIManager::findById()` 在 Loader 索引未命中时查询实时 Widget 树，覆盖运行时挂载控件。
-- public authoring schema 扩展后源码 ABI 版本更新为 113。
+- public authoring schema 扩展后源码 ABI 版本更新为 114。
 
 ### Fixed
 
@@ -40,7 +41,7 @@
 ### Validation
 
 - Windows Debug：AYUI `5147 / 5147` 条断言通过。
-- VS 2026 Insider Windows Debug：AYUI `5593 / 5593`，Layout Editor headless round-trip 通过。
+- VS 2026 Insider Windows Debug：AYUI `5596 / 5596`，Layout Editor headless round-trip 通过。
 - AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

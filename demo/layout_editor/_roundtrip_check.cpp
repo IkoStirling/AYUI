@@ -1,6 +1,7 @@
 // Headless round-trip check for LayoutEditorSession (no HWND).
 #include "AYUI/LayoutEditor/LayoutEditorSession.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
+#include "AYUI/LayoutEditor/PropertySchema.h"
 
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/Button.h"
@@ -159,19 +160,15 @@ int main() {
                      missingQualityEntries);
         return 81;
     }
-    static const char* requiredTypedInspectorIds[] = {
-        "prop_min", "prop_max", "prop_value", "prop_image_tint",
-        "prop_uv_min_x", "prop_uv_min_y", "prop_uv_max_x", "prop_uv_max_y",
-        "prop_selection_mode", "prop_item_height", "prop_tile_width",
-        "prop_tile_height", "prop_tile_spacing", "prop_vscroll_visibility",
-        "prop_hscroll_visibility", "prop_tab_overflow", "prop_min_tab_width",
-        "prop_grid_rows", "prop_grid_columns", "prop_grid_spacing_x",
-        "prop_grid_spacing_y", "prop_rich_wrap", "prop_rich_overflow",
-        "prop_line_height", "prop_max_lines"
-    };
     int missingTypedInspectorEntries = 0;
-    for (const char* id : requiredTypedInspectorIds) {
-        if (ui.findById(id) == nullptr) ++missingTypedInspectorEntries;
+    for (const ayt::ui::PropertyFieldSchema& schema :
+         ayt::ui::allPropertyFieldSchemas()) {
+        if (ui.findById(schema.controlId) == nullptr)
+            ++missingTypedInspectorEntries;
+        for (const std::string& componentId : schema.componentControlIds) {
+            if (ui.findById(componentId) == nullptr)
+                ++missingTypedInspectorEntries;
+        }
     }
     if (missingTypedInspectorEntries != 0) {
         std::fprintf(stderr, "typed inspector regression: missing=%d\n",
@@ -185,21 +182,19 @@ int main() {
         std::istreambuf_iterator<char>(chromeSourceFile),
         std::istreambuf_iterator<char>()};
     int serializedGeneratedControls = 0;
-    for (const char* id : requiredTypedInspectorIds) {
-        if (chromeSource.find(std::string("\"") + id + "\"") !=
+    for (const ayt::ui::PropertyFieldSchema& schema :
+         ayt::ui::allPropertyFieldSchemas()) {
+        if (chromeSource.find(std::string("\"") + schema.rowId + "\"") !=
             std::string::npos) {
             ++serializedGeneratedControls;
         }
     }
-    auto* generatedSection = dynamic_cast<ayt::ui::TextLabel*>(
-        ui.findById("section_schema_properties"));
     auto* generatedMinimum = dynamic_cast<ayt::ui::TextInput*>(
         ui.findById("prop_min"));
     auto* generatedSelection = dynamic_cast<ayt::ui::ComboBox*>(
         ui.findById("prop_selection_mode"));
     if (!chromeSourceOpened || serializedGeneratedControls != 0 ||
-        generatedSection == nullptr || generatedMinimum == nullptr ||
-        generatedSelection == nullptr || generatedSection->isVisible()) {
+        generatedMinimum == nullptr || generatedSelection == nullptr) {
         std::fprintf(stderr,
             "schema-generated inspector chrome regression: serialized=%d\n",
             serializedGeneratedControls);
@@ -254,7 +249,11 @@ int main() {
     if (propsScroll->getScrollOffset().y != 0.0f ||
         rootWidthRow == nullptr || !rootWidthRow->isVisible() ||
         rootHeightRow == nullptr || !rootHeightRow->isVisible()) {
-        std::fprintf(stderr, "root inspector visibility/scroll reset failed\n");
+        std::fprintf(stderr,
+            "root inspector visibility/scroll reset failed: scroll=%g w=%d h=%d\n",
+            propsScroll->getScrollOffset().y,
+            rootWidthRow != nullptr && rootWidthRow->isVisible(),
+            rootHeightRow != nullptr && rootHeightRow->isVisible());
         return 59;
     }
     session.select(button, false);
@@ -402,8 +401,7 @@ int main() {
         ui.findById("row_prop_min");
     ayt::ui::Widget* generatedTintRow =
         ui.findById("row_prop_image_tint");
-    if (generatedSection == nullptr || !generatedSection->isVisible() ||
-        generatedMinRow == nullptr || !generatedMinRow->isVisible() ||
+    if (generatedMinRow == nullptr || !generatedMinRow->isVisible() ||
         generatedTintRow == nullptr || generatedTintRow->isVisible()) {
         std::fprintf(stderr, "schema-generated row visibility failed\n");
         return 117;

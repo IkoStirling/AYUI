@@ -177,8 +177,15 @@ TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
     for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
         if (schema.displayName != nullptr) ++generatedRows;
     }
-    CHECK(generatedRows == 25);
-    CHECK(width.displayName == nullptr);
+    CHECK(generatedRows == 51);
+    CHECK(width.displayName != nullptr);
+    if (width.displayName != nullptr) {
+        CHECK(std::string(width.displayName) == "Width");
+    }
+    const PropertyFieldSchema& padding =
+        propertyFieldSchema(AuthoringProperty::Padding);
+    CHECK(padding.rowKind == PropertyRowKind::Vector4);
+    CHECK(padding.componentControlIds.size() == 4u);
 
     WidgetAuthoringRegistry& registry = WidgetAuthoringRegistry::get();
     const WidgetAuthoringDescriptor* slider = registry.find("Slider");

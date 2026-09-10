@@ -496,7 +496,10 @@ Grid 不允许缩小到会丢弃已占用 cell 的尺寸。Image color/UV 和 Gr
 `WidgetSerializer` 中对称往返，避免“Inspector 可编辑但保存丢失”的半实现状态。第二阶段把显示名也
 纳入 schema，并在 Session attach 时自动创建这 25 个类型专用属性行；两份 chrome JSON 不再复制其
 label/control 定义。复杂基础行仍保留声明式 JSON，旧版或部分迁移的 chrome 若已提供相同 row id，
-生成器会复用它而不会创建重复控件，文档模型和属性写入协议保持不变。`UIManager::findById()` 保持
+生成器会复用它而不会创建重复控件，文档模型和属性写入协议保持不变。第三阶段进一步把 Identity、
+Transform、Content、Appearance、Interaction 和 Layout 的全部 51 个普通属性行纳入 schema 生成，
+并用 `PropertyRowKind::Vector4` 描述 Padding 四分量；chrome JSON 仅保留具有独立交互模型的工具面板。
+`UIManager::findById()` 保持
 Loader registry 的 O(1) 快路径，并在 miss 时遍历实时树，使动态生成控件与静态控件具有一致查询语义。
 
 命令栈已经区分 `Property`、`Insert`、`Delete`、`Reorder`、`Transform`、`Clipboard` 与
@@ -777,6 +780,8 @@ headless round-trip 通过。
 同日完成类型化 Inspector 第二阶段：25 个类型专用属性行改由 `PropertySchema` 的显示名和控件契约
 自动生成，静态 chrome 仅保留基础与复合编辑界面。回归同时验证源 JSON 不再包含生成控件、attach 后
 完整 Widget 树和按选中类型显隐均正确；源码 ABI 更新到 113，当前提交链基线为 AYUI `5593 / 5593`。
+随后完成 Inspector Schema 第三阶段，51 个普通属性行和 Padding 复合行全部脱离 chrome JSON；
+源码 ABI 更新到 114，当前基线为 AYUI `5596 / 5596`，headless round-trip 通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

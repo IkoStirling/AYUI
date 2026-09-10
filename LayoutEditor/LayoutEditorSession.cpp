@@ -73,6 +73,39 @@ namespace {
 constexpr float kHandleHit = 8.0f;
 constexpr float kMinWidgetSize = 8.0f;
 
+bool usesGenericSchemaBinding(AuthoringProperty property) {
+    switch (property) {
+    case AuthoringProperty::ValueMin:
+    case AuthoringProperty::ValueMax:
+    case AuthoringProperty::Value:
+    case AuthoringProperty::ImageTint:
+    case AuthoringProperty::ImageUvMinX:
+    case AuthoringProperty::ImageUvMinY:
+    case AuthoringProperty::ImageUvMaxX:
+    case AuthoringProperty::ImageUvMaxY:
+    case AuthoringProperty::SelectionMode:
+    case AuthoringProperty::ItemHeight:
+    case AuthoringProperty::TileWidth:
+    case AuthoringProperty::TileHeight:
+    case AuthoringProperty::TileSpacing:
+    case AuthoringProperty::VerticalScrollBarVisibility:
+    case AuthoringProperty::HorizontalScrollBarVisibility:
+    case AuthoringProperty::TabOverflowMode:
+    case AuthoringProperty::MinTabWidth:
+    case AuthoringProperty::GridRows:
+    case AuthoringProperty::GridColumns:
+    case AuthoringProperty::GridSpacingX:
+    case AuthoringProperty::GridSpacingY:
+    case AuthoringProperty::RichTextWrapMode:
+    case AuthoringProperty::RichTextOverflow:
+    case AuthoringProperty::LineHeight:
+    case AuthoringProperty::MaxLines:
+        return true;
+    default:
+        return false;
+    }
+}
+
 std::wstring utf8ToWide(const std::string& s) {
     if (s.empty()) {
         return {};
@@ -5161,9 +5194,7 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     setChromeVisible("section_interaction", hasSel &&
         properties.hasSection(PropertySection::Interaction));
 
-    bool hasGeneratedProperty = false;
     for (const PropertyFieldSchema& field : allPropertyFieldSchemas()) {
-        if (field.property == AuthoringProperty::Padding) continue;
         bool visible = hasProperty(field.property);
         if (field.property == AuthoringProperty::Items &&
             structuredKind != LayoutStructuredKind::None) {
@@ -5178,26 +5209,11 @@ void LayoutEditorSession::updatePropPanelVisibility() {
             visible = visible && showPos;
         }
         row(field.rowId, field.labelId, field.controlId, visible);
-        if (field.displayName != nullptr && visible) {
-            hasGeneratedProperty = true;
-        }
     }
-    setChromeVisible("section_schema_properties", hasGeneratedProperty);
     const bool hasTexture = hasProperty(AuthoringProperty::Texture);
     setChromeVisible("row_prop_texture_actions", hasTexture);
     setChromeVisible("section_structured",
                      structuredKind != LayoutStructuredKind::None);
-    const bool hasPadding = hasProperty(AuthoringProperty::Padding);
-    if (findChromeById("row_prop_padding") != nullptr) {
-        setChromeVisible("row_prop_padding", hasPadding);
-    } else {
-        setChromeVisible("lbl_prop_pad", hasPadding);
-        setChromeVisible("prop_pad_l", hasPadding);
-        setChromeVisible("prop_pad_t", hasPadding);
-        setChromeVisible("prop_pad_r", hasPadding);
-        setChromeVisible("prop_pad_b", hasPadding);
-    }
-
     if (auto* title = dynamic_cast<TextLabel*>(_ui != nullptr
             ? findChromeById("lbl_props") : nullptr)) {
         if (!hasSel) {
@@ -7680,11 +7696,25 @@ void LayoutEditorSession::syncTextAlignCombos() {
 
 void LayoutEditorSession::ensureSchemaPropertyChrome() {
     auto* column = dynamic_cast<VBox*>(findChromeById("props_col"));
-    Widget* insertBefore = findChromeById("section_style_quality");
-    if (column == nullptr || insertBefore == nullptr) return;
+    if (column == nullptr) return;
 
-    int insertIndex = column->slotIndexOf(insertBefore);
-    if (insertIndex < 0) return;
+    auto sectionAnchor = [this](PropertySection section) -> Widget* {
+        switch (section) {
+        case PropertySection::Identity:
+            return findChromeById("section_transform");
+        case PropertySection::Transform:
+            return findChromeById("section_content");
+        case PropertySection::Content:
+            return findChromeById("row_prop_texture_actions");
+        case PropertySection::Appearance:
+            return findChromeById("section_style_quality");
+        case PropertySection::Interaction:
+            return findChromeById("section_layout");
+        case PropertySection::Layout:
+            return findChromeById("section_validation");
+        }
+        return nullptr;
+    };
 
     std::vector<const PropertyFieldSchema*> missing;
     for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
@@ -7695,42 +7725,69 @@ void LayoutEditorSession::ensureSchemaPropertyChrome() {
     }
     if (missing.empty()) return;
 
-    if (findChromeById("section_schema_properties") == nullptr) {
-        auto* section = new TextLabel();
-        section->setId("section_schema_properties");
-        section->setStyleId("__le_accent");
-        section->setText(L"TYPE-SPECIFIC");
-        section->setSize({272.0f, 22.0f});
-        section->setVisible(false);
-        column->insertWidget(insertIndex++, section, 22.0f);
-    }
-
     for (const PropertyFieldSchema* schema : missing) {
-        auto* row = new HBox();
+        Widget* insertBefore = sectionAnchor(schema->section);
+        const int insertIndex = insertBefore != nullptr
+            ? column->slotIndexOf(insertBefore) : -1;
+        if (insertIndex < 0) continue;
+
+        BoxBase* row = nullptr;
+        if (schema->rowKind == PropertyRowKind::Vector4) {
+            row = new VBox();
+        } else {
+            row = new HBox();
+        }
         row->setId(schema->rowId);
-        row->setSize({272.0f, 32.0f});
-        row->setSpacing(8.0f);
+        row->setSize({272.0f, schema->rowHeight});
+        row->setSpacing(schema->rowKind == PropertyRowKind::Vector4
+            ? 4.0f : 8.0f);
         row->setVisible(false);
 
         auto* label = new TextLabel();
         label->setId(schema->labelId);
         label->setStyleId("__le_label");
         label->setText(utf8ToWide(schema->displayName));
-        label->setSize({86.0f, 30.0f});
-        row->addWidget(label, 86.0f);
+        if (schema->rowKind == PropertyRowKind::Vector4) {
+            label->setSize({272.0f, 24.0f});
+            row->addWidget(label, 24.0f);
 
-        Widget* control = nullptr;
-        if (schema->editorKind == PropertyEditorKind::Enum ||
-            schema->editorKind == PropertyEditorKind::Boolean) {
-            control = new ComboBox();
+            auto* components = new HBox();
+            components->setId(std::string(schema->rowId) + "_inputs");
+            components->setSize({272.0f, 32.0f});
+            components->setSpacing(6.0f);
+            for (size_t componentIndex = 0;
+                 componentIndex < schema->componentControlIds.size();
+                 ++componentIndex) {
+                const std::string& controlId =
+                    schema->componentControlIds[componentIndex];
+                auto* input = new TextInput();
+                input->setId(controlId);
+                input->setStyleId("__le_input");
+                if (componentIndex < schema->componentLabels.size()) {
+                    input->setPlaceholder(utf8ToWide(
+                        schema->componentLabels[componentIndex]));
+                }
+                input->setSize({63.0f, 30.0f});
+                components->addWidget(input, 63.0f);
+            }
+            row->addWidget(components, 32.0f);
         } else {
-            control = new TextInput();
+            label->setSize({86.0f, 30.0f});
+            row->addWidget(label, 86.0f);
+
+            Widget* control = nullptr;
+            if (schema->editorKind == PropertyEditorKind::Enum ||
+                schema->editorKind == PropertyEditorKind::Boolean) {
+                control = new ComboBox();
+            } else {
+                control = new TextInput();
+            }
+            control->setId(schema->controlId);
+            control->setStyleId("__le_input");
+            control->setSize({0.0f, 30.0f});
+            row->addWidget(control, 0.0f);
         }
-        control->setId(schema->controlId);
-        control->setStyleId("__le_input");
-        control->setSize({0.0f, 30.0f});
-        row->addWidget(control, 0.0f);
-        column->insertWidget(insertIndex++, row, 32.0f);
+        column->insertWidget(insertIndex, row, schema->rowHeight);
     }
 }
 
@@ -7738,7 +7795,7 @@ void LayoutEditorSession::bindSchemaPropertyFields() {
     _schemaPropertyInputs.clear();
     _schemaPropertyCombos.clear();
     for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
-        if (schema.displayName == nullptr) {
+        if (!usesGenericSchemaBinding(schema.property)) {
             continue;
         }
         if (schema.editorKind == PropertyEditorKind::Enum ||
