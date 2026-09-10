@@ -269,7 +269,7 @@
               "content": {
                 "type": "VBox",
                 "id": "props_col",
-                "size": { "w": 304, "h": 4050 },
+                "size": { "w": 304, "h": 5200 },
                 "spacing": 6,
                 "padding": { "left": 16, "top": 4, "right": 16, "bottom": 16 },
                 "children": [
@@ -516,6 +516,34 @@
                       { "type": "TextInput", "id": "prop_text", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
+                  { "type": "HBox", "id": "row_prop_min", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_min", "style": "__le_label", "text": "Minimum", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_min", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_max", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_max", "style": "__le_label", "text": "Maximum", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_max", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_value", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_value", "style": "__le_label", "text": "Value", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_value", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_uv_min_x", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_uv_min_x", "style": "__le_label", "text": "UV min X", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_uv_min_x", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_uv_min_y", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_uv_min_y", "style": "__le_label", "text": "UV min Y", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_uv_min_y", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_uv_max_x", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_uv_max_x", "style": "__le_label", "text": "UV max X", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_uv_max_x", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_uv_max_y", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_uv_max_y", "style": "__le_label", "text": "UV max Y", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_uv_max_y", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
                   {
                     "type": "HBox", "id": "row_prop_texture", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
                     "children": [
@@ -610,6 +638,10 @@
                       { "type": "ComboBox", "id": "prop_style_combo", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
+                  { "type": "HBox", "id": "row_prop_image_tint", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_image_tint", "style": "__le_label", "text": "Image tint", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_image_tint", "style": "__le_input", "text": "#FFFFFFFF", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
                   { "type": "TextLabel", "id": "section_style_quality", "style": "__le_accent", "text": "STYLE SOURCE & STATE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {
                     "type": "HBox", "id": "row_style_preview_state", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
@@ -656,6 +688,10 @@
                       { "type": "TextInput", "id": "prop_controller", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
+                  { "type": "HBox", "id": "row_prop_selection_mode", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_selection_mode", "style": "__le_label", "text": "Selection", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_selection_mode", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
                   {
                     "type": "HBox", "id": "row_prop_on_click", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8,
                     "children": [
@@ -727,6 +763,70 @@
                       { "type": "TextInput", "id": "prop_spacing", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
                     ]
                   },
+                  { "type": "HBox", "id": "row_prop_item_height", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_item_height", "style": "__le_label", "text": "Item height", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_item_height", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_tile_width", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_tile_width", "style": "__le_label", "text": "Tile width", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_tile_width", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_tile_height", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_tile_height", "style": "__le_label", "text": "Tile height", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_tile_height", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_tile_spacing", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_tile_spacing", "style": "__le_label", "text": "Tile spacing", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_tile_spacing", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_vscroll_visibility", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_vscroll_visibility", "style": "__le_label", "text": "Vertical bar", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_vscroll_visibility", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_hscroll_visibility", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_hscroll_visibility", "style": "__le_label", "text": "Horizontal bar", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_hscroll_visibility", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_tab_overflow", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_tab_overflow", "style": "__le_label", "text": "Tab overflow", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_tab_overflow", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_min_tab_width", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_min_tab_width", "style": "__le_label", "text": "Min tab width", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_min_tab_width", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_grid_rows", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_grid_rows", "style": "__le_label", "text": "Grid rows", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_grid_rows", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_grid_columns", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_grid_columns", "style": "__le_label", "text": "Grid columns", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_grid_columns", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_grid_spacing_x", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_grid_spacing_x", "style": "__le_label", "text": "Grid gap X", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_grid_spacing_x", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_grid_spacing_y", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_grid_spacing_y", "style": "__le_label", "text": "Grid gap Y", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_grid_spacing_y", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_rich_wrap", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_rich_wrap", "style": "__le_label", "text": "Rich wrap", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_rich_wrap", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_rich_overflow", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_rich_overflow", "style": "__le_label", "text": "Rich overflow", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "ComboBox", "id": "prop_rich_overflow", "style": "__le_input", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_line_height", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_line_height", "style": "__le_label", "text": "Line height", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_line_height", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
+                  { "type": "HBox", "id": "row_prop_max_lines", "size": { "h": 32 }, "slot": { "height": 32 }, "spacing": 8, "children": [
+                    { "type": "TextLabel", "id": "lbl_prop_max_lines", "style": "__le_label", "text": "Max lines", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                    { "type": "TextInput", "id": "prop_max_lines", "style": "__le_input", "text": "", "size": { "w": 0, "h": 30 }, "slot": { "width": 0 } }
+                  ] },
                   {
                     "type": "VBox", "id": "row_prop_padding", "size": { "h": 70 }, "slot": { "height": 70 }, "spacing": 4,
                     "children": [

@@ -242,6 +242,9 @@ private:
     void syncStyleInspector();
     void syncTextAlignCombos();
     void syncEnumCombos();
+    void bindSchemaPropertyFields();
+    void syncSchemaPropertyFields();
+    std::wstring schemaPropertyValue(const std::string& field) const;
     void refreshWindowTitle();
     void bindBoolCombo(ComboBox*& slot, const char* id, const char* field);
     void bindGravityCombo();
@@ -504,6 +507,8 @@ private:
     TextInput* _propPadT = nullptr;
     TextInput* _propPadR = nullptr;
     TextInput* _propPadB = nullptr;
+    std::unordered_map<std::string, TextInput*> _schemaPropertyInputs;
+    std::unordered_map<std::string, ComboBox*> _schemaPropertyCombos;
     TextLabel* _status = nullptr;
     ListView* _structuredList = nullptr;
     TextInput* _structuredText = nullptr;

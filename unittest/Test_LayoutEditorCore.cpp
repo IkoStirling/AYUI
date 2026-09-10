@@ -149,6 +149,54 @@ TEST_CASE(authoring_registry_is_the_single_palette_and_schema_source) {
     destroyWidgetTree(created);
 }
 
+TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
+    const PropertyFieldSchema& width =
+        propertyFieldSchema(AuthoringProperty::Width);
+    CHECK(width.editorKind == PropertyEditorKind::Number);
+    CHECK(width.hasRange);
+    CHECK_FLOAT_EQ(width.minimum, 8.0f, 1e-5f);
+    CHECK_FLOAT_EQ(width.step, 1.0f, 1e-5f);
+
+    const PropertyFieldSchema& selection =
+        propertyFieldSchema(AuthoringProperty::SelectionMode);
+    CHECK(selection.editorKind == PropertyEditorKind::Enum);
+    CHECK(selection.enumOptions.size() == 2u);
+    if (selection.enumOptions.size() == 2u) {
+        CHECK(selection.enumOptions[0] == "Single");
+        CHECK(selection.enumOptions[1] == "Extended");
+    }
+    CHECK(findPropertyFieldSchema("imageTint") != nullptr);
+    CHECK(findPropertyFieldSchema("richWrapMode") != nullptr);
+    CHECK(findPropertyFieldSchema("notAProperty") == nullptr);
+
+    WidgetAuthoringRegistry& registry = WidgetAuthoringRegistry::get();
+    const WidgetAuthoringDescriptor* slider = registry.find("Slider");
+    const WidgetAuthoringDescriptor* image = registry.find("Image");
+    const WidgetAuthoringDescriptor* scroll = registry.find("ScrollView");
+    const WidgetAuthoringDescriptor* rich = registry.find("RichText");
+    CHECK_NOT_NULL(slider);
+    CHECK_NOT_NULL(image);
+    CHECK_NOT_NULL(scroll);
+    CHECK_NOT_NULL(rich);
+    if (slider != nullptr) {
+        CHECK(slider->properties.contains(AuthoringProperty::ValueMin));
+        CHECK(slider->properties.contains(AuthoringProperty::ValueMax));
+        CHECK(slider->properties.contains(AuthoringProperty::Value));
+    }
+    if (image != nullptr) {
+        CHECK(image->properties.contains(AuthoringProperty::ImageTint));
+        CHECK(image->properties.contains(AuthoringProperty::ImageUvMaxY));
+    }
+    if (scroll != nullptr) {
+        CHECK(scroll->properties.contains(
+            AuthoringProperty::VerticalScrollBarVisibility));
+    }
+    if (rich != nullptr) {
+        CHECK(rich->properties.contains(AuthoringProperty::RichTextWrapMode));
+        CHECK(rich->properties.contains(AuthoringProperty::MaxLines));
+    }
+}
+
 TEST_CASE(structured_content_model_edits_lists_trees_tabs_and_rich_runs) {
     LayoutStructuredContentModel model;
 

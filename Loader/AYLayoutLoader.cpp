@@ -822,6 +822,17 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                 ++idx;
             }
         }
+        if (j.contains("padding") && j["padding"].is_object()) {
+            const auto& padding = j["padding"];
+            grid->setPadding(
+                padding.value("left", 4.0f), padding.value("top", 4.0f),
+                padding.value("right", 4.0f), padding.value("bottom", 4.0f));
+        }
+        if (j.contains("spacing") && j["spacing"].is_object()) {
+            const auto& spacing = j["spacing"];
+            grid->setSpacing(spacing.value("horizontal", 4.0f),
+                             spacing.value("vertical", 4.0f));
+        }
     }
 
     if (Image* image = dynamic_cast<Image*>(widget)) {
@@ -832,6 +843,12 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                 c[1].get<float>(),
                 c[2].get<float>(),
                 c[3].get<float>()));
+        }
+        if (j.contains("uv") && j["uv"].is_object()) {
+            const auto& uv = j["uv"];
+            image->setUV(math::FRectangle(
+                uv.value("minX", 0.0f), uv.value("minY", 0.0f),
+                uv.value("maxX", 1.0f), uv.value("maxY", 1.0f)));
         }
         // L2 — parity with WidgetSerializer. TextureRegistry + the
         // typed ImageTextureHandle are landed (G10), but the loader

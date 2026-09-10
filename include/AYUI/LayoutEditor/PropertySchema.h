@@ -33,7 +33,32 @@ enum class AuthoringProperty : std::uint8_t {
     OnClose,
     Gravity,
     Spacing,
-    Padding
+    Padding,
+    ValueMin,
+    ValueMax,
+    Value,
+    ImageTint,
+    ImageUvMinX,
+    ImageUvMinY,
+    ImageUvMaxX,
+    ImageUvMaxY,
+    SelectionMode,
+    ItemHeight,
+    TileWidth,
+    TileHeight,
+    TileSpacing,
+    VerticalScrollBarVisibility,
+    HorizontalScrollBarVisibility,
+    TabOverflowMode,
+    MinTabWidth,
+    GridRows,
+    GridColumns,
+    GridSpacingX,
+    GridSpacingY,
+    RichTextWrapMode,
+    RichTextOverflow,
+    LineHeight,
+    MaxLines
 };
 
 enum class PropertySection : std::uint8_t {
@@ -45,6 +70,20 @@ enum class PropertySection : std::uint8_t {
     Interaction
 };
 
+// The schema describes both availability and the editor control contract.
+// LayoutEditorSession still hosts the concrete chrome, but it no longer owns
+// duplicated enum lists or numeric intent for schema-backed fields.
+enum class PropertyEditorKind : std::uint8_t {
+    Text,
+    MultilineText,
+    Number,
+    Integer,
+    Boolean,
+    Enum,
+    Color,
+    Resource
+};
+
 struct PropertyFieldSchema {
     AuthoringProperty property;
     PropertySection section;
@@ -52,6 +91,12 @@ struct PropertyFieldSchema {
     const char* rowId;
     const char* labelId;
     const char* controlId;
+    PropertyEditorKind editorKind = PropertyEditorKind::Text;
+    bool hasRange = false;
+    float minimum = 0.0f;
+    float maximum = 0.0f;
+    float step = 0.0f;
+    std::vector<std::string> enumOptions;
 };
 
 class PropertySchema {
@@ -71,6 +116,7 @@ private:
 };
 
 const PropertyFieldSchema& propertyFieldSchema(AuthoringProperty property);
+const PropertyFieldSchema* findPropertyFieldSchema(const std::string& key);
 const std::vector<PropertyFieldSchema>& allPropertyFieldSchemas();
 
 } // namespace ayt::ui

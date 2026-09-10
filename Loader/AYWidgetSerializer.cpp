@@ -1040,6 +1040,20 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         }
 
         if (Image* img = dynamic_cast<Image*>(widget)) {
+            if (j.contains("color") && j["color"].is_array() &&
+                j["color"].size() >= 4u) {
+                img->setColor(math::FVector4(
+                    j["color"][0].get<float>(),
+                    j["color"][1].get<float>(),
+                    j["color"][2].get<float>(),
+                    j["color"][3].get<float>()));
+            }
+            if (j.contains("uv") && j["uv"].is_object()) {
+                const auto& uv = j["uv"];
+                img->setUV(math::FRectangle(
+                    uv.value("minX", 0.0f), uv.value("minY", 0.0f),
+                    uv.value("maxX", 1.0f), uv.value("maxY", 1.0f)));
+            }
             // G10 — round-trip textureName → TextureRegistry::acquire.
             // The width/height we record here are metadata; the actual
             // backend handle is filled in by the host's loader once the
@@ -1830,6 +1844,11 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
     }
     else if (Image* image = dynamic_cast<Image*>(widget)) {
         j["type"] = "Image";
+        const math::FVector4& color = image->getColor();
+        j["color"] = {color.x, color.y, color.z, color.w};
+        const math::FRectangle& uv = image->getUV();
+        j["uv"] = {{"minX", uv.minX}, {"minY", uv.minY},
+                   {"maxX", uv.maxX}, {"maxY", uv.maxY}};
         // G10 — texture handle is now typed + name-based. The backend
         // pointer itself never serializes (it's runtime state); the
         // host re-resolves `textureName` via TextureRegistry at load

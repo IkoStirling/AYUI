@@ -218,6 +218,16 @@ bool parseColorHex(std::wstring value, math::FVector4& out) {
     }
 }
 
+std::vector<std::wstring> propertyOptionLabels(AuthoringProperty property) {
+    const PropertyFieldSchema& schema = propertyFieldSchema(property);
+    std::vector<std::wstring> labels;
+    labels.reserve(schema.enumOptions.size());
+    for (const std::string& option : schema.enumOptions) {
+        labels.push_back(utf8ToWide(option));
+    }
+    return labels;
+}
+
 std::string readFileToString(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
@@ -1521,6 +1531,15 @@ void LayoutEditorSession::bindPropField(const char* id, const char* field,
             if (_suppressProp) {
                 return;
             }
+            if (const PropertyFieldSchema* schema =
+                    findPropertyFieldSchema(fieldName)) {
+                if (schema->hasRange) {
+                    v = std::clamp(v, schema->minimum, schema->maximum);
+                }
+                if (schema->editorKind == PropertyEditorKind::Integer) {
+                    v = std::round(v);
+                }
+            }
             beginMutation();
             applyProperty(fieldName, formatFloat(v));
             _suppressProp = true;
@@ -1783,26 +1802,32 @@ void LayoutEditorSession::wireChrome() {
     _propTextVAlign = dynamic_cast<ComboBox*>(
         findChromeById("prop_text_valign"));
     if (_propTextHAlign != nullptr) {
-        _propTextHAlign->setItems({L"Left", L"Center", L"Right"});
+        _propTextHAlign->setItems(
+            propertyOptionLabels(AuthoringProperty::TextHAlign));
         _propTextHAlign->setOnSelectionChanged([this](int index) {
             if (_suppressProp || index < 0 || index > 2) {
                 return;
             }
-            static const char* kH[] = {"Left", "Center", "Right"};
+            const PropertyFieldSchema& schema =
+                propertyFieldSchema(AuthoringProperty::TextHAlign);
             beginMutation();
-            applyProperty("hAlign", utf8ToWide(kH[index]));
+            applyProperty("hAlign", utf8ToWide(
+                schema.enumOptions[static_cast<size_t>(index)]));
             endMutation();
         });
     }
     if (_propTextVAlign != nullptr) {
-        _propTextVAlign->setItems({L"Top", L"Center", L"Bottom"});
+        _propTextVAlign->setItems(
+            propertyOptionLabels(AuthoringProperty::TextVAlign));
         _propTextVAlign->setOnSelectionChanged([this](int index) {
             if (_suppressProp || index < 0 || index > 2) {
                 return;
             }
-            static const char* kV[] = {"Top", "Center", "Bottom"};
+            const PropertyFieldSchema& schema =
+                propertyFieldSchema(AuthoringProperty::TextVAlign);
             beginMutation();
-            applyProperty("vAlign", utf8ToWide(kV[index]));
+            applyProperty("vAlign", utf8ToWide(
+                schema.enumOptions[static_cast<size_t>(index)]));
             endMutation();
         });
     }
@@ -1811,6 +1836,7 @@ void LayoutEditorSession::wireChrome() {
     bindBoolCombo(_propPassword, "prop_password", "password");
     bindBoolCombo(_propReadOnly, "prop_readonly", "readOnly");
     bindGravityCombo();
+    bindSchemaPropertyFields();
 
     _structuredList = dynamic_cast<ListView*>(
         findChromeById("structured_items"));
@@ -3231,6 +3257,226 @@ void LayoutEditorSession::applyProperty(const std::string& field,
             return;
         }
         setStatus(L"gravity: only VBox/HBox");
+        return;
+    }
+
+    const PropertyFieldSchema* fieldSchema = findPropertyFieldSchema(field);
+    auto parseSchemaNumber = [&](float& parsed) {
+        if (!parseFloat(value, parsed) || !std::isfinite(parsed)) {
+            setStatus(L"Invalid numeric value");
+            return false;
+        }
+        if (fieldSchema != nullptr && fieldSchema->hasRange) {
+            parsed = std::clamp(parsed, fieldSchema->minimum,
+                                fieldSchema->maximum);
+        }
+        if (fieldSchema != nullptr &&
+            fieldSchema->editorKind == PropertyEditorKind::Integer) {
+            parsed = std::round(parsed);
+        }
+        return true;
+    };
+    auto finishSchemaProperty = [&]() {
+        _selected->markDirty();
+        markDirty(true);
+        const bool previousSuppress = _suppressProp;
+        _suppressProp = true;
+        syncSchemaPropertyFields();
+        _suppressProp = previousSuppress;
+        if (_ui != nullptr) _ui->invalidateLayout();
+    };
+
+    if (field == "min" || field == "max" || field == "value") {
+        float parsed = 0.0f;
+        if (!parseSchemaNumber(parsed)) return;
+        if (auto* slider = dynamic_cast<Slider*>(_selected)) {
+            if (field == "min") slider->setMin(parsed);
+            else if (field == "max") slider->setMax(parsed);
+            else slider->setValue(parsed);
+        } else if (auto* progress = dynamic_cast<ProgressBar*>(_selected)) {
+            if (field == "min") progress->setMin(parsed);
+            else if (field == "max") progress->setMax(parsed);
+            else progress->setValue(parsed);
+        } else {
+            return;
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "imageTint") {
+        auto* image = dynamic_cast<Image*>(_selected);
+        math::FVector4 color;
+        if (image == nullptr || !parseColorHex(value, color)) {
+            setStatus(L"Image tint expects #RRGGBB or #RRGGBBAA");
+            return;
+        }
+        image->setColor(color);
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "uvMinX" || field == "uvMinY" ||
+        field == "uvMaxX" || field == "uvMaxY") {
+        auto* image = dynamic_cast<Image*>(_selected);
+        float parsed = 0.0f;
+        if (image == nullptr || !parseSchemaNumber(parsed)) return;
+        math::FRectangle uv = image->getUV();
+        if (field == "uvMinX") uv.minX = parsed;
+        else if (field == "uvMinY") uv.minY = parsed;
+        else if (field == "uvMaxX") uv.maxX = parsed;
+        else uv.maxY = parsed;
+        image->setUV(uv);
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "selectionMode") {
+        const bool extended = value == L"Extended";
+        if (auto* list = dynamic_cast<ListView*>(_selected)) {
+            list->setSelectionMode(extended
+                ? ListView::SelectionMode::Extended
+                : ListView::SelectionMode::Single);
+        } else if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
+            tiles->setSelectionMode(extended
+                ? TileView::SelectionMode::Extended
+                : TileView::SelectionMode::Single);
+        } else {
+            return;
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "itemHeight") {
+        float parsed = 0.0f;
+        if (!parseSchemaNumber(parsed)) return;
+        if (auto* list = dynamic_cast<ListView*>(_selected)) {
+            list->setItemHeight(parsed);
+        } else if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
+            tree->setItemHeight(parsed);
+        } else {
+            return;
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "tileWidth" || field == "tileHeight" ||
+        field == "tileSpacing") {
+        auto* tiles = dynamic_cast<TileView*>(_selected);
+        float parsed = 0.0f;
+        if (tiles == nullptr || !parseSchemaNumber(parsed)) return;
+        if (field == "tileSpacing") {
+            tiles->setTileSpacing(parsed);
+        } else {
+            math::FVector2 size = tiles->getTileSize();
+            if (field == "tileWidth") size.x = parsed;
+            else size.y = parsed;
+            tiles->setTileSize(size);
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "verticalScrollBarVisibility" ||
+        field == "horizontalScrollBarVisibility") {
+        auto* scroll = dynamic_cast<ScrollView*>(_selected);
+        if (scroll == nullptr) return;
+        ScrollView::ScrollBarVisibility visibility =
+            ScrollView::ScrollBarVisibility::Auto;
+        if (value == L"Always") {
+            visibility = ScrollView::ScrollBarVisibility::Always;
+        } else if (value == L"Hidden") {
+            visibility = ScrollView::ScrollBarVisibility::Hidden;
+        }
+        if (field == "verticalScrollBarVisibility") {
+            scroll->setVerticalScrollBarVisibility(visibility);
+        } else {
+            scroll->setHorizontalScrollBarVisibility(visibility);
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "overflowMode" || field == "minTabWidth") {
+        auto* strip = dynamic_cast<TabStrip*>(_selected);
+        if (strip == nullptr) return;
+        if (field == "overflowMode") {
+            TabStrip::OverflowMode mode = TabStrip::OverflowMode::Scroll;
+            if (value == L"Compress") mode = TabStrip::OverflowMode::Compress;
+            else if (value == L"Clip") mode = TabStrip::OverflowMode::Clip;
+            strip->setOverflowMode(mode);
+        } else {
+            float parsed = 0.0f;
+            if (!parseSchemaNumber(parsed)) return;
+            strip->setMinTabWidth(parsed);
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "gridRows" || field == "gridColumns" ||
+        field == "gridSpacingX" || field == "gridSpacingY") {
+        auto* grid = dynamic_cast<GridPanel*>(_selected);
+        float parsed = 0.0f;
+        if (grid == nullptr || !parseSchemaNumber(parsed)) return;
+        if (field == "gridRows" || field == "gridColumns") {
+            const int requested = static_cast<int>(parsed);
+            int requiredRows = 1;
+            int requiredColumns = 1;
+            for (int row = 0; row < grid->getRowCount(); ++row) {
+                for (int column = 0; column < grid->getColumnCount(); ++column) {
+                    const GridPanel::CellInfo* cell = grid->findCell(row, column);
+                    if (cell != nullptr && cell->widget != nullptr) {
+                        requiredRows = (std::max)(requiredRows,
+                            row + cell->rowSpan);
+                        requiredColumns = (std::max)(requiredColumns,
+                            column + cell->colSpan);
+                    }
+                }
+            }
+            if ((field == "gridRows" && requested < requiredRows) ||
+                (field == "gridColumns" && requested < requiredColumns)) {
+                setStatus(L"Grid size cannot discard occupied cells");
+                const bool previousSuppress = _suppressProp;
+                _suppressProp = true;
+                syncSchemaPropertyFields();
+                _suppressProp = previousSuppress;
+                return;
+            }
+            if (field == "gridRows") grid->setRowCount(requested);
+            else grid->setColumnCount(requested);
+        } else {
+            float horizontal = grid->getHorizontalSpacing();
+            float vertical = grid->getVerticalSpacing();
+            if (field == "gridSpacingX") horizontal = parsed;
+            else vertical = parsed;
+            grid->setSpacing(horizontal, vertical);
+        }
+        finishSchemaProperty();
+        return;
+    }
+
+    if (field == "richWrapMode" || field == "richOverflow" ||
+        field == "lineHeight" || field == "maxLines") {
+        auto* rich = dynamic_cast<RichText*>(_selected);
+        if (rich == nullptr) return;
+        if (field == "richWrapMode") {
+            RichTextWrapMode mode = RichTextWrapMode::NoWrap;
+            if (value == L"Word") mode = RichTextWrapMode::Word;
+            else if (value == L"Character") mode = RichTextWrapMode::Character;
+            rich->setWrapMode(mode);
+        } else if (field == "richOverflow") {
+            rich->setOverflow(value == L"Ellipsis"
+                ? RichTextOverflow::Ellipsis : RichTextOverflow::Clip);
+        } else {
+            float parsed = 0.0f;
+            if (!parseSchemaNumber(parsed)) return;
+            if (field == "lineHeight") rich->setLineHeight(parsed);
+            else rich->setMaxLines(static_cast<size_t>(parsed));
+        }
+        finishSchemaProperty();
         return;
     }
 
@@ -5017,6 +5263,7 @@ void LayoutEditorSession::syncPropertyStrip() {
             _propTextVAlign->setSelectedIndex(0);
         }
         syncEnumCombos();
+        syncSchemaPropertyFields();
         setField(_propSpacing, L"");
         setField(_propPadL, L"");
         setField(_propPadT, L"");
@@ -5153,6 +5400,7 @@ void LayoutEditorSession::syncPropertyStrip() {
     }
     syncTextAlignCombos();
     syncEnumCombos();
+    syncSchemaPropertyFields();
     if (auto* box = dynamic_cast<BoxBase*>(_selected)) {
         setField(_propSpacing, formatFloat(box->getSpacing()));
         const math::FVector4& pad = box->getPadding();
@@ -7424,6 +7672,172 @@ void LayoutEditorSession::syncTextAlignCombos() {
     _suppressProp = prev;
 }
 
+void LayoutEditorSession::bindSchemaPropertyFields() {
+    _schemaPropertyInputs.clear();
+    _schemaPropertyCombos.clear();
+    for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
+        if (static_cast<std::uint8_t>(schema.property) <=
+            static_cast<std::uint8_t>(AuthoringProperty::Padding)) {
+            continue;
+        }
+        if (schema.editorKind == PropertyEditorKind::Enum ||
+            schema.editorKind == PropertyEditorKind::Boolean) {
+            auto* combo = dynamic_cast<ComboBox*>(
+                findChromeById(schema.controlId));
+            if (combo == nullptr) continue;
+            std::vector<std::wstring> items;
+            items.reserve(schema.enumOptions.size());
+            for (const std::string& option : schema.enumOptions) {
+                items.push_back(utf8ToWide(option));
+            }
+            combo->setItems(items);
+            const std::string key = schema.key;
+            combo->setOnSelectionChanged([this, key](int index) {
+                if (_suppressProp || index < 0) return;
+                const PropertyFieldSchema* current =
+                    findPropertyFieldSchema(key);
+                if (current == nullptr ||
+                    index >= static_cast<int>(current->enumOptions.size())) {
+                    return;
+                }
+                beginMutation();
+                applyProperty(key, utf8ToWide(
+                    current->enumOptions[static_cast<size_t>(index)]));
+                endMutation();
+            });
+            _schemaPropertyCombos.emplace(key, combo);
+            continue;
+        }
+
+        TextInput* input = nullptr;
+        const bool numeric = schema.editorKind == PropertyEditorKind::Number ||
+                             schema.editorKind == PropertyEditorKind::Integer;
+        bindPropField(schema.controlId, schema.key, input, numeric);
+        if (input != nullptr) {
+            _schemaPropertyInputs.emplace(schema.key, input);
+        }
+    }
+}
+
+std::wstring LayoutEditorSession::schemaPropertyValue(
+    const std::string& field) const {
+    if (_selected == nullptr) return {};
+    if (auto* slider = dynamic_cast<Slider*>(_selected)) {
+        if (field == "min") return formatFloat(slider->getMin());
+        if (field == "max") return formatFloat(slider->getMax());
+        if (field == "value") return formatFloat(slider->getValue());
+    }
+    if (auto* progress = dynamic_cast<ProgressBar*>(_selected)) {
+        if (field == "min") return formatFloat(progress->getMin());
+        if (field == "max") return formatFloat(progress->getMax());
+        if (field == "value") return formatFloat(progress->getValue());
+    }
+    if (auto* image = dynamic_cast<Image*>(_selected)) {
+        if (field == "imageTint") return formatColorHex(image->getColor());
+        const math::FRectangle& uv = image->getUV();
+        if (field == "uvMinX") return formatFloat(uv.minX);
+        if (field == "uvMinY") return formatFloat(uv.minY);
+        if (field == "uvMaxX") return formatFloat(uv.maxX);
+        if (field == "uvMaxY") return formatFloat(uv.maxY);
+    }
+    if (auto* list = dynamic_cast<ListView*>(_selected)) {
+        if (field == "selectionMode") {
+            return list->getSelectionMode() == ListView::SelectionMode::Extended
+                ? L"Extended" : L"Single";
+        }
+        if (field == "itemHeight") return formatFloat(list->getItemHeight());
+    }
+    if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
+        if (field == "selectionMode") {
+            return tiles->getSelectionMode() == TileView::SelectionMode::Extended
+                ? L"Extended" : L"Single";
+        }
+        if (field == "tileWidth") return formatFloat(tiles->getTileSize().x);
+        if (field == "tileHeight") return formatFloat(tiles->getTileSize().y);
+        if (field == "tileSpacing") return formatFloat(tiles->getTileSpacing());
+    }
+    if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
+        if (field == "itemHeight") return formatFloat(tree->getItemHeight());
+    }
+    if (auto* scroll = dynamic_cast<ScrollView*>(_selected)) {
+        auto visibilityName = [](ScrollView::ScrollBarVisibility visibility) {
+            switch (visibility) {
+            case ScrollView::ScrollBarVisibility::Always: return L"Always";
+            case ScrollView::ScrollBarVisibility::Hidden: return L"Hidden";
+            case ScrollView::ScrollBarVisibility::Auto:
+            default: return L"Auto";
+            }
+        };
+        if (field == "verticalScrollBarVisibility") {
+            return visibilityName(scroll->getVerticalScrollBarVisibility());
+        }
+        if (field == "horizontalScrollBarVisibility") {
+            return visibilityName(scroll->getHorizontalScrollBarVisibility());
+        }
+    }
+    if (auto* strip = dynamic_cast<TabStrip*>(_selected)) {
+        if (field == "overflowMode") {
+            switch (strip->getOverflowMode()) {
+            case TabStrip::OverflowMode::Compress: return L"Compress";
+            case TabStrip::OverflowMode::Clip: return L"Clip";
+            case TabStrip::OverflowMode::Scroll:
+            default: return L"Scroll";
+            }
+        }
+        if (field == "minTabWidth") return formatFloat(strip->getMinTabWidth());
+    }
+    if (auto* grid = dynamic_cast<GridPanel*>(_selected)) {
+        if (field == "gridRows") return std::to_wstring(grid->getRowCount());
+        if (field == "gridColumns") {
+            return std::to_wstring(grid->getColumnCount());
+        }
+        if (field == "gridSpacingX") {
+            return formatFloat(grid->getHorizontalSpacing());
+        }
+        if (field == "gridSpacingY") {
+            return formatFloat(grid->getVerticalSpacing());
+        }
+    }
+    if (auto* rich = dynamic_cast<RichText*>(_selected)) {
+        if (field == "richWrapMode") {
+            switch (rich->getWrapMode()) {
+            case RichTextWrapMode::Word: return L"Word";
+            case RichTextWrapMode::Character: return L"Character";
+            case RichTextWrapMode::NoWrap:
+            default: return L"NoWrap";
+            }
+        }
+        if (field == "richOverflow") {
+            return rich->getOverflow() == RichTextOverflow::Ellipsis
+                ? L"Ellipsis" : L"Clip";
+        }
+        if (field == "lineHeight") return formatFloat(rich->getLineHeight());
+        if (field == "maxLines") return std::to_wstring(rich->getMaxLines());
+    }
+    return {};
+}
+
+void LayoutEditorSession::syncSchemaPropertyFields() {
+    for (const auto& [field, input] : _schemaPropertyInputs) {
+        if (input != nullptr) input->setText(schemaPropertyValue(field));
+    }
+    for (const auto& [field, combo] : _schemaPropertyCombos) {
+        if (combo == nullptr) continue;
+        const PropertyFieldSchema* schema = findPropertyFieldSchema(field);
+        const std::wstring value = schemaPropertyValue(field);
+        int selected = -1;
+        if (schema != nullptr) {
+            for (size_t i = 0; i < schema->enumOptions.size(); ++i) {
+                if (value == utf8ToWide(schema->enumOptions[i])) {
+                    selected = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        combo->setSelectedIndex(selected);
+    }
+}
+
 void LayoutEditorSession::bindBoolCombo(ComboBox*& slot, const char* id,
                                         const char* field) {
     if (_ui == nullptr) {
@@ -7433,14 +7847,20 @@ void LayoutEditorSession::bindBoolCombo(ComboBox*& slot, const char* id,
     if (slot == nullptr) {
         return;
     }
-    slot->setItems({L"false", L"true"});
+    const AuthoringProperty property = field == std::string("checked")
+        ? AuthoringProperty::Checked
+        : (field == std::string("password")
+            ? AuthoringProperty::Password : AuthoringProperty::ReadOnly);
+    slot->setItems(propertyOptionLabels(property));
     const std::string fieldName = field;
-    slot->setOnSelectionChanged([this, fieldName](int index) {
+    slot->setOnSelectionChanged([this, fieldName, property](int index) {
         if (_suppressProp || index < 0 || index > 1) {
             return;
         }
+        const PropertyFieldSchema& schema = propertyFieldSchema(property);
         beginMutation();
-        applyProperty(fieldName, index == 1 ? L"true" : L"false");
+        applyProperty(fieldName, utf8ToWide(
+            schema.enumOptions[static_cast<size_t>(index)]));
         endMutation();
     });
 }
@@ -7453,27 +7873,17 @@ void LayoutEditorSession::bindGravityCombo() {
     if (_propGravity == nullptr) {
         return;
     }
-    static const wchar_t* kGravity[] = {
-        L"TopLeft", L"TopCenter", L"TopRight",
-        L"CenterLeft", L"Center", L"CenterRight",
-        L"BottomLeft", L"BottomCenter", L"BottomRight"
-    };
-    std::vector<std::wstring> items;
-    for (const wchar_t* g : kGravity) {
-        items.emplace_back(g);
-    }
-    _propGravity->setItems(items);
+    _propGravity->setItems(
+        propertyOptionLabels(AuthoringProperty::Gravity));
     _propGravity->setOnSelectionChanged([this](int index) {
         if (_suppressProp || index < 0 || index > 8) {
             return;
         }
-        static const char* kG[] = {
-            "TopLeft", "TopCenter", "TopRight",
-            "CenterLeft", "Center", "CenterRight",
-            "BottomLeft", "BottomCenter", "BottomRight"
-        };
+        const PropertyFieldSchema& schema =
+            propertyFieldSchema(AuthoringProperty::Gravity);
         beginMutation();
-        applyProperty("gravity", utf8ToWide(kG[index]));
+        applyProperty("gravity", utf8ToWide(
+            schema.enumOptions[static_cast<size_t>(index)]));
         endMutation();
     });
 }

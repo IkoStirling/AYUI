@@ -12,11 +12,15 @@
 #include "AYUI/Modal.h"
 #include "AYUI/ModalDialog.h"
 #include "AYUI/RadioButton.h"
+#include "AYUI/RichText.h"
 #include "AYUI/ScrollView.h"
 #include "AYUI/Separator.h"
+#include "AYUI/Slider.h"
+#include "AYUI/ProgressBar.h"
 #include "AYUI/TabControl.h"
 #include "AYUI/TabStrip.h"
 #include "AYUI/TextLabel.h"
+#include "AYUI/TileView.h"
 #include "AYUI/Theme.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYUI/UIManager.h"
@@ -50,6 +54,13 @@ public:
 } // namespace
 
 int main() {
+    struct LoaderErrorCleanup {
+        ~LoaderErrorCleanup() {
+            std::error_code error;
+            std::filesystem::remove("ayui_loader_error.txt", error);
+        }
+    } loaderErrorCleanup;
+
     ayt::ui::ThemeManager::get().ensureDefaultThemes();
     ayt::ui::ThemeManager::get().setActiveTheme("dark");
 
@@ -145,6 +156,25 @@ int main() {
         std::fprintf(stderr, "authoring-quality chrome regression: missing=%d\n",
                      missingQualityEntries);
         return 81;
+    }
+    static const char* requiredTypedInspectorIds[] = {
+        "prop_min", "prop_max", "prop_value", "prop_image_tint",
+        "prop_uv_min_x", "prop_uv_min_y", "prop_uv_max_x", "prop_uv_max_y",
+        "prop_selection_mode", "prop_item_height", "prop_tile_width",
+        "prop_tile_height", "prop_tile_spacing", "prop_vscroll_visibility",
+        "prop_hscroll_visibility", "prop_tab_overflow", "prop_min_tab_width",
+        "prop_grid_rows", "prop_grid_columns", "prop_grid_spacing_x",
+        "prop_grid_spacing_y", "prop_rich_wrap", "prop_rich_overflow",
+        "prop_line_height", "prop_max_lines"
+    };
+    int missingTypedInspectorEntries = 0;
+    for (const char* id : requiredTypedInspectorIds) {
+        if (ui.findById(id) == nullptr) ++missingTypedInspectorEntries;
+    }
+    if (missingTypedInspectorEntries != 0) {
+        std::fprintf(stderr, "typed inspector regression: missing=%d\n",
+                     missingTypedInspectorEntries);
+        return 115;
     }
     ayt::ui::Widget* timelineHost = ui.findById("animation_timeline_host");
     bool timelineSurfaceMounted = false;
@@ -337,6 +367,60 @@ int main() {
         return 40;
     }
 
+    session.addWidget("Slider");
+    auto* slider = dynamic_cast<ayt::ui::Slider*>(session.selected());
+    session.applyProperty("min", L"-2");
+    session.applyProperty("max", L"8");
+    session.applyProperty("value", L"6.5");
+    if (slider == nullptr || slider->getMin() != -2.0f ||
+        slider->getMax() != 8.0f || slider->getValue() != 6.5f) {
+        std::fprintf(stderr, "typed Slider inspector properties failed\n");
+        return 116;
+    }
+
+    session.select(session.documentRoot(), false);
+    session.addWidget("ProgressBar");
+    auto* progress = dynamic_cast<ayt::ui::ProgressBar*>(session.selected());
+    session.applyProperty("max", L"50");
+    session.applyProperty("min", L"10");
+    session.applyProperty("value", L"35");
+    if (progress == nullptr || progress->getMin() != 10.0f ||
+        progress->getMax() != 50.0f || progress->getValue() != 35.0f) {
+        std::fprintf(stderr, "typed ProgressBar inspector properties failed\n");
+        return 117;
+    }
+
+    session.select(session.documentRoot(), false);
+    session.addWidget("RichText");
+    auto* rich = dynamic_cast<ayt::ui::RichText*>(session.selected());
+    session.applyProperty("richWrapMode", L"Word");
+    session.applyProperty("richOverflow", L"Ellipsis");
+    session.applyProperty("lineHeight", L"1.6");
+    session.applyProperty("maxLines", L"3");
+    if (rich == nullptr || rich->getWrapMode() != ayt::ui::RichTextWrapMode::Word ||
+        rich->getOverflow() != ayt::ui::RichTextOverflow::Ellipsis ||
+        std::fabs(rich->getLineHeight() - 1.6f) > 0.001f ||
+        rich->getMaxLines() != 3u) {
+        std::fprintf(stderr, "typed RichText inspector properties failed\n");
+        return 118;
+    }
+
+    session.select(session.documentRoot(), false);
+    session.addWidget("TileView");
+    auto* tiles = dynamic_cast<ayt::ui::TileView*>(session.selected());
+    session.applyProperty("selectionMode", L"Extended");
+    session.applyProperty("tileWidth", L"112");
+    session.applyProperty("tileHeight", L"148");
+    session.applyProperty("tileSpacing", L"12");
+    if (tiles == nullptr ||
+        tiles->getSelectionMode() != ayt::ui::TileView::SelectionMode::Extended ||
+        tiles->getTileSize() != ayt::math::FVector2(112.0f, 148.0f) ||
+        tiles->getTileSpacing() != 12.0f) {
+        std::fprintf(stderr, "typed TileView inspector properties failed\n");
+        return 119;
+    }
+
+    session.select(session.documentRoot(), false);
     session.addWidget("Image");
     auto* image = dynamic_cast<ayt::ui::Image*>(session.selected());
     if (image == nullptr) {
@@ -350,11 +434,19 @@ int main() {
         };
     });
     session.applyProperty("texture", L"Assets/ui/test.png");
+    session.applyProperty("imageTint", L"#804020FF");
+    session.applyProperty("uvMinX", L"0.1");
+    session.applyProperty("uvMinY", L"0.2");
+    session.applyProperty("uvMaxX", L"0.8");
+    session.applyProperty("uvMaxY", L"0.9");
     session.applyProperty("controller", L"HudController");
     session.applyProperty("event:onClick", L"inspectImage");
     if (image->getTextureName() != "Assets/ui/test.png" ||
         image->getControllerId() != "HudController" ||
-        image->getEventBinding("onClick") != "inspectImage") {
+        image->getEventBinding("onClick") != "inspectImage" ||
+        std::fabs(image->getColor().x - 128.0f / 255.0f) > 0.001f ||
+        std::fabs(image->getUV().minX - 0.1f) > 0.001f ||
+        std::fabs(image->getUV().maxY - 0.9f) > 0.001f) {
         std::fprintf(stderr, "Image authoring properties failed\n");
         return 15;
     }
@@ -395,9 +487,13 @@ int main() {
     session.addWidget("ListView");
     auto* list = dynamic_cast<ayt::ui::ListView*>(session.selected());
     session.applyProperty("items", L"Alpha | Beta | Gamma");
+    session.applyProperty("selectionMode", L"Extended");
+    session.applyProperty("itemHeight", L"31");
     session.applyProperty("event:onSelectionChanged", L"selectEntry");
     if (list == nullptr || list->getItemCount() != 3u ||
-        list->getItem(1) != L"Beta") {
+        list->getItem(1) != L"Beta" ||
+        list->getSelectionMode() != ayt::ui::ListView::SelectionMode::Extended ||
+        list->getItemHeight() != 31.0f) {
         std::fprintf(stderr, "ListView palette/items creation failed\n");
         return 16;
     }
@@ -452,6 +548,18 @@ int main() {
         std::fprintf(stderr, "GridPanel authoring defaults failed\n");
         return 42;
     }
+    session.applyProperty("gridRows", L"3");
+    session.applyProperty("gridColumns", L"3");
+    session.applyProperty("gridSpacingX", L"7");
+    session.applyProperty("gridSpacingY", L"9");
+    if (grid->getRowCount() != 3 || grid->getColumnCount() != 3 ||
+        grid->getHorizontalSpacing() != 7.0f ||
+        grid->getVerticalSpacing() != 9.0f) {
+        std::fprintf(stderr, "typed GridPanel inspector properties failed\n");
+        return 120;
+    }
+    session.applyProperty("gridRows", L"2");
+    session.applyProperty("gridColumns", L"2");
     for (int i = 0; i < 4; ++i) {
         session.select(grid, false);
         session.addWidget("Button");
@@ -518,6 +626,15 @@ int main() {
         std::fprintf(stderr, "ScrollView editable content model failed\n");
         return 24;
     }
+    session.applyProperty("verticalScrollBarVisibility", L"Always");
+    session.applyProperty("horizontalScrollBarVisibility", L"Auto");
+    if (scroll->getVerticalScrollBarVisibility() !=
+            ayt::ui::ScrollView::ScrollBarVisibility::Always ||
+        scroll->getHorizontalScrollBarVisibility() !=
+            ayt::ui::ScrollView::ScrollBarVisibility::Auto) {
+        std::fprintf(stderr, "typed ScrollView inspector properties failed\n");
+        return 121;
+    }
     ayt::ui::Widget* scrollContent = scroll->getContent();
     const std::string scrollId = scroll->getId();
     const std::string scrollContentId = scrollContent->getId();
@@ -555,9 +672,16 @@ int main() {
         return 27;
     }
     session.applyProperty("items", L"Scene | Game | Profiler");
+    session.applyProperty("overflowMode", L"Compress");
+    session.applyProperty("minTabWidth", L"96");
     if (strip->getTabCount() != 3 || strip->getTabLabel(2) != L"Profiler") {
         std::fprintf(stderr, "TabStrip label editing failed\n");
         return 28;
+    }
+    if (strip->getOverflowMode() != ayt::ui::TabStrip::OverflowMode::Compress ||
+        strip->getMinTabWidth() != 96.0f) {
+        std::fprintf(stderr, "typed TabStrip inspector properties failed\n");
+        return 122;
     }
     const std::string stripId = strip->getId();
 
@@ -1031,7 +1155,13 @@ int main() {
         loadedImage->getTextureName() != "Assets/ui/test.png" ||
         loadedImage->getControllerId() != "HudController" ||
         loadedImage->getEventBinding("onClick") != "inspectImage" ||
+        std::fabs(loadedImage->getColor().x - 128.0f / 255.0f) > 0.001f ||
+        std::fabs(loadedImage->getUV().minX - 0.1f) > 0.001f ||
+        std::fabs(loadedImage->getUV().maxY - 0.9f) > 0.001f ||
         loadedList == nullptr || loadedList->getItemCount() != 3u ||
+        loadedList->getSelectionMode() !=
+            ayt::ui::ListView::SelectionMode::Extended ||
+        loadedList->getItemHeight() != 31.0f ||
         loadedList->getEventBinding("onSelectionChanged") != "selectEntry" ||
         loadedRadio == nullptr || loadedRadio->getText() != L"Choice" ||
         !loadedRadio->isChecked() ||
@@ -1043,6 +1173,8 @@ int main() {
     }
     if (loadedGrid == nullptr || loadedGrid->getRowCount() != 2 ||
         loadedGrid->getColumnCount() != 2 ||
+        loadedGrid->getHorizontalSpacing() != 7.0f ||
+        loadedGrid->getVerticalSpacing() != 9.0f ||
         loadedGrid->getCell(0, 0) == nullptr ||
         loadedGrid->getCell(1, 1) == nullptr) {
         std::fprintf(stderr,
@@ -1069,7 +1201,11 @@ int main() {
 
     if (loadedScroll == nullptr ||
         loadedScroll->getContent() != loader.findWidgetById(scrollContentId) ||
-        loader.findWidgetById(scrollChildId) == nullptr) {
+        loader.findWidgetById(scrollChildId) == nullptr ||
+        loadedScroll->getVerticalScrollBarVisibility() !=
+            ayt::ui::ScrollView::ScrollBarVisibility::Always ||
+        loadedScroll->getHorizontalScrollBarVisibility() !=
+            ayt::ui::ScrollView::ScrollBarVisibility::Auto) {
         std::fprintf(stderr, "reloaded ScrollView structure failed\n");
         ayt::ui::destroyWidgetTree(reloaded);
         return 33;
@@ -1079,7 +1215,10 @@ int main() {
         loadedModal->getContent() != loader.findWidgetById(modalContentId) ||
         loader.findWidgetById(modalChildId) == nullptr ||
         loadedStrip == nullptr || loadedStrip->getTabCount() != 3 ||
-        loadedStrip->getTabLabel(2) != L"Profiler") {
+        loadedStrip->getTabLabel(2) != L"Profiler" ||
+        loadedStrip->getOverflowMode() !=
+            ayt::ui::TabStrip::OverflowMode::Compress ||
+        loadedStrip->getMinTabWidth() != 96.0f) {
         std::fprintf(stderr, "reloaded modal/tab-strip structure failed\n");
         ayt::ui::destroyWidgetTree(reloaded);
         return 34;

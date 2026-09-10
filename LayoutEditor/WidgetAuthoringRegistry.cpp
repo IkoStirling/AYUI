@@ -121,7 +121,9 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
         "RichText", "Rich Text", "btn_add_richtext", C::BasicContent,
         "richtext", {200.0f, 80.0f},
         "M4 5h16 M4 9h11 M4 13h16 M4 17h9",
-        with(base(), {P::Text}), textInitializer(L"Rich text")));
+        with(base(), {P::Text, P::RichTextWrapMode, P::RichTextOverflow,
+                      P::LineHeight, P::MaxLines}),
+        textInitializer(L"Rich text")));
     registerDescriptor(descriptor<TextInput>(
         "TextInput", "Text Input", "btn_add_input", C::BasicContent, "input",
         {120.0f, 28.0f}, "M3 6h18v12H3z M7 9v6",
@@ -147,17 +149,20 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
     registerDescriptor(descriptor<Slider>(
         "Slider", "Slider", "btn_add_slider", C::BasicContent, "slider",
         {160.0f, 24.0f}, "M4 8h10 M18 8h2 M4 16h3 M11 16h9 M14 5v6 M7 13v6",
-        base().add(interaction({P::OnClick, P::OnValueChanged}))));
+        with(base().add(interaction({P::OnClick, P::OnValueChanged})),
+             {P::ValueMin, P::ValueMax, P::Value})));
     registerDescriptor(descriptor<ProgressBar>(
         "ProgressBar", "Progress Bar", "btn_add_progress", C::BasicContent,
-        "prog", {120.0f, 28.0f}, "M3 8h18v8H3z M5 10h9v4H5z", base()));
+        "prog", {120.0f, 28.0f}, "M3 8h18v8H3z M5 10h9v4H5z",
+        with(base(), {P::ValueMin, P::ValueMax, P::Value})));
     registerDescriptor(descriptor<Spinner>(
         "Spinner", "Spinner", "btn_add_spinner", C::BasicContent, "spinner",
         {120.0f, 28.0f}, "M12 3a9 9 0 1 1-6.4 2.7 M5 3v5h5", base()));
     registerDescriptor(descriptor<Image>(
         "Image", "Image", "btn_add_image", C::BasicContent, "image",
         {128.0f, 128.0f}, "M3 4h18v16H3z M6 16l4-5 3 3 2-2 3 4 M8 8h.01",
-        with(base(), {P::Texture}),
+        with(base(), {P::Texture, P::ImageTint, P::ImageUvMinX,
+                      P::ImageUvMinY, P::ImageUvMaxX, P::ImageUvMaxY}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             static_cast<Image&>(widget).setColor({0.16f, 0.19f, 0.24f, 1.0f});
         }));
@@ -175,21 +180,24 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
     registerDescriptor(descriptor<ListView>(
         "ListView", "List View", "btn_add_list", C::Collections, "list",
         {220.0f, 160.0f}, "M5 6h2 M10 6h9 M5 12h2 M10 12h9 M5 18h2 M10 18h9",
-        with(base().add(collection).add(P::OnItemActivated), {P::Items}),
+        with(base().add(collection).add(P::OnItemActivated),
+             {P::Items, P::SelectionMode, P::ItemHeight}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             static_cast<ListView&>(widget).setItems({L"Item 1", L"Item 2", L"Item 3"});
         }));
     registerDescriptor(descriptor<TileView>(
         "TileView", "Tile View", "btn_add_tiles", C::Collections, "tiles",
         {360.0f, 260.0f}, "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
-        with(base().add(collection).add(P::OnItemActivated), {P::Items}),
+        with(base().add(collection).add(P::OnItemActivated),
+             {P::Items, P::SelectionMode, P::TileWidth, P::TileHeight,
+              P::TileSpacing}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             static_cast<TileView&>(widget).setItems({L"Tile 1", L"Tile 2", L"Tile 3", L"Tile 4"});
         }));
     registerDescriptor(descriptor<TreeView>(
         "TreeView", "Tree View", "btn_add_tree", C::Collections, "tree",
         {220.0f, 160.0f}, "M5 5h4 M9 5v6h4 M9 11v6h4 M13 8h6 M13 14h6 M13 20h6",
-        with(base().add(collection), {P::Items}),
+        with(base().add(collection), {P::Items, P::ItemHeight}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             static_cast<TreeView&>(widget).setTree({
                 {L"Root", {}, true, true, -1},
@@ -200,7 +208,8 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
         "TabStrip", "Tab Strip", "btn_add_tabstrip", C::Collections,
         "tab_strip", {320.0f, 32.0f},
         "M3 7h6v4H3z M9 7h6v4H9z M15 7h6v4h-6z M3 11h18v8H3z",
-        with(base().add(collection), {P::Items}),
+        with(base().add(collection),
+             {P::Items, P::TabOverflowMode, P::MinTabWidth}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             auto& strip = static_cast<TabStrip&>(widget);
             strip.addTab(L"Tab 1");
@@ -234,7 +243,8 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
     registerDescriptor(descriptor<GridPanel>(
         "GridPanel", "Grid Panel", "btn_add_grid", C::Layout, "grid",
         {200.0f, 120.0f}, "M4 4h16v16H4z M4 10h16 M4 16h16 M10 4v16 M16 4v16",
-        base(),
+        with(base(), {P::GridRows, P::GridColumns, P::GridSpacingX,
+                      P::GridSpacingY}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory&) {
             auto& grid = static_cast<GridPanel&>(widget);
             grid.setRowCount(2);
@@ -242,7 +252,9 @@ WidgetAuthoringRegistry::WidgetAuthoringRegistry() {
         }));
     registerDescriptor(descriptor<ScrollView>(
         "ScrollView", "Scroll View", "btn_add_scroll", C::Layout, "scroll",
-        {200.0f, 120.0f}, "M4 4h16v16H4z M17 7v7 M17 17h.01", base(),
+        {200.0f, 120.0f}, "M4 4h16v16H4z M17 7v7 M17 17h.01",
+        with(base(), {P::VerticalScrollBarVisibility,
+                      P::HorizontalScrollBarVisibility}),
         [](Widget& widget, const WidgetAuthoringDescriptor::UniqueIdFactory& ids) {
             auto& scroll = static_cast<ScrollView&>(widget);
             auto* content = new Panel();

@@ -484,9 +484,17 @@ Dock fallback 还是 AYDevice 顶层窗口中，也不复制第二套布局编�
 
 `WidgetAuthoringRegistry` 是 Palette 与 Inspector 的单一 authoring 元数据源，集中 type/display name、
 分类、SVG、ID prefix、默认尺寸、factory 后初始化、可编辑属性和事件 schema；运行时构造仍委托
-`WidgetFactory`。`PropertySchema` 以字段和 section 描述 Inspector，类型切换不再依赖持续增长的
-`dynamic_cast` 显隐矩阵。属性读写中的少量控件 adapter 仍允许渐进迁移，但新类型首先注册 descriptor，
+`WidgetFactory`。`PropertySchema` 以字段和 section 描述 Inspector，并携带 Text/Number/Integer/
+Boolean/Enum/Color/Resource 编辑器种类、可选数值范围/步长和枚举选项；类型切换、控件绑定和选项列表
+共享同一元数据，不再依赖持续增长的显隐矩阵或重复字符串表。属性读写中的少量控件 adapter 仍允许渐进迁移，但新类型首先注册 descriptor，
 不得再增加平行的 Palette/default-size/icon 表。
+
+类型化 Inspector 第一阶段覆盖 Slider/ProgressBar 的范围和值、Image tint 与 UV crop、ListView/
+TileView 选择模式和集合尺寸、Tree/List item height、ScrollView 两轴 scrollbar policy、TabStrip overflow/
+min width、Grid 行列/间距以及 RichText wrap/overflow/line-height/max-lines。数值输入按 schema 约束归一；
+Grid 不允许缩小到会丢弃已占用 cell 的尺寸。Image color/UV 和 Grid spacing 在 `UILayoutLoader` 与
+`WidgetSerializer` 中对称往返，避免“Inspector 可编辑但保存丢失”的半实现状态。当前 chrome 仍为
+声明式 JSON；后续可从相同 schema 自动生成属性行，而无需改变文档模型或属性写入协议。
 
 命令栈已经区分 `Property`、`Insert`、`Delete`、`Reorder`、`Transform`、`Clipboard` 与
 `SnapshotFallback` edit intent。当前 entry 同时保存完整 JSON snapshot，作为复杂复合控件和旧路径的
@@ -756,6 +764,12 @@ Windows Debug 基线为 `5510 / 5510`。
 时间轴缩放/平移和曲线预览进入共享 Designer core；预览基线收敛为属性级恢复，不再重建 Widget 树。
 新增交互、运行时播放和宿主集成回归后，Insider Windows Debug 基线为 AYUI `5534 / 5534`、
 AYEditor `2099 / 2099`，Layout Editor headless round-trip 同步通过。
+
+2026-09-10 完成类型化 Inspector 第一阶段：property schema 增加编辑器类型、范围、步长与枚举选项，
+并接入数值控件、Image、集合、ScrollView、TabStrip、GridPanel 和 RichText 的 25 项运行时属性；
+Image tint/UV 与 Grid spacing 的 Loader/Serializer 对称性、Grid occupied-cell 缩小保护及 headless
+属性/保存/重载回归同时落地。Insider Windows Debug 当前提交基线为 AYUI `5579 / 5579`，Layout Editor
+headless round-trip 通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例

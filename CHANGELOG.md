@@ -20,6 +20,9 @@
   线性目标不受影响。Layer 透明复合改为正确 coverage alpha + premultiplied-over。
 - `AnimationTimeline` 增加有限/永久 repeat、yoyo 和每关键帧物理弹簧参数；累计时钟保证大帧间隔
   跨周期稳定，`AnimationSequence` 会把跨步骤后的剩余帧时间继续交给下一步。
+- Layout Editor `PropertySchema` 增加编辑器种类、数值约束和枚举选项；Inspector 新增 Slider/
+  ProgressBar、Image tint/UV、集合布局、滚动条策略、Tab overflow、Grid 与 RichText 类型化属性。
+- public authoring schema 扩展后源码 ABI 版本更新为 112。
 
 ### Fixed
 
@@ -28,10 +31,13 @@
 - 复杂控件路径继续共用 retained display-list、合批与即时绘制兜底，不复制渲染实现。
 - `ActiveScope` 只在仍持有全局 active slot 时恢复旧 manager，避免 shutdown/显式切换被作用域退出覆盖。
 - 四角渐变在 damage/普通 clip 下按原 bounds 重映射颜色，局部重放不再重启或拉伸渐变。
+- Image tint/UV 和 Grid spacing 补齐 `UILayoutLoader`/`WidgetSerializer` 对称往返；Grid Inspector
+  拒绝会丢弃已占用 cell 的缩小操作。
 
 ### Validation
 
 - Windows Debug：AYUI `5147 / 5147` 条断言通过。
+- VS 2026 Insider Windows Debug：AYUI `5579 / 5579`，Layout Editor headless round-trip 通过。
 - AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

@@ -4,7 +4,7 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 
 - CMake 目标版本：`1.0.0`
 - 当前功能里程碑：v1.6 已实现
-- 最近全模块审计：2026-09-08
+- 最近全模块审计：2026-09-10
 - 权威架构文档：[design.md](design.md)
 - 变更记录：[CHANGELOG.md](CHANGELOG.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
@@ -48,7 +48,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
   轨道、关键帧/曲线、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
-2026-09-09 Insider Windows Debug 当前基线为 AYUI `5534 / 5534`、AYEditor `2099 / 2099` 条断言通过，
+2026-09-10 Insider Windows Debug 当前提交基线为 AYUI `5579 / 5579`；AYEditor 最近完整基线仍为
+`2099 / 2099` 条断言通过，
 Layout Editor headless round-trip 同步通过。2026-08-29 审计快照为
 `4643 / 4643`；旧基线中的循环内重复 `CHECK` 已改为循环累计失败数、循环结束统一判断，
 测试用例和输入迭代覆盖没有减少。
@@ -316,7 +317,11 @@ Authoring 代码位于独立静态库 `AYUILayoutEditorCore`，不进入游戏�
 `LayoutDocumentModel`、`LayoutSelectionModel`、`LayoutCommandStack` 与 `LayoutCanvasViewport`
 从宿主 Session 中拆开；standalone 与 AYEditor 只负责窗口、backend 和资源选择器。Palette、类型图标、
 默认尺寸/初始化与 Inspector schema 统一来自 `WidgetAuthoringRegistry`，新增类型不再需要同步修改多张
-硬编码表。`PropertySchema` 按字段/section 生成属性行显隐；命令栈已记录 Property/Insert/Delete/Reorder/
+硬编码表。`PropertySchema` 同时声明字段 section、编辑器种类、数值范围/步长和枚举选项；现有 chrome
+据此绑定输入与枚举，不再由 Session 维护重复选项表。类型化 Inspector 已覆盖 Slider/ProgressBar 的
+min/max/value、Image tint/UV、List/Tile 选择与尺寸、ScrollView 滚动条策略、TabStrip overflow、
+Grid 行列/间距以及 RichText wrap/overflow/line-height/max-lines。Grid 缩小时会拒绝丢弃已占用 cell；
+Image tint/UV 与 Grid 间距均已补齐 Loader/Serializer 往返。命令栈已记录 Property/Insert/Delete/Reorder/
 Transform/Clipboard 等类型化 edit intent，同时暂时保留完整 JSON snapshot 作为可靠 undo/redo 兜底。
 
 Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳定身份，并把本机文件位置放在
