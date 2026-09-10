@@ -435,7 +435,7 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
-### 8.5 Application UI Flow（阶段一）
+### 8.5 Application UI Flow（阶段二）
 
 `*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
 编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
@@ -443,13 +443,16 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 Signal、Action、并行 Region、层级 State、Transition 和可扩展 Graph。Graph 节点类型保持字符串，
 properties 支持递归 JSON，因此游戏或插件节点不需要把 World/Entity 语义放进 AYUI。
 
-依赖边界固定为 AYUI 提供数据契约，AYApplication/游戏宿主持有跨 World 的 UIRuntime 并注册信号与
-动作，AYEditor 只做同一格式的创作、验证和预览。这里的逻辑 Layer 不是 renderer pixel Layer；
+依赖边界固定为 AYUI 提供数据契约，`AYApplicationUI` 的 `UIFlowRuntime` 持有跨 World 的逻辑状态并
+注册信号与动作，AYEditor 只做同一格式的创作、验证和预览。这里的逻辑 Layer 不是 renderer pixel Layer；
 UI Flow 不直接依赖 Scene、World、Entity、AYRenderer 或编辑器。旧项目的 `world.ui` 会在 AYEditor
 解析为一个隐式 World-scope Screen/Context，不自动改写文件；新 `ui.flow` 与旧字段混用会被拒绝。
 
-阶段一不包含运行时挂载、Transition/Graph 执行、Scene 订阅或可视化 Flow Editor。完整格式、迁移规则
-和后续阶段见 [docs/UIFlow.md](docs/UIFlow.md)。
+阶段二已经实现 Context 优先级/激活序仲裁、Slot capacity/Hide/restore、World/Owner Scope 清理、
+类型化 Signal/Action、并行 Region Transition、Graph request 扩展点及 `UIManagerFlowScreenHost`。
+运行时作为可选 Presentation SubSystem 发布到 `IEngineHost`，核心 AYApplication 的 server/headless
+依赖面不变。Scene 订阅、可视化 Flow Editor、异步 interruption policy 和 enter/exit 动画编排仍属
+后续阶段。完整格式、运行语义和迁移规则见 [docs/UIFlow.md](docs/UIFlow.md)。
 
 ## 9. Popup、Modal 与 Docking
 

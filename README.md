@@ -277,11 +277,11 @@ TileView 处理。拖拽默认产生 `AYUI.TileItems` payload；文件浏览器�
   旧顶层 `onClick` 仍可读取并迁移到 `events.onClick`。
 - Dock 布局通过 `UILayoutLoader::saveLayout*` 与 `loadFrom*` 持久化。
 
-应用级 UI 编排使用独立 `*.uiflow.json`，不把多个场景状态塞进一个 Widget 树。AYUI 当前提供
-纯数据 `UIFlowDocument`、validator 和 serializer；项目可在启动 World 之前选择 Entry，并以并行
-Region、Context 和 Slot 表达主菜单、加载、HUD、剧情及临时覆盖。游戏节点由宿主以字符串类型注册，
-嵌套 JSON 参数可无损往返。阶段一尚不执行挂载、信号或 Action Graph，完整边界和格式见
-[UI Flow contract](docs/UIFlow.md)。
+应用级 UI 编排使用独立 `*.uiflow.json`，不把多个场景状态塞进一个 Widget 树。AYUI 提供纯数据
+`UIFlowDocument`、validator 和 serializer；可选 `AYApplicationUI` 目标提供跨 World 持久运行时、
+Context/Slot 仲裁、Scope 清理、类型化 Signal/Action、并行 Region Transition 及真实 Widget Screen
+挂载。游戏 Graph 节点仍由宿主以字符串类型扩展，AYUI 不引入 Scene/Entity 语义。完整边界、运行时
+接入和格式见 [UI Flow contract](docs/UIFlow.md)。
 
 ## Layout Editor
 

@@ -1,16 +1,18 @@
 # AYUI Flow Contract
 
-Status: **Stage 1 data contract implemented** (2026-09-11).
+Status: **Stage 2 persistent runtime implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
 document decides which layouts are present, where they are layered, how their
 lifetimes are scoped, and which signals may change the presentation.
 
-Stage 1 is intentionally data-only. `UIFlowDocument`, validation, JSON
-round-trip, project references, and legacy migration are implemented. Runtime
-mounting, signal dispatch, action execution, transitions, and the visual Flow
-Editor belong to later stages.
+Stage 1 delivered `UIFlowDocument`, validation, JSON round-trip, project
+references, and legacy migration. Stage 2 adds the optional `AYApplicationUI`
+runtime target: application-owned orchestration, real Widget-tree mounting,
+Context/Slot arbitration, Scope cleanup, typed signals/actions, parallel state
+regions, and an extension boundary for action-graph execution. Scene signal
+producers and the visual Flow Editor remain later stages.
 
 ## Ownership and dependency boundary
 
@@ -58,11 +60,77 @@ controls composition/input semantics; the latter is a renderer pixel cache.
 | Transition | A signal-triggered state change with guard, priority, action graph and interruption policy. |
 | Graph | Extensible nodes and pin links. Unknown node types and recursive JSON properties round-trip without AYUI understanding their behavior. |
 
-The planned runtime uses a Context stack per Slot. Higher-priority Contexts
+The runtime uses a Context stack per Slot. Higher-priority Contexts
 override lower-priority assignments; removing an override reveals the previous
 assignment when `restorePrevious` is true. A World change removes World-scoped
 instances only. Application-scoped menus and loading screens remain alive, and
 Owner-scoped UI can follow a specific entity or gameplay owner.
+
+## Stage 2 runtime
+
+`AYApplicationUI` is built only when the `AYUI` target exists. Core
+`AYApplication` remains usable by headless/server configurations without a UI
+dependency. The principal types are:
+
+- `UIFlowRuntime`: persistent logical state owned by the Application layer.
+- `IUIFlowScreenHost`: narrow presentation adapter used by headless tests,
+  native views, or Widget hosts.
+- `UIManagerFlowScreenHost`: production adapter which mounts each Screen with
+  an independent `UILayoutLoader` under ordered Flow Layer widgets.
+- `UIFlowRuntimeModule`: unscaled Presentation-phase subsystem which publishes
+  `UIFlowRuntime*` as `kHostServiceUIFlowRuntime`.
+
+The normal startup order is: initialize and size `UIManager`, load its host
+root, construct `UIManagerFlowScreenHost`, add `UIFlowRuntimeModule` to the
+Application module graph, then let GameLoop initialize the subsystem. The
+adapter owns the Flow subtree and attaches it as an externally-owned child of
+the current manager root. Replacing that root therefore detaches rather than
+destroys mounted Screens; the next host update reattaches the same subtree.
+Per-Screen file hot reload remains independent and is handled by the adapter.
+
+`load()` validates the complete contract before replacing a running document.
+`start()` selects an explicit Entry or `defaultEntry`, enters every Region's
+initial leaf, then reconciles the desired Screens. Reconciliation is
+presentation-transactional: all new layouts mount first; old layouts unmount
+only after every new mount succeeds. A failed load therefore preserves the
+previous visible presentation.
+
+Slot candidates are sorted by Context priority and then activation serial.
+`capacity` keeps the highest N distinct Screen/scope identities. A highest
+priority `Hide` assignment suppresses the whole Slot. When an override leaves,
+`restorePrevious=true` reveals the prior candidate; `false` advances a restore
+floor so older candidates remain suppressed until activated again. Layer order
+and order within a Layer are forwarded to the Screen host.
+
+Application Scope is permanent. `beginScope`/`endScope` switch World or Owner
+keys, remove Context activations bound to the ending key, and reconcile only
+the affected Screens. World-scoped Screens remain dormant until a World key is
+active; application Screens survive World changes; transient identity is tied
+to a Context activation. A manual Context returns a stable handle for explicit
+deactivation.
+
+Signals are schema-checked, default-filled, and synchronously serialized
+through a re-entrant queue with a 1024-event safety limit. Each parallel Region
+chooses its highest-priority matching Transition independently. Guards are
+delegated to a host evaluator. Enter/exit/transition Graphs are emitted through
+`setGraphRequestHandler`; node execution stays host/plugin-defined, so AYUI
+does not acquire gameplay semantics. Graph requests happen after the new
+presentation commits: a throwing graph callback is reported and contained but
+does not roll back the already-visible state.
+
+The Action registry validates declared inputs and applies defaults before
+calling the registered host capability. Unknown actions, missing handlers,
+wrong types, and handler exceptions return `UIFlowActionResult::failure`.
+Screen-host, guard, graph, and signal-listener exceptions are contained at the
+runtime boundary.
+
+For Widget input, Layer order is painter order. `blockLower` (or
+`blocksLowerInput`) captures the transparent Layer surface. `passThrough`
+ignores a viewport-sized Screen root's blank background while preserving hits
+on interactive descendants. Precise retry of a lower widget after a picked
+control returns "unhandled" is not part of the current single-target
+`UIManager` dispatcher; that refinement belongs with the production input
+router rather than the Flow data model.
 
 ## Version 1 JSON shape
 
@@ -258,12 +326,15 @@ conversion in a later editor stage can generate a real asset after user review.
 
 1. **Data contract — complete:** model, schema v1, serializer, validation,
    project descriptor reference, legacy migration, pure tests and documentation.
-2. **Persistent runtime:** application-owned UIRuntime, layout mounting, slot
-   arbitration, Context stack, scope cleanup, signal bus and action registry.
+2. **Persistent runtime — complete:** optional application-owned runtime,
+   transactional layout mounting, Layer/Slot arbitration, Context stack, Scope
+   cleanup, typed signal bus/action registry, parallel state transitions,
+   Widget host adapter and Host service publication.
 3. **Scene bridge:** generic Scene signal sources and `SceneSignalVolume`-style
    components; World lifecycle binding without AYUI dependencies.
 4. **Flow Editor:** graph/state/region canvas, Screen/Context/Layer inspectors,
    diagnostics, simulated signals, mock action execution and live preview.
-5. **Production gates:** async interruption semantics, save/reload migration,
-   replay diagnostics, accessibility/reduced-motion behavior and full visual
+5. **Production gates:** async interruption-policy execution, lower-target
+   input retry, enter/exit animation handoff, save/reload migration, replay
+   diagnostics, accessibility/reduced-motion behavior and full visual
    integration tests.
