@@ -341,6 +341,10 @@ Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳�
 `LayoutValidationModel` 对作者语义树检查空/非法/重复 ID、非有限或非正尺寸、缺失 Style/纹理、
 无 Controller 的事件、无可访问名称的交互控件、非法 Anchor、越界控件与 Grid slot 重叠；诊断行可
 直接定位控件，且不会把列表虚拟行、Tab 内部节点或编辑器 overlay 当成用户文档。
+宿主还可以向 Session 提供 `LayoutControllerContract` 列表或刷新 provider；编辑器会校验 Controller、
+Handler 及其接受的 Widget event 类型，并在 Event Trigger Graph 中显示每条
+`Widget.event -> Controller.handler` 边。该 registry 仅用于 authoring 校验，运行时绑定和 Controller
+实例化仍由 `UILayoutLoader` 与宿主负责。
 
 Reuse & Responsive 阶段加入文档内 `LayoutReuseLibrary`。选中的完整 Widget 子树可定义或更新为
 命名 block，并可反复插入；每次插入都会展开成独立 Widget 树并重新生成 ID，因此实例后续可以单独

@@ -7,6 +7,7 @@
 #include "AYUI/Image.h"
 #include "AYUI/InteractiveWidget.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
+#include "AYUI/LayoutEditor/LayoutInteractionModel.h"
 #include "AYUI/RadioButton.h"
 #include "AYUI/Style.h"
 #include "AYUI/UIAnimation.h"
@@ -152,6 +153,43 @@ void LayoutValidationModel::run(
             add(LayoutDiagnosticSeverity::Warning,
                 LayoutDiagnosticCode::EventWithoutController, widget,
                 name + L" binds events without a controller ID");
+        }
+
+        if (!widget->getEventBindings().empty() &&
+            !widget->getControllerId().empty() &&
+            context.interactionRegistry != nullptr) {
+            const LayoutInteractionRegistry& registry =
+                *context.interactionRegistry;
+            const std::string& controllerId = widget->getControllerId();
+            if (registry.findController(controllerId) == nullptr) {
+                add(LayoutDiagnosticSeverity::Error,
+                    LayoutDiagnosticCode::MissingController, widget,
+                    name + L" references an unregistered controller: " +
+                        std::wstring(controllerId.begin(), controllerId.end()));
+            } else {
+                for (const auto& [eventName, handlerName] :
+                     widget->getEventBindings()) {
+                    const LayoutEventHandlerContract* handler =
+                        registry.findHandler(controllerId, handlerName);
+                    if (handler == nullptr) {
+                        add(LayoutDiagnosticSeverity::Error,
+                            LayoutDiagnosticCode::MissingEventHandler, widget,
+                            name + L" references missing handler " +
+                                std::wstring(handlerName.begin(),
+                                             handlerName.end()) +
+                                L" for " + std::wstring(eventName.begin(),
+                                                         eventName.end()));
+                    } else if (!registry.handlerAccepts(*handler, eventName)) {
+                        add(LayoutDiagnosticSeverity::Error,
+                            LayoutDiagnosticCode::EventTypeMismatch, widget,
+                            name + L" binds " +
+                                std::wstring(eventName.begin(), eventName.end()) +
+                                L" to an incompatible handler: " +
+                                std::wstring(handlerName.begin(),
+                                             handlerName.end()));
+                    }
+                }
+            }
         }
 
         if (dynamic_cast<InteractiveWidget*>(widget) != nullptr &&

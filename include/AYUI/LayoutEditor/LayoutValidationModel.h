@@ -7,6 +7,7 @@
 namespace ayt::ui {
 
 class LayoutResourceCatalog;
+class LayoutInteractionRegistry;
 class StyleSheet;
 class UIAnimationLibrary;
 class Widget;
@@ -22,6 +23,9 @@ enum class LayoutDiagnosticCode {
     MissingStyle,
     MissingTexture,
     EventWithoutController,
+    MissingController,
+    MissingEventHandler,
+    EventTypeMismatch,
     MissingAccessibleName,
     InvalidAnchors,
     InvalidResponsiveRange,
@@ -47,6 +51,7 @@ struct LayoutValidationContext {
     const LayoutResourceCatalog* textureCatalog = nullptr;
     const StyleSheet* styleSheet = nullptr;
     const UIAnimationLibrary* animations = nullptr;
+    const LayoutInteractionRegistry* interactionRegistry = nullptr;
     bool reportAnonymousWidgets = true;
     bool reportOutsideParent = true;
 };

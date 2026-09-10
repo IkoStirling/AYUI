@@ -139,7 +139,9 @@ int main() {
     static const char* requiredQualityIds[] = {
         "style_preview_state", "style_preview_swatch",
         "style_source_status", "btn_reset_style", "validation_list",
-        "validation_status", "btn_validate", "reuse_name", "reuse_list",
+        "validation_status", "btn_validate", "interaction_graph_list",
+        "interaction_graph_status", "btn_refresh_interactions",
+        "reuse_name", "reuse_list",
         "btn_reuse_define", "btn_reuse_insert", "responsive_breakpoint",
         "responsive_visibility", "btn_responsive_preview",
         "btn_responsive_capture", "animation_clip_name",
@@ -234,6 +236,19 @@ int main() {
         std::fprintf(stderr, "button selection failed\n");
         return 10;
     }
+    session.applyProperty("controller", L"SampleController");
+    session.applyProperty("event:onClick", L"handleHello");
+    session.setInteractionContracts({
+        {"SampleController", {{"handleHello", {"onClick"}}}},
+    });
+    if (session.interactionGraph().edges().size() != 1u ||
+        session.interactionGraph().resolvedCount() != 1u) {
+        std::fprintf(stderr, "interaction contract graph failed\n");
+        return 118;
+    }
+    session.applyProperty("event:onClick", L"");
+    session.applyProperty("controller", L"");
+    session.clearInteractionContracts();
     auto* alignLeft = dynamic_cast<ayt::ui::Button*>(
         ui.findById("btn_align_left"));
     if (alignLeft == nullptr || alignLeft->isEnabled()) {

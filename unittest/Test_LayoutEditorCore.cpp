@@ -7,6 +7,7 @@
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutInteractionModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
@@ -451,6 +452,65 @@ TEST_CASE(validation_model_reports_actionable_authoring_issues) {
     CHECK(overlappingResponsiveCount == 1u);
     CHECK(responsiveAnchorWithoutBaseCount == 1u);
     CHECK(validation.hasErrors());
+}
+
+TEST_CASE(interaction_registry_validates_and_projects_event_trigger_graph) {
+    Button resolved;
+    resolved.setId("resolved_button");
+    resolved.setControllerId("MenuController");
+    resolved.setEventBinding("onClick", "openMenu");
+
+    Button missingController;
+    missingController.setId("missing_controller");
+    missingController.setControllerId("UnknownController");
+    missingController.setEventBinding("onClick", "openMenu");
+
+    Button missingHandler;
+    missingHandler.setId("missing_handler");
+    missingHandler.setControllerId("MenuController");
+    missingHandler.setEventBinding("onClick", "notRegistered");
+
+    Button incompatible;
+    incompatible.setId("incompatible_handler");
+    incompatible.setControllerId("MenuController");
+    incompatible.setEventBinding("onClick", "submitText");
+
+    LayoutInteractionRegistry registry;
+    registry.replace({
+        {"MenuController", {
+            {"openMenu", {"onClick"}},
+            {"submitText", {"onSubmit"}},
+        }},
+    });
+    const std::vector<Widget*> widgets = {
+        &resolved, &missingController, &missingHandler, &incompatible};
+
+    LayoutInteractionGraphModel graph;
+    graph.rebuild(widgets, &registry);
+    CHECK(graph.edges().size() == 4u);
+    CHECK(graph.resolvedCount() == 1u);
+    CHECK(graph.unresolvedCount() == 3u);
+    CHECK(graph.displayLabels().size() == 4u);
+
+    LayoutValidationContext context;
+    context.interactionRegistry = &registry;
+    context.reportOutsideParent = false;
+    LayoutValidationModel validation;
+    validation.run(widgets, context);
+    size_t controllerErrors = 0;
+    size_t handlerErrors = 0;
+    size_t eventErrors = 0;
+    for (const LayoutDiagnostic& diagnostic : validation.diagnostics()) {
+        if (diagnostic.code == LayoutDiagnosticCode::MissingController)
+            ++controllerErrors;
+        else if (diagnostic.code == LayoutDiagnosticCode::MissingEventHandler)
+            ++handlerErrors;
+        else if (diagnostic.code == LayoutDiagnosticCode::EventTypeMismatch)
+            ++eventErrors;
+    }
+    CHECK(controllerErrors == 1u);
+    CHECK(handlerErrors == 1u);
+    CHECK(eventErrors == 1u);
 }
 
 TEST_CASE(preview_model_maps_physical_resolution_dpi_and_safe_area_to_dip) {

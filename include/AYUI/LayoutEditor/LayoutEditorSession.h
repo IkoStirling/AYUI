@@ -5,6 +5,7 @@
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutInteractionModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
 #include "AYUI/LayoutEditor/LayoutResourceCatalog.h"
@@ -44,6 +45,8 @@ public:
     using TitleUpdater = std::function<void(const std::wstring& title)>;
     using DocumentStateUpdater =
         std::function<void(const std::string& path, bool dirty)>;
+    using InteractionContractProvider =
+        std::function<std::vector<LayoutControllerContract>()>;
 
     enum class AlignMode {
         Left, HCenter, Right,
@@ -112,6 +115,15 @@ public:
     }
     void setSafeAreaVisible(bool visible);
     void refreshTextureResources();
+    void setInteractionContracts(
+        std::vector<LayoutControllerContract> controllers);
+    void clearInteractionContracts();
+    void setInteractionContractProvider(
+        InteractionContractProvider provider);
+    void refreshInteractionContracts();
+    const LayoutInteractionGraphModel& interactionGraph() const {
+        return _interactionGraph;
+    }
     void refreshValidation();
     const std::vector<LayoutDiagnostic>& diagnostics() const {
         return _validationModel.diagnostics();
@@ -456,6 +468,9 @@ private:
     LayoutStructuredContentModel _structuredModel;
     LayoutResourceCatalog _textureCatalog;
     LayoutStyleInspectorModel _styleInspectorModel;
+    LayoutInteractionRegistry _interactionRegistry;
+    LayoutInteractionGraphModel _interactionGraph;
+    bool _interactionContractsConfigured = false;
     LayoutValidationModel _validationModel;
     LayoutPreviewModel _previewModel;
     LayoutResponsiveModel _responsiveModel;
@@ -554,6 +569,10 @@ private:
     bool _suppressValidation = false;
     bool _validationDirty = true;
     std::vector<std::wstring> _validationLabels;
+    ListView* _interactionGraphList = nullptr;
+    TextLabel* _interactionGraphStatus = nullptr;
+    bool _suppressInteractionGraph = false;
+    std::vector<std::wstring> _interactionGraphLabels;
     ComboBox* _previewPreset = nullptr;
     ComboBox* _previewDpi = nullptr;
     TextInput* _previewWidth = nullptr;
@@ -598,6 +617,7 @@ private:
     PathPicker _texturePicker;
     TexturePreviewLoader _texturePreviewLoader;
     TextureResourceProvider _textureResourceProvider;
+    InteractionContractProvider _interactionContractProvider;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;
     UILayoutLoader _docLoader;

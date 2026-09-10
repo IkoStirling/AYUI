@@ -1543,6 +1543,41 @@ void LayoutEditorSession::refreshTextureResources() {
     refreshValidation();
 }
 
+void LayoutEditorSession::setInteractionContracts(
+    std::vector<LayoutControllerContract> controllers) {
+    _interactionRegistry.replace(std::move(controllers));
+    _interactionContractsConfigured = true;
+    refreshValidation();
+}
+
+void LayoutEditorSession::clearInteractionContracts() {
+    _interactionRegistry.clear();
+    _interactionContractsConfigured = false;
+    refreshValidation();
+}
+
+void LayoutEditorSession::setInteractionContractProvider(
+    InteractionContractProvider provider) {
+    _interactionContractProvider = std::move(provider);
+    if (_interactionContractProvider) {
+        refreshInteractionContracts();
+    } else {
+        clearInteractionContracts();
+    }
+}
+
+void LayoutEditorSession::refreshInteractionContracts() {
+    if (!_interactionContractProvider) {
+        refreshValidation();
+        return;
+    }
+    try {
+        setInteractionContracts(_interactionContractProvider());
+    } catch (...) {
+        setStatus(L"Controller contract refresh failed");
+    }
+}
+
 void LayoutEditorSession::bindPropField(const char* id, const char* field,
                                         TextInput*& slot, bool numericScrub) {
     slot = dynamic_cast<TextInput*>(findChromeById(id));
@@ -1974,6 +2009,27 @@ void LayoutEditorSession::wireChrome() {
     _validationStatus = dynamic_cast<TextLabel*>(
         findChromeById("validation_status"));
     bindBtn("btn_validate", [this]() { refreshValidation(); });
+
+    _interactionGraphList = dynamic_cast<ListView*>(
+        findChromeById("interaction_graph_list"));
+    if (_interactionGraphList != nullptr) {
+        _interactionGraphList->setSelectionMode(
+            ListView::SelectionMode::Single);
+        _interactionGraphList->setOnSelectionChanged([this](int index) {
+            if (_suppressInteractionGraph || index < 0 ||
+                index >= static_cast<int>(_interactionGraph.edges().size())) {
+                return;
+            }
+            Widget* widget = _interactionGraph.edges()[
+                static_cast<size_t>(index)].widget;
+            if (widget != nullptr) select(widget, false);
+        });
+    }
+    _interactionGraphStatus = dynamic_cast<TextLabel*>(
+        findChromeById("interaction_graph_status"));
+    bindBtn("btn_refresh_interactions", [this]() {
+        refreshInteractionContracts();
+    });
 
     _reuseList = dynamic_cast<ListView*>(findChromeById("reuse_list"));
     _reuseName = dynamic_cast<TextInput*>(findChromeById("reuse_name"));
@@ -7819,8 +7875,43 @@ void LayoutEditorSession::refreshValidation() {
         ? &_textureCatalog : nullptr;
     context.styleSheet = StyleManager::get().getStyleSheet();
     context.animations = &_animationLibrary;
+    context.interactionRegistry = _interactionContractsConfigured
+        ? &_interactionRegistry : nullptr;
     _validationModel.run(authored, context);
+    _interactionGraph.rebuild(authored, context.interactionRegistry);
     _validationDirty = false;
+
+    std::vector<std::wstring> interactionLabels =
+        _interactionGraph.displayLabels();
+    if (interactionLabels != _interactionGraphLabels) {
+        _interactionGraphLabels = std::move(interactionLabels);
+        _suppressInteractionGraph = true;
+        if (_interactionGraphList != nullptr) {
+            _interactionGraphList->setItems(_interactionGraphLabels);
+            _interactionGraphList->setSelectedIndex(-1);
+        }
+        _suppressInteractionGraph = false;
+    }
+    if (_interactionGraphStatus != nullptr) {
+        const size_t edges = _interactionGraph.edges().size();
+        if (edges == 0u) {
+            _interactionGraphStatus->setText(L"No event bindings");
+            _interactionGraphStatus->setStyleId("__le_muted");
+        } else if (!_interactionContractsConfigured) {
+            _interactionGraphStatus->setText(
+                std::to_wstring(edges) +
+                L" bindings  \u00b7  host registry not connected");
+            _interactionGraphStatus->setStyleId("__le_muted");
+        } else {
+            const size_t unresolved = _interactionGraph.unresolvedCount();
+            _interactionGraphStatus->setText(
+                std::to_wstring(_interactionGraph.resolvedCount()) +
+                L" resolved  \u00b7  " + std::to_wstring(unresolved) +
+                L" unresolved");
+            _interactionGraphStatus->setStyleId(unresolved == 0u
+                ? "__le_success" : "__le_warning");
+        }
+    }
 
     std::vector<std::wstring> labels = _validationModel.displayLabels();
     if (labels != _validationLabels) {
@@ -7900,7 +7991,7 @@ void LayoutEditorSession::ensureSchemaPropertyChrome() {
         case PropertySection::Appearance:
             return findChromeById("section_style_quality");
         case PropertySection::Interaction:
-            return findChromeById("section_layout");
+            return findChromeById("section_interaction_graph");
         case PropertySection::Layout:
             return findChromeById("section_validation");
         }

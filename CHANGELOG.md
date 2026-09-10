@@ -30,6 +30,8 @@
 - `UIManager::findById()` 在 Loader 索引未命中时查询实时 Widget 树，覆盖运行时挂载控件。
 - public authoring 控件与 schema 扩展后源码 ABI 版本更新为 115。
 - Layout Editor 常规属性使用稳定 Widget ID 的 typed undo/redo command；源码 ABI 更新为 116。
+- Layout Editor 接受宿主 Controller/Handler contract，并显示可定位 Widget 的事件触发图；源码 ABI
+  更新为 117。
 
 ### Fixed
 
@@ -44,7 +46,7 @@
 ### Validation
 
 - Windows Debug：AYUI `5147 / 5147` 条断言通过。
-- VS 2026 Insider Windows Debug：AYUI `5611 / 5611`，Layout Editor headless round-trip 通过。
+- VS 2026 Insider Windows Debug：AYUI `5626 / 5626`，Layout Editor headless round-trip 通过。
 - AYRenderer Noop：`3284 / 3284` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

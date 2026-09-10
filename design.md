@@ -508,6 +508,12 @@ Loader registry 的 O(1) 快路径，并在 miss 时遍历实时树，使动态�
 连续交互仍 coalesce 为一个命令，并恢复命令前后的 dirty 状态。结构编辑、复杂内容和画布变换继续保存
 完整 JSON snapshot 作为可靠兜底，两种 entry 在同一 undo/redo 栈中严格保持时间顺序。
 
+交互元数据采用宿主注入的 `LayoutControllerContract`：每个 Controller 列出 Handler 及允许接收的
+Widget event，空 event 集表示接受任意事件。`LayoutInteractionRegistry` 不持有 Controller 实例或
+回调，只供 authoring 校验；`LayoutInteractionGraphModel` 将序列化的绑定投影为
+`Widget.event -> Controller.handler` 边并标记 resolved、host-unvalidated、missing controller、
+missing handler 与 event mismatch。运行时解析顺序仍完全由 `UILayoutLoader` 负责。
+
 Chrome 本身采用 File/Edit 菜单栏、单列 Widget Library + Document Outline、Canvas、滚动
 Inspector、状态栏布局。`UILayoutLoader` 与 Serializer 都支持 MenuBar 的结构化 `menus/items`
 声明及 shortcut/submenu；命令不再依赖一排临时按钮。Widget Library 行绑定类型专属 SVG，点击
@@ -790,6 +796,8 @@ Resource 把 key、Browse/Clear 收敛到单行；Vector 保留各分量稳定 I
 AYUI `5611 / 5611`，headless round-trip 通过。
 随后属性命令阶段把常规 Inspector 编辑迁移到小粒度 typed command，结构与复合编辑继续走 snapshot
 兜底；源码 ABI 更新到 116，当前基线为 AYUI `5619 / 5619`，headless round-trip 通过。
+Controller/Event contract 与只读触发图随后进入 authoring core，源码 ABI 更新到 117；当前基线为
+AYUI `5626 / 5626`，headless round-trip 通过。
 
 断言总数从旧基线的 7405 收敛到 4229，是因为参数矩阵、逐帧动画和压力循环不再在每次
 迭代中调用 `CHECK`；循环体只累计失败数，并在循环结束后统一断言。测试文件数、测试用例
