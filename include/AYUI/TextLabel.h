@@ -65,6 +65,10 @@ public:
         markDirty();
     }
 
+    math::FVector4 getBackgroundColor() const {
+        return math::FVector4(_bgR, _bgG, _bgB, _bgA);
+    }
+
 protected:
     void onRender(IRenderBackend& renderer) override;
 

@@ -43,11 +43,13 @@
 #include "AYUI/SelectableWidget.h"
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace ayt::ui {
 
 class Menu;   // forward — used for submenu pointer.
+class SvgDocument;
 
 class MenuItem : public SelectableWidget {
 public:
@@ -80,6 +82,16 @@ public:
     // Re-callable: passing a different string updates the dispatch
     // binding too.
     void setShortcut(const std::wstring& s);
+
+    // Optional leading SVG used by checked/stateful menu entries. Keeping the
+    // indicator separate from the label avoids text markers such as "[x]"
+    // and gives every host the same alignment and disabled-state treatment.
+    void setLeadingIconDocument(std::shared_ptr<const SvgDocument> document);
+    std::shared_ptr<const SvgDocument> getLeadingIconDocument() const;
+    void setLeadingIconColor(const math::FVector4& color);
+    math::FVector4 getLeadingIconColor() const;
+    void setLeadingIconSize(float size);
+    float getLeadingIconSize() const;
 
     // Polish (P3): parsed accelerator. If the displayed string is not
     // parseable (typo, unsupported F1 etc.) _accelKey remains 0 and

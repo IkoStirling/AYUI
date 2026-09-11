@@ -295,6 +295,23 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("fontSize")) {
                 label->setFontSize(j["fontSize"]);
             }
+            if (j.contains("textColor") && j["textColor"].is_array()
+                && j["textColor"].size() == 4u) {
+                label->setTextColor({
+                    j["textColor"][0].get<float>(),
+                    j["textColor"][1].get<float>(),
+                    j["textColor"][2].get<float>(),
+                    j["textColor"][3].get<float>()});
+            }
+            if (j.contains("backgroundColor")
+                && j["backgroundColor"].is_array()
+                && j["backgroundColor"].size() == 4u) {
+                label->setBackgroundColor({
+                    j["backgroundColor"][0].get<float>(),
+                    j["backgroundColor"][1].get<float>(),
+                    j["backgroundColor"][2].get<float>(),
+                    j["backgroundColor"][3].get<float>()});
+            }
             if (j.contains("hAlign")) {
                 if (j["hAlign"].is_string()) {
                     const std::string a = j["hAlign"].get<std::string>();
@@ -1368,6 +1385,12 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
         j["type"] = "TextLabel";
         j["text"] = toUtf8(label->getText());
         j["fontSize"] = label->getFontSize();
+        const auto textColor = label->getTextColor();
+        j["textColor"] = {
+            textColor.x, textColor.y, textColor.z, textColor.w};
+        const auto backgroundColor = label->getBackgroundColor();
+        j["backgroundColor"] = {backgroundColor.x, backgroundColor.y,
+                                  backgroundColor.z, backgroundColor.w};
         switch (label->getHorizontalAlignment()) {
         case TextLabel::HAlignment::Center: j["hAlign"] = "Center"; break;
         case TextLabel::HAlignment::Right:  j["hAlign"] = "Right";  break;

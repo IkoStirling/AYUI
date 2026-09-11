@@ -2,10 +2,12 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/Menu.h"
 #include "AYUI/Style.h"
+#include "AYUI/SvgIcon.h"
 #include "AYUI/TextMeasure.h"
 #include "AYUI/UIKeyCode.h"
 #include <algorithm>
 #include <cctype>
+#include <unordered_map>
 #include <vector>
 
 namespace ayt::ui {
@@ -30,6 +32,29 @@ namespace ayt::ui {
 // ============================================================================
 
 namespace {
+
+struct MenuItemLeadingIconState {
+    std::shared_ptr<const SvgDocument> document;
+    math::FVector4 color{0.92f, 0.92f, 0.94f, 1.0f};
+    float size = 14.0f;
+};
+
+std::unordered_map<const MenuItem*, MenuItemLeadingIconState>&
+menuItemLeadingIcons()
+{
+    // Leading indicators are optional presentation state. Store them out of
+    // line so adding the feature does not alter MenuItem's public layout.
+    static auto* states = new std::unordered_map<
+        const MenuItem*, MenuItemLeadingIconState>();
+    return *states;
+}
+
+const MenuItemLeadingIconState* findLeadingIcon(const MenuItem* item)
+{
+    const auto& states = menuItemLeadingIcons();
+    const auto found = states.find(item);
+    return found != states.end() ? &found->second : nullptr;
+}
 
 // Case-insensitive equality on std::wstring. Returns true iff `s` equals
 // `prefix` ignoring ASCII case. Used by the parser to recognize modifier
@@ -161,6 +186,7 @@ MenuItem::~MenuItem() {
     // (unusual — items live inside Menu which MenuBar owns), MenuBar
     // sees the deletion first. Items not behind a MenuBar never end up
     // in the registry, so no leak.
+    menuItemLeadingIcons().erase(this);
 }
 
 void MenuItem::setShortcut(const std::wstring& s) {
@@ -178,6 +204,45 @@ void MenuItem::setShortcut(const std::wstring& s) {
     // AYUI-DirtyRect-2026-08-26: shortcut text changes the rendered row
     // (right-aligned hint).
     markDirty();
+}
+
+void MenuItem::setLeadingIconDocument(
+    std::shared_ptr<const SvgDocument> document) {
+    auto& state = menuItemLeadingIcons()[this];
+    if (state.document == document) return;
+    state.document = std::move(document);
+    markDirty();
+}
+
+std::shared_ptr<const SvgDocument> MenuItem::getLeadingIconDocument() const {
+    const MenuItemLeadingIconState* state = findLeadingIcon(this);
+    return state != nullptr ? state->document : nullptr;
+}
+
+void MenuItem::setLeadingIconColor(const math::FVector4& color) {
+    auto& state = menuItemLeadingIcons()[this];
+    if (state.color == color) return;
+    state.color = color;
+    markDirty();
+}
+
+math::FVector4 MenuItem::getLeadingIconColor() const {
+    const MenuItemLeadingIconState* state = findLeadingIcon(this);
+    return state != nullptr
+        ? state->color : math::FVector4(0.92f, 0.92f, 0.94f, 1.0f);
+}
+
+void MenuItem::setLeadingIconSize(float size) {
+    const float clamped = std::max(0.0f, size);
+    auto& state = menuItemLeadingIcons()[this];
+    if (state.size == clamped) return;
+    state.size = clamped;
+    markDirty();
+}
+
+float MenuItem::getLeadingIconSize() const {
+    const MenuItemLeadingIconState* state = findLeadingIcon(this);
+    return state != nullptr ? state->size : 14.0f;
 }
 
 bool MenuItem::handleClick() {
@@ -228,11 +293,27 @@ void MenuItem::onRender(IRenderBackend& renderer) {
         resolveTransitionColor(resolveAccentColor(0.0f));
     }
 
-    const float padL = 16.0f;
+    const MenuItemLeadingIconState* leading = findLeadingIcon(this);
+    const bool hasLeadingIcon = leading != nullptr
+        && leading->document != nullptr;
+    const float padL = hasLeadingIcon ? 36.0f : 16.0f;
     const float padR = 12.0f;
     const math::FVector4 textColor = isEnabled()
         ? math::FVector4(1.0f, 1.0f, 1.0f, 1.0f)
         : math::FVector4(0.55f, 0.55f, 0.55f, 1.0f);
+
+    if (hasLeadingIcon && leading->size > 0.0f) {
+        const float size = std::min(leading->size,
+            std::max(0.0f, b.maxY - b.minY - 8.0f));
+        if (size > 0.0f) {
+            const float x = b.minX + 14.0f;
+            const float y = b.minY + (b.maxY - b.minY - size) * 0.5f;
+            math::FVector4 color = leading->color;
+            if (!isEnabled()) color.w *= 0.55f;
+            leading->document->draw(renderer,
+                math::FRectangle(x, y, x + size, y + size), color);
+        }
+    }
 
     if (!_text.empty()) {
         math::FRectangle textBounds(

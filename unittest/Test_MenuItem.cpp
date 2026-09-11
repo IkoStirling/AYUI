@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYUI/MenuItem.h"
+#include "AYUI/SvgIcon.h"
 #include "AYUI/UIKeyCode.h"
 #include "AYUI/MockRenderer.h"
 #include "AYUI/WidgetFactory.h"
@@ -70,6 +71,28 @@ TEST_CASE(menuitem_render_emits_text) {
     for (const auto& dc : renderer.getDrawCalls()) {
         if (dc.type == MockRenderer::DrawCall::Text) { sawText = true; break; }
     }
+    CHECK(sawText);
+}
+
+TEST_CASE(menuitem_leading_svg_indicator_uses_icon_slot) {
+    MenuItem item;
+    item.setText(L"Enabled option");
+    item.setSize(FVector2(200.0f, 24.0f));
+    const auto icon = SvgDocument::parse(
+        R"(<svg viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg>)");
+    CHECK(icon != nullptr);
+    item.setLeadingIconDocument(icon);
+    item.setLeadingIconSize(13.0f);
+
+    MockRenderer renderer;
+    item.render(renderer);
+    bool sawPath = false;
+    bool sawText = false;
+    for (const auto& call : renderer.getDrawCalls()) {
+        sawPath |= call.type == MockRenderer::DrawCall::Path;
+        sawText |= call.type == MockRenderer::DrawCall::Text;
+    }
+    CHECK(sawPath);
     CHECK(sawText);
 }
 

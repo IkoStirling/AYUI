@@ -988,6 +988,21 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         if (j.contains("fontSize")) {
             label->setFontSize(j["fontSize"].get<int>());
         }
+        if (j.contains("textColor") && j["textColor"].is_array()
+            && j["textColor"].size() >= 4u) {
+            const auto& color = j["textColor"];
+            label->setTextColor(math::FVector4(
+                color[0].get<float>(), color[1].get<float>(),
+                color[2].get<float>(), color[3].get<float>()));
+        }
+        if (j.contains("backgroundColor")
+            && j["backgroundColor"].is_array()
+            && j["backgroundColor"].size() >= 4u) {
+            const auto& color = j["backgroundColor"];
+            label->setBackgroundColor(math::FVector4(
+                color[0].get<float>(), color[1].get<float>(),
+                color[2].get<float>(), color[3].get<float>()));
+        }
         if (j.contains("hAlign")) {
             if (j["hAlign"].is_string()) {
                 const std::string align = j["hAlign"].get<std::string>();
