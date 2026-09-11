@@ -478,3 +478,9 @@ conversion in a later editor stage can generate a real asset after user review.
    independent async nodes overlap, multi-input execution pins provide Join
    semantics, and executor-owned timeout/cancellation safely tears work down
    when a Flow document or Scene lifetime ends.
+10. **Scene presentation control — complete:** a World may activate multiple
+    exact Context bindings plus reusable `*` defaults; Scene systems can publish
+    typed signal requests through EventBus or temporarily push a Context by
+    source and scope. Non-Application presentations retire at every Scene
+    instance boundary, while Application presentation handles intentionally
+    survive World changes until released.
