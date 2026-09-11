@@ -435,7 +435,7 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
-### 8.5 Application UI Flow（阶段三）
+### 8.5 Application UI Flow（阶段四）
 
 `*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
 编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
@@ -458,8 +458,13 @@ UI Flow 不直接依赖 Scene、World、Entity、AYRenderer 或编辑器。旧�
 `SceneSignalParticipantComponent` 提供无业务语义、可序列化的轴对齐区域进入/离开信号，已有物理、
 脚本或任务系统也可经 `emitSceneSignal()` 接入相同通道。Bridge 只调用 Flow Runtime，不查找 Widget；
 AYScene/AYEntity 核心也不反向依赖 AYUI。当前内建扫描适合少量 authored region，忽略旋转且复杂度为
-O(volume × participant)，大规模或旋转区域应由物理 broadphase 产出信号。可视化 Flow Editor、异步
-interruption policy 和 enter/exit 动画交接仍属后续阶段。完整格式、运行语义和迁移规则见
+O(volume × participant)，大规模或旋转区域应由物理 broadphase 产出信号。
+
+阶段四已经在 AYEditor 中加入独立 Flow 工具窗、项目资产入口、模型 Outline、Region/State/Transition
+与 Graph 画布、Screen/Context/Layer/Transition Inspector、即时诊断、Signal 模拟和 Mock Action
+trace。创作文档直接持有本节数据模型，重命名会原子更新引用，删除被引用对象会被拒绝；预览实例化
+生产 `UIFlowRuntime` 并用记录型 Screen Host 展示 mounted Screen，不复制状态机。真实 Widget 像素
+加载、异步 interruption policy 和 enter/exit 动画交接仍属阶段五。完整格式、运行语义和迁移规则见
 [docs/UIFlow.md](docs/UIFlow.md)。
 
 ## 9. Popup、Modal 与 Docking
@@ -937,10 +942,11 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
    预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
     clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
-8. Application UI Flow 已完成阶段三：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
+8. Application UI Flow 已完成阶段四：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
    AYApplication 持久 Runtime、Context/Slot 仲裁、Scope 清理、signal/action registry，以及 Scene
-   生命周期与通用区域信号桥。Scene 只发布通用信号，不直接操作 Widget；下一步 Flow Editor 复用同一
-   wire contract，随后补异步 interruption、动画交接和更完整的生产验收。
+   生命周期与通用区域信号桥，以及复用同一 wire/runtime contract 的独立 Flow Editor、诊断、模拟
+   Signal/Action 和逻辑预览。Scene 只发布通用信号，不直接操作 Widget；下一步补真实 Widget 预览、
+   异步 interruption、动画交接和更完整的生产验收。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

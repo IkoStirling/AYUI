@@ -1,6 +1,6 @@
 # AYUI Flow Contract
 
-Status: **Stage 3 Scene bridge implemented** (2026-09-11).
+Status: **Stage 4 Flow Editor implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
@@ -14,7 +14,8 @@ Context/Slot arbitration, Scope cleanup, typed signals/actions, parallel state
 regions, and an extension boundary for action-graph execution. Stage 3 adds
 World lifecycle binding, serializable generic Scene signal components, and an
 explicit signal entry point for physics, script, task, or custom interaction
-systems. The visual Flow Editor remains a later stage.
+systems. Stage 4 adds the independent AYEditor Flow authoring window and a
+logical live preview backed by the production runtime.
 
 ## Ownership and dependency boundary
 
@@ -375,8 +376,10 @@ conversion in a later editor stage can generate a real asset after user review.
 3. **Scene bridge — complete:** World Scope/Context lifecycle binding, optional
    lifecycle Signals, serializable generic signal volume/participant components,
    explicit physics/script signal entry point, Host service and module ordering.
-4. **Flow Editor:** graph/state/region canvas, Screen/Context/Layer inspectors,
-   diagnostics, simulated signals, mock action execution and live preview.
+4. **Flow Editor — complete:** independent AYDevice tool window, project asset
+   creation/opening, graph/state/region canvas, Screen/Context/Layer/Transition
+   inspectors, reference-safe history, diagnostics, simulated signals, mock
+   action execution and production-runtime logical live preview.
 5. **Production gates:** async interruption-policy execution, lower-target
    input retry, enter/exit animation handoff, save/reload migration, replay
    diagnostics, accessibility/reduced-motion behavior and full visual
