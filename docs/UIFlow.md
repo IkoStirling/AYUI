@@ -484,3 +484,7 @@ conversion in a later editor stage can generate a real asset after user review.
     source and scope. Non-Application presentations retire at every Scene
     instance boundary, while Application presentation handles intentionally
     survive World changes until released.
+11. **Graph debugging — complete:** the production executor supports
+    pre-handler breakpoints, pause-next, step and continue. Pause snapshots and
+    bounded traces expose resolved node inputs and completed outputs; editor
+    tooling presents this state without implementing a second execution path.
