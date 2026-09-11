@@ -1,6 +1,6 @@
 # AYUI Flow Contract
 
-Status: **Stage 4 Flow Editor implemented** (2026-09-11).
+Status: **Stage 5 production gates implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
@@ -15,7 +15,10 @@ regions, and an extension boundary for action-graph execution. Stage 3 adds
 World lifecycle binding, serializable generic Scene signal components, and an
 explicit signal entry point for physics, script, task, or custom interaction
 systems. Stage 4 adds the independent AYEditor Flow authoring window and a
-logical live preview backed by the production runtime.
+logical live preview backed by the production runtime. Stage 5 closes the
+production execution path with asynchronous graph interruption, precise input
+fall-through, Screen animation handoff, transactional Flow reload, replayable
+diagnostics, reduced-motion behavior, and a real Widget-tree editor preview.
 
 ## Ownership and dependency boundary
 
@@ -112,14 +115,28 @@ active; application Screens survive World changes; transient identity is tied
 to a Context activation. A manual Context returns a stable handle for explicit
 deactivation.
 
-Signals are schema-checked, default-filled, and synchronously serialized
+Signals are schema-checked, default-filled, and serialized
 through a re-entrant queue with a 1024-event safety limit. Each parallel Region
 chooses its highest-priority matching Transition independently. Guards are
 delegated to a host evaluator. Enter/exit/transition Graphs are emitted through
-`setGraphRequestHandler`; node execution stays host/plugin-defined, so AYUI
-does not acquire gameplay semantics. Graph requests happen after the new
-presentation commits: a throwing graph callback is reported and contained but
-does not roll back the already-visible state.
+`setGraphRequestHandler` or `setAsyncGraphRequestHandler`; node execution stays
+host/plugin-defined, so AYUI does not acquire gameplay semantics. The synchronous
+handler remains the compatibility path. With the asynchronous handler, a
+transition advances through exit, transition, and enter graphs only after the
+host completes each returned execution ID via `completeGraphExecution()`.
+Handlers must return before completing that ID; completion is intentionally a
+later callback so the runtime cannot be re-entered while installing the pending
+execution record.
+
+`queue`, `coalesce`, `ignoreIfRunning`, `cancelPrevious`, and `reversePrevious`
+are enforced per Region. Queue preserves every deferred transition; coalesce
+retains only the newest; ignore drops it; cancel/reverse call the host interrupt
+handler and replace the old pipeline. Logical State and mounted presentation
+commit before asynchronous graph work begins, matching the existing
+non-rollback graph contract. Runtime trace entries and the bounded replay Signal
+log expose the exact decision sequence for diagnostics and deterministic replay.
+If the host rejects a graph start, the failed Region's deferred transitions are
+discarded so stale work cannot leak into a later, unrelated pipeline.
 
 The Action registry validates declared inputs and applies defaults before
 calling the registered host capability. Unknown actions, missing handlers,
@@ -130,10 +147,21 @@ runtime boundary.
 For Widget input, Layer order is painter order. `blockLower` (or
 `blocksLowerInput`) captures the transparent Layer surface. `passThrough`
 ignores a viewport-sized Screen root's blank background while preserving hits
-on interactive descendants. Precise retry of a lower widget after a picked
-control returns "unhandled" is not part of the current single-target
-`UIManager` dispatcher; that refinement belongs with the production input
-router rather than the Flow data model.
+on interactive descendants. `consumeHandled` first offers the event to the top
+target and retries lower siblings only when it remains unhandled. The retry is
+bounded by explicit container capabilities, so ordinary overlapping controls do
+not accidentally acquire click-through behavior and `blockLower` remains a hard
+boundary.
+
+`UIManagerFlowScreenHost` validates named enter/exit clips before mounting,
+plays enter clips immediately, and retains an unmounted Screen until its exit
+clip completes. The same `AnimationTimeline` honors the process-wide
+`AnimationSettings` reduced-motion provider; when reduced motion is active the
+handoff completes synchronously without maintaining a retiring Screen.
+`reload()` validates and reconciles a replacement Flow transactionally while
+preserving compatible manual Context handles and active Region state. It rejects
+reload during an in-flight asynchronous graph rather than creating a mixed
+document pipeline.
 
 ## Stage 3 Scene bridge
 
@@ -380,7 +408,8 @@ conversion in a later editor stage can generate a real asset after user review.
    creation/opening, graph/state/region canvas, Screen/Context/Layer/Transition
    inspectors, reference-safe history, diagnostics, simulated signals, mock
    action execution and production-runtime logical live preview.
-5. **Production gates:** async interruption-policy execution, lower-target
+5. **Production gates — complete:** async interruption-policy execution, lower-target
    input retry, enter/exit animation handoff, save/reload migration, replay
-   diagnostics, accessibility/reduced-motion behavior and full visual
-   integration tests.
+   diagnostics, accessibility/reduced-motion behavior, and a clipped real
+   Widget-tree preview in the Flow Editor. Runtime, AYUI, editor-contract, and
+   full editor test gates cover the integration.

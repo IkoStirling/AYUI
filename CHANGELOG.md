@@ -39,6 +39,8 @@
 - 增加 Application UI Flow 阶段一纯数据契约：`*.uiflow.json` 可描述 Screen、Layer、Slot、Scope、
   Context、Entry、Signal/Action、并行层级状态机和可扩展 Action Graph；自定义节点的递归 JSON 属性
   可无损往返，交叉引用、层级循环、类型默认值与数值范围具有统一诊断。源码 ABI 更新为 119。
+- UI Flow 生产路径增加异步 Graph execution、中断策略、事务式 reload、Signal replay/trace、
+  Screen enter/exit 动画交接和 `consumeHandled` 下层输入重试；新增 Widget 虚函数后源码 ABI 更新为 120。
 
 ### Fixed
 
@@ -49,6 +51,8 @@
 - 四角渐变在 damage/普通 clip 下按原 bounds 重映射颜色，局部重放不再重启或拉伸渐变。
 - Image tint/UV 和 Grid spacing 补齐 `UILayoutLoader`/`WidgetSerializer` 对称往返；Grid Inspector
   拒绝会丢弃已占用 cell 的缩小操作。
+- 外部宿主销毁或替换 Widget 子树前可统一清理 hover、capture、focus、IME 与 drag 非拥有引用，
+  避免 UI Flow Screen 卸载后下一次指针事件访问已释放控件。
 
 ### Validation
 

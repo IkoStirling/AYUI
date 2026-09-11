@@ -373,6 +373,13 @@ public:
     virtual bool onMouseMove(const UIMouseEvent& e);
     virtual bool onMouseButtonDown(const UIMouseEvent& e);
     virtual bool onMouseButtonUp(const UIMouseEvent& e);
+    // Layered hosts can opt into retrying a pointer-down behind an unhandled
+    // descendant. Ordinary Widget trees retain the historical single-target
+    // behavior. A blocking boundary consumes the event even when the leaf did
+    // not handle it (modal/full-screen input shields use this contract).
+    virtual bool retriesUnhandledPointerWithinChildren() const { return false; }
+    virtual bool allowsUnhandledPointerRetryBehind() const { return false; }
+    virtual bool blocksLowerPointerInput() const { return false; }
     // Called when the host must terminate pointer capture without a real
     // release event (for example, when a window loses focus). The default
     // preserves the historical behaviour for drag controls by synthesizing

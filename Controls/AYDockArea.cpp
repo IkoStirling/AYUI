@@ -224,22 +224,7 @@ void clearUiTransientPointersForTree(Widget* root) {
     if (root == nullptr || ui == nullptr) {
         return;
     }
-    std::vector<Widget*> pending{root};
-    while (!pending.empty()) {
-        Widget* current = pending.back();
-        pending.pop_back();
-        if (current == nullptr) {
-            continue;
-        }
-        for (Widget* child : current->getChildren()) {
-            if (child != nullptr) {
-                pending.push_back(child);
-            }
-        }
-        ui->clearCaptureNoDispatch(current);
-        ui->clearHoverNoDispatch(current);
-        ui->clearFocusNoDispatch(current);
-    }
+    ui->clearTransientStateForSubtree(root);
 }
 
 void destroyDockWidgetTree(Widget* root) {

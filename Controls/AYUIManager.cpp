@@ -1910,9 +1910,42 @@ bool UIManager::onMouseButtonDown(float x, float y, int button) {
         }
     }
 
-    if (hit != nullptr && hit->onMouseButtonDown(UIMouseEvent(pos, button))) {
-        _capturedWidget = hit;
-        return true;
+    Widget* candidate = hit;
+    while (candidate != nullptr) {
+        if (candidate->onMouseButtonDown(UIMouseEvent(pos, button))) {
+            _capturedWidget = candidate;
+            return true;
+        }
+
+        Widget* current = candidate;
+        Widget* next = nullptr;
+        bool blocked = false;
+        while (current != nullptr && current->getParent() != nullptr) {
+            Widget* parent = current->getParent();
+            if (parent->blocksLowerPointerInput()) {
+                blocked = true;
+                break;
+            }
+            const bool maySearch =
+                parent->retriesUnhandledPointerWithinChildren()
+                || current->allowsUnhandledPointerRetryBehind();
+            if (maySearch) {
+                const auto& siblings = parent->getChildren();
+                const auto branch = std::find(siblings.begin(), siblings.end(), current);
+                if (branch != siblings.end()) {
+                    for (auto it = std::make_reverse_iterator(branch);
+                         it != siblings.rend(); ++it) {
+                        if (*it == nullptr) continue;
+                        next = (*it)->hitTest(pos);
+                        if (next != nullptr) break;
+                    }
+                }
+                if (next != nullptr) break;
+            }
+            current = parent;
+        }
+        if (blocked) return true;
+        candidate = next;
     }
     return false;
 }
@@ -2342,6 +2375,25 @@ void UIManager::clearCaptureNoDispatch(Widget* candidate) {
 void UIManager::clearHoverNoDispatch(Widget* candidate) {
     if (_hoverWidget == candidate) {
         _hoverWidget = nullptr;
+    }
+}
+
+void UIManager::clearTransientStateForSubtree(Widget* root) noexcept {
+    if (root == nullptr) return;
+    const auto belongsToSubtree = [root](Widget* candidate) {
+        return candidate != nullptr
+            && (candidate == root || isDescendantOf(candidate, root));
+    };
+    if (belongsToSubtree(_focusedWidget)) _focusedWidget = nullptr;
+    if (belongsToSubtree(_capturedWidget)) _capturedWidget = nullptr;
+    if (belongsToSubtree(_hoverWidget)) _hoverWidget = nullptr;
+    if (belongsToSubtree(_compositionOwner)) {
+        _compositionOwner = nullptr;
+        _composing = false;
+    }
+    if (belongsToSubtree(_dragSession.source)
+        || belongsToSubtree(_dragSession.currentTarget)) {
+        clearDragStateNoDispatch(nullptr);
     }
 }
 

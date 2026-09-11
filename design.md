@@ -280,6 +280,8 @@ backing。Additive/Multiply/Screen 只改变 RGB blend 方程，alpha 一律独�
    `TabControl::addTabOwned` 明确接管结构化内容；非 owned API 只建立外部引用。两种销毁入口都必须避免重复释放。
 9. 关闭/热重载/销毁树之前，UIManager 必须清理 focus、hover、capture、active modal 和 drag 状态。
 10. 回调中可能触发当前控件关闭；事件路径在回调返回后不得再次读取可能已释放的控件。
+11. 外部 Screen/Dock/子窗口宿主替换局部树时，必须先调用
+    `UIManager::clearTransientStateForSubtree()`；局部销毁不能依赖全局 reload/shutdown 才清理输入别名。
 
 所有权 API 的命名应直接表达语义；不要通过“新地址是否不同”判断对象是否已析构，测试应使用析构哨兵。
 
@@ -435,7 +437,7 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
-### 8.5 Application UI Flow（阶段四）
+### 8.5 Application UI Flow（阶段五）
 
 `*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
 编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
@@ -463,8 +465,9 @@ O(volume × participant)，大规模或旋转区域应由物理 broadphase 产�
 阶段四已经在 AYEditor 中加入独立 Flow 工具窗、项目资产入口、模型 Outline、Region/State/Transition
 与 Graph 画布、Screen/Context/Layer/Transition Inspector、即时诊断、Signal 模拟和 Mock Action
 trace。创作文档直接持有本节数据模型，重命名会原子更新引用，删除被引用对象会被拒绝；预览实例化
-生产 `UIFlowRuntime` 并用记录型 Screen Host 展示 mounted Screen，不复制状态机。真实 Widget 像素
-加载、异步 interruption policy 和 enter/exit 动画交接仍属阶段五。完整格式、运行语义和迁移规则见
+生产 `UIFlowRuntime` 并用记录型 Screen Host 展示 mounted Screen，不复制状态机。阶段五进一步完成
+异步 Graph 中断策略、显式 lower-target 输入重试、Screen enter/exit 动画交接、事务式 reload、Signal
+replay/trace、reduced-motion，以及编辑器内生产 Screen Host 的真实裁剪预览。完整格式和迁移规则见
 [docs/UIFlow.md](docs/UIFlow.md)。
 
 ## 9. Popup、Modal 与 Docking
@@ -942,11 +945,10 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
    预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
     clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
-8. Application UI Flow 已完成阶段四：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
+8. Application UI Flow 已完成阶段五：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
    AYApplication 持久 Runtime、Context/Slot 仲裁、Scope 清理、signal/action registry，以及 Scene
-   生命周期与通用区域信号桥，以及复用同一 wire/runtime contract 的独立 Flow Editor、诊断、模拟
-   Signal/Action 和逻辑预览。Scene 只发布通用信号，不直接操作 Widget；下一步补真实 Widget 预览、
-   异步 interruption、动画交接和更完整的生产验收。
+   生命周期与通用区域信号桥，以及复用同一 wire/runtime contract 的独立 Flow Editor、诊断、模拟、
+   异步中断、动画交接、reload/replay 和真实布局预览。Scene 只发布通用信号，不直接操作 Widget。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

@@ -430,6 +430,10 @@ public:
     // point at `candidate` without synthesizing mouse-up or other virtuals.
     void clearCaptureNoDispatch(Widget* candidate);
     void clearHoverNoDispatch(Widget* candidate);
+    // Clears non-owning input aliases that point at `root` or one of its
+    // descendants. Call immediately before an externally managed subtree is
+    // detached/destroyed or atomically replaced.
+    void clearTransientStateForSubtree(Widget* root) noexcept;
 
     // =================================================================
     // G12 — Drag & Drop session lifecycle.
