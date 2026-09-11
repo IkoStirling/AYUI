@@ -295,4 +295,25 @@ TEST_CASE(flow_graph_node_registry_validates_registered_typed_pins)
     CHECK(diagnostics.front().path == "graphs[0].links[0].toPin");
 }
 
+TEST_CASE(flow_graph_pin_compatibility_includes_direction_kind_and_value_type)
+{
+    using Direction = UIFlowGraphPinDirection;
+    using Kind = UIFlowGraphPinKind;
+    const UIFlowGraphPinTypeDefinition integerOutput{
+        "value", Direction::Output, Kind::Value, UIFlowValueType::Integer};
+    const UIFlowGraphPinTypeDefinition numberInput{
+        "value", Direction::Input, Kind::Value, UIFlowValueType::Number};
+    const UIFlowGraphPinTypeDefinition stringInput{
+        "value", Direction::Input, Kind::Value, UIFlowValueType::String};
+    const UIFlowGraphPinTypeDefinition wrongDirection{
+        "value", Direction::Output, Kind::Value, UIFlowValueType::Number};
+    const UIFlowGraphPinTypeDefinition executionInput{
+        "execute", Direction::Input, Kind::Execution};
+
+    CHECK(areUIFlowGraphPinsCompatible(integerOutput, numberInput));
+    CHECK_FALSE(areUIFlowGraphPinsCompatible(integerOutput, stringInput));
+    CHECK_FALSE(areUIFlowGraphPinsCompatible(integerOutput, wrongDirection));
+    CHECK_FALSE(areUIFlowGraphPinsCompatible(integerOutput, executionInput));
+}
+
 TEST_SUITE_END

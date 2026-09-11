@@ -51,6 +51,15 @@ private:
     std::vector<UIFlowGraphNodeTypeDefinition> _types;
 };
 
+[[nodiscard]] const UIFlowGraphPinTypeDefinition* findUIFlowGraphPin(
+    const UIFlowGraphNodeTypeDefinition& type,
+    std::string_view pinId,
+    UIFlowGraphPinDirection direction) noexcept;
+
+[[nodiscard]] bool areUIFlowGraphPinsCompatible(
+    const UIFlowGraphPinTypeDefinition& source,
+    const UIFlowGraphPinTypeDefinition& target) noexcept;
+
 // Strict optional validation layered on top of validateUIFlow(). The base
 // wire contract continues to preserve unknown extension nodes; an authoring
 // host opts into this registry when it knows the available node vocabulary.

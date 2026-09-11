@@ -1,6 +1,6 @@
 # AYUI Flow Contract
 
-Status: **Stage 7 interaction authoring implemented** (2026-09-11).
+Status: **Stage 8 executable graph pipeline implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
@@ -21,7 +21,9 @@ fall-through, Screen animation handoff, transactional Flow reload, replayable
 diagnostics, reduced-motion behavior, and a real Widget-tree editor preview.
 Stage 6 adds a deployable Screen/layout/animation asset closure. Stage 7 connects
 declarative Widget events to Flow Signals and defines host-extensible Graph
-node/pin metadata for typed authoring and strict opt-in validation.
+node/pin metadata for typed authoring and strict opt-in validation. Stage 8 adds
+the production command-graph executor in AYApplication and makes the editor
+preview execute that same pipeline with typed ports and links.
 
 ## Ownership and dependency boundary
 
@@ -360,6 +362,20 @@ required properties. Base `validateUIFlow()` deliberately remains forward
 compatible and preserves unknown extension nodes, while runtime execution stays
 owned by AYApplication/game plugins.
 
+`findUIFlowGraphPin()` and `areUIFlowGraphPinsCompatible()` are public so an
+authoring host, executor, and connection UI use exactly the same direction,
+execution/value-kind, and value-type rules. AYApplication's
+`UIFlowGraphExecutor` pairs those definitions with host handlers. It executes
+command nodes serially and deterministically, routes execution outputs, copies
+typed values from already completed producers, and permits one node to return
+`Running` before a later `completeNode()` continuation. Execution cycles,
+unknown node types, invalid links, duplicate execution IDs, and handler
+exceptions are rejected at the runtime boundary. Completed results are checked
+against the registered execution-output and value-output pins before routing,
+so a host handler cannot inject a mismatched runtime value. Cancel/reverse
+interruption removes pending node continuations; gameplay behavior remains
+outside AYUI.
+
 Validation rejects unsupported schema versions, duplicate/empty IDs, broken
 Layer/Slot/Screen/Context/Entry/Signal/Graph references, incompatible Screen
 and Slot layers, hierarchy cycles, invalid initial children, missing graph
@@ -449,3 +465,8 @@ conversion in a later editor stage can generate a real asset after user review.
    asset validation checks that every mapped handler exists in the referenced
    layout. A generic Graph node registry supplies typed node/pin choices and
    strict diagnostics without putting gameplay node semantics into AYUI.
+8. **Executable graphs — complete:** AYApplication binds registered node
+   contracts to deterministic handlers, propagates typed values, resumes async
+   nodes and honors runtime interruption. AYEditor's production preview runs
+   the same executor; graph cards expose typed ports, curved links and
+   compatibility-filtered connection targets.

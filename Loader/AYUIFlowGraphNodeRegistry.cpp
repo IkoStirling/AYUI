@@ -38,29 +38,32 @@ void addError(std::vector<UIFlowDiagnostic>* diagnostics,
         UIFlowDiagnosticSeverity::Error, std::move(path), std::move(message)});
 }
 
-const UIFlowGraphPinTypeDefinition* findPin(
+} // namespace
+
+const UIFlowGraphPinTypeDefinition* findUIFlowGraphPin(
     const UIFlowGraphNodeTypeDefinition& type,
-    std::string_view id,
-    UIFlowGraphPinDirection direction)
+    std::string_view pinId,
+    UIFlowGraphPinDirection direction) noexcept
 {
     const auto found = std::find_if(type.pins.begin(), type.pins.end(),
         [&](const UIFlowGraphPinTypeDefinition& pin) {
-            return pin.id == id && pin.direction == direction;
+            return pin.id == pinId && pin.direction == direction;
         });
     return found == type.pins.end() ? nullptr : &*found;
 }
 
-bool compatible(const UIFlowGraphPinTypeDefinition& source,
-                const UIFlowGraphPinTypeDefinition& target)
+bool areUIFlowGraphPinsCompatible(
+    const UIFlowGraphPinTypeDefinition& source,
+    const UIFlowGraphPinTypeDefinition& target) noexcept
 {
+    if (source.direction != UIFlowGraphPinDirection::Output
+        || target.direction != UIFlowGraphPinDirection::Input) return false;
     if (source.kind != target.kind) return false;
     if (source.kind == UIFlowGraphPinKind::Execution) return true;
     if (source.valueType == target.valueType) return true;
     return source.valueType == UIFlowValueType::Integer
         && target.valueType == UIFlowValueType::Number;
 }
-
-} // namespace
 
 bool UIFlowGraphNodeRegistry::registerType(
     UIFlowGraphNodeTypeDefinition definition, std::string* error)
@@ -181,9 +184,9 @@ bool validateUIFlowGraphNodes(
             const UIFlowGraphNodeTypeDefinition* targetType =
                 registry.find(targetNode->type);
             if (sourceType == nullptr || targetType == nullptr) continue;
-            const UIFlowGraphPinTypeDefinition* sourcePin = findPin(
+            const UIFlowGraphPinTypeDefinition* sourcePin = findUIFlowGraphPin(
                 *sourceType, link.fromPin, UIFlowGraphPinDirection::Output);
-            const UIFlowGraphPinTypeDefinition* targetPin = findPin(
+            const UIFlowGraphPinTypeDefinition* targetPin = findUIFlowGraphPin(
                 *targetType, link.toPin, UIFlowGraphPinDirection::Input);
             if (sourcePin == nullptr) {
                 addError(diagnostics, linkPath + ".fromPin",
@@ -196,7 +199,7 @@ bool validateUIFlowGraphNodes(
                 valid = false;
             }
             if (sourcePin != nullptr && targetPin != nullptr
-                && !compatible(*sourcePin, *targetPin)) {
+                && !areUIFlowGraphPinsCompatible(*sourcePin, *targetPin)) {
                 addError(diagnostics, linkPath,
                          "Link connects incompatible Graph pin types.");
                 valid = false;
