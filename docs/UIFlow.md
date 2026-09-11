@@ -413,3 +413,10 @@ conversion in a later editor stage can generate a real asset after user review.
    diagnostics, accessibility/reduced-motion behavior, and a clipped real
    Widget-tree preview in the Flow Editor. Runtime, AYUI, editor-contract, and
    full editor test gates cover the integration.
+6. **Asset closure — complete:** the production asset audit resolves every
+   Screen below the project asset root, rejects absolute/root-escaping paths,
+   loads each unique layout once, validates referenced enter/exit clips and
+   their Widget track targets, and emits a sorted layout dependency closure
+   with reverse Screen references. The Flow Editor displays these asset
+   diagnostics before preview; project validation and its command-line tool
+   expose the same closure for packaging.
