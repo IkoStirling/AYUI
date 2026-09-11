@@ -21,8 +21,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 通用 `ColorPicker`：HSV/透明度选择、十六进制输入、命名记忆色组及宿主拾色回调
 - DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
-- Application UI Flow 阶段一：Screen/Layer/Slot/Scope/Context/Signal/Action、并行层级状态与可扩展
-  Graph 的 `*.uiflow.json` 数据契约、校验和无损往返
+- Application UI Flow 阶段三：`*.uiflow.json` 数据契约、持久 Runtime、真实 Widget Layer 挂载、
+  Context/Slot/Scope 编排，以及 World 生命周期和通用 Scene Signal Volume 桥接
 - 42 个注册类型的 Serializer wire contract，含 ColorPicker、Grid cell、虚拟化 TileView、复合内容、Menu/Dock/Modal 专用结构
 - StyleSheet/Theme、控件级 token override、I18n、UTF-8 文本往返
 - 逻辑 DIP 坐标、独立 DPI/UI scale、物理输入换算与按缩放倍率栅格化字体
@@ -544,9 +544,11 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 - `WidgetSerializer` 已覆盖全部 41 个公共注册类型；Grid、ScrollView、TileView、Menu、StatusBar、Tab、
   Modal 和 Dock 使用各自的结构化 payload。Controller/event 处理器名字属于持久化元数据；真正的
   回调函数、焦点/hover、拖拽会话和 `DockTabGroup` 等运行时状态不属于持久化格式。
-- UI Flow 当前完成数据契约、校验和旧项目迁移，尚未接入 application-owned UIRuntime、Scene signal
-  bridge、Action executor 或可视化 Flow Editor；旧 `world.ui` 仅由 AYEditor 解析为隐式 World
-  Screen/Context，不会被静默改写。
+- UI Flow 已完成数据契约、校验、旧项目迁移、application-owned Runtime、Widget Screen Host、
+  Action registry 和 Scene bridge。Scene bridge 支持 World Scope/Context 映射、生命周期 Signal、
+  可序列化的通用轴对齐区域/参与者组件，以及供物理、脚本和任务系统使用的显式 Signal API；
+  当前未完成的是可视化 Flow Editor 和生产级异步 interruption/动画交接。旧 `world.ui` 仅由
+  AYEditor 解析为隐式 World Screen/Context，不会被静默改写。
 - Windows UI Automation adapter 已实现 Fragment tree、常用 control pattern、跨线程动作封送和
   增量事件；AT-SPI/NSAccessibility 原生 provider 仍待实现。TextInput/TextArea 的 UIA TextPattern、
   原生 selection range 和 live-region 事件也尚未进入本阶段。

@@ -435,7 +435,7 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
-### 8.5 Application UI Flow（阶段二）
+### 8.5 Application UI Flow（阶段三）
 
 `*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
 编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
@@ -451,8 +451,16 @@ UI Flow 不直接依赖 Scene、World、Entity、AYRenderer 或编辑器。旧�
 阶段二已经实现 Context 优先级/激活序仲裁、Slot capacity/Hide/restore、World/Owner Scope 清理、
 类型化 Signal/Action、并行 Region Transition、Graph request 扩展点及 `UIManagerFlowScreenHost`。
 运行时作为可选 Presentation SubSystem 发布到 `IEngineHost`，核心 AYApplication 的 server/headless
-依赖面不变。Scene 订阅、可视化 Flow Editor、异步 interruption policy 和 enter/exit 动画编排仍属
-后续阶段。完整格式、运行语义和迁移规则见 [docs/UIFlow.md](docs/UIFlow.md)。
+依赖面不变。
+
+阶段三已经在 `AYApplicationUI` 中实现 `UIFlowSceneBridge`：订阅现有 Scene 生命周期事件，在 World
+切换时维护 World Scope 并激活 World→Context 映射；`SceneSignalVolumeComponent` 与
+`SceneSignalParticipantComponent` 提供无业务语义、可序列化的轴对齐区域进入/离开信号，已有物理、
+脚本或任务系统也可经 `emitSceneSignal()` 接入相同通道。Bridge 只调用 Flow Runtime，不查找 Widget；
+AYScene/AYEntity 核心也不反向依赖 AYUI。当前内建扫描适合少量 authored region，忽略旋转且复杂度为
+O(volume × participant)，大规模或旋转区域应由物理 broadphase 产出信号。可视化 Flow Editor、异步
+interruption policy 和 enter/exit 动画交接仍属后续阶段。完整格式、运行语义和迁移规则见
+[docs/UIFlow.md](docs/UIFlow.md)。
 
 ## 9. Popup、Modal 与 Docking
 
@@ -929,9 +937,10 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
    预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
     clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
-8. Application UI Flow 已完成阶段一数据契约、schema/serializer/validator 和旧 `world.ui` 兼容迁移；
-   下一步是 AYApplication 持有的持久 UIRuntime、Context/Slot 仲裁、Scope 清理和可扩展 signal/action
-   registry。Scene 只发布通用信号，不直接操作 Widget；Flow Editor 复用同一 wire contract。
+8. Application UI Flow 已完成阶段三：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
+   AYApplication 持久 Runtime、Context/Slot 仲裁、Scope 清理、signal/action registry，以及 Scene
+   生命周期与通用区域信号桥。Scene 只发布通用信号，不直接操作 Widget；下一步 Flow Editor 复用同一
+   wire contract，随后补异步 interruption、动画交接和更完整的生产验收。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

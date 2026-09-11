@@ -1,6 +1,6 @@
 # AYUI Flow Contract
 
-Status: **Stage 2 persistent runtime implemented** (2026-09-11).
+Status: **Stage 3 Scene bridge implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
@@ -8,11 +8,13 @@ document decides which layouts are present, where they are layered, how their
 lifetimes are scoped, and which signals may change the presentation.
 
 Stage 1 delivered `UIFlowDocument`, validation, JSON round-trip, project
-references, and legacy migration. Stage 2 adds the optional `AYApplicationUI`
+references, and legacy migration. Stage 2 added the optional `AYApplicationUI`
 runtime target: application-owned orchestration, real Widget-tree mounting,
 Context/Slot arbitration, Scope cleanup, typed signals/actions, parallel state
-regions, and an extension boundary for action-graph execution. Scene signal
-producers and the visual Flow Editor remain later stages.
+regions, and an extension boundary for action-graph execution. Stage 3 adds
+World lifecycle binding, serializable generic Scene signal components, and an
+explicit signal entry point for physics, script, task, or custom interaction
+systems. The visual Flow Editor remains a later stage.
 
 ## Ownership and dependency boundary
 
@@ -131,6 +133,46 @@ on interactive descendants. Precise retry of a lower widget after a picked
 control returns "unhandled" is not part of the current single-target
 `UIManager` dispatcher; that refinement belongs with the production input
 router rather than the Flow data model.
+
+## Stage 3 Scene bridge
+
+`UIFlowSceneBridge` is an optional Application integration layer. It subscribes
+to the existing Scene lifecycle events, opens and closes the runtime World
+Scope, activates the Context mapped to the stable World key, and can emit the
+declared `scene.currentChanged`, `scene.beginPlay`, and `scene.endPlay`
+notifications. Lifecycle notifications are optional: an undeclared lifecycle
+Signal is skipped so a Flow is not forced to model events it does not use.
+
+`UIFlowSceneBridgeModule` runs in `FramePhase::World`, after Entity processing,
+and publishes the non-owning `UIFlowSceneBridge*` host service. When
+`GameWorldRouter` is installed, the bridge is ordered after it and resolves a
+transition from `pendingWorldId()` before falling back to `currentWorldId()`.
+Projects without a router can supply `worldKeyResolver`; otherwise the bridge
+uses the Scene path, Scene name, and finally a process-local identity fallback.
+Every configured World key and Context ID is validated when the bridge starts.
+
+The optional authored interaction source consists of two ordinary, scene-
+serializable Entity components:
+
+- `SceneSignalVolumeComponent` declares an axis-aligned region, enter/exit
+  Signal IDs, source ID, optional participant tag, offset, enabled state, and
+  `emitOncePerWorld` policy.
+- `SceneSignalParticipantComponent` marks an Entity position as a participant
+  and provides an optional exact-match tag.
+
+The Stage 3 detector applies Transform position and absolute scale to the
+volume but intentionally ignores rotation. It performs an O(volumes ×
+participants) scan suitable for authored UI regions and deterministic tests;
+large or rotated trigger sets should use a physics/broadphase system and call
+`emitSceneSignal()` through the same bridge. No Scene component stores a Widget,
+Screen, Context, or gameplay-specific type. Standard payload fields include
+`world`, `scene`, `path`, `mode`, `sourceId`, `sourceEntity`, `entity`, and
+`participantTag`; additional declared fields can be supplied by the caller.
+
+A typical composition root adds `UIFlowRuntimeModule` first, then adds
+`UIFlowSceneBridgeModule` with World-to-Context mappings. The module dependency
+graph guarantees runtime and Entity services are available; Scene code still
+publishes generic signals and never searches for or mutates Widgets.
 
 ## Version 1 JSON shape
 
@@ -330,8 +372,9 @@ conversion in a later editor stage can generate a real asset after user review.
    transactional layout mounting, Layer/Slot arbitration, Context stack, Scope
    cleanup, typed signal bus/action registry, parallel state transitions,
    Widget host adapter and Host service publication.
-3. **Scene bridge:** generic Scene signal sources and `SceneSignalVolume`-style
-   components; World lifecycle binding without AYUI dependencies.
+3. **Scene bridge — complete:** World Scope/Context lifecycle binding, optional
+   lifecycle Signals, serializable generic signal volume/participant components,
+   explicit physics/script signal entry point, Host service and module ordering.
 4. **Flow Editor:** graph/state/region canvas, Screen/Context/Layer inspectors,
    diagnostics, simulated signals, mock action execution and live preview.
 5. **Production gates:** async interruption-policy execution, lower-target
