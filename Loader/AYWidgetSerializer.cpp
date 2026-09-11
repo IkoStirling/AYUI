@@ -68,6 +68,17 @@ static std::string toUtf8(const std::wstring& str) {
     }
 }
 
+static bool readColor4(const json& value, ayt::math::FVector4& out) {
+    if (!value.is_array() || value.size() != 4u) return false;
+    for (const auto& channel : value) {
+        if (!channel.is_number()) return false;
+    }
+    out = ayt::math::FVector4(
+        value[0].get<float>(), value[1].get<float>(),
+        value[2].get<float>(), value[3].get<float>());
+    return true;
+}
+
 static ResponsiveVisibility responsiveVisibilityFromString(
     const std::string& value) {
     if (value == "visible" || value == "show")
@@ -295,22 +306,14 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
             if (j.contains("fontSize")) {
                 label->setFontSize(j["fontSize"]);
             }
-            if (j.contains("textColor") && j["textColor"].is_array()
-                && j["textColor"].size() == 4u) {
-                label->setTextColor({
-                    j["textColor"][0].get<float>(),
-                    j["textColor"][1].get<float>(),
-                    j["textColor"][2].get<float>(),
-                    j["textColor"][3].get<float>()});
+            math::FVector4 color;
+            if (j.contains("textColor")
+                && readColor4(j["textColor"], color)) {
+                label->setTextColor(color);
             }
             if (j.contains("backgroundColor")
-                && j["backgroundColor"].is_array()
-                && j["backgroundColor"].size() == 4u) {
-                label->setBackgroundColor({
-                    j["backgroundColor"][0].get<float>(),
-                    j["backgroundColor"][1].get<float>(),
-                    j["backgroundColor"][2].get<float>(),
-                    j["backgroundColor"][3].get<float>()});
+                && readColor4(j["backgroundColor"], color)) {
+                label->setBackgroundColor(color);
             }
             if (j.contains("hAlign")) {
                 if (j["hAlign"].is_string()) {

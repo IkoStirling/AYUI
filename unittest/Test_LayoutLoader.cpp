@@ -84,6 +84,39 @@ TEST_CASE(test_layout_loader_button) {
     destroyWidgetTree(widget);
 }
 
+TEST_CASE(test_layout_loader_text_label_colors_are_strict_rgba) {
+    UILayoutLoader loader;
+    Widget* raw = loader.loadFromString(R"({
+        "type": "TextLabel",
+        "textColor": [0.1, 0.2, 0.3, 0.4],
+        "backgroundColor": [0.5, 0.6, 0.7, 0.8]
+    })");
+    auto* label = dynamic_cast<TextLabel*>(raw);
+    CHECK(label != nullptr);
+    if (label != nullptr) {
+        CHECK_FLOAT_EQ(label->getTextColor().x, 0.1f, 1e-5f);
+        CHECK_FLOAT_EQ(label->getTextColor().w, 0.4f, 1e-5f);
+        CHECK_FLOAT_EQ(label->getBackgroundColor().x, 0.5f, 1e-5f);
+        CHECK_FLOAT_EQ(label->getBackgroundColor().w, 0.8f, 1e-5f);
+    }
+    destroyWidgetTree(raw);
+
+    raw = loader.loadFromString(R"({
+        "type": "TextLabel",
+        "textColor": [1, 0, 0, 1, 99],
+        "backgroundColor": [0, "invalid", 0, 1]
+    })");
+    label = dynamic_cast<TextLabel*>(raw);
+    CHECK(label != nullptr);
+    if (label != nullptr) {
+        CHECK(label->getTextColor()
+              == FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+        CHECK(label->getBackgroundColor()
+              == FVector4(0.0f, 0.0f, 0.0f, 0.0f));
+    }
+    destroyWidgetTree(raw);
+}
+
 TEST_CASE(test_layout_loader_controller_event_metadata_and_resolution) {
     UILayoutLoader loader;
     int controllerHits = 0;

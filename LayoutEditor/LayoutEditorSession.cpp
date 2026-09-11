@@ -1624,10 +1624,11 @@ void LayoutEditorSession::bindPropField(const char* id, const char* field,
 
     if (numericScrub) {
         ti->setNumericScrubEnabled(true);
-        ti->setOnNumericScrub([this, fieldName, ti](float v) {
+        ti->setOnNumericScrub([this, fieldName, ti](double value) {
             if (_suppressProp) {
                 return;
             }
+            float v = static_cast<float>(value);
             if (const PropertyFieldSchema* schema =
                     findPropertyFieldSchema(fieldName)) {
                 if (schema->hasRange) {

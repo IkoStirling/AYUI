@@ -267,11 +267,13 @@ bool TextInput::onMouseButtonDown(const UIMouseEvent& e) {
     _scrubArmed = false;
     _scrubbing = false;
     if (_numericScrubEnabled && !_readOnly) {
-        // Parse current text as float for scrub baseline; fall back to 0.
+        // Preserve the complete double value for generic numeric editors.
+        // Typed integral editors use the delta callback below and retain their
+        // exact source string, including values beyond double's integer range.
         try {
-            _scrubStartValue = std::stof(std::string(_text.begin(), _text.end()));
+            _scrubStartValue = std::stod(_text);
         } catch (...) {
-            _scrubStartValue = 0.0f;
+            _scrubStartValue = 0.0;
         }
         _scrubStartX = e.mousePos.x;
         _scrubArmed = true;
@@ -350,9 +352,12 @@ bool TextInput::onMouseMove(const UIMouseEvent& e) {
             clearSelection();
         }
         if (_scrubbing) {
-            const float newValue =
-                _scrubStartValue + dx / kScrubPixelsPerUnit;
-            if (_onNumericScrub) {
+            const double delta = static_cast<double>(dx)
+                / static_cast<double>(kScrubPixelsPerUnit);
+            const double newValue = _scrubStartValue + delta;
+            if (_onNumericScrubDelta) {
+                _onNumericScrubDelta(delta);
+            } else if (_onNumericScrub) {
                 _onNumericScrub(newValue);
             }
             return true;

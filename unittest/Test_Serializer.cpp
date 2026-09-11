@@ -160,6 +160,37 @@ TEST_CASE(test_deserialize_text_label) {
     delete widget;
 }
 
+TEST_CASE(test_text_label_color_round_trip_and_malformed_fallback) {
+    auto* source = new TextLabel();
+    source->setTextColor(FVector4(0.15f, 0.25f, 0.35f, 0.45f));
+    source->setBackgroundColor(FVector4(0.55f, 0.65f, 0.75f, 0.85f));
+    Widget* raw = WidgetSerializer::deserialize(
+        WidgetSerializer::serialize(source));
+    auto* restored = dynamic_cast<TextLabel*>(raw);
+    CHECK(restored != nullptr);
+    if (restored != nullptr) {
+        CHECK(restored->getTextColor() == source->getTextColor());
+        CHECK(restored->getBackgroundColor() == source->getBackgroundColor());
+    }
+    delete source;
+    destroyWidgetTree(raw);
+
+    raw = WidgetSerializer::deserialize(R"({
+        "type": "TextLabel",
+        "textColor": [1, 0, 0, 1, 2],
+        "backgroundColor": [0, false, 0, 1]
+    })");
+    restored = dynamic_cast<TextLabel*>(raw);
+    CHECK(restored != nullptr);
+    if (restored != nullptr) {
+        CHECK(restored->getTextColor()
+              == FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+        CHECK(restored->getBackgroundColor()
+              == FVector4(0.0f, 0.0f, 0.0f, 0.0f));
+    }
+    destroyWidgetTree(raw);
+}
+
 TEST_CASE(test_deserialize_with_children) {
     const char* json = R"({
         "type": "VBox",

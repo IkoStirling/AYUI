@@ -97,8 +97,15 @@ public:
     // caret/selection into value scrubbing; click-without-drag still edits.
     void setNumericScrubEnabled(bool enabled) { _numericScrubEnabled = enabled; }
     bool isNumericScrubEnabled() const { return _numericScrubEnabled; }
-    void setOnNumericScrub(std::function<void(float /*newValue*/)> cb) {
+    void setOnNumericScrub(std::function<void(double /*newValue*/)> cb) {
         _onNumericScrub = std::move(cb);
+    }
+    // Optional delta channel for typed numeric editors that cannot safely
+    // round-trip their source value through double (notably uint64_t). The
+    // value is the total drag delta from mouse-down, in logical units. When
+    // installed it takes precedence over the absolute-value callback above.
+    void setOnNumericScrubDelta(std::function<void(double /*delta*/)> cb) {
+        _onNumericScrubDelta = std::move(cb);
     }
 
     // Placeholder text. Drawn when the buffer is empty
@@ -245,8 +252,9 @@ protected:
     bool _scrubArmed = false;
     bool _scrubbing = false;
     float _scrubStartX = 0.0f;
-    float _scrubStartValue = 0.0f;
-    std::function<void(float)> _onNumericScrub;
+    double _scrubStartValue = 0.0;
+    std::function<void(double)> _onNumericScrub;
+    std::function<void(double)> _onNumericScrubDelta;
     static constexpr float kScrubThresholdPx = 3.0f;
     static constexpr float kScrubPixelsPerUnit = 2.0f;
 

@@ -3,10 +3,10 @@
 #include <cstdint>
 
 #ifndef AYUI_SOURCE_ABI_VERSION
-#define AYUI_SOURCE_ABI_VERSION 120
+#define AYUI_SOURCE_ABI_VERSION 121
 #endif
 
-static_assert(AYUI_SOURCE_ABI_VERSION == 120,
+static_assert(AYUI_SOURCE_ABI_VERSION == 121,
               "AYUI headers and target disagree; perform a full rebuild.");
 
 #define AYUI_STRINGIZE_IMPL(value) #value

@@ -113,6 +113,18 @@ std::wstring utf8ToWide(const std::string& text)
     }
 }
 
+bool readColor4(const json& value, math::FVector4& out)
+{
+    if (!value.is_array() || value.size() != 4u) return false;
+    for (const auto& channel : value) {
+        if (!channel.is_number()) return false;
+    }
+    out = math::FVector4(
+        value[0].get<float>(), value[1].get<float>(),
+        value[2].get<float>(), value[3].get<float>());
+    return true;
+}
+
 BoxSlotLimits parseHBoxSlotLimits(const json& childJson, float& outWidth)
 {
     BoxSlotLimits limits;
@@ -988,20 +1000,13 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         if (j.contains("fontSize")) {
             label->setFontSize(j["fontSize"].get<int>());
         }
-        if (j.contains("textColor") && j["textColor"].is_array()
-            && j["textColor"].size() >= 4u) {
-            const auto& color = j["textColor"];
-            label->setTextColor(math::FVector4(
-                color[0].get<float>(), color[1].get<float>(),
-                color[2].get<float>(), color[3].get<float>()));
+        math::FVector4 color;
+        if (j.contains("textColor") && readColor4(j["textColor"], color)) {
+            label->setTextColor(color);
         }
         if (j.contains("backgroundColor")
-            && j["backgroundColor"].is_array()
-            && j["backgroundColor"].size() >= 4u) {
-            const auto& color = j["backgroundColor"];
-            label->setBackgroundColor(math::FVector4(
-                color[0].get<float>(), color[1].get<float>(),
-                color[2].get<float>(), color[3].get<float>()));
+            && readColor4(j["backgroundColor"], color)) {
+            label->setBackgroundColor(color);
         }
         if (j.contains("hAlign")) {
             if (j["hAlign"].is_string()) {

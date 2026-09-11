@@ -964,4 +964,55 @@ TEST_CASE(textinput_lowered_max_length_replacement_cannot_underflow) {
     um.shutdown();
 }
 
+TEST_CASE(textinput_numeric_scrub_parses_wide_text_without_narrowing) {
+    TextInput input;
+    input.setPosition({0.0f, 0.0f});
+    input.setSize({120.0f, 24.0f});
+    input.setText(L"12.5");
+    input.setNumericScrubEnabled(true);
+
+    double scrubbed = 0.0;
+    input.setOnNumericScrub([&](double value) { scrubbed = value; });
+
+    CHECK(input.onMouseButtonDown(UIMouseEvent({10.0f, 12.0f}, 0)));
+    CHECK(input.onMouseMove(UIMouseEvent({14.0f, 12.0f}, 0)));
+    CHECK_FLOAT_EQ(scrubbed, 14.5f, 1.0e-5f);
+    CHECK_FALSE(input.onMouseButtonUp(UIMouseEvent({14.0f, 12.0f}, 0)));
+}
+
+TEST_CASE(textinput_numeric_scrub_keeps_values_beyond_float_precision) {
+    TextInput input;
+    input.setPosition({0.0f, 0.0f});
+    input.setSize({120.0f, 24.0f});
+    input.setText(L"16777217");
+    input.setNumericScrubEnabled(true);
+
+    double scrubbed = 0.0;
+    input.setOnNumericScrub([&](double value) { scrubbed = value; });
+
+    CHECK(input.onMouseButtonDown(UIMouseEvent({10.0f, 12.0f}, 0)));
+    CHECK(input.onMouseMove(UIMouseEvent({14.0f, 12.0f}, 0)));
+    CHECK(std::fabs(scrubbed - 16777219.0) < 0.001);
+    CHECK_FALSE(input.onMouseButtonUp(UIMouseEvent({14.0f, 12.0f}, 0)));
+}
+
+TEST_CASE(textinput_numeric_scrub_delta_bypasses_absolute_conversion) {
+    TextInput input;
+    input.setPosition({0.0f, 0.0f});
+    input.setSize({120.0f, 24.0f});
+    input.setText(L"18446744073709551615");
+    input.setNumericScrubEnabled(true);
+
+    double delta = 0.0;
+    bool absoluteCalled = false;
+    input.setOnNumericScrub([&](double) { absoluteCalled = true; });
+    input.setOnNumericScrubDelta([&](double value) { delta = value; });
+
+    CHECK(input.onMouseButtonDown(UIMouseEvent({10.0f, 12.0f}, 0)));
+    CHECK(input.onMouseMove(UIMouseEvent({14.0f, 12.0f}, 0)));
+    CHECK(std::fabs(delta - 2.0) < 0.001);
+    CHECK_FALSE(absoluteCalled);
+    CHECK_FALSE(input.onMouseButtonUp(UIMouseEvent({14.0f, 12.0f}, 0)));
+}
+
 TEST_SUITE_END
