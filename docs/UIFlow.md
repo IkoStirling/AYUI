@@ -365,16 +365,19 @@ owned by AYApplication/game plugins.
 `findUIFlowGraphPin()` and `areUIFlowGraphPinsCompatible()` are public so an
 authoring host, executor, and connection UI use exactly the same direction,
 execution/value-kind, and value-type rules. AYApplication's
-`UIFlowGraphExecutor` pairs those definitions with host handlers. It executes
-command nodes serially and deterministically, routes execution outputs, copies
-typed values from already completed producers, and permits one node to return
-`Running` before a later `completeNode()` continuation. Execution cycles,
-unknown node types, invalid links, duplicate execution IDs, and handler
-exceptions are rejected at the runtime boundary. Completed results are checked
-against the registered execution-output and value-output pins before routing,
-so a host handler cannot inject a mismatched runtime value. Cancel/reverse
-interruption removes pending node continuations; gameplay behavior remains
-outside AYUI.
+`UIFlowGraphExecutor` pairs those definitions with host handlers. It starts
+ready nodes in deterministic order, routes execution outputs, and treats every
+value link as a producer dependency instead of relying on document order.
+Independent nodes may remain `Running` concurrently and later resume through
+stable `completeNode()` continuations. Multiple connected execution input pins
+form an explicit all-input Join; multiple links to one input pin retain
+merge/OR behavior. Execution/value dependency cycles, ambiguous value inputs,
+missing linked outputs, unknown node types, invalid links, duplicate execution
+IDs, and handler exceptions fail at the runtime boundary. Completed results
+are checked against registered output pins before routing. Running handlers may
+provide a timeout and cancellation callback; timeout ticks, cancel/reverse,
+document replacement, reset, and destruction invalidate continuations before
+notifying asynchronous host work. Gameplay behavior remains outside AYUI.
 
 Validation rejects unsupported schema versions, duplicate/empty IDs, broken
 Layer/Slot/Screen/Context/Entry/Signal/Graph references, incompatible Screen
@@ -470,3 +473,8 @@ conversion in a later editor stage can generate a real asset after user review.
    nodes and honors runtime interruption. AYEditor's production preview runs
    the same executor; graph cards expose typed ports, curved links and
    compatibility-filtered connection targets.
+9. **Dependency-aware execution — complete:** value links impose producer
+   ordering, combined dependency cycles and ambiguous producers are rejected,
+   independent async nodes overlap, multi-input execution pins provide Join
+   semantics, and executor-owned timeout/cancellation safely tears work down
+   when a Flow document or Scene lifetime ends.
