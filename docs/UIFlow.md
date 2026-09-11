@@ -1,6 +1,6 @@
 # AYUI Flow Contract
 
-Status: **Stage 5 production gates implemented** (2026-09-11).
+Status: **Stage 7 interaction authoring implemented** (2026-09-11).
 
 UI Flow describes application-level UI orchestration. It does not replace a
 `*.ui.json` layout: a layout owns one Widget tree, while a `*.uiflow.json`
@@ -19,6 +19,9 @@ logical live preview backed by the production runtime. Stage 5 closes the
 production execution path with asynchronous graph interruption, precise input
 fall-through, Screen animation handoff, transactional Flow reload, replayable
 diagnostics, reduced-motion behavior, and a real Widget-tree editor preview.
+Stage 6 adds a deployable Screen/layout/animation asset closure. Stage 7 connects
+declarative Widget events to Flow Signals and defines host-extensible Graph
+node/pin metadata for typed authoring and strict opt-in validation.
 
 ## Ownership and dependency boundary
 
@@ -53,7 +56,7 @@ controls composition/input semantics; the latter is a renderer pixel cache.
 
 | Concept | Purpose |
 |---|---|
-| Screen | A named `*.ui.json` layout plus layer, slot, lifetime, animations and parameters. |
+| Screen | A named `*.ui.json` layout plus layer, slot, lifetime, animations, parameters and Widget-event mappings. |
 | Layer | Global visual order and lower-layer input policy. |
 | Slot | A replacement channel within a Layer, for example `hud.primary` or `modal`. |
 | Scope | Lifetime boundary: `application`, `world`, `owner`, or `transient`. |
@@ -144,6 +147,15 @@ wrong types, and handler exceptions return `UIFlowActionResult::failure`.
 Screen-host, guard, graph, and signal-listener exceptions are contained at the
 runtime boundary.
 
+A Screen can map a semantic handler name used by its layout to a declared Flow
+Signal. `UILayoutLoader` first resolves explicitly registered controller/global
+handlers, then invokes its dynamic declarative-event resolver. The production
+Screen host installs that resolver per mounted Screen, so a layout such as
+`"events":{"onClick":"startGame"}` can emit the Signal mapped by
+`{"handler":"startGame","signal":"ui.startGame"}` without game code finding
+the Button by ID. Command events currently carry no dynamic Widget value;
+therefore every required payload field on such a Signal must have a default.
+
 For Widget input, Layer order is painter order. `blockLower` (or
 `blocksLowerInput`) captures the transparent Layer surface. `passThrough`
 ignores a viewport-sized Screen root's blank background while preserving hits
@@ -231,7 +243,10 @@ forward slashes.
       "scope": "application",
       "enterAnimation": "enter",
       "exitAnimation": "exit",
-      "parameters": { "title": "Aliyat" }
+      "parameters": { "title": "Aliyat" },
+      "events": [
+        { "handler": "startGame", "signal": "ui.startGame" }
+      ]
     },
     {
       "id": "gameplay_hud",
@@ -337,11 +352,20 @@ Supported field types are `bool`, `integer`, `number`, `string`, `entity`, and
 `asset`. Their defaults are scalar and type-checked. Screen parameters and graph
 node properties preserve any JSON value, including nested objects and arrays.
 
+`UIFlowGraphNodeRegistry` is authoring metadata, not an executor registry. A
+host registers node display/category data, typed input/output pins and property
+fields. `validateUIFlowGraphNodes()` can then reject unknown node types,
+unavailable pins, wrong pin directions, incompatible value links and invalid
+required properties. Base `validateUIFlow()` deliberately remains forward
+compatible and preserves unknown extension nodes, while runtime execution stays
+owned by AYApplication/game plugins.
+
 Validation rejects unsupported schema versions, duplicate/empty IDs, broken
 Layer/Slot/Screen/Context/Entry/Signal/Graph references, incompatible Screen
 and Slot layers, hierarchy cycles, invalid initial children, missing graph
-nodes, and typed defaults with the wrong value type. Behavioral validation of
-a host-defined graph node is the node registry's responsibility in Stage 2.
+nodes, invalid Screen event mappings, and typed defaults with the wrong value
+type. Behavioral validation of a host-defined graph node is the host executor's
+responsibility; the registry validates only its authoring contract.
 
 ## Project descriptor and legacy migration
 
@@ -420,3 +444,8 @@ conversion in a later editor stage can generate a real asset after user review.
    with reverse Screen references. The Flow Editor displays these asset
    diagnostics before preview; project validation and its command-line tool
    expose the same closure for packaging.
+7. **Interaction authoring — complete:** Screen-local handler-to-Signal
+   mappings bridge real declarative Widget events into the production runtime;
+   asset validation checks that every mapped handler exists in the referenced
+   layout. A generic Graph node registry supplies typed node/pin choices and
+   strict diagnostics without putting gameplay node semantics into AYUI.

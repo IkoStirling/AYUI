@@ -10,6 +10,7 @@
 #include "AYUI/Animation.h"
 #include "AYUI/UIAnimation.h"
 #include "AYUI/UIFlow.h"
+#include "AYUI/UIFlowGraphNodeRegistry.h"
 
 #include "AYUI/Widget.h"
 #include "AYUI/DisplayList.h"

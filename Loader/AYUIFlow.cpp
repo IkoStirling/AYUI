@@ -632,6 +632,41 @@ bool validateUIFlow(const UIFlowDocument& document,
                 valid = false;
             }
         }
+        std::unordered_set<std::string> eventHandlers;
+        for (std::size_t eventIndex = 0; eventIndex < screen.events.size();
+             ++eventIndex) {
+            const UIFlowScreenEventBinding& binding = screen.events[eventIndex];
+            const std::string eventPath = path + ".events["
+                + std::to_string(eventIndex) + "]";
+            if (binding.handler.empty()) {
+                addError(diagnostics, eventPath + ".handler",
+                         "Screen event handler must not be empty.");
+                valid = false;
+            } else if (!eventHandlers.insert(binding.handler).second) {
+                addError(diagnostics, eventPath + ".handler",
+                         "Screen event handler is mapped more than once.");
+                valid = false;
+            }
+            const UIFlowSignalDefinition* signal =
+                document.findSignal(binding.signal);
+            if (signal == nullptr) {
+                addError(diagnostics, eventPath + ".signal",
+                         "Screen event references an unknown Signal.");
+                valid = false;
+                continue;
+            }
+            for (const UIFlowFieldDefinition& field : signal->payload) {
+                if (field.required
+                    && std::holds_alternative<std::monostate>(
+                        field.defaultValue.data)) {
+                    addError(diagnostics, eventPath + ".signal",
+                        "Command-style Screen events require defaults for "
+                        "every required Signal payload field.");
+                    valid = false;
+                    break;
+                }
+            }
+        }
     }
 
     for (std::size_t contextIndex = 0;
@@ -952,6 +987,28 @@ bool UIFlowSerializer::deserialize(
                 }
             }
         }
+        if (const auto events = item.find("events"); events != item.end()) {
+            if (!events->is_array()) {
+                addError(diagnostics, path + ".events", "Expected an array.");
+                parsed = false;
+            } else {
+                for (std::size_t index = 0; index < events->size(); ++index) {
+                    const std::string eventPath = path + ".events["
+                        + std::to_string(index) + "]";
+                    if (!(*events)[index].is_object()) {
+                        addError(diagnostics, eventPath, "Expected an object.");
+                        parsed = false;
+                        continue;
+                    }
+                    UIFlowScreenEventBinding binding;
+                    parsed = readString((*events)[index], "handler",
+                        binding.handler, diagnostics, eventPath, true) && parsed;
+                    parsed = readString((*events)[index], "signal",
+                        binding.signal, diagnostics, eventPath, true) && parsed;
+                    value.events.push_back(std::move(binding));
+                }
+            }
+        }
         document.screens.push_back(std::move(value));
     });
 
@@ -1212,9 +1269,16 @@ bool UIFlowSerializer::serialize(
             {"enterAnimation", value.enterAnimation},
             {"exitAnimation", value.exitAnimation},
             {"parameters", json::object()},
+            {"events", json::array()},
         };
         for (const auto& [key, property] : value.parameters) {
             screen["parameters"][key] = valueToJson(property);
+        }
+        for (const UIFlowScreenEventBinding& binding : value.events) {
+            screen["events"].push_back({
+                {"handler", binding.handler},
+                {"signal", binding.signal},
+            });
         }
         root["screens"].push_back(std::move(screen));
     }

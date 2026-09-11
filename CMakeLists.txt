@@ -74,6 +74,7 @@ set(SRC_FILES
     Layout/AYConstraint.cpp
     Loader/AYLayoutLoader.cpp
     Loader/AYUIFlow.cpp
+    Loader/AYUIFlowGraphNodeRegistry.cpp
     Loader/AYWidgetFactory.cpp
     Loader/AYWidgetSerializer.cpp
     Style/AYMockRenderer.cpp
@@ -160,6 +161,7 @@ set(HEAD_FILES
     include/AYUI/ValueWidget.h
     include/AYUI/LayoutLoader.h
     include/AYUI/UIFlow.h
+    include/AYUI/UIFlowGraphNodeRegistry.h
     include/AYUI/WidgetFactory.h
     include/AYUI/WidgetSerializer.h
     include/AYUI/MockRenderer.h

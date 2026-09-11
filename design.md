@@ -437,7 +437,7 @@ Serializer 服务于测试、编辑器导出和 Dock 布局持久化。其保证
 
 `UILayoutLoader` 通过 AYIO FileWatcher 监控已加载文件。UIManager reload 前取消 capture 并清理旧树相关状态，再替换根树。Reload 失败时不得留下半构建树。
 
-### 8.5 Application UI Flow（阶段五）
+### 8.5 Application UI Flow（阶段七）
 
 `*.ui.json` 继续只描述一个 Widget 树；跨主菜单、加载、World、HUD、剧情、Modal 和区域交互的
 编排由独立 `*.uiflow.json` 描述。阶段一已经落地 `UIFlowDocument`、schema v1、JSON 无损往返、
@@ -469,6 +469,12 @@ trace。创作文档直接持有本节数据模型，重命名会原子更新引
 异步 Graph 中断策略、显式 lower-target 输入重试、Screen enter/exit 动画交接、事务式 reload、Signal
 replay/trace、reduced-motion，以及编辑器内生产 Screen Host 的真实裁剪预览。完整格式和迁移规则见
 [docs/UIFlow.md](docs/UIFlow.md)。
+
+阶段六增加布局/动画资产闭包；阶段七增加 Screen `handler -> Signal` 映射和
+`UILayoutLoader::setDeclarativeEventResolver()` 动态兜底。AYUI 只保存通用语义处理器名与 Signal ID，
+不查找 Scene 或游戏对象。`UIFlowGraphNodeRegistry` 进一步提供通用节点类别、类型化输入/输出 Pin 和
+属性 schema；基础 validator 仍无损保留未知扩展节点，只有知道宿主词汇表的创作工具才显式调用严格
+节点校验，节点执行仍归 AYApplication/游戏插件。
 
 ## 9. Popup、Modal 与 Docking
 
@@ -945,10 +951,11 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    参数与跨 Sequence 步骤的时间守恒；文档级创作、图形时间轴、连续 transport、关键帧拖动、参数
    预览和 Controller/Event 触发图也已闭环。后续可增加 Bezier 控制柄、Spring 响应曲线与事件驱动的
     clip 启动元数据，但仍应复用现有求值器和宿主 contract，不能另建动画路径。
-8. Application UI Flow 已完成阶段五：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
+8. Application UI Flow 已完成阶段七：数据契约、schema/serializer/validator、旧 `world.ui` 兼容迁移、
    AYApplication 持久 Runtime、Context/Slot 仲裁、Scope 清理、signal/action registry，以及 Scene
    生命周期与通用区域信号桥，以及复用同一 wire/runtime contract 的独立 Flow Editor、诊断、模拟、
-   异步中断、动画交接、reload/replay 和真实布局预览。Scene 只发布通用信号，不直接操作 Widget。
+   异步中断、动画交接、reload/replay、资产闭包、Widget 事件到 Signal 的声明式桥接，以及可扩展的
+   Graph 节点/Pin 创作元数据。Scene 只发布通用信号，不直接操作 Widget。
 
 这些限制不阻塞当前 v1.6 功能，但实现新特性时不得继续扩大重复路径。
 

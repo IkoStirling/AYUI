@@ -353,6 +353,8 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     // wipe is the highest-value half of the fix.
     std::unordered_map<std::string, Widget*> oldIndex;
     oldIndex.swap(_widgetsById);
+    std::unordered_set<std::string> oldDeclarativeEventHandlers;
+    oldDeclarativeEventHandlers.swap(_declarativeEventHandlers);
     UIAnimationLibrary oldAnimations = std::move(_animationLibrary);
 
     try {
@@ -377,6 +379,8 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         Widget* root = buildWidgetTree(JsonHandle(rootJson));
         if (root == nullptr) {
             _widgetsById = std::move(oldIndex);
+            _declarativeEventHandlers =
+                std::move(oldDeclarativeEventHandlers);
             _animationLibrary = std::move(oldAnimations);
             return nullptr;
         }
@@ -405,6 +409,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         // previous tree can still find them. Wipe the (incomplete)
         // index that buildWidgetTree may have partially populated.
         _widgetsById = std::move(oldIndex);
+        _declarativeEventHandlers = std::move(oldDeclarativeEventHandlers);
         _animationLibrary = std::move(oldAnimations);
         return nullptr;
     }
@@ -555,6 +560,7 @@ void UILayoutLoader::clearEventBindings() {
 
 void UILayoutLoader::clearWidgetRegistry() {
     _widgetsById.clear();
+    _declarativeEventHandlers.clear();
 }
 
 Widget* UILayoutLoader::findWidgetById(const std::string& id) const {
@@ -729,13 +735,19 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     if (j.contains("events") && j["events"].is_object()) {
         for (auto it = j["events"].begin(); it != j["events"].end(); ++it) {
             if (it.value().is_string()) {
-                widget->setEventBinding(it.key(), it.value().get<std::string>());
+                const std::string handler = it.value().get<std::string>();
+                widget->setEventBinding(it.key(), handler);
+                if (!handler.empty()) {
+                    _declarativeEventHandlers.insert(handler);
+                }
             }
         }
     }
     if (j.contains("onClick") && j["onClick"].is_string() &&
         widget->getEventBinding("onClick").empty()) {
-        widget->setEventBinding("onClick", j["onClick"].get<std::string>());
+        const std::string handler = j["onClick"].get<std::string>();
+        widget->setEventBinding("onClick", handler);
+        if (!handler.empty()) _declarativeEventHandlers.insert(handler);
     }
 
     if (VBox* vbox = dynamic_cast<VBox*>(widget)) {
@@ -1562,7 +1574,10 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
             if (auto callback = find("@controller." + widget->getControllerId()
                                      + "." + handlerName)) return callback;
         }
-        return find("@handler." + handlerName);
+        if (auto callback = find("@handler." + handlerName)) return callback;
+        return _declarativeEventResolver
+            ? _declarativeEventResolver(*widget, eventName, handlerName)
+            : std::function<void()>{};
     };
 
     if (auto callback = resolveEvent("onClick")) {

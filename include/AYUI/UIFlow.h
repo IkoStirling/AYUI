@@ -114,6 +114,18 @@ struct UIFlowSlotDefinition {
     bool restorePrevious = true;
 };
 
+// Maps a semantic handler authored in a reusable Widget layout to a declared
+// Flow Signal. The current command-event contract carries no dynamic Widget
+// value; Signals with required payload fields must provide defaults before
+// they can be used here.
+struct UIFlowScreenEventBinding {
+    std::string handler;
+    std::string signal;
+
+    friend bool operator==(const UIFlowScreenEventBinding&,
+                           const UIFlowScreenEventBinding&) = default;
+};
+
 struct UIFlowScreenDefinition {
     std::string id;
     std::string layoutAsset;
@@ -123,6 +135,7 @@ struct UIFlowScreenDefinition {
     std::string enterAnimation;
     std::string exitAnimation;
     std::map<std::string, UIFlowValue> parameters;
+    std::vector<UIFlowScreenEventBinding> events;
 };
 
 struct UIFlowSlotAssignment {

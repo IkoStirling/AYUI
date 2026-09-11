@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYUI/UIFlow.h"
+#include "AYUI/UIFlowGraphNodeRegistry.h"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +34,7 @@ TEST_CASE(flow_document_round_trips_parallel_regions_and_extensible_nodes)
                 "scope":"application",
                 "enterAnimation":"enter",
                 "exitAnimation":"exit",
+                "events":[{"handler":"startGame","signal":"story.cutscene"}],
                 "parameters":{"title":"Aliyat","attempt":2,"dim":0.25,"enabled":true}
             },
             {
@@ -114,6 +116,8 @@ TEST_CASE(flow_document_round_trips_parallel_regions_and_extensible_nodes)
     CHECK(document.findContext("Gameplay") != nullptr);
     CHECK(document.findGraph("load_world") != nullptr);
     CHECK(document.findGraph("load_world")->nodes[1].type == "game.world.load");
+    CHECK(document.findScreen("main_menu")->events.size() == 1u);
+    CHECK(document.findScreen("main_menu")->events[0].handler == "startGame");
     CHECK(std::get<std::int64_t>(
         document.findScreen("main_menu")->parameters.at("attempt").data) == 2);
 
@@ -128,6 +132,8 @@ TEST_CASE(flow_document_round_trips_parallel_regions_and_extensible_nodes)
     CHECK(reloaded.findRegion("story") != nullptr);
     CHECK(reloaded.findGraph("load_world") != nullptr);
     CHECK(reloaded.findGraph("load_world")->nodes[1].type == "game.world.load");
+    CHECK(reloaded.findScreen("main_menu")->events[0].signal
+          == "story.cutscene");
     CHECK(reloaded.transitions[0].interruptPolicy
           == UIFlowInterruptPolicy::CancelPrevious);
 }
@@ -225,6 +231,68 @@ TEST_CASE(flow_parser_requires_schema_version_and_checks_unsigned_ranges)
     })json", document, &diagnostics));
     CHECK(diagnostics.size() == 1u);
     CHECK(diagnostics[0].path == "slots[0].capacity");
+}
+
+TEST_CASE(flow_screen_event_bindings_validate_signal_defaults_and_uniqueness)
+{
+    UIFlowDocument document;
+    document.id = "screen_events";
+    document.layers.push_back(UIFlowLayerDefinition{"screen"});
+    UIFlowScreenDefinition screen;
+    screen.id = "menu";
+    screen.layoutAsset = "ui/menu.ui.json";
+    screen.layer = "screen";
+    screen.events = {{"startGame", "ui.start"},
+                     {"startGame", "ui.missing"}};
+    document.screens.push_back(std::move(screen));
+    UIFlowSignalDefinition signal;
+    signal.id = "ui.start";
+    signal.payload.push_back(UIFlowFieldDefinition{
+        "world", UIFlowValueType::Asset, true, {}});
+    document.signals.push_back(std::move(signal));
+
+    std::vector<UIFlowDiagnostic> diagnostics;
+    CHECK_FALSE(validateUIFlow(document, &diagnostics));
+    CHECK(diagnostics.size() == 3u);
+
+    document.screens[0].events.resize(1u);
+    document.signals[0].payload[0].defaultValue = std::string("worlds/main");
+    CHECK(validateUIFlow(document, &diagnostics));
+    CHECK(diagnostics.empty());
+}
+
+TEST_CASE(flow_graph_node_registry_validates_registered_typed_pins)
+{
+    UIFlowGraphNodeRegistry registry;
+    UIFlowGraphNodeTypeDefinition source;
+    source.type = "test.source";
+    source.pins.push_back({"completed", UIFlowGraphPinDirection::Output,
+                           UIFlowGraphPinKind::Execution});
+    CHECK(registry.registerType(std::move(source)));
+    UIFlowGraphNodeTypeDefinition target;
+    target.type = "test.target";
+    target.pins.push_back({"execute", UIFlowGraphPinDirection::Input,
+                           UIFlowGraphPinKind::Execution});
+    target.properties.push_back({
+        "name", UIFlowValueType::String, true, std::string("default")});
+    CHECK(registry.registerType(std::move(target)));
+
+    UIFlowDocument document;
+    document.id = "typed_graph";
+    UIFlowGraphDefinition graph;
+    graph.id = "main";
+    graph.nodes.push_back({"a", "test.source"});
+    graph.nodes.push_back({"b", "test.target"});
+    graph.links.push_back({"a", "completed", "b", "execute"});
+    document.graphs.push_back(std::move(graph));
+    std::vector<UIFlowDiagnostic> diagnostics;
+    CHECK(validateUIFlowGraphNodes(document, registry, &diagnostics));
+    CHECK(diagnostics.empty());
+
+    document.graphs[0].links[0].toPin = "missing";
+    CHECK_FALSE(validateUIFlowGraphNodes(document, registry, &diagnostics));
+    CHECK(diagnostics.size() == 1u);
+    CHECK(diagnostics.front().path == "graphs[0].links[0].toPin");
 }
 
 TEST_SUITE_END

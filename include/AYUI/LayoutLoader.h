@@ -6,9 +6,12 @@
 #include "AYUI/DockJsonHandle.h"
 #include "AYUI/UIAnimation.h"
 #include <string>
+#include <string_view>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace ayt::io {
@@ -25,6 +28,11 @@ class DockCard;
 
 class UILayoutLoader {
 public:
+    using DeclarativeEventResolver = std::function<std::function<void()>(
+        const Widget& widget,
+        std::string_view eventName,
+        std::string_view handlerName)>;
+
     UILayoutLoader();
     ~UILayoutLoader();
 
@@ -68,10 +76,23 @@ public:
                              std::function<void()> handler);
     void bindHandler(const std::string& handlerName,
                      std::function<void()> handler);
+    // Final, dynamic fallback for reusable layouts whose semantic handlers
+    // are supplied by a runtime host after authoring. Explicit widget,
+    // controller and named bindings retain precedence.
+    void setDeclarativeEventResolver(DeclarativeEventResolver resolver) {
+        _declarativeEventResolver = std::move(resolver);
+    }
     void clearEventBindings();
     void clearWidgetRegistry();
 
     Widget* findWidgetById(const std::string& id) const;
+    bool hasDeclarativeEventHandler(std::string_view handlerName) const {
+        return _declarativeEventHandlers.contains(std::string(handlerName));
+    }
+    const std::unordered_set<std::string>& getDeclarativeEventHandlers()
+        const noexcept {
+        return _declarativeEventHandlers;
+    }
     const UIAnimationLibrary& getAnimationLibrary() const {
         return _animationLibrary;
     }
@@ -94,7 +115,9 @@ private:
     I18n* _i18n;
 
     std::unordered_map<std::string, std::function<void()>> _eventBindings;
+    DeclarativeEventResolver _declarativeEventResolver;
     std::unordered_map<std::string, Widget*> _widgetsById;
+    std::unordered_set<std::string> _declarativeEventHandlers;
     UIAnimationLibrary _animationLibrary;
 
     std::string _lastJson;

@@ -153,6 +153,62 @@ TEST_CASE(test_layout_loader_named_handler_and_legacy_id_binding_precedence) {
     destroyWidgetTree(priorityRaw);
 }
 
+TEST_CASE(test_layout_loader_dynamic_declarative_event_resolver_is_fallback) {
+    UILayoutLoader loader;
+    int dynamicHits = 0;
+    std::string resolvedWidget;
+    std::string resolvedEvent;
+    std::string resolvedHandler;
+    loader.setDeclarativeEventResolver(
+        [&](const Widget& widget, std::string_view event,
+            std::string_view handler) -> std::function<void()> {
+            resolvedWidget = widget.getId();
+            resolvedEvent = event;
+            resolvedHandler = handler;
+            return [&dynamicHits]() { ++dynamicHits; };
+        });
+
+    Widget* raw = loader.loadFromString(R"({
+        "type": "Button", "id": "flow_start",
+        "events": { "onClick": "startGame" },
+        "size": { "w": 100, "h": 30 }
+    })");
+    Button* button = dynamic_cast<Button*>(raw);
+    CHECK(button != nullptr);
+    if (button != nullptr) {
+        button->onMouseButtonDown(UIMouseEvent(FVector2(5, 5), 0));
+        button->onMouseButtonUp(UIMouseEvent(FVector2(5, 5), 0));
+    }
+    CHECK(dynamicHits == 1);
+    CHECK(resolvedWidget == "flow_start");
+    CHECK(resolvedEvent == "onClick");
+    CHECK(resolvedHandler == "startGame");
+    destroyWidgetTree(raw);
+}
+
+TEST_CASE(test_layout_loader_declarative_event_index_is_transactional) {
+    UILayoutLoader loader;
+    Widget* first = loader.loadFromString(R"({
+        "type": "Button", "id": "flow_start",
+        "events": { "onClick": "startGame" }
+    })");
+    CHECK(first != nullptr);
+    CHECK(loader.hasDeclarativeEventHandler("startGame"));
+
+    Widget* rejected = loader.loadFromString("{ invalid json");
+    CHECK(rejected == nullptr);
+    CHECK(loader.hasDeclarativeEventHandler("startGame"));
+
+    Widget* replacement = loader.loadFromString(R"({
+        "type": "Button", "id": "flow_exit"
+    })");
+    CHECK(replacement != nullptr);
+    CHECK(!loader.hasDeclarativeEventHandler("startGame"));
+
+    destroyWidgetTree(first);
+    destroyWidgetTree(replacement);
+}
+
 TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
     UILayoutLoader loader;
 
