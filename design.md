@@ -644,6 +644,14 @@ ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay �
 是否真实存在由宿主注入 `LayoutControllerContract` 或刷新 provider；AYUI 仅校验契约并构建只读触发图，
 不依赖游戏反射系统，也不持有 Controller 实例。
 
+资源与发布闭包由独立 `LayoutPublicationModel` 承担，不把一般 authoring warning 与可部署性混为
+一谈。输入是保存状态、内容根相对 Layout asset ID、authored Widget 集，以及宿主提供的纹理目录、
+StyleSheet 和可选 Controller contract；输出是稳定排序、按 kind/key 去重并保留全部 consumer 的
+`AYUILayoutPublicationManifest` v1。绝对路径、`..` 越界、missing/invalid 纹理、缺失 Style 与严格
+模式下未解析的 Handler 都是发布阻断。模型只构造清单、不读取或复制文件；AYEditor/packager 负责把
+清单与既有 UI Flow layout/animation closure 合并，并执行实际打包。文档内 reusable block 与外部
+component 都在实例化时展开，因此不会把 authoring library 带进运行时闭包。
+
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
 必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section
 显隐并执行一次 invalidate/layout，保证 Inspector 不会短暂保留上一类型的行结构。VBox 的可伸缩

@@ -44,6 +44,9 @@
   可无损往返，交叉引用、层级循环、类型默认值与数值范围具有统一诊断。源码 ABI 更新为 119。
 - UI Flow 生产路径增加异步 Graph execution、中断策略、事务式 reload、Signal replay/trace、
   Screen enter/exit 动画交接和 `consumeHandled` 下层输入重试；新增 Widget 虚函数后源码 ABI 更新为 120。
+- Layout Designer 增加 `LayoutPublicationModel`，生成确定性的 v1 发布依赖清单并阻断非便携路径、
+  missing/invalid 纹理、缺失 Style、脏文档和严格模式下未解析的交互契约；公共 authoring API
+  扩展后源码 ABI 更新为 127。
 
 ### Fixed
 
@@ -64,6 +67,7 @@
   AYEditor `2549 / 2549`、Default Editor Module Assembly `13 / 13`；Layout Editor headless
   round-trip 与 AYEditor level-4（三帧 GPU UI 合成及完整 shutdown）通过。
 - VS 2026 Insider Windows Debug：Application UI Flow 契约加入后 AYUI `5697 / 5697` 通过。
+- VS 2026 Insider Windows Debug：Layout 发布闭包加入后 AYUI `5854 / 5854` 通过。
 - AYRenderer Noop：`4333 / 4333` 条断言通过（含局部 damage、采样键、224 次离屏 pass 边界、resize 与
   运行时 MSAA reset 后的 Layer 重绘）。
 - AYFont `112 / 112` 条断言通过。

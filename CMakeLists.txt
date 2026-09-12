@@ -180,7 +180,7 @@ set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
 find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
-target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=126)
+target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=127)
 target_include_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -225,6 +225,7 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/LayoutCommandStack.cpp
     LayoutEditor/LayoutComponentLibrary.cpp
     LayoutEditor/LayoutPreviewModel.cpp
+    LayoutEditor/LayoutPublicationModel.cpp
     LayoutEditor/LayoutPropertyEditors.cpp
     LayoutEditor/LayoutResponsiveModel.cpp
     LayoutEditor/LayoutResourceCatalog.cpp
@@ -245,6 +246,7 @@ add_library(AYUILayoutEditorCore STATIC
     include/AYUI/LayoutEditor/LayoutCommandStack.h
     include/AYUI/LayoutEditor/LayoutComponentLibrary.h
     include/AYUI/LayoutEditor/LayoutPreviewModel.h
+    include/AYUI/LayoutEditor/LayoutPublicationModel.h
     include/AYUI/LayoutEditor/LayoutPropertyEditors.h
     include/AYUI/LayoutEditor/LayoutResponsiveModel.h
     include/AYUI/LayoutEditor/LayoutResourceCatalog.h

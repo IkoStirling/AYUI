@@ -304,6 +304,12 @@ Tree 可增加子节点，RichText run 可编辑字号、颜色和粗体/斜体/
 和资源身份仍属于宿主。standalone 默认扫描常见 assets 与 AYRenderer core textures，AYEditor 默认
 组合 Project/Assets 和 EngineAssets。
 
+发布前可用 `LayoutPublicationModel` 从 authored Widget 集生成版本化、稳定排序的
+`AYUILayoutPublicationManifest`。清单去重记录纹理、Style 和 Controller/Handler 依赖及其消费者；
+未保存文档、绝对或越界资源路径、missing/invalid 纹理、缺失 Style 和未解析交互契约都会阻断
+`ready()`。资源目录、StyleSheet 和交互 registry 均由宿主注入，因此模型不访问 GPU、不写文件，
+也不会把本机 preview path 写入发布物。组件实例在插入时已经展开，不形成额外运行时依赖。
+
 View 菜单与 Canvas header 提供 Document、Desktop、HiDPI Desktop、Phone、Tablet 预设以及自定义
 物理宽高、DPI scale 和 Safe Area inset。画布把物理尺寸换算为逻辑 DIP，并以 editor-only overlay
 显示安全区；预览尺寸不进入 undo snapshot 或 `.ui.json`，保存时仍写 authored root 尺寸。F6 或
