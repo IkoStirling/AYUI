@@ -311,9 +311,10 @@ Tree 可增加子节点，RichText run 可编辑字号、颜色和粗体/斜体/
 也不会把本机 preview path 写入发布物。组件实例在插入时已经展开，不形成额外运行时依赖。
 
 实际打包发现由独立、headless 的 `AYUIPackaging` 目标负责。通用 package coordinator 只把选中的
-根 `*.ui.json` 交给 `UIAssetCollector`；AYUI 自己理解 Layout wire format，递归发现任意复合结构中的
-`Image.textureName`，通过可选 resolver 将稳定资源键映射为内容根相对源文件，并输出
-`AYUIModulePackageContribution` v1。布局与纹理按 package key 去重，同时保留全部 consumer；绝对路径、
+根 `*.ui.json` 和项目 Theme 根交给 `UIAssetCollector`；AYUI 自己理解 Layout/Theme wire format，
+递归发现任意复合结构中的 `Image.textureName` 及 Theme `extends` 链，通过可选 resolver 将稳定资源键
+或 Theme 名映射为内容根相对源文件，并输出 `AYUIModulePackageContribution` v1。布局、纹理与 Theme
+按 package key 去重，同时保留全部 consumer；绝对路径、
 URI、`..` 越界、缺失文件、错误 JSON 和错误资源字段都会阻断贡献。collector 不链接 Widget runtime、
 Renderer 或 Designer，也不扫描 Scene/UI Flow、不写总包；后续统一打包层只负责调用各模块 contributor、
 合并清单和写包，不维护 UI 控件字段列表。

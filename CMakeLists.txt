@@ -214,9 +214,9 @@ if(WIN32)
 endif()
 
 # Module-owned, headless package contribution. The project packager supplies
-# only root *.ui.json assets; AYUI owns parsing its wire format and discovering
-# transitive texture dependencies. Keep this target independent from runtime
-# Widgets, AYRenderer and the authoring core.
+# only root *.ui.json / *.theme.json assets; AYUI owns parsing its wire formats
+# and discovering transitive texture and Theme inheritance dependencies. Keep
+# this target independent from runtime Widgets, AYRenderer and authoring core.
 add_library(AYUIPackaging STATIC
     Packaging/UIAssetCollector.cpp
     include/AYUI/Packaging/UIAssetCollector.h

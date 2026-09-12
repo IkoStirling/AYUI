@@ -22,6 +22,7 @@ const char* kindName(UIAssetKind kind) {
     switch (kind) {
     case UIAssetKind::Layout: return "layout";
     case UIAssetKind::Texture: return "texture";
+    case UIAssetKind::Theme: return "theme";
     }
     return "unknown";
 }
@@ -38,10 +39,15 @@ const char* issueName(UIAssetCollectionIssueCode code) {
     case UIAssetCollectionIssueCode::AssetTooLarge: return "assetTooLarge";
     case UIAssetCollectionIssueCode::InvalidJson: return "invalidJson";
     case UIAssetCollectionIssueCode::InvalidLayout: return "invalidLayout";
+    case UIAssetCollectionIssueCode::InvalidTheme: return "invalidTheme";
     case UIAssetCollectionIssueCode::InvalidResourceReference:
         return "invalidResourceReference";
     case UIAssetCollectionIssueCode::UnresolvedResource:
         return "unresolvedResource";
+    case UIAssetCollectionIssueCode::ConflictingAsset:
+        return "conflictingAsset";
+    case UIAssetCollectionIssueCode::ThemeInheritanceCycle:
+        return "themeInheritanceCycle";
     }
     return "unknown";
 }
@@ -56,6 +62,19 @@ bool hasUriScheme(std::string_view value) {
     const std::size_t slash = value.find('/');
     return colon != std::string_view::npos
         && (slash == std::string_view::npos || colon < slash);
+}
+
+bool hasSuffixIgnoreCase(std::string_view asset, std::string_view suffix) {
+    if (asset.size() < suffix.size()) return false;
+    const std::size_t offset = asset.size() - suffix.size();
+    for (std::size_t index = 0; index < suffix.size(); ++index) {
+        const unsigned char actual = static_cast<unsigned char>(
+            asset[offset + index]);
+        if (static_cast<char>(std::tolower(actual)) != suffix[index]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool absoluteLike(std::string_view value) {
@@ -152,17 +171,8 @@ bool isLayoutDocument(const json& document) {
 } // namespace
 
 bool UIAssetCollector::accepts(std::string_view asset) const noexcept {
-    constexpr std::string_view suffix = ".ui.json";
-    if (asset.size() < suffix.size()) return false;
-    const std::size_t offset = asset.size() - suffix.size();
-    for (std::size_t index = 0; index < suffix.size(); ++index) {
-        const unsigned char actual = static_cast<unsigned char>(
-            asset[offset + index]);
-        if (static_cast<char>(std::tolower(actual)) != suffix[index]) {
-            return false;
-        }
-    }
-    return true;
+    return hasSuffixIgnoreCase(asset, ".ui.json")
+        || hasSuffixIgnoreCase(asset, ".theme.json");
 }
 
 UIAssetCollectionResult UIAssetCollector::collect(
@@ -189,6 +199,10 @@ UIAssetCollectionResult UIAssetCollector::collect(
             contribution.kind = kind;
             contribution.packageKey = packageKey;
             contribution.sourceAsset = sourceAsset;
+        } else if (contribution.sourceAsset != sourceAsset) {
+            addIssue(result, UIAssetCollectionIssueCode::ConflictingAsset,
+                packageKey, consumer,
+                "One AYUI package key resolves to multiple source assets.");
         }
         contribution.consumers.push_back(consumer);
     };
@@ -258,7 +272,7 @@ UIAssetCollectionResult UIAssetCollector::collect(
                 "UI layout entry escapes the content root.");
             continue;
         }
-        if (!accepts(entry)) {
+        if (!hasSuffixIgnoreCase(entry, ".ui.json")) {
             addIssue(result, UIAssetCollectionIssueCode::InvalidLayout,
                 entry, "$entry", "AYUI only accepts *.ui.json layouts.");
             continue;
@@ -329,6 +343,107 @@ UIAssetCollectionResult UIAssetCollector::collect(
             validateSource(UIAssetKind::Texture, normalizedKey,
                            source, consumer);
         }
+    }
+
+    std::map<std::string, int, std::less<>> themeVisitState;
+    std::function<void(const std::string&, const std::string&,
+                       const std::string&)> collectTheme;
+    collectTheme = [&](const std::string& name,
+                       const std::string& originalSource,
+                       const std::string& consumer) {
+        if (name.empty()) {
+            addIssue(result, UIAssetCollectionIssueCode::InvalidTheme,
+                originalSource, consumer,
+                "Theme package entry requires a runtime name.");
+            return;
+        }
+        const std::string source = normalizeAsset(originalSource);
+        const auto existing = closure.find({UIAssetKind::Theme, name});
+        if (existing != closure.end() && !source.empty()
+            && existing->second.sourceAsset != source) {
+            addIssue(result, UIAssetCollectionIssueCode::ConflictingAsset,
+                name, consumer,
+                "One Theme runtime name resolves to multiple source assets.");
+            return;
+        }
+        const int state = themeVisitState[name];
+        if (state == 1) {
+            addIssue(result,
+                UIAssetCollectionIssueCode::ThemeInheritanceCycle,
+                name, consumer,
+                "Theme inheritance contains a cycle through this name.");
+            return;
+        }
+        if (state == 2) return;
+        themeVisitState[name] = 1;
+
+        if (!hasSuffixIgnoreCase(source, ".theme.json")) {
+            addIssue(result, UIAssetCollectionIssueCode::InvalidTheme,
+                source, consumer,
+                "AYUI Theme sources must use the *.theme.json suffix.");
+            themeVisitState[name] = 2;
+            return;
+        }
+        if (!validateSource(UIAssetKind::Theme, name, source, consumer)) {
+            themeVisitState[name] = 2;
+            return;
+        }
+        const fs::path resolved = root / source;
+        const std::uintmax_t byteCount = fs::file_size(resolved, ec);
+        if (ec || byteCount > kMaximumLayoutBytes) {
+            ec.clear();
+            addIssue(result, UIAssetCollectionIssueCode::AssetTooLarge,
+                source, consumer,
+                "UI Theme exceeds the 16 MiB package limit.");
+            themeVisitState[name] = 2;
+            return;
+        }
+
+        std::ifstream input(resolved, std::ios::binary);
+        json document;
+        try {
+            input >> document;
+        } catch (const std::exception& exception) {
+            addIssue(result, UIAssetCollectionIssueCode::InvalidJson,
+                source, consumer,
+                std::string("UI Theme JSON is invalid: ")
+                    + exception.what());
+            themeVisitState[name] = 2;
+            return;
+        }
+        if (!document.is_object()) {
+            addIssue(result, UIAssetCollectionIssueCode::InvalidTheme,
+                source, consumer, "UI Theme root must be an object.");
+            themeVisitState[name] = 2;
+            return;
+        }
+        const auto parent = document.find("extends");
+        if (parent != document.end()) {
+            if (!parent->is_string()
+                || parent->get_ref<const std::string&>().empty()) {
+                addIssue(result, UIAssetCollectionIssueCode::InvalidTheme,
+                    source, consumer,
+                    "Theme.extends must be a non-empty runtime theme name.");
+            } else {
+                const std::string parentName = parent->get<std::string>();
+                const std::string parentSource = request.sourceResolver
+                    ? request.sourceResolver(UIAssetKind::Theme, parentName)
+                    : std::string();
+                collectTheme(parentName, parentSource, name + "@extends");
+            }
+        }
+        themeVisitState[name] = 2;
+    };
+
+    std::vector<UIAssetCollectionRequest::ThemeEntry> themeEntries =
+        request.entryThemes;
+    std::sort(themeEntries.begin(), themeEntries.end(),
+        [](const auto& left, const auto& right) {
+            if (left.name != right.name) return left.name < right.name;
+            return left.sourceAsset < right.sourceAsset;
+        });
+    for (const auto& theme : themeEntries) {
+        collectTheme(theme.name, theme.sourceAsset, "$entry");
     }
 
     result.assets.reserve(closure.size());

@@ -10,6 +10,7 @@ namespace ayt::ui::packaging {
 enum class UIAssetKind {
     Layout,
     Texture,
+    Theme,
 };
 
 struct UIAssetContribution {
@@ -29,8 +30,11 @@ enum class UIAssetCollectionIssueCode {
     AssetTooLarge,
     InvalidJson,
     InvalidLayout,
+    InvalidTheme,
     InvalidResourceReference,
     UnresolvedResource,
+    ConflictingAsset,
+    ThemeInheritanceCycle,
 };
 
 struct UIAssetCollectionIssue {
@@ -48,11 +52,20 @@ using UIAssetSourceResolver = std::function<std::string(
     UIAssetKind kind, std::string_view packageKey)>;
 
 struct UIAssetCollectionRequest {
+    struct ThemeEntry {
+        // Runtime identity used by ThemeManager and `extends`.
+        std::string name;
+        std::string sourceAsset;
+    };
+
     std::string contentRoot;
     // Only root UI assets are supplied by the package graph. AYUI discovers
     // their transitive dependencies; a central cook tool must not know Widget
     // fields such as Image.textureName.
     std::vector<std::string> entryLayouts;
+    // Active/project themes are roots rather than Layout dependencies. AYUI
+    // follows their `extends` chain through sourceResolver.
+    std::vector<ThemeEntry> entryThemes;
     UIAssetSourceResolver sourceResolver;
     bool requireSourceFiles = true;
 };

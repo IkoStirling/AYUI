@@ -178,12 +178,80 @@ TEST_CASE(ui_module_rejects_nonportable_missing_and_malformed_dependencies) {
     CHECK(malformed == 1u);
 }
 
-TEST_CASE(ui_module_collector_advertises_only_layout_wire_assets) {
+TEST_CASE(ui_module_collects_transitive_theme_inheritance) {
+    TemporaryContentRoot content;
+    std::error_code error;
+    fs::create_directories(content.path / "Themes", error);
+    content.write("Themes/base.theme.json", R"({
+        "tokens":{"color":{"surface":[0.1,0.1,0.1,1.0]}}
+    })");
+    content.write("Themes/game.theme.json", R"({
+        "extends":"base",
+        "tokens":{"color":{"accent":[0.1,0.5,0.9,1.0]}}
+    })");
+
+    UIAssetCollectionRequest request;
+    request.contentRoot = content.path.string();
+    request.entryThemes = {{"game", "Themes/game.theme.json"}};
+    request.sourceResolver = [](UIAssetKind kind, std::string_view key) {
+        return kind == UIAssetKind::Theme && key == "base"
+            ? std::string("Themes/base.theme.json") : std::string();
+    };
+
+    const UIAssetCollectionResult result = UIAssetCollector().collect(request);
+    CHECK(result.ready());
+    CHECK(result.assets.size() == 2u);
+
+    std::size_t themeCount = 0u;
+    std::size_t inheritedConsumerCount = 0u;
+    for (const UIAssetContribution& asset : result.assets) {
+        if (asset.kind == UIAssetKind::Theme) {
+            ++themeCount;
+            if (asset.packageKey == "base") {
+                inheritedConsumerCount = asset.consumers.size();
+            }
+        }
+    }
+    CHECK(themeCount == 2u);
+    CHECK(inheritedConsumerCount == 1u);
+}
+
+TEST_CASE(ui_module_rejects_theme_inheritance_cycles) {
+    TemporaryContentRoot content;
+    std::error_code error;
+    fs::create_directories(content.path / "Themes", error);
+    content.write("Themes/a.theme.json", R"({"extends":"b"})");
+    content.write("Themes/b.theme.json", R"({"extends":"a"})");
+
+    UIAssetCollectionRequest request;
+    request.contentRoot = content.path.string();
+    request.entryThemes = {{"a", "Themes/a.theme.json"}};
+    request.sourceResolver = [](UIAssetKind kind, std::string_view key) {
+        if (kind != UIAssetKind::Theme) return std::string();
+        if (key == "a") return std::string("Themes/a.theme.json");
+        if (key == "b") return std::string("Themes/b.theme.json");
+        return std::string();
+    };
+
+    const UIAssetCollectionResult result = UIAssetCollector().collect(request);
+    CHECK(!result.ready());
+    std::size_t cycleCount = 0u;
+    for (const UIAssetCollectionIssue& issue : result.issues) {
+        if (issue.code
+            == UIAssetCollectionIssueCode::ThemeInheritanceCycle) {
+            ++cycleCount;
+        }
+    }
+    CHECK(cycleCount == 1u);
+}
+
+TEST_CASE(ui_module_collector_advertises_its_wire_assets) {
     const UIAssetCollector collector;
     CHECK(collector.accepts("UI/Main.ui.json"));
     CHECK(collector.accepts("UI/Main.UI.JSON"));
+    CHECK(collector.accepts("Themes/Game.theme.json"));
     CHECK(!collector.accepts("UI/Main.uiflow.json"));
-    CHECK(!collector.accepts("UI/Main.theme.json"));
+    CHECK(!collector.accepts("UI/project.ayuicomponents.json"));
 }
 
 TEST_SUITE_END

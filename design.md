@@ -652,14 +652,15 @@ StyleSheet 和可选 Controller contract；输出是稳定排序、按 kind/key 
 与外部 component 都在实例化时展开，因此不会把 authoring library 带进运行时闭包。
 
 生产打包采用“模块贡献者”而非中央 cook 工具硬编码全部资产类型。第一阶段新增独立静态目标
-`AYUIPackaging`：上层 package graph 只传入根 `*.ui.json` asset ID 和 content root，AYUI-owned
-`UIAssetCollector` 自己解析 Layout JSON、递归识别内建 `Image.textureName`、执行 package key 到源文件
-的可选映射，并返回稳定排序的 `AYUIModulePackageContribution` v1。贡献项区分运行时 package key 与
+`AYUIPackaging`：上层 package graph 只传入根 `*.ui.json`、项目 Theme 根和 content root，AYUI-owned
+`UIAssetCollector` 自己解析 Layout/Theme JSON、递归识别内建 `Image.textureName`、沿 Theme `extends`
+链收集父主题、执行 package key/Theme 名到源文件的可选映射，并返回稳定排序的
+`AYUIModulePackageContribution` v1。贡献项区分运行时 package key 与
 content-relative source asset，按 `(kind, packageKey)` 去重并保留 consumer，绝对路径、URI、越界路径、
 缺失文件、非法 JSON/Layout 和错误资源字段都产生发布阻断。该目标仅依赖 JSON/标准库，不链接 AYUI
 Widget runtime、AYRenderer 或 Designer；它不扫描 Flow/Scene，也不写 package。未来公共 coordinator
 只负责给每个模块分发其接受的根资产、合并贡献和调用 PackageWriter；UI 字段与递归依赖规则始终留在
-AYUI。Theme 选择属于宿主/项目根资产，UI Flow 到 Layout 的跨模块边由 AYApplication 贡献者负责，
+AYUI。Theme 选择由宿主/项目作为根资产传入，但继承闭包由 AYUI 自己负责；UI Flow 到 Layout 的跨模块边由 AYApplication 贡献者负责，
 系统字体 family 仍由平台发现而不是复制进包。
 
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
