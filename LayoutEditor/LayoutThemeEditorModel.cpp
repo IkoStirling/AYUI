@@ -292,6 +292,81 @@ bool LayoutThemeEditorModel::setStyleProperty(
     return true;
 }
 
+std::string LayoutThemeEditorModel::styleProperty(
+    const std::string& fragment, const std::string& styleId,
+    const std::string& property) const {
+    const json root = json::parse(_json);
+    if (!root.contains("sheets") || !root["sheets"].contains(fragment)) {
+        return {};
+    }
+    const json& sheet = root["sheets"][fragment];
+    if (!sheet.is_object() || !sheet.contains("styles")
+        || !sheet["styles"].contains(styleId)) {
+        return {};
+    }
+    const json& style = sheet["styles"][styleId];
+    if (!style.is_object() || !style.contains(property)) return {};
+    const json& value = style[property];
+    return value.is_string() ? value.get<std::string>() : value.dump();
+}
+
+bool LayoutThemeEditorModel::createStyle(
+    const std::string& fragment, const std::string& styleId,
+    std::string* error) {
+    if (fragment.empty() || styleId.empty()) {
+        return fail(error, "Fragment and style ID are required");
+    }
+    json root = json::parse(_json);
+    json& styles = root["sheets"][fragment]["styles"];
+    if (!styles.is_object()) styles = json::object();
+    if (styles.contains(styleId)) {
+        return fail(error, "Style already exists");
+    }
+    styles[styleId] = json::object();
+    _json = root.dump();
+    return true;
+}
+
+bool LayoutThemeEditorModel::duplicateStyle(
+    const std::string& sourceFragment, const std::string& sourceStyleId,
+    const std::string& destinationFragment,
+    const std::string& destinationStyleId, std::string* error) {
+    if (destinationFragment.empty() || destinationStyleId.empty()) {
+        return fail(error, "Destination fragment and style ID are required");
+    }
+    json root = json::parse(_json);
+    if (!root.contains("sheets")
+        || !root["sheets"].contains(sourceFragment)
+        || !root["sheets"][sourceFragment].contains("styles")
+        || !root["sheets"][sourceFragment]["styles"].contains(sourceStyleId)) {
+        return fail(error, "Source style does not exist");
+    }
+    json& destinationStyles =
+        root["sheets"][destinationFragment]["styles"];
+    if (!destinationStyles.is_object()) destinationStyles = json::object();
+    if (destinationStyles.contains(destinationStyleId)) {
+        return fail(error, "Destination style already exists");
+    }
+    destinationStyles[destinationStyleId] =
+        root["sheets"][sourceFragment]["styles"][sourceStyleId];
+    _json = root.dump();
+    return true;
+}
+
+bool LayoutThemeEditorModel::removeStyle(
+    const std::string& fragment, const std::string& styleId,
+    std::string* error) {
+    json root = json::parse(_json);
+    if (!root.contains("sheets") || !root["sheets"].contains(fragment)
+        || !root["sheets"][fragment].contains("styles")
+        || !root["sheets"][fragment]["styles"].is_object()
+        || root["sheets"][fragment]["styles"].erase(styleId) == 0u) {
+        return fail(error, "Style does not exist");
+    }
+    _json = root.dump();
+    return true;
+}
+
 Theme LayoutThemeEditorModel::buildPreviewTheme() const {
     Theme theme;
     theme.loadFromJson(_json);

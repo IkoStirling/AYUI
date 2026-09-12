@@ -965,6 +965,17 @@ TEST_CASE(theme_editor_renames_tokens_and_repairs_style_references) {
     CHECK(!model.removeToken("color.brand.primary", false, &error));
     CHECK(model.setStyleProperty("controls", "primary", "textColor",
                                  "$color.brand.primary", &error));
+    CHECK(model.styleProperty("controls", "primary", "textColor")
+          == "$color.brand.primary");
+    CHECK(model.createStyle("controls", "secondary", &error));
+    CHECK(!model.createStyle("controls", "secondary", &error));
+    CHECK(model.duplicateStyle("controls", "primary", "dialogs", "confirm",
+                               &error));
+    CHECK(model.styleProperty("dialogs", "confirm", "backgroundColor")
+          == "$color.brand.primary");
+    CHECK(model.removeStyle("controls", "secondary", &error));
+    CHECK(!model.removeStyle("controls", "missing", &error));
+    CHECK(model.styles().size() == 2u);
     CHECK(model.setFloatToken("radius.compact", 3.0f, &error));
     CHECK(model.renameToken("radius.compact", "radius.control", &error));
 

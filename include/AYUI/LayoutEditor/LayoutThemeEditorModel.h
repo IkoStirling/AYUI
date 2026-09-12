@@ -47,6 +47,18 @@ public:
                           const std::string& property,
                           const std::string& tokenOrLiteral,
                           std::string* error = nullptr);
+    std::string styleProperty(const std::string& fragment,
+                              const std::string& styleId,
+                              const std::string& property) const;
+    bool createStyle(const std::string& fragment, const std::string& styleId,
+                     std::string* error = nullptr);
+    bool duplicateStyle(const std::string& sourceFragment,
+                        const std::string& sourceStyleId,
+                        const std::string& destinationFragment,
+                        const std::string& destinationStyleId,
+                        std::string* error = nullptr);
+    bool removeStyle(const std::string& fragment, const std::string& styleId,
+                     std::string* error = nullptr);
     Theme buildPreviewTheme() const;
 
 private:

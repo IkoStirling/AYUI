@@ -372,13 +372,14 @@ v2 目录为每个组件增加显示名、说明和去重标签，Designer 可�
 Enter/激活快速插入；v1 库可无迁移读取，下一次保存升级为 v2。文档内 reusable block 继续用于
 单文件局部模板，两种作用域不会混写。Theme authoring model 保留未知
 JSON 字段，列出 color/float token 和 sheet/style，支持添加、修改、安全删除、重命名 token 并同步
-修复所有 `$token` style 引用，以及为常用颜色属性绑定 token 或 literal；Theme 文件仍由用户显式保存。
+修复所有 `$token` style 引用。颜色 token 提供实时色块与共享 ColorPicker，列表显示引用计数；样式支持
+新建、复制、删除、属性绑定回读，以及为常用颜色属性绑定 token 或 literal。Theme 文件仍由用户显式保存。
 
 `LayoutEditorSession` 只以可选宿主回调暴露项目工作流：**Open Owning Screen**、
 **Complete Flow Signals** 与 **Safe Rename References**。Safe Rename Inspector 通过宿主提供的中性
 kind 描述先预览受影响文件和阻断诊断，再显式提交；standalone 没有项目索引时会禁用提交并给出明确
 状态。AYEditor 注入跨 Layout/Flow 索引和事务实现，AYUI 不读取 `.uiflow.json`，也不持有项目、
-Screen 或 Signal 业务语义。组件目录扩展与同期公共 authoring 契约合并后源码 ABI 为 125。
+Screen 或 Signal 业务语义。Theme/style authoring 生命周期扩展后源码 ABI 为 126。
 
 Reuse & Responsive 阶段加入文档内 `LayoutReuseLibrary`。选中的完整 Widget 子树可定义或更新为
 命名 block，并可反复插入；每次插入都会展开成独立 Widget 树并重新生成 ID，因此实例后续可以单独

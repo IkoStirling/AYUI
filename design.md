@@ -629,6 +629,8 @@ override，Inspector 可预览 Normal/Hovered/Pressed/Disabled 的声明式背�
 不把模板服务带入 runtime，也不与文档内 `LayoutReuseLibrary` 的局部作用域混淆。
 `LayoutThemeEditorModel` 对原 Theme JSON 做保留未知字段的投影，枚举嵌套 color/float token 与
 fragment/style，支持安全增删改、token 重命名和 `$token` 引用修复，以及常用 style 属性绑定。
+Designer 显示 token 引用计数，颜色 token 复用统一 ColorPicker；style 可新建、复制和删除，属性选择
+会回读当前 binding。该层只编辑 Theme 文档，不隐式改写 Layout 文档或运行时 ThemeManager 状态。
 Theme 解析和预览继续调用生产 `Theme`，Designer 不维护第二套样式解释器。
 项目级 Layout/Flow 关系继续归 AYEditor 所有。Session 仅提供两个带当前布局路径的可选 host action：
 打开 owning Screen、补全 Flow Signals；Workflow 菜单只路由命令并呈现结果。standalone 未注入时

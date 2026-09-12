@@ -186,7 +186,9 @@ int main() {
         "btn_project_refactor_preview", "btn_project_refactor_apply",
         "component_library_search", "component_library_filter",
         "component_library_display_name", "component_library_tags",
-        "component_library_description"
+        "component_library_description", "btn_theme_token_swatch",
+        "theme_style_fragment", "theme_style_id", "btn_theme_style_new",
+        "btn_theme_style_duplicate", "btn_theme_style_remove"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {

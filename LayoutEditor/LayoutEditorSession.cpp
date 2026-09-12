@@ -718,7 +718,10 @@ void LayoutEditorSession::detach() {
     _themeTokenList = nullptr;
     _themeTokenKey = nullptr;
     _themeTokenValue = nullptr;
+    _themeTokenSwatch = nullptr;
     _themeStyleList = nullptr;
+    _themeStyleFragment = nullptr;
+    _themeStyleId = nullptr;
     _themeStyleProperty = nullptr;
     _themeStyleBinding = nullptr;
     _themeEditorStatus = nullptr;
@@ -1140,7 +1143,40 @@ void LayoutEditorSession::applyThemeToken() {
         return;
     }
     _themeDocumentDirty = true;
-    syncThemeEditor();
+    syncThemeEditor(key);
+}
+
+void LayoutEditorSession::openThemeTokenColorPicker() {
+    if (_ui == nullptr || _themeTokenSwatch == nullptr
+        || _themeTokenKey == nullptr || _themeTokenValue == nullptr) return;
+    const std::string key = wideToUtf8(trimWide(_themeTokenKey->getText()));
+    if (key.rfind("color.", 0) != 0) {
+        setStatus(L"Select or enter a color.* token before opening the picker");
+        return;
+    }
+    math::FVector4 initial;
+    if (!parseColorHex(trimWide(_themeTokenValue->getText()), initial)) {
+        initial = _themeTokenSwatch->getColor();
+    }
+    auto* picker = new ColorPicker();
+    picker->setId("theme_token_color_picker");
+    picker->setSize({292.0f, 310.0f});
+    const math::FRectangle anchor = _themeTokenSwatch->getWorldBounds();
+    picker->setPosition({anchor.maxX - 292.0f, anchor.maxY + 4.0f});
+    picker->setColor(initial, false);
+    picker->setOnColorChanged([this](const math::FVector4& value) {
+        if (_themeTokenValue != nullptr) {
+            _themeTokenValue->setText(ColorPicker::formatHexCode(value));
+        }
+        if (_themeTokenSwatch != nullptr) _themeTokenSwatch->setColor(value);
+    });
+    picker->setOnColorCommitted([this](const math::FVector4& value) {
+        if (_themeTokenValue != nullptr) {
+            _themeTokenValue->setText(ColorPicker::formatHexCode(value));
+        }
+        applyThemeToken();
+    });
+    _ui->openPopup(_themeTokenSwatch, picker);
 }
 
 void LayoutEditorSession::renameThemeToken() {
@@ -1157,7 +1193,7 @@ void LayoutEditorSession::renameThemeToken() {
         return;
     }
     _themeDocumentDirty = true;
-    syncThemeEditor();
+    syncThemeEditor(replacement);
 }
 
 void LayoutEditorSession::removeThemeToken() {
@@ -1192,6 +1228,55 @@ void LayoutEditorSession::applyThemeStyleBinding() {
             style.fragment, style.styleId, properties[propertyIndex],
             wideToUtf8(trimWide(_themeStyleBinding->getText())), &error)) {
         setStatus(L"Theme style binding rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor({}, style.fragment + "/" + style.styleId);
+}
+
+void LayoutEditorSession::createThemeStyle() {
+    if (_themeStyleFragment == nullptr || _themeStyleId == nullptr) return;
+    const std::string fragment = wideToUtf8(trimWide(
+        _themeStyleFragment->getText()));
+    const std::string styleId = wideToUtf8(trimWide(_themeStyleId->getText()));
+    std::string error;
+    if (!_themeEditorModel.createStyle(fragment, styleId, &error)) {
+        setStatus(L"Theme style creation rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor({}, fragment + "/" + styleId);
+}
+
+void LayoutEditorSession::duplicateThemeStyle() {
+    if (_themeStyleList == nullptr || _themeStyleFragment == nullptr
+        || _themeStyleId == nullptr) return;
+    const std::vector<LayoutThemeStyleEntry> entries = _themeEditorModel.styles();
+    const int index = _themeStyleList->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(entries.size())) return;
+    const std::string fragment = wideToUtf8(trimWide(
+        _themeStyleFragment->getText()));
+    const std::string styleId = wideToUtf8(trimWide(_themeStyleId->getText()));
+    const auto& source = entries[static_cast<size_t>(index)];
+    std::string error;
+    if (!_themeEditorModel.duplicateStyle(
+            source.fragment, source.styleId, fragment, styleId, &error)) {
+        setStatus(L"Theme style duplication rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor({}, fragment + "/" + styleId);
+}
+
+void LayoutEditorSession::removeThemeStyle() {
+    if (_themeStyleList == nullptr) return;
+    const std::vector<LayoutThemeStyleEntry> entries = _themeEditorModel.styles();
+    const int index = _themeStyleList->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(entries.size())) return;
+    const auto& style = entries[static_cast<size_t>(index)];
+    std::string error;
+    if (!_themeEditorModel.removeStyle(style.fragment, style.styleId, &error)) {
+        setStatus(L"Theme style removal rejected — " + utf8ToWide(error));
         return;
     }
     _themeDocumentDirty = true;
@@ -2511,7 +2596,12 @@ void LayoutEditorSession::wireChrome() {
     _themeTokenList = dynamic_cast<ListView*>(findChromeById("theme_token_list"));
     _themeTokenKey = dynamic_cast<TextInput*>(findChromeById("theme_token_key"));
     _themeTokenValue = dynamic_cast<TextInput*>(findChromeById("theme_token_value"));
+    _themeTokenSwatch = dynamic_cast<Button*>(
+        findChromeById("btn_theme_token_swatch"));
     _themeStyleList = dynamic_cast<ListView*>(findChromeById("theme_style_list"));
+    _themeStyleFragment = dynamic_cast<TextInput*>(
+        findChromeById("theme_style_fragment"));
+    _themeStyleId = dynamic_cast<TextInput*>(findChromeById("theme_style_id"));
     _themeStyleProperty = dynamic_cast<ComboBox*>(
         findChromeById("theme_style_property"));
     _themeStyleBinding = dynamic_cast<TextInput*>(
@@ -2526,10 +2616,16 @@ void LayoutEditorSession::wireChrome() {
     }
     if (_themeStyleList != nullptr) {
         _themeStyleList->setSelectionMode(ListView::SelectionMode::Single);
+        _themeStyleList->setOnSelectionChanged([this](int) {
+            if (!_suppressThemeEditor) syncThemeEditor();
+        });
     }
     if (_themeStyleProperty != nullptr) {
         _themeStyleProperty->setItems({L"Background", L"Border", L"Text"});
         _themeStyleProperty->setSelectedIndex(0);
+        _themeStyleProperty->setOnSelectionChanged([this](int) {
+            if (!_suppressThemeEditor) syncThemeEditor();
+        });
     }
     bindBtn("btn_theme_open", [this]() {
         if (_themePicker == nullptr) return;
@@ -2538,9 +2634,15 @@ void LayoutEditorSession::wireChrome() {
     });
     bindBtn("btn_theme_save", [this]() { saveThemeDocument(); });
     bindBtn("btn_theme_token_apply", [this]() { applyThemeToken(); });
+    bindBtn("btn_theme_token_swatch", [this]() {
+        openThemeTokenColorPicker();
+    });
     bindBtn("btn_theme_token_rename", [this]() { renameThemeToken(); });
     bindBtn("btn_theme_token_remove", [this]() { removeThemeToken(); });
     bindBtn("btn_theme_style_apply", [this]() { applyThemeStyleBinding(); });
+    bindBtn("btn_theme_style_new", [this]() { createThemeStyle(); });
+    bindBtn("btn_theme_style_duplicate", [this]() { duplicateThemeStyle(); });
+    bindBtn("btn_theme_style_remove", [this]() { removeThemeStyle(); });
 
     _projectRefactorKind = dynamic_cast<ComboBox*>(
         findChromeById("project_refactor_kind"));
@@ -7039,7 +7141,8 @@ void LayoutEditorSession::syncExternalComponentEditor() {
     }
 }
 
-void LayoutEditorSession::syncThemeEditor() {
+void LayoutEditorSession::syncThemeEditor(
+    const std::string& preferredToken, const std::string& preferredStyle) {
     if (_themeTokenList == nullptr && _themeStyleList == nullptr
         && _themeEditorStatus == nullptr) return;
     const std::vector<LayoutThemeTokenEntry> tokens = _themeEditorModel.tokens();
@@ -7048,12 +7151,14 @@ void LayoutEditorSession::syncThemeEditor() {
         ? _themeTokenList->getSelectedIndex() : -1;
     int oldStyleIndex = _themeStyleList != nullptr
         ? _themeStyleList->getSelectedIndex() : -1;
-    std::string selectedToken;
-    if (oldTokenIndex >= 0 && oldTokenIndex < static_cast<int>(tokens.size())) {
+    std::string selectedToken = preferredToken;
+    if (selectedToken.empty() && oldTokenIndex >= 0
+        && oldTokenIndex < static_cast<int>(tokens.size())) {
         selectedToken = tokens[static_cast<size_t>(oldTokenIndex)].key;
     }
-    std::string selectedStyle;
-    if (oldStyleIndex >= 0 && oldStyleIndex < static_cast<int>(styles.size())) {
+    std::string selectedStyle = preferredStyle;
+    if (selectedStyle.empty() && oldStyleIndex >= 0
+        && oldStyleIndex < static_cast<int>(styles.size())) {
         const auto& entry = styles[static_cast<size_t>(oldStyleIndex)];
         selectedStyle = entry.fragment + "/" + entry.styleId;
     }
@@ -7063,7 +7168,11 @@ void LayoutEditorSession::syncThemeEditor() {
     if (_themeTokenList != nullptr) {
         std::vector<std::wstring> labels;
         labels.reserve(tokens.size());
-        for (const auto& entry : tokens) labels.push_back(utf8ToWide(entry.key));
+        for (const auto& entry : tokens) {
+            const std::size_t uses = _themeEditorModel.referenceCount(entry.key);
+            labels.push_back(utf8ToWide(entry.key) + L"  ·  "
+                             + std::to_wstring(uses) + L" use(s)");
+        }
         _themeTokenList->setItems(labels);
         for (size_t index = 0; index < tokens.size(); ++index) {
             if (tokens[index].key == selectedToken) tokenIndex = static_cast<int>(index);
@@ -7085,6 +7194,16 @@ void LayoutEditorSession::syncThemeEditor() {
                 _themeTokenValue->setText(utf8ToWide(token.value));
             }
         }
+        if (_themeTokenSwatch != nullptr) {
+            const bool isColor = token.kind == LayoutThemeTokenKind::Color;
+            _themeTokenSwatch->setEnabled(isColor);
+            if (isColor) {
+                _themeTokenSwatch->setColor(
+                    _themeEditorModel.buildPreviewTheme().getColorToken(token.key));
+            }
+        }
+    } else if (_themeTokenSwatch != nullptr) {
+        _themeTokenSwatch->setEnabled(false);
     }
 
     int styleIndex = -1;
@@ -7102,6 +7221,26 @@ void LayoutEditorSession::syncThemeEditor() {
         if (styleIndex < 0 && !styles.empty()) styleIndex = 0;
         _themeStyleList->setSelectedIndex(styleIndex);
     }
+    if (styleIndex >= 0) {
+        const auto& style = styles[static_cast<size_t>(styleIndex)];
+        if (_themeStyleFragment != nullptr) {
+            _themeStyleFragment->setText(utf8ToWide(style.fragment));
+        }
+        if (_themeStyleId != nullptr) {
+            _themeStyleId->setText(utf8ToWide(style.styleId));
+        }
+        if (_themeStyleBinding != nullptr && _themeStyleProperty != nullptr) {
+            static const char* properties[] = {
+                "backgroundColor", "borderColor", "textColor"
+            };
+            const int property = _themeStyleProperty->getSelectedIndex();
+            if (property >= 0 && property < 3) {
+                _themeStyleBinding->setText(utf8ToWide(
+                    _themeEditorModel.styleProperty(
+                        style.fragment, style.styleId, properties[property])));
+            }
+        }
+    }
     _suppressThemeEditor = false;
 
     const bool loaded = !_themeDocumentPath.empty();
@@ -7110,6 +7249,9 @@ void LayoutEditorSession::syncThemeEditor() {
     setChromeEnabled("btn_theme_token_rename", loaded && tokenIndex >= 0);
     setChromeEnabled("btn_theme_token_remove", loaded && tokenIndex >= 0);
     setChromeEnabled("btn_theme_style_apply", loaded && styleIndex >= 0);
+    setChromeEnabled("btn_theme_style_new", loaded);
+    setChromeEnabled("btn_theme_style_duplicate", loaded && styleIndex >= 0);
+    setChromeEnabled("btn_theme_style_remove", loaded && styleIndex >= 0);
     if (_themeEditorStatus != nullptr) {
         if (!loaded) {
             _themeEditorStatus->setText(L"Open a Theme JSON to edit tokens and styles");

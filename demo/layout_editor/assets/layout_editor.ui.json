@@ -455,7 +455,13 @@
                   },
                   { "type": "ListView", "id": "theme_token_list", "style": "__le_input", "size": { "w": 272, "h": 104 }, "slot": { "height": 104 }, "itemHeight": 26 },
                   { "type": "TextInput", "id": "theme_token_key", "style": "__le_input", "text": "", "placeholder": "color.brand.primary or space.md", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
-                  { "type": "TextInput", "id": "theme_token_value", "style": "__le_input", "text": "", "placeholder": "#RRGGBBAA or number", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  {
+                    "type": "HBox", "id": "row_theme_token_value", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "TextInput", "id": "theme_token_value", "style": "__le_input", "text": "", "placeholder": "#RRGGBBAA or number", "size": { "w": 237, "h": 30 }, "slot": { "width": 237 } },
+                      { "type": "Button", "id": "btn_theme_token_swatch", "text": "", "size": { "w": 30, "h": 30 }, "slot": { "width": 30 } }
+                    ]
+                  },
                   {
                     "type": "HBox", "id": "row_theme_token_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
                     "children": [
@@ -465,6 +471,21 @@
                     ]
                   },
                   { "type": "ListView", "id": "theme_style_list", "style": "__le_input", "size": { "w": 272, "h": 88 }, "slot": { "height": 88 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_theme_style_identity", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "TextInput", "id": "theme_style_fragment", "style": "__le_input", "text": "", "placeholder": "Fragment", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "TextInput", "id": "theme_style_id", "style": "__le_input", "text": "", "placeholder": "Style ID", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  {
+                    "type": "HBox", "id": "row_theme_style_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_theme_style_new", "style": "__le_command", "text": "New", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } },
+                      { "type": "Button", "id": "btn_theme_style_duplicate", "style": "__le_command", "text": "Duplicate", "size": { "w": 90, "h": 30 }, "slot": { "width": 90 } },
+                      { "type": "Button", "id": "btn_theme_style_remove", "style": "__le_command", "text": "Remove", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } }
+                    ]
+                  },
                   { "type": "ComboBox", "id": "theme_style_property", "style": "__le_input", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "TextInput", "id": "theme_style_binding", "style": "__le_input", "text": "$color.accent", "placeholder": "$token or literal", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "Button", "id": "btn_theme_style_apply", "style": "__le_command", "text": "Apply style binding", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },

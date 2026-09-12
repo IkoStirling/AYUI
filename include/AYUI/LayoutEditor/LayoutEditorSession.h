@@ -366,11 +366,16 @@ private:
     void syncReuseEditor();
     void syncExternalComponentEditor();
     bool saveExternalComponentLibrary();
-    void syncThemeEditor();
+    void syncThemeEditor(const std::string& preferredToken = {},
+                         const std::string& preferredStyle = {});
     void applyThemeToken();
+    void openThemeTokenColorPicker();
     void renameThemeToken();
     void removeThemeToken();
     void applyThemeStyleBinding();
+    void createThemeStyle();
+    void duplicateThemeStyle();
+    void removeThemeStyle();
     void syncProjectRefactorEditor();
     void seedProjectRefactorValue();
     void runProjectRefactor(bool apply);
@@ -692,7 +697,10 @@ private:
     ListView* _themeTokenList = nullptr;
     TextInput* _themeTokenKey = nullptr;
     TextInput* _themeTokenValue = nullptr;
+    Button* _themeTokenSwatch = nullptr;
     ListView* _themeStyleList = nullptr;
+    TextInput* _themeStyleFragment = nullptr;
+    TextInput* _themeStyleId = nullptr;
     ComboBox* _themeStyleProperty = nullptr;
     TextInput* _themeStyleBinding = nullptr;
     TextLabel* _themeEditorStatus = nullptr;
