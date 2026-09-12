@@ -938,6 +938,11 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
 
 按优先级记录剩余边界：
 
+> **平台优先级（2026-09-12）**：AYUI 当前产品化、回归测试和发布门禁以 **Windows** 为主目标。
+> Linux/macOS 的系统字体发现、fallback 一致性、彩色 Emoji、可变字体以及真实图形后端/字体集矩阵
+> 统一放入最低优先队列；现有 portable 实现作为未来接入基础继续保留，但不代表这两个平台已经达到
+> Windows 同等级的生产验收状态，也不得因补齐其平台差异而阻塞当前 Windows 功能和稳定性工作。
+
 1. Production UI Layer 已完成多 damage region、root/Always/Auto 子树分层、strict budget/LRU 压力
    降级、统计反馈及 D3D11/D3D12/Vulkan/OpenGL 的 36-capture 矩阵。下一步是基于历史 repaint cost
    和命中率自适应 Auto 阈值、按 Layer 类别分预算，以及 filtered/backdrop Layer；不能让策略判断
@@ -951,6 +956,8 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    字体、鼠标与键盘 selection、剪贴板编辑、IME、undo/redo，以及 Windows/Linux/macOS 字体发现。
    运行时 texture/widget handle 明确不序列化；JSON 只保存 inline descriptor。下一层是 UI Automation/
    AT-SPI/NSAccessibility 的 TextPattern/selection range，以及由生成数据提供的完整 Unicode line-break 表。
+   其中 Windows 字体路径继续进入主线门禁；Linux/macOS 字体实机发现与渲染验证属于最低优先级，
+   仅在不影响 Windows 主线时推进。
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
@@ -999,7 +1006,8 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    或单测覆盖；本阶段新增 Windows UIA provider、Unicode grapheme/Bidi/断行、HarfBuzz direction/
    language 与 family/weight 多 face atlas；RichText 第二阶段继续补齐跨字体 fallback、inline object、
    selection/editing、可变/彩色字形和三平台字体发现。下一阶段沿现有 adapter/text/backend 契约补
-   平台 provider 与 TextPattern，不复制核心路径。
+   平台 provider 与 TextPattern，不复制核心路径。当前排期只把 Windows provider、字体路径和视觉
+   回归作为生产主线；Linux/macOS 字体兼容与实机矩阵明确处于最低优先队列。
 
 `OrderedRuns` 与 `OverlapAware` 只允许在提交顺序规划上分叉；图元记录、合批兼容键、
 顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明
