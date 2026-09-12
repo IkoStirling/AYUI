@@ -235,6 +235,113 @@ UILayoutLoader::UILayoutLoader()
 UILayoutLoader::~UILayoutLoader() {
 }
 
+void UILayoutLoader::retranslate(Widget* root) const
+{
+    if (root == nullptr || !_textResolver) return;
+
+    const auto resolve = [this, root](const char* property,
+                                      const std::wstring& fallback) {
+        const std::string& key = root->getLocalizationKey(property);
+        return key.empty() ? fallback : _textResolver(key, fallback);
+    };
+
+    if (!root->getLocalizationKey("accessibilityLabel").empty()) {
+        root->setAccessibilityLabel(resolve(
+            "accessibilityLabel", root->getAccessibilityLabel()));
+    }
+    if (!root->getLocalizationKey("accessibilityDescription").empty()) {
+        root->setAccessibilityDescription(resolve(
+            "accessibilityDescription", root->getAccessibilityDescription()));
+    }
+    if (!root->getLocalizationKey("accessibilityValue").empty()) {
+        root->setAccessibilityValue(resolve(
+            "accessibilityValue", root->getAccessibilityValue()));
+    }
+
+    if (!root->getLocalizationKey("text").empty()) {
+        if (auto* value = dynamic_cast<Button*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<TextLabel*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<CheckBox*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<RadioButton*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<TextInput*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<TextArea*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<Tooltip*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        } else if (auto* value = dynamic_cast<MenuItem*>(root)) {
+            value->setText(resolve("text", value->getText()));
+        }
+    }
+
+    if (!root->getLocalizationKey("title").empty()) {
+        if (auto* value = dynamic_cast<DockCard*>(root)) {
+            value->setTitle(resolve("title", value->getTitle()));
+        } else if (auto* value = dynamic_cast<Window*>(root)) {
+            value->setTitle(resolve("title", value->getTitle()));
+        }
+    }
+
+    if (auto* dialog = dynamic_cast<ModalDialog*>(root)) {
+        if (!root->getLocalizationKey("acceptText").empty()) {
+            dialog->setAcceptText(resolve(
+                "acceptText", dialog->getAcceptText()));
+        }
+        if (!root->getLocalizationKey("rejectText").empty()) {
+            dialog->setRejectText(resolve(
+                "rejectText", dialog->getRejectText()));
+        }
+    }
+
+    const auto& itemKeys = root->getLocalizationKeys("items");
+    if (!itemKeys.empty()) {
+        const auto translateItems = [this, &itemKeys](
+            const std::vector<std::wstring>& fallbacks) {
+            std::vector<std::wstring> translated;
+            translated.reserve(std::max(itemKeys.size(), fallbacks.size()));
+            const std::size_t count = std::max(
+                itemKeys.size(), fallbacks.size());
+            for (std::size_t i = 0; i < count; ++i) {
+                const std::wstring fallback = i < fallbacks.size()
+                    ? fallbacks[i] : std::wstring{};
+                translated.push_back(i < itemKeys.size()
+                    && !itemKeys[i].empty()
+                    ? _textResolver(itemKeys[i], fallback)
+                    : fallback);
+            }
+            return translated;
+        };
+
+        if (auto* value = dynamic_cast<ComboBox*>(root)) {
+            const int selected = value->getSelectedIndex();
+            value->setItems(translateItems(value->getItemsRef()));
+            value->setSelectedIndex(selected);
+        } else if (auto* value = dynamic_cast<ListView*>(root)) {
+            const std::vector<int> selected = value->getSelectedIndices();
+            const int anchor = value->getAnchorIndex();
+            const math::FVector2 scroll = value->getScrollOffset();
+            value->setItems(translateItems(value->getItemsRef()));
+            value->setSelectedIndices(selected);
+            value->setAnchorIndex(anchor);
+            value->setScrollOffset(scroll);
+        } else if (auto* value = dynamic_cast<TileView*>(root)) {
+            const std::vector<int> selected = value->getSelectedIndices();
+            const int focused = value->getFocusedIndex();
+            const math::FVector2 scroll = value->getScrollOffset();
+            value->setItems(translateItems(value->getItemsRef()));
+            value->setSelectedIndices(selected);
+            value->setFocusedIndex(focused, false);
+            value->setScrollOffset(scroll);
+        }
+    }
+
+    for (Widget* child : root->getChildren()) retranslate(child);
+}
+
 std::wstring UILayoutLoader::resolveLocalizedString(
     JsonHandle h, std::string_view valueProperty,
     std::string_view keyProperty) const {

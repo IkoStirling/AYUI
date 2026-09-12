@@ -45,6 +45,11 @@ public:
     }
     const TextResolver& textResolver() const { return _textResolver; }
 
+    // Re-resolve every localized property in an existing widget tree without
+    // rebuilding it. Runtime state such as selection and scroll position is
+    // preserved for localized item collections.
+    void retranslate(Widget* root) const;
+
     Widget* loadFromFile(const std::string& filepath);
     Widget* loadFromString(const std::string& json);
 

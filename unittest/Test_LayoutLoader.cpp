@@ -275,11 +275,21 @@ TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
 
 TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
     UILayoutLoader loader;
-    loader.setTextResolver([](std::string_view key, std::wstring_view fallback) {
-        if (key == "ui.test.button") return std::wstring(L"Translated");
-        if (key == "ui.test.window") return std::wstring(L"Localized Window");
-        if (key == "ui.test.item.first") return std::wstring(L"First Localized");
-        if (key == "ui.test.a11y") return std::wstring(L"Accessible Localized");
+    bool alternateLanguage = false;
+    loader.setTextResolver([&alternateLanguage](
+        std::string_view key, std::wstring_view fallback) {
+        if (key == "ui.test.button") return alternateLanguage
+            ? std::wstring(L"Translated alternate")
+            : std::wstring(L"Translated");
+        if (key == "ui.test.window") return alternateLanguage
+            ? std::wstring(L"Alternate Window")
+            : std::wstring(L"Localized Window");
+        if (key == "ui.test.item.first") return alternateLanguage
+            ? std::wstring(L"First alternate")
+            : std::wstring(L"First Localized");
+        if (key == "ui.test.a11y") return alternateLanguage
+            ? std::wstring(L"Accessible alternate")
+            : std::wstring(L"Accessible Localized");
         return std::wstring(fallback);
     });
 
@@ -309,7 +319,18 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
     if (combo != nullptr && combo->getItemCount() == 2u) {
         CHECK(combo->getItem(0) == L"First Localized");
         CHECK(combo->getItem(1) == L"Second fallback");
+        combo->setSelectedIndex(1);
     }
+
+    alternateLanguage = true;
+    loader.retranslate(root);
+    CHECK(window != nullptr && window->getTitle() == L"Alternate Window");
+    CHECK(button != nullptr && button->getText() == L"Translated alternate");
+    CHECK(button != nullptr
+          && button->getAccessibilityLabel() == L"Accessible alternate");
+    CHECK(combo != nullptr && combo->getItem(0) == L"First alternate");
+    CHECK(combo != nullptr && combo->getItem(1) == L"Second fallback");
+    CHECK(combo != nullptr && combo->getSelectedIndex() == 1);
     destroyWidgetTree(root);
 }
 
