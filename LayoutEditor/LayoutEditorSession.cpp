@@ -46,12 +46,14 @@
 #include "AYUI/UIKeyCode.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <codecvt>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -271,6 +273,22 @@ std::string readFileToString(const std::string& path) {
     std::ostringstream ss;
     ss << file.rdbuf();
     return ss.str();
+}
+
+bool writeStringToFile(const std::string& path, const std::string& text) {
+    if (path.empty()) return false;
+    std::error_code error;
+    const std::filesystem::path parent =
+        std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, error);
+        if (error) return false;
+    }
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file.is_open()) return false;
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    file.flush();
+    return file.good();
 }
 
 struct DesignerGridEntry {
@@ -679,6 +697,19 @@ void LayoutEditorSession::detach() {
     _reuseName = nullptr;
     _reuseStatus = nullptr;
     _suppressReuse = false;
+    _externalComponentList = nullptr;
+    _externalComponentId = nullptr;
+    _externalComponentCategory = nullptr;
+    _externalComponentStatus = nullptr;
+    _suppressExternalComponents = false;
+    _themeTokenList = nullptr;
+    _themeTokenKey = nullptr;
+    _themeTokenValue = nullptr;
+    _themeStyleList = nullptr;
+    _themeStyleProperty = nullptr;
+    _themeStyleBinding = nullptr;
+    _themeEditorStatus = nullptr;
+    _suppressThemeEditor = false;
     _responsiveBreakpoint = nullptr;
     _responsiveVisibility = nullptr;
     _responsiveStatus = nullptr;
@@ -917,6 +948,227 @@ bool LayoutEditorSession::removeReusableBlock(const std::string& name) {
     syncReuseEditor();
     setStatus(utf8ToWide("Reusable block removed: " + name));
     return true;
+}
+
+void LayoutEditorSession::setExternalComponentLibraryPath(std::string path) {
+    if (_externalComponentLibraryPath == path) return;
+    _externalComponentLibraryPath = std::move(path);
+    refreshExternalComponentLibrary();
+}
+
+bool LayoutEditorSession::refreshExternalComponentLibrary() {
+    _externalComponentLibrary.clear();
+    if (_externalComponentLibraryPath.empty()) {
+        syncExternalComponentEditor();
+        return true;
+    }
+    const std::string encoded = readFileToString(_externalComponentLibraryPath);
+    if (encoded.empty()) {
+        syncExternalComponentEditor();
+        return true;
+    }
+    std::string error;
+    if (!_externalComponentLibrary.deserialize(encoded, &error)) {
+        setStatus(L"Component library rejected — " + utf8ToWide(error));
+        syncExternalComponentEditor();
+        return false;
+    }
+    syncExternalComponentEditor();
+    return true;
+}
+
+bool LayoutEditorSession::saveExternalComponentLibrary() {
+    if (_externalComponentLibraryPath.empty()) {
+        setStatus(L"Project component library path is not configured");
+        return false;
+    }
+    if (!writeStringToFile(_externalComponentLibraryPath,
+                           _externalComponentLibrary.serialize(true))) {
+        setStatus(L"Project component library could not be saved");
+        return false;
+    }
+    return true;
+}
+
+bool LayoutEditorSession::defineExternalComponent(
+    const std::string& id, const std::string& displayName,
+    const std::string& category) {
+    if (_selected == nullptr || _selection.size() != 1u) {
+        setStatus(L"Select exactly one Widget to create a project component");
+        return false;
+    }
+    LayoutComponentLibrary updated = _externalComponentLibrary;
+    std::string error;
+    if (!updated.define(id, displayName, category, _selected, &error)) {
+        setStatus(L"Project component rejected — " + utf8ToWide(error));
+        return false;
+    }
+    const LayoutComponentLibrary previous = _externalComponentLibrary;
+    _externalComponentLibrary = std::move(updated);
+    if (!saveExternalComponentLibrary()) {
+        _externalComponentLibrary = previous;
+        return false;
+    }
+    syncExternalComponentEditor();
+    setStatus(L"Project component saved — " + utf8ToWide(id));
+    return true;
+}
+
+bool LayoutEditorSession::insertExternalComponent(const std::string& id) {
+    Widget* instance = _externalComponentLibrary.instantiate(id);
+    if (instance == nullptr) {
+        setStatus(L"Project component could not be instantiated");
+        return false;
+    }
+    Widget* parent = pickParentForAdd();
+    if (parent == nullptr) {
+        destroyWidgetTree(instance);
+        return false;
+    }
+    remintTreeIds(instance);
+    pushUndo(LayoutEditKind::Insert, "Insert project component");
+    if (!placeNewWidget(instance, parent, -1, nullptr)) {
+        _commandStack.discardLastUndo();
+        destroyWidgetTree(instance);
+        return false;
+    }
+    rehydrateRuntimePresentation(instance);
+    freezeDocumentInteraction(instance);
+    markDirty(true);
+    refreshHierarchy();
+    select(instance, false);
+    setStatus(L"Project component inserted — " + utf8ToWide(id));
+    return true;
+}
+
+bool LayoutEditorSession::removeExternalComponent(const std::string& id) {
+    LayoutComponentLibrary updated = _externalComponentLibrary;
+    if (!updated.remove(id)) return false;
+    const LayoutComponentLibrary previous = _externalComponentLibrary;
+    _externalComponentLibrary = std::move(updated);
+    if (!saveExternalComponentLibrary()) {
+        _externalComponentLibrary = previous;
+        return false;
+    }
+    syncExternalComponentEditor();
+    setStatus(L"Project component removed — " + utf8ToWide(id));
+    return true;
+}
+
+bool LayoutEditorSession::openThemeDocument(const std::string& path) {
+    const std::string encoded = readFileToString(path);
+    if (encoded.empty()) {
+        setStatus(L"Theme file could not be read");
+        return false;
+    }
+    LayoutThemeEditorModel loaded;
+    std::string error;
+    if (!loaded.load(encoded, &error)) {
+        setStatus(L"Theme rejected — " + utf8ToWide(error));
+        return false;
+    }
+    _themeEditorModel = std::move(loaded);
+    _themeDocumentPath = path;
+    _themeDocumentDirty = false;
+    syncThemeEditor();
+    setStatus(L"Theme opened — " + utf8ToWide(path));
+    return true;
+}
+
+bool LayoutEditorSession::saveThemeDocument() {
+    if (_themeDocumentPath.empty()) {
+        setStatus(L"Open a Theme JSON file before saving");
+        return false;
+    }
+    if (!writeStringToFile(_themeDocumentPath,
+                           _themeEditorModel.serialize(true))) {
+        setStatus(L"Theme file could not be saved");
+        return false;
+    }
+    _themeDocumentDirty = false;
+    syncThemeEditor();
+    setStatus(L"Theme saved — " + utf8ToWide(_themeDocumentPath));
+    return true;
+}
+
+void LayoutEditorSession::applyThemeToken() {
+    if (_themeTokenKey == nullptr || _themeTokenValue == nullptr) return;
+    const std::string key = wideToUtf8(trimWide(_themeTokenKey->getText()));
+    const std::wstring value = trimWide(_themeTokenValue->getText());
+    std::string error;
+    bool changed = false;
+    if (key.rfind("color.", 0) == 0) {
+        math::FVector4 color;
+        changed = parseColorHex(value, color)
+            && _themeEditorModel.setColorToken(key, color, &error);
+        if (!changed && error.empty()) error = "Color token expects #RRGGBB or #RRGGBBAA";
+    } else {
+        float number = 0.0f;
+        changed = parseFloat(value, number)
+            && _themeEditorModel.setFloatToken(key, number, &error);
+        if (!changed && error.empty()) error = "Float token expects a number";
+    }
+    if (!changed) {
+        setStatus(L"Theme token rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor();
+}
+
+void LayoutEditorSession::renameThemeToken() {
+    if (_themeTokenList == nullptr || _themeTokenKey == nullptr) return;
+    const std::vector<LayoutThemeTokenEntry> entries = _themeEditorModel.tokens();
+    const int index = _themeTokenList->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(entries.size())) return;
+    const std::string replacement = wideToUtf8(
+        trimWide(_themeTokenKey->getText()));
+    std::string error;
+    if (!_themeEditorModel.renameToken(
+            entries[static_cast<size_t>(index)].key, replacement, &error)) {
+        setStatus(L"Theme token rename rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor();
+}
+
+void LayoutEditorSession::removeThemeToken() {
+    if (_themeTokenList == nullptr) return;
+    const std::vector<LayoutThemeTokenEntry> entries = _themeEditorModel.tokens();
+    const int index = _themeTokenList->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(entries.size())) return;
+    std::string error;
+    if (!_themeEditorModel.removeToken(
+            entries[static_cast<size_t>(index)].key, false, &error)) {
+        setStatus(L"Theme token removal rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor();
+}
+
+void LayoutEditorSession::applyThemeStyleBinding() {
+    if (_themeStyleList == nullptr || _themeStyleProperty == nullptr
+        || _themeStyleBinding == nullptr) return;
+    const std::vector<LayoutThemeStyleEntry> entries = _themeEditorModel.styles();
+    const int styleIndex = _themeStyleList->getSelectedIndex();
+    const int propertyIndex = _themeStyleProperty->getSelectedIndex();
+    if (styleIndex < 0 || styleIndex >= static_cast<int>(entries.size())
+        || propertyIndex < 0 || propertyIndex > 2) return;
+    static const char* properties[] = {
+        "backgroundColor", "borderColor", "textColor"
+    };
+    const LayoutThemeStyleEntry& style = entries[static_cast<size_t>(styleIndex)];
+    std::string error;
+    if (!_themeEditorModel.setStyleProperty(
+            style.fragment, style.styleId, properties[propertyIndex],
+            wideToUtf8(trimWide(_themeStyleBinding->getText())), &error)) {
+        setStatus(L"Theme style binding rejected — " + utf8ToWide(error));
+        return;
+    }
+    _themeDocumentDirty = true;
+    syncThemeEditor();
 }
 
 void LayoutEditorSession::setResponsiveVisibility(
@@ -2097,6 +2349,94 @@ void LayoutEditorSession::wireChrome() {
         }
     });
 
+    _externalComponentList = dynamic_cast<ListView*>(
+        findChromeById("component_library_list"));
+    _externalComponentId = dynamic_cast<TextInput*>(
+        findChromeById("component_library_id"));
+    _externalComponentCategory = dynamic_cast<TextInput*>(
+        findChromeById("component_library_category"));
+    _externalComponentStatus = dynamic_cast<TextLabel*>(
+        findChromeById("component_library_status"));
+    if (_externalComponentList != nullptr) {
+        _externalComponentList->setSelectionMode(ListView::SelectionMode::Single);
+        _externalComponentList->setOnSelectionChanged([this](int index) {
+            if (_suppressExternalComponents || index < 0
+                || index >= static_cast<int>(
+                    _externalComponentLibrary.components().size())) return;
+            const LayoutComponentDefinition& definition =
+                _externalComponentLibrary.components()[static_cast<size_t>(index)];
+            if (_externalComponentId != nullptr) {
+                _externalComponentId->setText(utf8ToWide(definition.id));
+            }
+            if (_externalComponentCategory != nullptr) {
+                _externalComponentCategory->setText(
+                    utf8ToWide(definition.category));
+            }
+            syncExternalComponentEditor();
+        });
+    }
+    bindBtn("btn_component_library_save", [this]() {
+        const std::string id = _externalComponentId != nullptr
+            ? wideToUtf8(trimWide(_externalComponentId->getText()))
+            : std::string{};
+        const std::string category = _externalComponentCategory != nullptr
+            ? wideToUtf8(trimWide(_externalComponentCategory->getText()))
+            : std::string{};
+        defineExternalComponent(id, id, category);
+    });
+    bindBtn("btn_component_library_insert", [this]() {
+        const int index = _externalComponentList != nullptr
+            ? _externalComponentList->getSelectedIndex() : -1;
+        if (index >= 0 && index < static_cast<int>(
+                _externalComponentLibrary.components().size())) {
+            insertExternalComponent(_externalComponentLibrary.components()[
+                static_cast<size_t>(index)].id);
+        }
+    });
+    bindBtn("btn_component_library_remove", [this]() {
+        const int index = _externalComponentList != nullptr
+            ? _externalComponentList->getSelectedIndex() : -1;
+        if (index >= 0 && index < static_cast<int>(
+                _externalComponentLibrary.components().size())) {
+            removeExternalComponent(_externalComponentLibrary.components()[
+                static_cast<size_t>(index)].id);
+        }
+    });
+
+    _themeTokenList = dynamic_cast<ListView*>(findChromeById("theme_token_list"));
+    _themeTokenKey = dynamic_cast<TextInput*>(findChromeById("theme_token_key"));
+    _themeTokenValue = dynamic_cast<TextInput*>(findChromeById("theme_token_value"));
+    _themeStyleList = dynamic_cast<ListView*>(findChromeById("theme_style_list"));
+    _themeStyleProperty = dynamic_cast<ComboBox*>(
+        findChromeById("theme_style_property"));
+    _themeStyleBinding = dynamic_cast<TextInput*>(
+        findChromeById("theme_style_binding"));
+    _themeEditorStatus = dynamic_cast<TextLabel*>(
+        findChromeById("theme_editor_status"));
+    if (_themeTokenList != nullptr) {
+        _themeTokenList->setSelectionMode(ListView::SelectionMode::Single);
+        _themeTokenList->setOnSelectionChanged([this](int) {
+            if (!_suppressThemeEditor) syncThemeEditor();
+        });
+    }
+    if (_themeStyleList != nullptr) {
+        _themeStyleList->setSelectionMode(ListView::SelectionMode::Single);
+    }
+    if (_themeStyleProperty != nullptr) {
+        _themeStyleProperty->setItems({L"Background", L"Border", L"Text"});
+        _themeStyleProperty->setSelectedIndex(0);
+    }
+    bindBtn("btn_theme_open", [this]() {
+        if (_themePicker == nullptr) return;
+        const std::string path = _themePicker();
+        if (!path.empty()) openThemeDocument(path);
+    });
+    bindBtn("btn_theme_save", [this]() { saveThemeDocument(); });
+    bindBtn("btn_theme_token_apply", [this]() { applyThemeToken(); });
+    bindBtn("btn_theme_token_rename", [this]() { renameThemeToken(); });
+    bindBtn("btn_theme_token_remove", [this]() { removeThemeToken(); });
+    bindBtn("btn_theme_style_apply", [this]() { applyThemeStyleBinding(); });
+
     _responsiveBreakpoint = dynamic_cast<ComboBox*>(
         findChromeById("responsive_breakpoint"));
     _responsiveVisibility = dynamic_cast<ComboBox*>(
@@ -2359,6 +2699,8 @@ void LayoutEditorSession::wireChrome() {
     refreshTextureResources();
     syncPreviewControls();
     syncReuseEditor();
+    syncExternalComponentEditor();
+    syncThemeEditor();
     syncResponsiveEditor();
     syncAnimationEditor();
     refreshValidation();
@@ -3223,6 +3565,25 @@ void LayoutEditorSession::applyProperty(const std::string& field,
         return;
     }
 
+    // Apply every shared Inspector field to the whole selection. Geometry
+    // and style already have native group implementations below because
+    // they need parent-layout validation and one shared refresh.
+    if (_selection.size() > 1u && field != "style" && field != "x" &&
+        field != "y" && field != "w" && field != "h") {
+        const std::vector<Widget*> targets = _selection;
+        Widget* const savedPrimary = _selected;
+        for (Widget* target : targets) {
+            if (target == nullptr) continue;
+            _selected = target;
+            _selection.assign(1u, target);
+            applyProperty(field, value);
+        }
+        _selection = targets;
+        _selected = savedPrimary;
+        syncPropertyStrip();
+        return;
+    }
+
     if (field == "style") {
         const std::string styleId = wideToUtf8(value);
         const std::vector<Widget*> targets = _selection.size() > 1u
@@ -3896,6 +4257,29 @@ std::wstring LayoutEditorSession::propertyValueForWidget(
         }
         return {};
     }
+    if (field == "items") {
+        std::vector<std::wstring> items;
+        if (auto* combo = dynamic_cast<ComboBox*>(widget)) {
+            items = combo->getItemsRef();
+        } else if (auto* list = dynamic_cast<ListView*>(widget)) {
+            items = list->getItemsRef();
+        } else if (auto* tiles = dynamic_cast<TileView*>(widget)) {
+            items = tiles->getItemsRef();
+        } else if (auto* tree = dynamic_cast<TreeView*>(widget)) {
+            for (size_t i = 0; i < tree->getNodeCount(); ++i) {
+                items.push_back(tree->getNodeData(i).label);
+            }
+        } else if (auto* strip = dynamic_cast<TabStrip*>(widget)) {
+            for (int i = 0; i < strip->getTabCount(); ++i) {
+                items.push_back(strip->getTabLabel(i));
+            }
+        } else if (auto* tabs = dynamic_cast<TabControl*>(widget)) {
+            for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
+                items.push_back(tabs->getTabLabel(i));
+            }
+        }
+        return joinItems(items);
+    }
     if (field == "checked") {
         if (auto* check = dynamic_cast<CheckBox*>(widget))
             return check->isChecked() ? L"true" : L"false";
@@ -3958,8 +4342,32 @@ std::wstring LayoutEditorSession::propertyValueForWidget(
             }
         }
     }
-    if (widget == _selected) return schemaPropertyValue(field);
-    return {};
+    if (widget->hasAnchorLayout()) {
+        const AnchorLayout& anchor = widget->getAnchorLayout();
+        if (field == "anchorMinX") return formatFloat(anchor.anchorMin.x);
+        if (field == "anchorMinY") return formatFloat(anchor.anchorMin.y);
+        if (field == "anchorMaxX") return formatFloat(anchor.anchorMax.x);
+        if (field == "anchorMaxY") return formatFloat(anchor.anchorMax.y);
+        if (field == "offsetMinX") return formatFloat(anchor.offsetMin.x);
+        if (field == "offsetMinY") return formatFloat(anchor.offsetMin.y);
+        if (field == "offsetMaxX") return formatFloat(anchor.offsetMax.x);
+        if (field == "offsetMaxY") return formatFloat(anchor.offsetMax.y);
+        if (field == "pivotX") return formatFloat(anchor.pivot.x);
+        if (field == "pivotY") return formatFloat(anchor.pivot.y);
+    }
+    return schemaPropertyValueForWidget(widget, field);
+}
+
+std::wstring LayoutEditorSession::commonPropertyValue(
+    const std::string& field) const {
+    if (_selection.empty()) return propertyValueForWidget(_selected, field);
+    const std::wstring first = propertyValueForWidget(_selection.front(), field);
+    for (size_t i = 1; i < _selection.size(); ++i) {
+        if (propertyValueForWidget(_selection[i], field) != first) {
+            return L"\u2014";
+        }
+    }
+    return first;
 }
 
 void LayoutEditorSession::beginPropertyMutation(
@@ -3973,9 +4381,7 @@ void LayoutEditorSession::beginPropertyMutation(
         return;
     }
 
-    const bool multiTarget = field == "x" || field == "y" ||
-        field == "w" || field == "h" || field == "style";
-    const std::vector<Widget*> targets = multiTarget && _selection.size() > 1u
+    const std::vector<Widget*> targets = _selection.size() > 1u
         ? _selection : std::vector<Widget*>{_selected};
     PendingPropertyMutation pending;
     pending.field = field;
@@ -5368,10 +5774,31 @@ void LayoutEditorSession::updatePropPanelVisibility() {
         AuthoringProperty::Id, AuthoringProperty::X, AuthoringProperty::Y,
         AuthoringProperty::Width, AuthoringProperty::Height,
         AuthoringProperty::Style};
-    const PropertySchema& properties = authoring != nullptr
-        ? authoring->properties : fallbackProperties;
+    const auto propertiesFor = [&](Widget* widget) -> const PropertySchema& {
+        const WidgetAuthoringDescriptor* descriptor =
+            WidgetAuthoringRegistry::get().findForWidget(widget);
+        return descriptor != nullptr
+            ? descriptor->properties : fallbackProperties;
+    };
     const auto hasProperty = [&](AuthoringProperty property) {
-        return hasSel && properties.contains(property);
+        if (!hasSel) return false;
+        const std::vector<Widget*> targets = _selection.empty()
+            ? std::vector<Widget*>{_selected} : _selection;
+        return std::all_of(targets.begin(), targets.end(),
+            [&](Widget* widget) {
+                return widget != nullptr &&
+                    propertiesFor(widget).contains(property);
+            });
+    };
+    const auto hasSection = [&](PropertySection section) {
+        if (!hasSel) return false;
+        const std::vector<Widget*> targets = _selection.empty()
+            ? std::vector<Widget*>{_selected} : _selection;
+        return std::all_of(targets.begin(), targets.end(),
+            [&](Widget* widget) {
+                return widget != nullptr &&
+                    propertiesFor(widget).hasSection(section);
+            });
     };
     _structuredModel.bind(_selected);
     const LayoutStructuredKind structuredKind = _structuredModel.kind();
@@ -5479,6 +5906,20 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     setChromeVisible("row_reuse_actions", hasDocument);
     setChromeVisible("reuse_status", hasDocument);
     for (const char* id : {
+             "section_component_library", "component_library_id",
+             "component_library_category", "component_library_list",
+             "row_component_library_actions", "component_library_status"}) {
+        setChromeVisible(id, hasDocument);
+    }
+    for (const char* id : {
+             "section_theme_editor", "row_theme_file", "theme_token_list",
+             "theme_token_key", "theme_token_value", "row_theme_token_actions",
+             "theme_style_list", "theme_style_property",
+             "theme_style_binding", "btn_theme_style_apply",
+             "theme_editor_status"}) {
+        setChromeVisible(id, hasDocument);
+    }
+    for (const char* id : {
              "section_animation", "animation_clip_name",
              "animation_clip_list", "row_animation_clip_actions",
              "lbl_animation_playback", "row_animation_playback",
@@ -5489,18 +5930,12 @@ void LayoutEditorSession::updatePropPanelVisibility() {
              "animation_status"}) {
         setChromeVisible(id, hasDocument);
     }
-    setChromeVisible("section_identity", hasSel &&
-        properties.hasSection(PropertySection::Identity));
-    setChromeVisible("section_transform", hasSel &&
-        properties.hasSection(PropertySection::Transform));
-    setChromeVisible("section_content", hasSel &&
-        properties.hasSection(PropertySection::Content));
-    setChromeVisible("section_appearance", hasSel &&
-        properties.hasSection(PropertySection::Appearance));
-    setChromeVisible("section_layout", hasSel &&
-        properties.hasSection(PropertySection::Layout));
-    setChromeVisible("section_interaction", hasSel &&
-        properties.hasSection(PropertySection::Interaction));
+    setChromeVisible("section_identity", hasSection(PropertySection::Identity));
+    setChromeVisible("section_transform", hasSection(PropertySection::Transform));
+    setChromeVisible("section_content", hasSection(PropertySection::Content));
+    setChromeVisible("section_appearance", hasSection(PropertySection::Appearance));
+    setChromeVisible("section_layout", hasSection(PropertySection::Layout));
+    setChromeVisible("section_interaction", hasSection(PropertySection::Interaction));
 
     for (const PropertyFieldSchema& field : allPropertyFieldSchemas()) {
         bool visible = hasProperty(field.property);
@@ -5603,6 +6038,8 @@ void LayoutEditorSession::syncPropertyStrip() {
         syncTextureBrowser();
         syncStyleInspector();
         syncReuseEditor();
+        syncExternalComponentEditor();
+        syncThemeEditor();
         syncResponsiveEditor();
         syncAnimationEditor();
         if (_ui != nullptr) {
@@ -5611,48 +6048,26 @@ void LayoutEditorSession::syncPropertyStrip() {
         }
         return;
     }
-    setField(_propId, utf8ToWide(_selected->getId()));
-    setField(_propX, formatFloat(_selected->getPosition().x));
-    setField(_propY, formatFloat(_selected->getPosition().y));
-    const math::FVector2 inspectorSize = _selected == _docRoot
-        ? authoredRootSize() : _selected->getSize();
-    setField(_propW, formatFloat(inspectorSize.x));
-    setField(_propH, formatFloat(inspectorSize.y));
-    if (_selection.size() > 1u) {
-        auto commonFloat = [this](auto getter) {
-            const float first = getter(_selection.front());
-            for (size_t i = 1; i < _selection.size(); ++i) {
-                if (std::fabs(getter(_selection[i]) - first) > 0.0001f) {
-                    return std::wstring(L"\u2014");
-                }
-            }
-            return formatFloat(first);
-        };
-        setField(_propX, commonFloat([](Widget* widget) {
-            return widget->getPosition().x;
-        }));
-        setField(_propY, commonFloat([](Widget* widget) {
-            return widget->getPosition().y;
-        }));
-        setField(_propW, commonFloat([](Widget* widget) {
-            return widget->getSize().x;
-        }));
-        setField(_propH, commonFloat([](Widget* widget) {
-            return widget->getSize().y;
-        }));
-    }
-    if (_selected->hasAnchorLayout()) {
-        const AnchorLayout& anchor = _selected->getAnchorLayout();
-        setField(_propAnchorMinX, formatFloat(anchor.anchorMin.x));
-        setField(_propAnchorMinY, formatFloat(anchor.anchorMin.y));
-        setField(_propAnchorMaxX, formatFloat(anchor.anchorMax.x));
-        setField(_propAnchorMaxY, formatFloat(anchor.anchorMax.y));
-        setField(_propOffsetMinX, formatFloat(anchor.offsetMin.x));
-        setField(_propOffsetMinY, formatFloat(anchor.offsetMin.y));
-        setField(_propOffsetMaxX, formatFloat(anchor.offsetMax.x));
-        setField(_propOffsetMaxY, formatFloat(anchor.offsetMax.y));
-        setField(_propPivotX, formatFloat(anchor.pivot.x));
-        setField(_propPivotY, formatFloat(anchor.pivot.y));
+    setField(_propId, _selection.size() > 1u
+        ? L"" : utf8ToWide(_selected->getId()));
+    setField(_propX, commonPropertyValue("x"));
+    setField(_propY, commonPropertyValue("y"));
+    setField(_propW, commonPropertyValue("w"));
+    setField(_propH, commonPropertyValue("h"));
+    const bool allAnchored = std::all_of(
+        _selection.begin(), _selection.end(),
+        [](Widget* widget) { return widget != nullptr && widget->hasAnchorLayout(); });
+    if (allAnchored) {
+        setField(_propAnchorMinX, commonPropertyValue("anchorMinX"));
+        setField(_propAnchorMinY, commonPropertyValue("anchorMinY"));
+        setField(_propAnchorMaxX, commonPropertyValue("anchorMaxX"));
+        setField(_propAnchorMaxY, commonPropertyValue("anchorMaxY"));
+        setField(_propOffsetMinX, commonPropertyValue("offsetMinX"));
+        setField(_propOffsetMinY, commonPropertyValue("offsetMinY"));
+        setField(_propOffsetMaxX, commonPropertyValue("offsetMaxX"));
+        setField(_propOffsetMaxY, commonPropertyValue("offsetMaxY"));
+        setField(_propPivotX, commonPropertyValue("pivotX"));
+        setField(_propPivotY, commonPropertyValue("pivotY"));
     } else {
         setField(_propAnchorMinX, L"");
         setField(_propAnchorMinY, L"");
@@ -5665,38 +6080,13 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propPivotX, L"");
         setField(_propPivotY, L"");
     }
-    std::wstring text;
-    getTextPayload(_selected, text);
-    setField(_propText, text);
-    if (auto* image = dynamic_cast<Image*>(_selected)) {
-        setField(_propTexture, utf8ToWide(image->getTextureName()));
-    } else {
-        setField(_propTexture, L"");
-    }
-    std::vector<std::wstring> items;
-    if (auto* combo = dynamic_cast<ComboBox*>(_selected)) {
-        items = combo->getItemsRef();
-    } else if (auto* list = dynamic_cast<ListView*>(_selected)) {
-        items = list->getItemsRef();
-    } else if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
-        items = tiles->getItemsRef();
-    } else if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
-        for (size_t i = 0; i < tree->getNodeCount(); ++i) {
-            items.push_back(tree->getNodeData(i).label);
-        }
-    } else if (auto* strip = dynamic_cast<TabStrip*>(_selected)) {
-        for (int i = 0; i < strip->getTabCount(); ++i) {
-            items.push_back(strip->getTabLabel(i));
-        }
-    } else if (auto* tabs = dynamic_cast<TabControl*>(_selected)) {
-        for (int i = 0; i < static_cast<int>(tabs->getTabCount()); ++i) {
-            items.push_back(tabs->getTabLabel(i));
-        }
-    }
-    setField(_propItems, joinItems(items));
-    setField(_propController, utf8ToWide(_selected->getControllerId()));
+    setField(_propText, commonPropertyValue("text"));
+    setField(_propTexture, commonPropertyValue("texture"));
+    setField(_propItems, commonPropertyValue("items"));
+    setField(_propController, commonPropertyValue("controller"));
     auto syncEvent = [this, &setField](TextInput* field, const char* eventName) {
-        setField(field, utf8ToWide(_selected->getEventBinding(eventName)));
+        setField(field, commonPropertyValue(
+            std::string("event:") + eventName));
     };
     syncEvent(_propOnClick, "onClick");
     syncEvent(_propOnToggled, "onToggled");
@@ -5729,13 +6119,14 @@ void LayoutEditorSession::syncPropertyStrip() {
     syncTextAlignCombos();
     syncEnumCombos();
     syncSchemaPropertyFields();
-    if (auto* box = dynamic_cast<BoxBase*>(_selected)) {
-        setField(_propSpacing, formatFloat(box->getSpacing()));
-        const math::FVector4& pad = box->getPadding();
-        setField(_propPadL, formatFloat(pad.x));
-        setField(_propPadT, formatFloat(pad.y));
-        setField(_propPadR, formatFloat(pad.z));
-        setField(_propPadB, formatFloat(pad.w));
+    const bool allBoxes = std::all_of(_selection.begin(), _selection.end(),
+        [](Widget* widget) { return dynamic_cast<BoxBase*>(widget) != nullptr; });
+    if (allBoxes) {
+        setField(_propSpacing, commonPropertyValue("spacing"));
+        setField(_propPadL, commonPropertyValue("padL"));
+        setField(_propPadT, commonPropertyValue("padT"));
+        setField(_propPadR, commonPropertyValue("padR"));
+        setField(_propPadB, commonPropertyValue("padB"));
     } else {
         setField(_propSpacing, L"");
         setField(_propPadL, L"");
@@ -5749,6 +6140,8 @@ void LayoutEditorSession::syncPropertyStrip() {
     syncTextureBrowser();
     syncStyleInspector();
     syncReuseEditor();
+    syncExternalComponentEditor();
+    syncThemeEditor();
     syncResponsiveEditor();
     syncAnimationEditor();
     if (_ui != nullptr) {
@@ -6355,6 +6748,162 @@ void LayoutEditorSession::syncReuseEditor() {
             ? L"No blocks — save the selected subtree for reuse"
             : std::to_wstring(_reuseLibrary.size()) +
               L" block(s) — inserted copies are independent");
+    }
+}
+
+void LayoutEditorSession::syncExternalComponentEditor() {
+    if (_externalComponentList == nullptr
+        && _externalComponentStatus == nullptr) return;
+    std::string selectedId;
+    if (_externalComponentList != nullptr) {
+        const int oldIndex = _externalComponentList->getSelectedIndex();
+        if (oldIndex >= 0 && oldIndex < static_cast<int>(
+                _externalComponentLibrary.components().size())) {
+            selectedId = _externalComponentLibrary.components()[
+                static_cast<size_t>(oldIndex)].id;
+        }
+    }
+    std::vector<std::wstring> labels;
+    labels.reserve(_externalComponentLibrary.size());
+    for (const LayoutComponentDefinition& definition :
+         _externalComponentLibrary.components()) {
+        std::wstring label;
+        if (!definition.category.empty()) {
+            label = utf8ToWide(definition.category) + L" / ";
+        }
+        label += utf8ToWide(definition.displayName);
+        labels.push_back(std::move(label));
+    }
+    _suppressExternalComponents = true;
+    int selectedIndex = -1;
+    if (_externalComponentList != nullptr) {
+        _externalComponentList->setItems(labels);
+        for (size_t index = 0;
+             index < _externalComponentLibrary.components().size(); ++index) {
+            if (_externalComponentLibrary.components()[index].id == selectedId) {
+                selectedIndex = static_cast<int>(index);
+                break;
+            }
+        }
+        if (selectedIndex < 0 && !_externalComponentLibrary.empty()) {
+            selectedIndex = 0;
+        }
+        _externalComponentList->setSelectedIndex(selectedIndex);
+    }
+    if (selectedIndex >= 0) {
+        const LayoutComponentDefinition& definition =
+            _externalComponentLibrary.components()[
+                static_cast<size_t>(selectedIndex)];
+        if (_externalComponentId != nullptr
+            && _externalComponentId->getText().empty()) {
+            _externalComponentId->setText(utf8ToWide(definition.id));
+        }
+        if (_externalComponentCategory != nullptr
+            && _externalComponentCategory->getText().empty()) {
+            _externalComponentCategory->setText(
+                utf8ToWide(definition.category));
+        }
+    }
+    _suppressExternalComponents = false;
+    const bool oneSelected = _selected != nullptr && _selection.size() == 1u;
+    setChromeEnabled("btn_component_library_save",
+                     oneSelected && !_externalComponentLibraryPath.empty());
+    setChromeEnabled("btn_component_library_insert", selectedIndex >= 0);
+    setChromeEnabled("btn_component_library_remove",
+                     selectedIndex >= 0 && !_externalComponentLibraryPath.empty());
+    if (_externalComponentStatus != nullptr) {
+        if (_externalComponentLibraryPath.empty()) {
+            _externalComponentStatus->setText(L"Project component library is not configured");
+        } else if (_externalComponentLibrary.empty()) {
+            _externalComponentStatus->setText(L"No project components");
+        } else {
+            _externalComponentStatus->setText(
+                std::to_wstring(_externalComponentLibrary.size())
+                + L" reusable project component(s)");
+        }
+    }
+}
+
+void LayoutEditorSession::syncThemeEditor() {
+    if (_themeTokenList == nullptr && _themeStyleList == nullptr
+        && _themeEditorStatus == nullptr) return;
+    const std::vector<LayoutThemeTokenEntry> tokens = _themeEditorModel.tokens();
+    const std::vector<LayoutThemeStyleEntry> styles = _themeEditorModel.styles();
+    int oldTokenIndex = _themeTokenList != nullptr
+        ? _themeTokenList->getSelectedIndex() : -1;
+    int oldStyleIndex = _themeStyleList != nullptr
+        ? _themeStyleList->getSelectedIndex() : -1;
+    std::string selectedToken;
+    if (oldTokenIndex >= 0 && oldTokenIndex < static_cast<int>(tokens.size())) {
+        selectedToken = tokens[static_cast<size_t>(oldTokenIndex)].key;
+    }
+    std::string selectedStyle;
+    if (oldStyleIndex >= 0 && oldStyleIndex < static_cast<int>(styles.size())) {
+        const auto& entry = styles[static_cast<size_t>(oldStyleIndex)];
+        selectedStyle = entry.fragment + "/" + entry.styleId;
+    }
+
+    _suppressThemeEditor = true;
+    int tokenIndex = -1;
+    if (_themeTokenList != nullptr) {
+        std::vector<std::wstring> labels;
+        labels.reserve(tokens.size());
+        for (const auto& entry : tokens) labels.push_back(utf8ToWide(entry.key));
+        _themeTokenList->setItems(labels);
+        for (size_t index = 0; index < tokens.size(); ++index) {
+            if (tokens[index].key == selectedToken) tokenIndex = static_cast<int>(index);
+        }
+        if (tokenIndex < 0 && !tokens.empty()) tokenIndex = 0;
+        _themeTokenList->setSelectedIndex(tokenIndex);
+    }
+    if (tokenIndex >= 0) {
+        const LayoutThemeTokenEntry& token = tokens[static_cast<size_t>(tokenIndex)];
+        if (_themeTokenKey != nullptr) {
+            _themeTokenKey->setText(utf8ToWide(token.key));
+        }
+        if (_themeTokenValue != nullptr) {
+            if (token.kind == LayoutThemeTokenKind::Color) {
+                const Theme preview = _themeEditorModel.buildPreviewTheme();
+                _themeTokenValue->setText(
+                    formatColorHex(preview.getColorToken(token.key)));
+            } else {
+                _themeTokenValue->setText(utf8ToWide(token.value));
+            }
+        }
+    }
+
+    int styleIndex = -1;
+    if (_themeStyleList != nullptr) {
+        std::vector<std::wstring> labels;
+        labels.reserve(styles.size());
+        for (const auto& entry : styles) {
+            labels.push_back(utf8ToWide(entry.fragment + " / " + entry.styleId));
+        }
+        _themeStyleList->setItems(labels);
+        for (size_t index = 0; index < styles.size(); ++index) {
+            if (styles[index].fragment + "/" + styles[index].styleId
+                == selectedStyle) styleIndex = static_cast<int>(index);
+        }
+        if (styleIndex < 0 && !styles.empty()) styleIndex = 0;
+        _themeStyleList->setSelectedIndex(styleIndex);
+    }
+    _suppressThemeEditor = false;
+
+    const bool loaded = !_themeDocumentPath.empty();
+    setChromeEnabled("btn_theme_save", loaded && _themeDocumentDirty);
+    setChromeEnabled("btn_theme_token_apply", loaded);
+    setChromeEnabled("btn_theme_token_rename", loaded && tokenIndex >= 0);
+    setChromeEnabled("btn_theme_token_remove", loaded && tokenIndex >= 0);
+    setChromeEnabled("btn_theme_style_apply", loaded && styleIndex >= 0);
+    if (_themeEditorStatus != nullptr) {
+        if (!loaded) {
+            _themeEditorStatus->setText(L"Open a Theme JSON to edit tokens and styles");
+        } else {
+            _themeEditorStatus->setText(
+                std::to_wstring(tokens.size()) + L" token(s), "
+                + std::to_wstring(styles.size()) + L" style(s)"
+                + (_themeDocumentDirty ? L" — unsaved" : L""));
+        }
     }
 }
 
@@ -8098,27 +8647,18 @@ void LayoutEditorSession::syncTextAlignCombos() {
     if (_selected == nullptr) {
         return;
     }
-    int hIdx = 0;
-    int vIdx = 0;
-    if (auto* label = dynamic_cast<TextLabel*>(_selected)) {
-        switch (label->getHorizontalAlignment()) {
-        case TextLabel::HAlignment::Center: hIdx = 1; break;
-        case TextLabel::HAlignment::Right:  hIdx = 2; break;
-        default: hIdx = 0; break;
-        }
-        switch (label->getVerticalAlignment()) {
-        case TextLabel::VAlignment::Center: vIdx = 1; break;
-        case TextLabel::VAlignment::Bottom: vIdx = 2; break;
-        default: vIdx = 0; break;
-        }
-    } else if (auto* ti = dynamic_cast<TextInput*>(_selected)) {
-        switch (ti->getHAlign()) {
-        case TextInput::HAlign::Center: hIdx = 1; break;
-        case TextInput::HAlign::Right:  hIdx = 2; break;
-        default: hIdx = 0; break;
-        }
-        vIdx = 0;
-    }
+    const auto alignIndex = [](const std::wstring& value,
+                               const wchar_t* center,
+                               const wchar_t* end) {
+        if (value == L"\u2014") return -1;
+        if (value == center) return 1;
+        if (value == end) return 2;
+        return 0;
+    };
+    const int hIdx = alignIndex(commonPropertyValue("hAlign"),
+                                L"Center", L"Right");
+    const int vIdx = alignIndex(commonPropertyValue("vAlign"),
+                                L"Center", L"Bottom");
     const bool prev = _suppressProp;
     _suppressProp = true;
     if (_propTextHAlign != nullptr) {
@@ -8296,18 +8836,23 @@ void LayoutEditorSession::bindSchemaPropertyFields() {
 
 std::wstring LayoutEditorSession::schemaPropertyValue(
     const std::string& field) const {
-    if (_selected == nullptr) return {};
-    if (auto* slider = dynamic_cast<Slider*>(_selected)) {
+    return schemaPropertyValueForWidget(_selected, field);
+}
+
+std::wstring LayoutEditorSession::schemaPropertyValueForWidget(
+    Widget* widget, const std::string& field) const {
+    if (widget == nullptr) return {};
+    if (auto* slider = dynamic_cast<Slider*>(widget)) {
         if (field == "min") return formatFloat(slider->getMin());
         if (field == "max") return formatFloat(slider->getMax());
         if (field == "value") return formatFloat(slider->getValue());
     }
-    if (auto* progress = dynamic_cast<ProgressBar*>(_selected)) {
+    if (auto* progress = dynamic_cast<ProgressBar*>(widget)) {
         if (field == "min") return formatFloat(progress->getMin());
         if (field == "max") return formatFloat(progress->getMax());
         if (field == "value") return formatFloat(progress->getValue());
     }
-    if (auto* image = dynamic_cast<Image*>(_selected)) {
+    if (auto* image = dynamic_cast<Image*>(widget)) {
         if (field == "imageTint") return formatColorHex(image->getColor());
         const math::FRectangle& uv = image->getUV();
         if (field == "uvMinX") return formatFloat(uv.minX);
@@ -8315,14 +8860,14 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
         if (field == "uvMaxX") return formatFloat(uv.maxX);
         if (field == "uvMaxY") return formatFloat(uv.maxY);
     }
-    if (auto* list = dynamic_cast<ListView*>(_selected)) {
+    if (auto* list = dynamic_cast<ListView*>(widget)) {
         if (field == "selectionMode") {
             return list->getSelectionMode() == ListView::SelectionMode::Extended
                 ? L"Extended" : L"Single";
         }
         if (field == "itemHeight") return formatFloat(list->getItemHeight());
     }
-    if (auto* tiles = dynamic_cast<TileView*>(_selected)) {
+    if (auto* tiles = dynamic_cast<TileView*>(widget)) {
         if (field == "selectionMode") {
             return tiles->getSelectionMode() == TileView::SelectionMode::Extended
                 ? L"Extended" : L"Single";
@@ -8331,10 +8876,10 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
         if (field == "tileHeight") return formatFloat(tiles->getTileSize().y);
         if (field == "tileSpacing") return formatFloat(tiles->getTileSpacing());
     }
-    if (auto* tree = dynamic_cast<TreeView*>(_selected)) {
+    if (auto* tree = dynamic_cast<TreeView*>(widget)) {
         if (field == "itemHeight") return formatFloat(tree->getItemHeight());
     }
-    if (auto* scroll = dynamic_cast<ScrollView*>(_selected)) {
+    if (auto* scroll = dynamic_cast<ScrollView*>(widget)) {
         auto visibilityName = [](ScrollView::ScrollBarVisibility visibility) {
             switch (visibility) {
             case ScrollView::ScrollBarVisibility::Always: return L"Always";
@@ -8350,7 +8895,7 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
             return visibilityName(scroll->getHorizontalScrollBarVisibility());
         }
     }
-    if (auto* strip = dynamic_cast<TabStrip*>(_selected)) {
+    if (auto* strip = dynamic_cast<TabStrip*>(widget)) {
         if (field == "overflowMode") {
             switch (strip->getOverflowMode()) {
             case TabStrip::OverflowMode::Compress: return L"Compress";
@@ -8361,7 +8906,7 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
         }
         if (field == "minTabWidth") return formatFloat(strip->getMinTabWidth());
     }
-    if (auto* grid = dynamic_cast<GridPanel*>(_selected)) {
+    if (auto* grid = dynamic_cast<GridPanel*>(widget)) {
         if (field == "gridRows") return std::to_wstring(grid->getRowCount());
         if (field == "gridColumns") {
             return std::to_wstring(grid->getColumnCount());
@@ -8373,7 +8918,7 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
             return formatFloat(grid->getVerticalSpacing());
         }
     }
-    if (auto* rich = dynamic_cast<RichText*>(_selected)) {
+    if (auto* rich = dynamic_cast<RichText*>(widget)) {
         if (field == "richWrapMode") {
             switch (rich->getWrapMode()) {
             case RichTextWrapMode::Word: return L"Word";
@@ -8394,12 +8939,12 @@ std::wstring LayoutEditorSession::schemaPropertyValue(
 
 void LayoutEditorSession::syncSchemaPropertyFields() {
     for (const auto& [field, input] : _schemaPropertyInputs) {
-        if (input != nullptr) input->setText(schemaPropertyValue(field));
+        if (input != nullptr) input->setText(commonPropertyValue(field));
     }
     for (const auto& [field, combo] : _schemaPropertyCombos) {
         if (combo == nullptr) continue;
         const PropertyFieldSchema* schema = findPropertyFieldSchema(field);
-        const std::wstring value = schemaPropertyValue(field);
+        const std::wstring value = commonPropertyValue(field);
         int selected = -1;
         if (schema != nullptr) {
             for (size_t i = 0; i < schema->enumOptions.size(); ++i) {
@@ -8417,7 +8962,7 @@ void LayoutEditorSession::syncSchemaPropertyFields() {
             findChromeById(std::string(schema.controlId) + "_editor"));
         if (editor == nullptr) continue;
         math::FVector4 color;
-        if (ColorPicker::parseHexCode(schemaPropertyValue(schema.key), color)) {
+        if (ColorPicker::parseHexCode(commonPropertyValue(schema.key), color)) {
             editor->setColor(color);
         }
     }
@@ -8474,34 +9019,23 @@ void LayoutEditorSession::bindGravityCombo() {
 }
 
 void LayoutEditorSession::syncEnumCombos() {
-    int checkedIdx = 0;
-    int passwordIdx = 0;
-    int readOnlyIdx = 0;
-    int gravityIdx = 0;
-
-    if (auto* cb = dynamic_cast<CheckBox*>(_selected)) {
-        checkedIdx = cb->isChecked() ? 1 : 0;
-    } else if (auto* radio = dynamic_cast<RadioButton*>(_selected)) {
-        checkedIdx = radio->isChecked() ? 1 : 0;
-    }
-    if (auto* ti = dynamic_cast<TextInput*>(_selected)) {
-        passwordIdx = ti->isPasswordMode() ? 1 : 0;
-        readOnlyIdx = ti->isReadOnly() ? 1 : 0;
-    } else if (auto* area = dynamic_cast<TextArea*>(_selected)) {
-        readOnlyIdx = area->isReadOnly() ? 1 : 0;
-    }
-    if (auto* box = dynamic_cast<BoxBase*>(_selected)) {
-        switch (box->getGravity()) {
-        case BoxBase::Gravity::TopCenter: gravityIdx = 1; break;
-        case BoxBase::Gravity::TopRight: gravityIdx = 2; break;
-        case BoxBase::Gravity::CenterLeft: gravityIdx = 3; break;
-        case BoxBase::Gravity::Center: gravityIdx = 4; break;
-        case BoxBase::Gravity::CenterRight: gravityIdx = 5; break;
-        case BoxBase::Gravity::BottomLeft: gravityIdx = 6; break;
-        case BoxBase::Gravity::BottomCenter: gravityIdx = 7; break;
-        case BoxBase::Gravity::BottomRight: gravityIdx = 8; break;
-        case BoxBase::Gravity::TopLeft:
-        default: gravityIdx = 0; break;
+    const auto booleanIndex = [this](const char* field) {
+        const std::wstring value = commonPropertyValue(field);
+        if (value == L"\u2014") return -1;
+        return value == L"true" ? 1 : 0;
+    };
+    const int checkedIdx = booleanIndex("checked");
+    const int passwordIdx = booleanIndex("password");
+    const int readOnlyIdx = booleanIndex("readOnly");
+    int gravityIdx = -1;
+    const std::wstring gravity = commonPropertyValue("gravity");
+    static const std::array<const wchar_t*, 9> gravityValues{{
+        L"TopLeft", L"TopCenter", L"TopRight", L"CenterLeft", L"Center",
+        L"CenterRight", L"BottomLeft", L"BottomCenter", L"BottomRight"}};
+    for (size_t i = 0; i < gravityValues.size(); ++i) {
+        if (gravity == gravityValues[i]) {
+            gravityIdx = static_cast<int>(i);
+            break;
         }
     }
 

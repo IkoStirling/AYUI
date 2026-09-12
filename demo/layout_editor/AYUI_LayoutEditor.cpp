@@ -395,7 +395,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     session.setOpenPathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setSavePathPicker([hwnd]() { return showSaveUiJsonDialog(hwnd); });
     session.setTexturePathPicker([hwnd]() { return showOpenTextureDialog(hwnd); });
+    session.setThemePathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setTextureResourceProvider([]() { return enumeratePreviewTextures(); });
+    session.setExternalComponentLibraryPath(
+        "assets/project.ayuicomponents.json");
     session.setTexturePreviewLoader([&state, &uiBackend](const std::string& path) {
         return loadPreviewTexture(path, uiBackend, state.previewTextures);
     });

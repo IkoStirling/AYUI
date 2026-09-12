@@ -223,12 +223,14 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/LayoutInteractionModel.cpp
     LayoutEditor/LayoutSelectionModel.cpp
     LayoutEditor/LayoutCommandStack.cpp
+    LayoutEditor/LayoutComponentLibrary.cpp
     LayoutEditor/LayoutPreviewModel.cpp
     LayoutEditor/LayoutPropertyEditors.cpp
     LayoutEditor/LayoutResponsiveModel.cpp
     LayoutEditor/LayoutResourceCatalog.cpp
     LayoutEditor/LayoutReuseLibrary.cpp
     LayoutEditor/LayoutStyleInspectorModel.cpp
+    LayoutEditor/LayoutThemeEditorModel.cpp
     LayoutEditor/LayoutStructuredContentModel.cpp
     LayoutEditor/LayoutValidationModel.cpp
     LayoutEditor/PropertySchema.cpp
@@ -241,12 +243,14 @@ add_library(AYUILayoutEditorCore STATIC
     include/AYUI/LayoutEditor/LayoutInteractionModel.h
     include/AYUI/LayoutEditor/LayoutSelectionModel.h
     include/AYUI/LayoutEditor/LayoutCommandStack.h
+    include/AYUI/LayoutEditor/LayoutComponentLibrary.h
     include/AYUI/LayoutEditor/LayoutPreviewModel.h
     include/AYUI/LayoutEditor/LayoutPropertyEditors.h
     include/AYUI/LayoutEditor/LayoutResponsiveModel.h
     include/AYUI/LayoutEditor/LayoutResourceCatalog.h
     include/AYUI/LayoutEditor/LayoutReuseLibrary.h
     include/AYUI/LayoutEditor/LayoutStyleInspectorModel.h
+    include/AYUI/LayoutEditor/LayoutThemeEditorModel.h
     include/AYUI/LayoutEditor/LayoutStructuredContentModel.h
     include/AYUI/LayoutEditor/LayoutValidationModel.h
     include/AYUI/LayoutEditor/PropertySchema.h

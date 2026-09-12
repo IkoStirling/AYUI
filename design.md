@@ -620,8 +620,16 @@ Inspector 根据选中类型暴露 `controller` 和有效事件字段。Session 
 
 `LayoutStyleInspectorModel` 区分 default、missing、style sheet、继承 token override 和本地 token
 override，Inspector 可预览 Normal/Hovered/Pressed/Disabled 的声明式背景色并一键恢复默认 Style。
-多选 Inspector 对不一致的 X/Y/Width/Height 显示混合值，数值和 Style 提交对当前选择集执行一次
-事务；ID 仍只允许单选修改，避免隐式生成名称。
+多选 Inspector 计算所有选中类型的 schema 交集，对任意不一致字段显示混合值；普通文本、数值、
+布尔、枚举、交互、容器和类型专用字段与 Style 均对当前选择集执行一次 typed transaction。ID 仍只
+允许单选修改，避免隐式生成名称；异构类型不会暴露仅主选中项支持、写入后会部分生效的属性。
+
+第九阶段工作流强化新增两个 authoring-only 数据模型。`LayoutComponentLibrary` 使用独立版本化 JSON
+保存跨文档 Widget 子树、稳定组件 ID、显示名和分类；插入时通过生产 Loader 展开并重新生成实例 ID，
+不把模板服务带入 runtime，也不与文档内 `LayoutReuseLibrary` 的局部作用域混淆。
+`LayoutThemeEditorModel` 对原 Theme JSON 做保留未知字段的投影，枚举嵌套 color/float token 与
+fragment/style，支持安全增删改、token 重命名和 `$token` 引用修复，以及常用 style 属性绑定。
+Theme 解析和预览继续调用生产 `Theme`，Designer 不维护第二套样式解释器。
 
 `LayoutValidationModel` 只消费 Session 导出的 authored widget 集，不递归猜测控件内部结构，因此
 ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay 不会产生误报。当前诊断覆盖

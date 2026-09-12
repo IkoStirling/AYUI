@@ -5,6 +5,7 @@
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
+#include "AYUI/LayoutEditor/LayoutComponentLibrary.h"
 #include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutInteractionModel.h"
@@ -14,6 +15,7 @@
 #include "AYUI/LayoutEditor/LayoutReuseLibrary.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
 #include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
+#include "AYUI/LayoutEditor/LayoutThemeEditorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/LayoutEditor/LayoutValidationModel.h"
 #include "AYUI/LayoutEditor/WidgetAuthoringRegistry.h"
@@ -888,6 +890,70 @@ TEST_CASE(validation_reports_animation_target_key_and_layout_conflicts) {
     CHECK(layoutConflict == 1u);
     CHECK(validation.hasErrors());
     root.removeChild(&anchored);
+}
+
+TEST_CASE(external_component_library_roundtrips_and_expands_widgets) {
+    Panel panel;
+    panel.setId("card_root");
+    panel.setSize({240.0f, 120.0f});
+    Button button;
+    button.setId("confirm_button");
+    button.setText(L"Confirm");
+    panel.addChildExternal(&button);
+
+    LayoutComponentLibrary library;
+    std::string error;
+    CHECK(library.define("common.confirm-card", "Confirm Card", "Common",
+                         &panel, &error));
+    CHECK(library.size() == 1u);
+    const std::string encoded = library.serialize(false);
+
+    LayoutComponentLibrary restored;
+    CHECK(restored.deserialize(encoded, &error));
+    const LayoutComponentDefinition* definition =
+        restored.find("common.confirm-card");
+    CHECK(definition != nullptr);
+    CHECK(definition != nullptr && definition->displayName == "Confirm Card");
+    CHECK(definition != nullptr && definition->category == "Common");
+
+    Widget* instance = restored.instantiate("common.confirm-card");
+    CHECK(instance != nullptr);
+    CHECK(instance != nullptr && instance->getId() == "card_root");
+    CHECK(instance != nullptr && instance->getChildren().size() == 1u);
+    if (instance != nullptr) destroyWidgetTree(instance);
+    panel.removeChild(&button);
+}
+
+TEST_CASE(theme_editor_renames_tokens_and_repairs_style_references) {
+    const std::string source = R"({
+        "tokens":{
+            "color":{"accent":[0.2,0.4,0.8,1.0]},
+            "space":{"md":8.0}
+        },
+        "sheets":{"controls":{"styles":{"primary":{
+            "backgroundColor":"$color.accent"
+        }}}}
+    })";
+    LayoutThemeEditorModel model;
+    std::string error;
+    CHECK(model.load(source, &error));
+    CHECK(model.tokens().size() == 2u);
+    CHECK(model.styles().size() == 1u);
+    CHECK(model.referenceCount("color.accent") == 1u);
+    CHECK(model.renameToken("color.accent", "color.brand.primary", &error));
+    CHECK(model.referenceCount("color.accent") == 0u);
+    CHECK(model.referenceCount("color.brand.primary") == 1u);
+    CHECK(!model.removeToken("color.brand.primary", false, &error));
+    CHECK(model.setStyleProperty("controls", "primary", "textColor",
+                                 "$color.brand.primary", &error));
+    CHECK(model.setFloatToken("radius.compact", 3.0f, &error));
+    CHECK(model.renameToken("radius.compact", "radius.control", &error));
+
+    Theme preview = model.buildPreviewTheme();
+    CHECK(preview.hasColorToken("color.brand.primary"));
+    CHECK(!preview.hasColorToken("color.accent"));
+    CHECK(preview.hasFloatToken("space.md"));
+    CHECK(preview.hasFloatToken("radius.control"));
 }
 
 TEST_SUITE_END

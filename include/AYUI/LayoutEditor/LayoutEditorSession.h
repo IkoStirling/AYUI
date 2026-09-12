@@ -4,6 +4,7 @@
 #include "AYUI/ImageTexture.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 #include "AYUI/LayoutEditor/LayoutCommandStack.h"
+#include "AYUI/LayoutEditor/LayoutComponentLibrary.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutInteractionModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
@@ -12,6 +13,7 @@
 #include "AYUI/LayoutEditor/LayoutReuseLibrary.h"
 #include "AYUI/LayoutEditor/LayoutSelectionModel.h"
 #include "AYUI/LayoutEditor/LayoutStyleInspectorModel.h"
+#include "AYUI/LayoutEditor/LayoutThemeEditorModel.h"
 #include "AYUI/LayoutEditor/LayoutStructuredContentModel.h"
 #include "AYUI/LayoutEditor/LayoutValidationModel.h"
 #include "AYUI/UIAnimation.h"
@@ -47,6 +49,7 @@ public:
         std::function<void(const std::string& path, bool dirty)>;
     using InteractionContractProvider =
         std::function<std::vector<LayoutControllerContract>()>;
+    using ThemePathPicker = std::function<std::string()>;
 
     enum class AlignMode {
         Left, HCenter, Right,
@@ -132,6 +135,25 @@ public:
     bool insertReusableBlock(const std::string& name);
     bool removeReusableBlock(const std::string& name);
     const LayoutReuseLibrary& reuseLibrary() const { return _reuseLibrary; }
+    void setExternalComponentLibraryPath(std::string path);
+    const std::string& externalComponentLibraryPath() const {
+        return _externalComponentLibraryPath;
+    }
+    bool refreshExternalComponentLibrary();
+    bool defineExternalComponent(const std::string& id,
+                                 const std::string& displayName,
+                                 const std::string& category);
+    bool insertExternalComponent(const std::string& id);
+    bool removeExternalComponent(const std::string& id);
+    const LayoutComponentLibrary& externalComponentLibrary() const {
+        return _externalComponentLibrary;
+    }
+    bool openThemeDocument(const std::string& path);
+    bool saveThemeDocument();
+    const std::string& themeDocumentPath() const { return _themeDocumentPath; }
+    const LayoutThemeEditorModel& themeEditorModel() const {
+        return _themeEditorModel;
+    }
     void setResponsiveVisibility(int breakpointIndex,
                                  ResponsiveVisibility visibility);
     void captureResponsiveAnchors(int breakpointIndex);
@@ -205,6 +227,9 @@ public:
     }
     void setTexturePreviewLoader(TexturePreviewLoader loader);
     void setTextureResourceProvider(TextureResourceProvider provider);
+    void setThemePathPicker(ThemePathPicker picker) {
+        _themePicker = std::move(picker);
+    }
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
     void setDocumentStateUpdater(DocumentStateUpdater updater) {
         _documentStateUpdater = std::move(updater);
@@ -263,6 +288,9 @@ private:
     void bindSchemaPropertyFields();
     void syncSchemaPropertyFields();
     std::wstring schemaPropertyValue(const std::string& field) const;
+    std::wstring schemaPropertyValueForWidget(
+        Widget* widget, const std::string& field) const;
+    std::wstring commonPropertyValue(const std::string& field) const;
     void refreshWindowTitle();
     void bindBoolCombo(ComboBox*& slot, const char* id, const char* field);
     void bindGravityCombo();
@@ -296,6 +324,13 @@ private:
     void applyPreviewToDocument();
     void syncPreviewChrome();
     void syncReuseEditor();
+    void syncExternalComponentEditor();
+    bool saveExternalComponentLibrary();
+    void syncThemeEditor();
+    void applyThemeToken();
+    void renameThemeToken();
+    void removeThemeToken();
+    void applyThemeStyleBinding();
     void syncResponsiveEditor();
     void syncAnimationEditor();
     void syncAnimationTimelineView();
@@ -483,6 +518,11 @@ private:
     LayoutPreviewModel _previewModel;
     LayoutResponsiveModel _responsiveModel;
     LayoutReuseLibrary _reuseLibrary;
+    LayoutComponentLibrary _externalComponentLibrary;
+    std::string _externalComponentLibraryPath;
+    LayoutThemeEditorModel _themeEditorModel;
+    std::string _themeDocumentPath;
+    bool _themeDocumentDirty = false;
     UIAnimationLibrary _animationLibrary;
     Mode _mode = Mode::Edit;
     std::optional<Snapshot> _interactionSnapshot;
@@ -594,6 +634,19 @@ private:
     TextInput* _reuseName = nullptr;
     TextLabel* _reuseStatus = nullptr;
     bool _suppressReuse = false;
+    ListView* _externalComponentList = nullptr;
+    TextInput* _externalComponentId = nullptr;
+    TextInput* _externalComponentCategory = nullptr;
+    TextLabel* _externalComponentStatus = nullptr;
+    bool _suppressExternalComponents = false;
+    ListView* _themeTokenList = nullptr;
+    TextInput* _themeTokenKey = nullptr;
+    TextInput* _themeTokenValue = nullptr;
+    ListView* _themeStyleList = nullptr;
+    ComboBox* _themeStyleProperty = nullptr;
+    TextInput* _themeStyleBinding = nullptr;
+    TextLabel* _themeEditorStatus = nullptr;
+    bool _suppressThemeEditor = false;
     ComboBox* _responsiveBreakpoint = nullptr;
     ComboBox* _responsiveVisibility = nullptr;
     TextLabel* _responsiveStatus = nullptr;
@@ -634,6 +687,7 @@ private:
     PathPicker _texturePicker;
     TexturePreviewLoader _texturePreviewLoader;
     TextureResourceProvider _textureResourceProvider;
+    ThemePathPicker _themePicker;
     InteractionContractProvider _interactionContractProvider;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;

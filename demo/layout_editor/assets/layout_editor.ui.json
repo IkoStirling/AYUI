@@ -418,6 +418,45 @@
                   },
                   { "type": "TextLabel", "id": "reuse_status", "style": "__le_muted", "text": "Expanded copies remain independently editable", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
 
+                  { "type": "TextLabel", "id": "section_component_library", "style": "__le_accent", "text": "PROJECT COMPONENTS", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "TextInput", "id": "component_library_id", "style": "__le_input", "text": "", "placeholder": "component.id", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "component_library_category", "style": "__le_input", "text": "", "placeholder": "Category", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ListView", "id": "component_library_list", "style": "__le_input", "size": { "w": 272, "h": 104 }, "slot": { "height": 104 }, "itemHeight": 26 },
+                  {
+                    "type": "HBox", "id": "row_component_library_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_component_library_save", "style": "__le_command", "text": "Save/Update", "size": { "w": 102, "h": 30 }, "slot": { "width": 102 } },
+                      { "type": "Button", "id": "btn_component_library_insert", "style": "__le_command", "text": "Insert", "size": { "w": 78, "h": 30 }, "slot": { "width": 78 } },
+                      { "type": "Button", "id": "btn_component_library_remove", "style": "__le_command", "text": "Remove", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
+                    ]
+                  },
+                  { "type": "TextLabel", "id": "component_library_status", "style": "__le_muted", "text": "Project component library is not configured", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
+
+                  { "type": "TextLabel", "id": "section_theme_editor", "style": "__le_accent", "text": "THEME / TOKENS / STYLES", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  {
+                    "type": "HBox", "id": "row_theme_file", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_theme_open", "style": "__le_command", "text": "Open Theme", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_theme_save", "style": "__le_primary", "text": "Save Theme", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  { "type": "ListView", "id": "theme_token_list", "style": "__le_input", "size": { "w": 272, "h": 104 }, "slot": { "height": 104 }, "itemHeight": 26 },
+                  { "type": "TextInput", "id": "theme_token_key", "style": "__le_input", "text": "", "placeholder": "color.brand.primary or space.md", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "theme_token_value", "style": "__le_input", "text": "", "placeholder": "#RRGGBBAA or number", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  {
+                    "type": "HBox", "id": "row_theme_token_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
+                    "children": [
+                      { "type": "Button", "id": "btn_theme_token_apply", "style": "__le_command", "text": "Add/Update", "size": { "w": 92, "h": 30 }, "slot": { "width": 92 } },
+                      { "type": "Button", "id": "btn_theme_token_rename", "style": "__le_command", "text": "Rename", "size": { "w": 84, "h": 30 }, "slot": { "width": 84 } },
+                      { "type": "Button", "id": "btn_theme_token_remove", "style": "__le_command", "text": "Remove", "size": { "w": 86, "h": 30 }, "slot": { "width": 86 } }
+                    ]
+                  },
+                  { "type": "ListView", "id": "theme_style_list", "style": "__le_input", "size": { "w": 272, "h": 88 }, "slot": { "height": 88 }, "itemHeight": 26 },
+                  { "type": "ComboBox", "id": "theme_style_property", "style": "__le_input", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "theme_style_binding", "style": "__le_input", "text": "$color.accent", "placeholder": "$token or literal", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "Button", "id": "btn_theme_style_apply", "style": "__le_command", "text": "Apply style binding", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextLabel", "id": "theme_editor_status", "style": "__le_muted", "text": "Open a Theme JSON to edit tokens and styles", "size": { "w": 272, "h": 40 }, "slot": { "height": 40 } },
+
                   { "type": "TextLabel", "id": "section_animation", "style": "__le_accent", "text": "ANIMATION TIMELINE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   { "type": "TextInput", "id": "animation_clip_name", "style": "__le_input", "text": "Intro", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "ListView", "id": "animation_clip_list", "style": "__le_input", "size": { "w": 272, "h": 70 }, "slot": { "height": 70 }, "itemHeight": 26 },

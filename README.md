@@ -355,8 +355,9 @@ Schema 的 `Color`、`Resource` 和 `Vector4` 不再退化成同一种文本行�
 
 Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳定身份，并把本机文件位置放在
 仅用于解码预览的 `previewPath`；打开文件、Undo/Redo 和复制后都只恢复临时句柄，不把绝对路径写回
-布局。Inspector 多选时用 `—` 表示不一致的 X/Y/Width/Height，提交数值或 Style 会在一个 undo 事务
-内写入全部选中项。Style 状态预览显示来源、继承/本地 token override 数和四种交互背景色。
+布局。Inspector 多选按所有选中类型的 schema 交集显示属性，并用 `—` 或空选项表示任意不一致值；
+位置、尺寸、文本、交互、容器、枚举、类型专用字段和 Style 的提交都会在一个 undo 事务内写入全部
+选中项，ID 仍保持单选。Style 状态预览显示来源、继承/本地 token override 数和四种交互背景色。
 `LayoutValidationModel` 对作者语义树检查空/非法/重复 ID、非有限或非正尺寸、缺失 Style/纹理、
 无 Controller 的事件、无可访问名称的交互控件、非法 Anchor、越界控件与 Grid slot 重叠；诊断行可
 直接定位控件，且不会把列表虚拟行、Tab 内部节点或编辑器 overlay 当成用户文档。
@@ -364,6 +365,12 @@ Authoring Quality 使用 `LayoutTextureResource::key` 作为可序列化的稳�
 Handler 及其接受的 Widget event 类型，并在 Event Trigger Graph 中显示每条
 `Widget.event -> Controller.handler` 边。该 registry 仅用于 authoring 校验，运行时绑定和 Controller
 实例化仍由 `UILayoutLoader` 与宿主负责。
+
+项目级复用使用独立、版本化的 `AYUIComponentLibrary` 文件；它保存可命名/分类的 Widget 子树，
+可跨布局文档插入，实例化时立即展开并重建 ID，因此运行时不依赖组件库且各实例可独立修改。
+文档内 reusable block 继续用于单文件局部模板，两种作用域不会混写。Theme authoring model 保留未知
+JSON 字段，列出 color/float token 和 sheet/style，支持添加、修改、安全删除、重命名 token 并同步
+修复所有 `$token` style 引用，以及为常用颜色属性绑定 token 或 literal；Theme 文件仍由用户显式保存。
 
 Reuse & Responsive 阶段加入文档内 `LayoutReuseLibrary`。选中的完整 Widget 子树可定义或更新为
 命名 block，并可反复插入；每次插入都会展开成独立 Widget 树并重新生成 ID，因此实例后续可以单独
