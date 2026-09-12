@@ -213,6 +213,29 @@ if(WIN32)
     target_link_libraries(${MODULE_NAME} PRIVATE usp10 uiautomationcore oleaut32 user32)
 endif()
 
+# Module-owned, headless package contribution. The project packager supplies
+# only root *.ui.json assets; AYUI owns parsing its wire format and discovering
+# transitive texture dependencies. Keep this target independent from runtime
+# Widgets, AYRenderer and the authoring core.
+add_library(AYUIPackaging STATIC
+    Packaging/UIAssetCollector.cpp
+    include/AYUI/Packaging/UIAssetCollector.h
+)
+target_include_directories(AYUIPackaging
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${AYUI_NLOHMANN_DIR}
+)
+if(nlohmann_json_FOUND)
+    target_link_libraries(AYUIPackaging PRIVATE nlohmann_json::nlohmann_json)
+endif()
+if(MSVC)
+    target_compile_options(AYUIPackaging PRIVATE
+        /Zc:__cplusplus /Zc:preprocessor)
+    target_compile_definitions(AYUIPackaging PRIVATE
+        NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # Product-grade layout authoring core shared by the standalone Designer,
 # AYEditor and headless regression tools. Keep it separate from AYUI runtime:
 # games that only load .ui.json do not pay for editor models or chrome logic.

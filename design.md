@@ -644,13 +644,23 @@ ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay �
 是否真实存在由宿主注入 `LayoutControllerContract` 或刷新 provider；AYUI 仅校验契约并构建只读触发图，
 不依赖游戏反射系统，也不持有 Controller 实例。
 
-资源与发布闭包由独立 `LayoutPublicationModel` 承担，不把一般 authoring warning 与可部署性混为
+资源与发布闭包的创作检查由独立 `LayoutPublicationModel` 承担，不把一般 authoring warning 与可部署性混为
 一谈。输入是保存状态、内容根相对 Layout asset ID、authored Widget 集，以及宿主提供的纹理目录、
 StyleSheet 和可选 Controller contract；输出是稳定排序、按 kind/key 去重并保留全部 consumer 的
 `AYUILayoutPublicationManifest` v1。绝对路径、`..` 越界、missing/invalid 纹理、缺失 Style 与严格
-模式下未解析的 Handler 都是发布阻断。模型只构造清单、不读取或复制文件；AYEditor/packager 负责把
-清单与既有 UI Flow layout/animation closure 合并，并执行实际打包。文档内 reusable block 与外部
-component 都在实例化时展开，因此不会把 authoring library 带进运行时闭包。
+模式下未解析的 Handler 都是发布阻断。模型只构造创作诊断，不读取或复制文件。文档内 reusable block
+与外部 component 都在实例化时展开，因此不会把 authoring library 带进运行时闭包。
+
+生产打包采用“模块贡献者”而非中央 cook 工具硬编码全部资产类型。第一阶段新增独立静态目标
+`AYUIPackaging`：上层 package graph 只传入根 `*.ui.json` asset ID 和 content root，AYUI-owned
+`UIAssetCollector` 自己解析 Layout JSON、递归识别内建 `Image.textureName`、执行 package key 到源文件
+的可选映射，并返回稳定排序的 `AYUIModulePackageContribution` v1。贡献项区分运行时 package key 与
+content-relative source asset，按 `(kind, packageKey)` 去重并保留 consumer，绝对路径、URI、越界路径、
+缺失文件、非法 JSON/Layout 和错误资源字段都产生发布阻断。该目标仅依赖 JSON/标准库，不链接 AYUI
+Widget runtime、AYRenderer 或 Designer；它不扫描 Flow/Scene，也不写 package。未来公共 coordinator
+只负责给每个模块分发其接受的根资产、合并贡献和调用 PackageWriter；UI 字段与递归依赖规则始终留在
+AYUI。Theme 选择属于宿主/项目根资产，UI Flow 到 Layout 的跨模块边由 AYApplication 贡献者负责，
+系统字体 family 仍由平台发现而不是复制进包。
 
 画布选择装饰仅绘制透明、像素对齐的单层 outline 与 handles，不能用半透明填充覆盖控件；后端
 必须跳过 alpha=0 的矩形。选择或 Hierarchy 切换后，Session 在同一输入事务内同步属性 section

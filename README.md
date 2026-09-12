@@ -310,6 +310,14 @@ Tree 可增加子节点，RichText run 可编辑字号、颜色和粗体/斜体/
 `ready()`。资源目录、StyleSheet 和交互 registry 均由宿主注入，因此模型不访问 GPU、不写文件，
 也不会把本机 preview path 写入发布物。组件实例在插入时已经展开，不形成额外运行时依赖。
 
+实际打包发现由独立、headless 的 `AYUIPackaging` 目标负责。通用 package coordinator 只把选中的
+根 `*.ui.json` 交给 `UIAssetCollector`；AYUI 自己理解 Layout wire format，递归发现任意复合结构中的
+`Image.textureName`，通过可选 resolver 将稳定资源键映射为内容根相对源文件，并输出
+`AYUIModulePackageContribution` v1。布局与纹理按 package key 去重，同时保留全部 consumer；绝对路径、
+URI、`..` 越界、缺失文件、错误 JSON 和错误资源字段都会阻断贡献。collector 不链接 Widget runtime、
+Renderer 或 Designer，也不扫描 Scene/UI Flow、不写总包；后续统一打包层只负责调用各模块 contributor、
+合并清单和写包，不维护 UI 控件字段列表。
+
 View 菜单与 Canvas header 提供 Document、Desktop、HiDPI Desktop、Phone、Tablet 预设以及自定义
 物理宽高、DPI scale 和 Safe Area inset。画布把物理尺寸换算为逻辑 DIP，并以 editor-only overlay
 显示安全区；预览尺寸不进入 undo snapshot 或 `.ui.json`，保存时仍写 authored root 尺寸。F6 或

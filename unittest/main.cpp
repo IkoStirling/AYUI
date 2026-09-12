@@ -108,6 +108,7 @@
 #include "Test_AnchorLayout.cpp"               // responsive free-layout anchors + persistence
 #include "Test_LayoutEditorCore.cpp"            // product authoring models, registry and schema
 #include "Test_LayoutPublicationModel.cpp"       // deterministic deployable Layout dependency closure
+#include "Test_UIAssetCollector.cpp"             // AYUI-owned headless package contribution
 #include "Test_UIFlow.cpp"                      // application UI orchestration wire contract
 
 int runTest()
