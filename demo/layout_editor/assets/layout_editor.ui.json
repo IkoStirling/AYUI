@@ -18,9 +18,9 @@
         {
           "type": "MenuBar",
           "id": "designer_menubar",
-          "size": { "w": 158, "h": 32 },
-          "slot": { "width": 158 },
-          "anchorWidth": 52,
+          "size": { "w": 280, "h": 32 },
+          "slot": { "width": 280 },
+          "anchorWidth": 69,
           "anchorSpacing": 1,
           "menus": [
             {
@@ -51,6 +51,13 @@
                 { "text": "Interact Preview", "shortcut": "F6" },
                 { "text": "Safe Area" },
                 { "text": "Validate Layout" }
+              ]
+            },
+            {
+              "title": "Workflow",
+              "items": [
+                { "text": "Open Owning Screen" },
+                { "text": "Complete Flow Signals" }
               ]
             }
           ]

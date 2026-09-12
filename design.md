@@ -630,6 +630,9 @@ override，Inspector 可预览 Normal/Hovered/Pressed/Disabled 的声明式背�
 `LayoutThemeEditorModel` 对原 Theme JSON 做保留未知字段的投影，枚举嵌套 color/float token 与
 fragment/style，支持安全增删改、token 重命名和 `$token` 引用修复，以及常用 style 属性绑定。
 Theme 解析和预览继续调用生产 `Theme`，Designer 不维护第二套样式解释器。
+项目级 Layout/Flow 关系继续归 AYEditor 所有。Session 仅提供两个带当前布局路径的可选 host action：
+打开 owning Screen、补全 Flow Signals；Workflow 菜单只路由命令并呈现结果。standalone 未注入时
+显式报告不可用，AYUI 本身不扫描 Flow、不修改项目文件，也不引入 Screen/Signal 类型。
 
 `LayoutValidationModel` 只消费 Session 导出的 authored widget 集，不递归猜测控件内部结构，因此
 ListView/TileView 虚拟 cell、Tab/Modal 私有组合节点和 editor overlay 不会产生误报。当前诊断覆盖

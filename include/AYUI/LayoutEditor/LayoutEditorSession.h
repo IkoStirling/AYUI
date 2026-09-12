@@ -50,6 +50,8 @@ public:
     using InteractionContractProvider =
         std::function<std::vector<LayoutControllerContract>()>;
     using ThemePathPicker = std::function<std::string()>;
+    using ProjectWorkflowAction = std::function<bool(
+        const std::string& layoutPath, std::string& message)>;
 
     enum class AlignMode {
         Left, HCenter, Right,
@@ -229,6 +231,12 @@ public:
     void setTextureResourceProvider(TextureResourceProvider provider);
     void setThemePathPicker(ThemePathPicker picker) {
         _themePicker = std::move(picker);
+    }
+    void setOpenOwningFlowAction(ProjectWorkflowAction action) {
+        _openOwningFlowAction = std::move(action);
+    }
+    void setCompleteFlowSignalsAction(ProjectWorkflowAction action) {
+        _completeFlowSignalsAction = std::move(action);
     }
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
     void setDocumentStateUpdater(DocumentStateUpdater updater) {
@@ -688,6 +696,8 @@ private:
     TexturePreviewLoader _texturePreviewLoader;
     TextureResourceProvider _textureResourceProvider;
     ThemePathPicker _themePicker;
+    ProjectWorkflowAction _openOwningFlowAction;
+    ProjectWorkflowAction _completeFlowSignalsAction;
     InteractionContractProvider _interactionContractProvider;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;

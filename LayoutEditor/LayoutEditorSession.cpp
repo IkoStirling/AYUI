@@ -2000,6 +2000,26 @@ void LayoutEditorSession::wireChrome() {
             ? L"Validation completed with errors"
             : L"Validation completed");
     });
+    auto runProjectWorkflow = [this](const ProjectWorkflowAction& action) {
+        if (action == nullptr) {
+            setStatus(L"This workflow action requires an editor project host");
+            return;
+        }
+        if (_documentPath.empty()) {
+            setStatus(L"Save the UI Layout before using project workflow actions");
+            return;
+        }
+        std::string message;
+        const bool ok = action(_documentPath, message);
+        setStatus(utf8ToWide((ok ? std::string{} : "Workflow failed — ")
+            + (message.empty() ? std::string("No details") : message)));
+    };
+    bindMenuItem(L"Workflow", L"Open Owning Screen", [this, runProjectWorkflow]() {
+        runProjectWorkflow(_openOwningFlowAction);
+    });
+    bindMenuItem(L"Workflow", L"Complete Flow Signals", [this, runProjectWorkflow]() {
+        runProjectWorkflow(_completeFlowSignalsAction);
+    });
 
     // Palette buttons are driven by onPointer* (click + drag-create).
     // Keep click handlers as a fallback if pointer routing misses them.
