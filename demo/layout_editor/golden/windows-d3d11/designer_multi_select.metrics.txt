@@ -1,6 +1,6 @@
-scenario=default
+scenario=multi_select
 frame=12
 framebuffer=1280x720
 backend=d3d11
-drawCalls=60
+drawCalls=66
 queued=yes

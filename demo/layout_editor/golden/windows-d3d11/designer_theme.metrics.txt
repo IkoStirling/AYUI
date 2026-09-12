@@ -1,6 +1,6 @@
-scenario=default
+scenario=theme
 frame=12
 framebuffer=1280x720
 backend=d3d11
-drawCalls=60
+drawCalls=81
 queued=yes

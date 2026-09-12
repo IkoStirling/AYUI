@@ -76,6 +76,7 @@ constexpr int kHeight = 720;
 struct VisualCaptureConfig {
     bool enabled = false;
     std::string outputBase;
+    std::string scenario = "default";
     int captureFrame = 12;
     int exitFrame = 15;
 };
@@ -95,6 +96,10 @@ VisualCaptureConfig visualCaptureConfig() {
             config.captureFrame = static_cast<int>(parsed);
             config.exitFrame = config.captureFrame + 3;
         }
+    }
+    if (const char* scenario = std::getenv("AY_UI_DESIGNER_CAPTURE_SCENARIO");
+        scenario != nullptr && scenario[0] != '\0') {
+        config.scenario = scenario;
     }
     return config;
 }
@@ -132,6 +137,61 @@ std::string resolveSamplePath() {
         }
     }
     return {};
+}
+
+std::string resolveCaptureThemePath() {
+    const std::vector<std::string> candidates = {
+        "assets/designer_golden.theme.json",
+        "AYRuntime/AYUI/demo/layout_editor/assets/designer_golden.theme.json",
+        "../AYRuntime/AYUI/demo/layout_editor/assets/designer_golden.theme.json",
+        "../../AYRuntime/AYUI/demo/layout_editor/assets/designer_golden.theme.json",
+    };
+    for (const std::string& path : candidates) {
+        if (fileExists(path)) return path;
+    }
+    return {};
+}
+
+void scrollInspectorTo(ayt::ui::UIManager& ui, const std::string& widgetId) {
+    auto* scroll = dynamic_cast<ayt::ui::ScrollView*>(ui.findById("props_scroll"));
+    ayt::ui::Widget* target = ui.findById(widgetId);
+    if (scroll == nullptr || target == nullptr) return;
+    const ayt::math::FRectangle viewport = scroll->getWorldBounds();
+    const ayt::math::FRectangle bounds = target->getWorldBounds();
+    const float nextY = scroll->getScrollOffset().y
+        + bounds.minY - viewport.minY - 6.0f;
+    scroll->setScrollOffset({0.0f, std::max(0.0f, nextY)});
+}
+
+bool prepareVisualScenario(const VisualCaptureConfig& capture,
+                           ayt::ui::UIManager& ui,
+                           ayt::ui::LayoutEditorSession& session) {
+    if (!capture.enabled || capture.scenario == "default") return true;
+    ui.layout();
+    if (capture.scenario == "multi_select") {
+        session.selectById("btn_hello");
+        session.select(ui.findById("lbl_hello"), true);
+        return true;
+    }
+    if (capture.scenario == "responsive") {
+        session.selectById("btn_hello");
+        session.setPreviewPreset(3);
+        ui.layout();
+        scrollInspectorTo(ui, "section_responsive");
+        return true;
+    }
+    if (capture.scenario == "theme") {
+        const std::string themePath = resolveCaptureThemePath();
+        if (themePath.empty() || !session.openThemeDocument(themePath)) {
+            return false;
+        }
+        ui.layout();
+        scrollInspectorTo(ui, "section_theme_editor");
+        return true;
+    }
+    std::fprintf(stderr, "[AYUI_LayoutEditor] unknown capture scenario: %s\n",
+                 capture.scenario.c_str());
+    return false;
 }
 
 std::string wideToUtf8Path(const wchar_t* w) {
@@ -452,6 +512,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!sample.empty()) {
         session.open(sample);
     }
+    if (!prepareVisualScenario(capture, ui, session)) {
+        std::fprintf(stderr, "[AYUI_LayoutEditor] capture scenario setup failed\n");
+        session.detach();
+        ui.shutdown();
+        uiBackend.shutdown();
+        renderer.shutdown();
+        devices.shutdown();
+        return 3;
+    }
 
     window.setWindowCloseCallback([&state]() { state.running = false; });
     window.setWindowResizeCallback([&state](int width, int height) {
@@ -641,9 +710,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             if (fopen_s(&metrics, metricsPath.c_str(), "wb") == 0
                 && metrics != nullptr) {
                 std::fprintf(metrics,
-                    "scenario=default\nframe=%d\nframebuffer=%dx%d\n"
+                    "scenario=%s\nframe=%d\nframebuffer=%dx%d\n"
                     "backend=d3d11\ndrawCalls=%d\nqueued=%s\n",
-                    visualFrame, state.clientW, state.clientH,
+                    capture.scenario.c_str(), visualFrame,
+                    state.clientW, state.clientH,
                     uiBackend.getDrawCallCount(), captureQueued ? "yes" : "no");
                 std::fclose(metrics);
             }

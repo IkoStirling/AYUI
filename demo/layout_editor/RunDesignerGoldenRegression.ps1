@@ -13,6 +13,9 @@ param(
     [ValidateRange(0.0, 100.0)]
     [double]$MaxChangedPixelPercent = 0.05,
 
+    [ValidateSet("default", "multi_select", "responsive", "theme")]
+    [string[]]$Scenarios = @("default", "multi_select", "responsive", "theme"),
+
     [switch]$UpdateBaselines
 )
 
@@ -116,58 +119,69 @@ $BaselineDir = [System.IO.Path]::GetFullPath($BaselineDir)
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $BaselineDir | Out-Null
 
-$name = "designer_default"
-$captureBase = Join-Path $OutputDir $name
-$actualTga = "$captureBase.tga"
-$actualPng = "$captureBase.png"
-$actualMetrics = "$captureBase.metrics.txt"
-$baselineTga = Join-Path $BaselineDir "$name.tga"
-$baselinePng = Join-Path $BaselineDir "$name.png"
-$baselineMetrics = Join-Path $BaselineDir "$name.metrics.txt"
+$results = @()
+foreach ($scenario in $Scenarios) {
+    $name = "designer_$scenario"
+    $captureBase = Join-Path $OutputDir $name
+    $actualTga = "$captureBase.tga"
+    $actualPng = "$captureBase.png"
+    $actualMetrics = "$captureBase.metrics.txt"
+    $baselineTga = Join-Path $BaselineDir "$name.tga"
+    $baselinePng = Join-Path $BaselineDir "$name.png"
+    $baselineMetrics = Join-Path $BaselineDir "$name.metrics.txt"
 
-foreach ($path in @($actualTga, $actualPng, $actualMetrics)) {
-    Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
-}
-
-try {
-    $env:AY_UI_DESIGNER_CAPTURE_BASE = $captureBase
-    $env:AY_UI_DESIGNER_CAPTURE_FRAME = "12"
-    $process = Start-Process -FilePath $designerPath `
-        -WorkingDirectory $designerDirectory `
-        -Wait -PassThru -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "AYUI_LayoutEditor exited with code $($process.ExitCode)"
+    foreach ($path in @($actualTga, $actualPng, $actualMetrics)) {
+        Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
     }
-}
-finally {
-    Remove-Item Env:\AY_UI_DESIGNER_CAPTURE_BASE -ErrorAction SilentlyContinue
-    Remove-Item Env:\AY_UI_DESIGNER_CAPTURE_FRAME -ErrorAction SilentlyContinue
-}
 
-if (-not (Test-Path -LiteralPath $actualTga) -or
-    -not (Test-Path -LiteralPath $actualMetrics)) {
-    throw "Designer did not produce the expected TGA and metrics files"
-}
-if ((Get-Content -LiteralPath $actualMetrics -Raw) -notmatch "queued=yes") {
-    throw "Designer rejected the screenshot request"
-}
-
-if ($UpdateBaselines) {
-    Copy-Item -LiteralPath $actualTga -Destination $baselineTga -Force
-    Copy-Item -LiteralPath $actualMetrics -Destination $baselineMetrics -Force
-    if (Test-Path -LiteralPath $actualPng) {
-        Copy-Item -LiteralPath $actualPng -Destination $baselinePng -Force
+    try {
+        $env:AY_UI_DESIGNER_CAPTURE_BASE = $captureBase
+        $env:AY_UI_DESIGNER_CAPTURE_FRAME = "12"
+        $env:AY_UI_DESIGNER_CAPTURE_SCENARIO = $scenario
+        $process = Start-Process -FilePath $designerPath `
+            -WorkingDirectory $designerDirectory `
+            -Wait -PassThru -WindowStyle Hidden
+        if ($process.ExitCode -ne 0) {
+            throw "AYUI_LayoutEditor scenario '$scenario' exited with code $($process.ExitCode)"
+        }
     }
-    Write-Host "UPDATED: $baselineTga"
-    exit 0
+    finally {
+        Remove-Item Env:\AY_UI_DESIGNER_CAPTURE_BASE -ErrorAction SilentlyContinue
+        Remove-Item Env:\AY_UI_DESIGNER_CAPTURE_FRAME -ErrorAction SilentlyContinue
+        Remove-Item Env:\AY_UI_DESIGNER_CAPTURE_SCENARIO -ErrorAction SilentlyContinue
+    }
+
+    if (-not (Test-Path -LiteralPath $actualTga) -or
+        -not (Test-Path -LiteralPath $actualMetrics)) {
+        throw "Designer scenario '$scenario' did not produce TGA and metrics files"
+    }
+    $metrics = Get-Content -LiteralPath $actualMetrics -Raw
+    if ($metrics -notmatch "queued=yes" -or
+        $metrics -notmatch "scenario=$([regex]::Escape($scenario))") {
+        throw "Designer scenario '$scenario' rejected or mislabeled the screenshot request"
+    }
+
+    if ($UpdateBaselines) {
+        Copy-Item -LiteralPath $actualTga -Destination $baselineTga -Force
+        Copy-Item -LiteralPath $actualMetrics -Destination $baselineMetrics -Force
+        if (Test-Path -LiteralPath $actualPng) {
+            Copy-Item -LiteralPath $actualPng -Destination $baselinePng -Force
+        }
+        Write-Host "UPDATED [$scenario]: $baselineTga"
+        continue
+    }
+
+    if (-not (Test-Path -LiteralPath $baselineTga)) {
+        throw "Golden baseline '$scenario' is missing. Review captures, then rerun with -UpdateBaselines."
+    }
+    $comparison = Compare-Tga $actualTga $baselineTga `
+        $PixelTolerance $MaxChangedPixelPercent
+    $results += $comparison
+    Write-Host ("PASS [{0}]: {1}x{2}; {3:N4}% pixels changed; max delta {4}." -f
+        $scenario, $comparison.Width, $comparison.Height,
+        $comparison.ChangedPercent, $comparison.MaxChannelDelta)
 }
 
-if (-not (Test-Path -LiteralPath $baselineTga)) {
-    throw "Golden baseline is missing. Review the capture, then rerun with -UpdateBaselines."
+if (-not $UpdateBaselines) {
+    Write-Host "PASS: $($results.Count) Designer golden scenario(s)."
 }
-
-$comparison = Compare-Tga $actualTga $baselineTga `
-    $PixelTolerance $MaxChangedPixelPercent
-Write-Host ("PASS: Designer {0}x{1}; {2:N4}% pixels changed; max delta {3}." -f
-    $comparison.Width, $comparison.Height, $comparison.ChangedPercent,
-    $comparison.MaxChannelDelta)

@@ -522,7 +522,8 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 
 Layout Designer 另有可重复的真实窗口 Golden 门禁。它以隐藏但具有真实 HWND/backbuffer 的
 1280×720 D3D11 standalone 窗口运行，固定 1/60 秒步长，在第 12 帧保存无损 TGA 和 draw-call
-指标并自动退出：
+指标并自动退出。默认矩阵覆盖初始画布、多选 mixed-value Inspector、Compact 响应式预览和
+Theme/token/style 编辑四种确定性状态：
 
 ```powershell
 & .\demo\layout_editor\RunDesignerGoldenRegression.ps1 `
@@ -530,7 +531,8 @@ Layout Designer 另有可重复的真实窗口 Golden 门禁。它以隐藏但�
 ```
 
 普通运行只做带少量像素容差的基线比较；审阅新截图后必须显式传入 `-UpdateBaselines` 才能更新
-`demo/layout_editor/golden/windows-d3d11`，避免布局回归自动覆盖期望结果。
+`demo/layout_editor/golden/windows-d3d11`，避免布局回归自动覆盖期望结果。可用 `-Scenarios theme`
+只重放单个状态；metrics 同时记录场景名，防止错误图片通过文件名冒充另一场景。
 
 ## 目录
 

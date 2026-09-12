@@ -885,7 +885,10 @@ Windows Debug 全量集成基线为 AYUI `5660 / 5660`、AYRenderer `4333 / 4333
 2026-09-12 将独立 Designer 的视觉验收固化为真实窗口 Golden：capture 模式创建隐藏 HWND 并绑定
 D3D11 backbuffer，使用固定帧步长与截图帧输出 1280×720 无损 TGA、frame/backend/draw-call 指标，
 随后自动退出。回归脚本默认只比较已审阅基线（逐通道容差 2、超阈值像素不超过 0.05%），只有显式
-`-UpdateBaselines` 才能替换基线。它补充 headless MockRenderer 契约，但不替代人工视觉验收。
+`-UpdateBaselines` 才能替换基线。门禁从单一默认截图扩展为场景矩阵：default 检查整体 chrome，
+multi_select 检查多选与 mixed-value Inspector，responsive 检查设备预览和响应式面板，theme 检查
+token/style authoring。每个进程只准备一个确定性状态，截图 metrics 携带场景名，避免状态互相污染。
+它补充 headless MockRenderer 契约，但不替代人工视觉验收。
 
 同日把 schema-aware 项目重构正式接入 Layout Designer：AYUI 仅声明中性的 refactor kind、旧值、
 新值、预览结果与宿主 action，不识别 Flow/Screen；AYEditor 映射 Widget ID、Widget Handler、Flow

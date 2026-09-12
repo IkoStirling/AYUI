@@ -1,0 +1,27 @@
+{
+  "tokens": {
+    "color": {
+      "accent": [0.12, 0.52, 0.92, 1.0],
+      "surface": [0.09, 0.11, 0.15, 1.0],
+      "text": [0.92, 0.95, 1.0, 1.0]
+    },
+    "space": {
+      "compact": 6.0,
+      "regular": 12.0
+    }
+  },
+  "sheets": {
+    "controls": {
+      "styles": {
+        "button.primary": {
+          "backgroundColor": "$color.accent",
+          "borderColor": "$color.accent",
+          "textColor": "$color.text"
+        },
+        "panel.surface": {
+          "backgroundColor": "$color.surface"
+        }
+      }
+    }
+  }
+}
