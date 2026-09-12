@@ -885,6 +885,11 @@ D3D11 backbuffer，使用固定帧步长与截图帧输出 1280×720 无损 TGA�
 随后自动退出。回归脚本默认只比较已审阅基线（逐通道容差 2、超阈值像素不超过 0.05%），只有显式
 `-UpdateBaselines` 才能替换基线。它补充 headless MockRenderer 契约，但不替代人工视觉验收。
 
+同日把 schema-aware 项目重构正式接入 Layout Designer：AYUI 仅声明中性的 refactor kind、旧值、
+新值、预览结果与宿主 action，不识别 Flow/Screen；AYEditor 映射 Widget ID、Widget Handler、Flow
+Signal 与 Layout Reference，并复用原子多文件事务。Apply 前要求当前布局与所有受影响的打开文档均
+已保存，Preview 永不写盘，成功后由 Workspace 重载受影响的干净文档。
+
 审计覆盖：
 
 - 全量构建和单测退出码

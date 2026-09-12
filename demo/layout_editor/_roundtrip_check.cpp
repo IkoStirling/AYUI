@@ -76,6 +76,29 @@ int main() {
     }
 
     ayt::ui::LayoutEditorSession session;
+    int refactorPreviewCalls = 0;
+    int refactorApplyCalls = 0;
+    session.setProjectRefactorKinds({
+        {"widget-id", L"Widget ID",
+         ayt::ui::LayoutProjectRefactorKind::Seed::SelectedWidgetId},
+    });
+    session.setProjectRefactorAction(
+        [&refactorPreviewCalls, &refactorApplyCalls](
+            const std::string&, const std::string& kind,
+            const std::string& oldValue, const std::string& newValue,
+            bool apply) {
+            ayt::ui::LayoutProjectRefactorResult result;
+            result.succeeded = kind == "widget-id"
+                && oldValue == "btn_hello" && newValue == "btn_primary";
+            result.safe = result.succeeded;
+            result.changedFiles = result.succeeded ? 2u : 0u;
+            result.details = {L"ui/sample.ui.json — 1 typed reference(s)",
+                              L"ui/main.uiflow.json — 1 typed reference(s)"};
+            result.message = result.succeeded ? "Safe project rename" : "Bad request";
+            if (apply) ++refactorApplyCalls;
+            else ++refactorPreviewCalls;
+            return result;
+        });
     auto* clipboard = new TestClipboard();
     ayt::ui::setClipboardImpl(clipboard);
     if (!session.attach(ui)) {
@@ -89,7 +112,7 @@ int main() {
     }
     auto* menuBar = dynamic_cast<ayt::ui::MenuBar*>(
         ui.findById("designer_menubar"));
-    if (menuBar == nullptr || menuBar->getMenuCount() != 3u) {
+    if (menuBar == nullptr || menuBar->getMenuCount() != 4u) {
         std::fprintf(stderr, "designer menu regression: count=%zu\n",
             menuBar != nullptr ? menuBar->getMenuCount() : 0u);
         return 9;
@@ -157,7 +180,10 @@ int main() {
         "animation_timeline_workspace", "animation_timeline_host",
         "btn_animation_play", "btn_animation_pause",
         "btn_animation_stop", "btn_animation_loop",
-        "animation_transport_status"
+        "animation_transport_status", "project_refactor_kind",
+        "project_refactor_old",
+        "project_refactor_new", "project_refactor_preview",
+        "btn_project_refactor_preview", "btn_project_refactor_apply"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {
@@ -240,6 +266,44 @@ int main() {
     if (button == nullptr) {
         std::fprintf(stderr, "button selection failed\n");
         return 10;
+    }
+    auto* refactorOld = dynamic_cast<ayt::ui::TextInput*>(
+        ui.findById("project_refactor_old"));
+    auto* refactorNew = dynamic_cast<ayt::ui::TextInput*>(
+        ui.findById("project_refactor_new"));
+    auto* refactorPreview = dynamic_cast<ayt::ui::ListView*>(
+        ui.findById("project_refactor_preview"));
+    auto* refactorPreviewButton = dynamic_cast<ayt::ui::Button*>(
+        ui.findById("btn_project_refactor_preview"));
+    auto* refactorApplyButton = dynamic_cast<ayt::ui::Button*>(
+        ui.findById("btn_project_refactor_apply"));
+    if (refactorOld == nullptr || refactorNew == nullptr
+        || refactorPreview == nullptr || refactorPreviewButton == nullptr
+        || refactorApplyButton == nullptr) {
+        std::fprintf(stderr, "project refactor controls missing\n");
+        return 123;
+    }
+    refactorOld->setText(L"btn_hello");
+    refactorNew->setText(L"btn_primary");
+    const auto clickButton = [](ayt::ui::Button& target) {
+        const ayt::math::FRectangle bounds = target.getWorldBounds();
+        const ayt::math::FVector2 center{
+            0.5f * (bounds.minX + bounds.maxX),
+            0.5f * (bounds.minY + bounds.maxY)};
+        return target.onMouseButtonDown(ayt::ui::UIMouseEvent(center, 0))
+            && target.onMouseButtonUp(ayt::ui::UIMouseEvent(center, 0));
+    };
+    const bool previewClicked = clickButton(*refactorPreviewButton);
+    const std::size_t previewItems = refactorPreview->getItemCount();
+    const bool applyClicked = clickButton(*refactorApplyButton);
+    if (!previewClicked || refactorPreviewCalls != 1 || previewItems != 2u
+        || !applyClicked || refactorApplyCalls != 1) {
+        std::fprintf(stderr,
+            "project refactor preview/apply routing failed "
+            "(previewClick=%d previewCalls=%d items=%zu applyClick=%d applyCalls=%d)\n",
+            previewClicked ? 1 : 0, refactorPreviewCalls, previewItems,
+            applyClicked ? 1 : 0, refactorApplyCalls);
+        return 124;
     }
     session.applyProperty("controller", L"SampleController");
     session.applyProperty("event:onClick", L"handleHello");

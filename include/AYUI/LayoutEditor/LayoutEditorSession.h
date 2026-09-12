@@ -35,6 +35,26 @@ class Panel;
 class TextInput;
 class TextLabel;
 
+struct LayoutProjectRefactorKind {
+    enum class Seed {
+        None,
+        SelectedWidgetId,
+        DocumentPath,
+    };
+
+    std::string id;
+    std::wstring displayName;
+    Seed seed = Seed::None;
+};
+
+struct LayoutProjectRefactorResult {
+    bool succeeded = false;
+    bool safe = false;
+    std::size_t changedFiles = 0u;
+    std::vector<std::wstring> details;
+    std::string message;
+};
+
 // Product authoring core shared by AYUI_LayoutEditor and AYEditor hosts.
 // One UIManager: chrome (layout_editor.ui.json) + document under canvas_host.
 class LayoutEditorSession {
@@ -52,6 +72,10 @@ public:
     using ThemePathPicker = std::function<std::string()>;
     using ProjectWorkflowAction = std::function<bool(
         const std::string& layoutPath, std::string& message)>;
+    using ProjectRefactorAction = std::function<LayoutProjectRefactorResult(
+        const std::string& layoutPath, const std::string& kind,
+        const std::string& oldValue, const std::string& newValue,
+        bool apply)>;
 
     enum class AlignMode {
         Left, HCenter, Right,
@@ -238,6 +262,12 @@ public:
     void setCompleteFlowSignalsAction(ProjectWorkflowAction action) {
         _completeFlowSignalsAction = std::move(action);
     }
+    void setProjectRefactorKinds(
+        std::vector<LayoutProjectRefactorKind> kinds);
+    void setProjectRefactorAction(ProjectRefactorAction action) {
+        _projectRefactorAction = std::move(action);
+        syncProjectRefactorEditor();
+    }
     void setTitleUpdater(TitleUpdater updater) { _titleUpdater = std::move(updater); }
     void setDocumentStateUpdater(DocumentStateUpdater updater) {
         _documentStateUpdater = std::move(updater);
@@ -339,6 +369,10 @@ private:
     void renameThemeToken();
     void removeThemeToken();
     void applyThemeStyleBinding();
+    void syncProjectRefactorEditor();
+    void seedProjectRefactorValue();
+    void runProjectRefactor(bool apply);
+    void revealProjectRefactorEditor();
     void syncResponsiveEditor();
     void syncAnimationEditor();
     void syncAnimationTimelineView();
@@ -655,6 +689,13 @@ private:
     TextInput* _themeStyleBinding = nullptr;
     TextLabel* _themeEditorStatus = nullptr;
     bool _suppressThemeEditor = false;
+    ComboBox* _projectRefactorKind = nullptr;
+    TextInput* _projectRefactorOld = nullptr;
+    TextInput* _projectRefactorNew = nullptr;
+    ListView* _projectRefactorPreview = nullptr;
+    TextLabel* _projectRefactorStatus = nullptr;
+    bool _suppressProjectRefactor = false;
+    std::vector<LayoutProjectRefactorKind> _projectRefactorKinds;
     ComboBox* _responsiveBreakpoint = nullptr;
     ComboBox* _responsiveVisibility = nullptr;
     TextLabel* _responsiveStatus = nullptr;
@@ -698,6 +739,7 @@ private:
     ThemePathPicker _themePicker;
     ProjectWorkflowAction _openOwningFlowAction;
     ProjectWorkflowAction _completeFlowSignalsAction;
+    ProjectRefactorAction _projectRefactorAction;
     InteractionContractProvider _interactionContractProvider;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;

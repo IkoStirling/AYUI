@@ -57,7 +57,8 @@
               "title": "Workflow",
               "items": [
                 { "text": "Open Owning Screen" },
-                { "text": "Complete Flow Signals" }
+                { "text": "Complete Flow Signals" },
+                { "text": "Safe Rename References" }
               ]
             }
           ]
@@ -463,6 +464,20 @@
                   { "type": "TextInput", "id": "theme_style_binding", "style": "__le_input", "text": "$color.accent", "placeholder": "$token or literal", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "Button", "id": "btn_theme_style_apply", "style": "__le_command", "text": "Apply style binding", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "TextLabel", "id": "theme_editor_status", "style": "__le_muted", "text": "Open a Theme JSON to edit tokens and styles", "size": { "w": 272, "h": 40 }, "slot": { "height": 40 } },
+
+                  { "type": "TextLabel", "id": "section_project_refactor", "style": "__le_accent", "text": "PROJECT SAFE RENAME", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "ComboBox", "id": "project_refactor_kind", "style": "__le_input", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "project_refactor_old", "style": "__le_input", "text": "", "placeholder": "Current value", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "project_refactor_new", "style": "__le_input", "text": "", "placeholder": "Replacement value", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  {
+                    "type": "HBox", "id": "row_project_refactor_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 6,
+                    "children": [
+                      { "type": "Button", "id": "btn_project_refactor_preview", "style": "__le_command", "text": "Preview", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } },
+                      { "type": "Button", "id": "btn_project_refactor_apply", "style": "__le_primary", "text": "Apply Safely", "size": { "w": 133, "h": 30 }, "slot": { "width": 133 } }
+                    ]
+                  },
+                  { "type": "ListView", "id": "project_refactor_preview", "style": "__le_input", "size": { "w": 272, "h": 104 }, "slot": { "height": 104 }, "itemHeight": 26 },
+                  { "type": "TextLabel", "id": "project_refactor_status", "style": "__le_muted", "text": "", "size": { "w": 272, "h": 42 }, "slot": { "height": 42 } },
 
                   { "type": "TextLabel", "id": "section_animation", "style": "__le_accent", "text": "ANIMATION TIMELINE", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   { "type": "TextInput", "id": "animation_clip_name", "style": "__le_input", "text": "Intro", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },

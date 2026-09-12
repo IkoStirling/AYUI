@@ -372,9 +372,11 @@ Handler 及其接受的 Widget event 类型，并在 Event Trigger Graph 中显�
 JSON 字段，列出 color/float token 和 sheet/style，支持添加、修改、安全删除、重命名 token 并同步
 修复所有 `$token` style 引用，以及为常用颜色属性绑定 token 或 literal；Theme 文件仍由用户显式保存。
 
-`LayoutEditorSession` 只以可选宿主回调暴露项目工作流：**Open Owning Screen** 与
-**Complete Flow Signals**。standalone 没有项目索引时会给出明确状态；AYEditor 注入跨 Layout/Flow
-索引和事务实现。AYUI 不读取 `.uiflow.json`，也不持有项目、Screen 或 Signal 业务语义。
+`LayoutEditorSession` 只以可选宿主回调暴露项目工作流：**Open Owning Screen**、
+**Complete Flow Signals** 与 **Safe Rename References**。Safe Rename Inspector 通过宿主提供的中性
+kind 描述先预览受影响文件和阻断诊断，再显式提交；standalone 没有项目索引时会禁用提交并给出明确
+状态。AYEditor 注入跨 Layout/Flow 索引和事务实现，AYUI 不读取 `.uiflow.json`，也不持有项目、
+Screen 或 Signal 业务语义。该宿主扩展将源码 ABI 更新到 123。
 
 Reuse & Responsive 阶段加入文档内 `LayoutReuseLibrary`。选中的完整 Widget 子树可定义或更新为
 命名 block，并可反复插入；每次插入都会展开成独立 Widget 树并重新生成 ID，因此实例后续可以单独

@@ -710,6 +710,12 @@ void LayoutEditorSession::detach() {
     _themeStyleBinding = nullptr;
     _themeEditorStatus = nullptr;
     _suppressThemeEditor = false;
+    _projectRefactorKind = nullptr;
+    _projectRefactorOld = nullptr;
+    _projectRefactorNew = nullptr;
+    _projectRefactorPreview = nullptr;
+    _projectRefactorStatus = nullptr;
+    _suppressProjectRefactor = false;
     _responsiveBreakpoint = nullptr;
     _responsiveVisibility = nullptr;
     _responsiveStatus = nullptr;
@@ -954,6 +960,12 @@ void LayoutEditorSession::setExternalComponentLibraryPath(std::string path) {
     if (_externalComponentLibraryPath == path) return;
     _externalComponentLibraryPath = std::move(path);
     refreshExternalComponentLibrary();
+}
+
+void LayoutEditorSession::setProjectRefactorKinds(
+    std::vector<LayoutProjectRefactorKind> kinds) {
+    _projectRefactorKinds = std::move(kinds);
+    syncProjectRefactorEditor();
 }
 
 bool LayoutEditorSession::refreshExternalComponentLibrary() {
@@ -2020,6 +2032,9 @@ void LayoutEditorSession::wireChrome() {
     bindMenuItem(L"Workflow", L"Complete Flow Signals", [this, runProjectWorkflow]() {
         runProjectWorkflow(_completeFlowSignalsAction);
     });
+    bindMenuItem(L"Workflow", L"Safe Rename References", [this]() {
+        revealProjectRefactorEditor();
+    });
 
     // Palette buttons are driven by onPointer* (click + drag-create).
     // Keep click handlers as a fallback if pointer routing misses them.
@@ -2456,6 +2471,35 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_theme_token_rename", [this]() { renameThemeToken(); });
     bindBtn("btn_theme_token_remove", [this]() { removeThemeToken(); });
     bindBtn("btn_theme_style_apply", [this]() { applyThemeStyleBinding(); });
+
+    _projectRefactorKind = dynamic_cast<ComboBox*>(
+        findChromeById("project_refactor_kind"));
+    _projectRefactorOld = dynamic_cast<TextInput*>(
+        findChromeById("project_refactor_old"));
+    _projectRefactorNew = dynamic_cast<TextInput*>(
+        findChromeById("project_refactor_new"));
+    _projectRefactorPreview = dynamic_cast<ListView*>(
+        findChromeById("project_refactor_preview"));
+    _projectRefactorStatus = dynamic_cast<TextLabel*>(
+        findChromeById("project_refactor_status"));
+    if (_projectRefactorKind != nullptr) {
+        _projectRefactorKind->setOnSelectionChanged([this](int) {
+            if (_suppressProjectRefactor) return;
+            seedProjectRefactorValue();
+            syncProjectRefactorEditor();
+        });
+    }
+    if (_projectRefactorPreview != nullptr) {
+        _projectRefactorPreview->setSelectionMode(
+            ListView::SelectionMode::Single);
+    }
+    bindBtn("btn_project_refactor_preview", [this]() {
+        runProjectRefactor(false);
+    });
+    bindBtn("btn_project_refactor_apply", [this]() {
+        runProjectRefactor(true);
+    });
+    syncProjectRefactorEditor();
 
     _responsiveBreakpoint = dynamic_cast<ComboBox*>(
         findChromeById("responsive_breakpoint"));
@@ -2964,6 +3008,8 @@ void LayoutEditorSession::ensureEmptyDocument() {
     _animationTrackIndex = -1;
     _animationKeyIndex = -1;
     markDirty(false);
+    syncProjectRefactorEditor();
+    seedProjectRefactorValue();
 }
 
 bool LayoutEditorSession::open(const std::string& path) {
@@ -3005,6 +3051,7 @@ bool LayoutEditorSession::open(const std::string& path) {
     }
     refreshHierarchy();
     syncReuseEditor();
+    syncProjectRefactorEditor();
     select(_docRoot, false);
     setStatus(utf8ToWide("Opened " + path));
     return true;
@@ -3063,6 +3110,7 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
     if (restorePreview) applyPreviewToDocument();
     _documentPath = path;
     markDirty(false);
+    syncProjectRefactorEditor();
     setStatus(utf8ToWide("Saved " + path));
     return true;
 }
@@ -3199,6 +3247,7 @@ void LayoutEditorSession::select(Widget* widget, bool additive) {
     syncHierarchySelection();
     syncSelectionChrome();
     updateContainerHint();
+    seedProjectRefactorValue();
     if (_selection.size() >= 2) {
         std::wostringstream oss;
         oss << L"Selected " << _selection.size()
@@ -6924,6 +6973,121 @@ void LayoutEditorSession::syncThemeEditor() {
                 + std::to_wstring(styles.size()) + L" style(s)"
                 + (_themeDocumentDirty ? L" — unsaved" : L""));
         }
+    }
+}
+
+void LayoutEditorSession::syncProjectRefactorEditor() {
+    if (_projectRefactorKind == nullptr && _projectRefactorStatus == nullptr) {
+        return;
+    }
+    int selectedIndex = _projectRefactorKind != nullptr
+        ? _projectRefactorKind->getSelectedIndex() : -1;
+    _suppressProjectRefactor = true;
+    if (_projectRefactorKind != nullptr) {
+        std::vector<std::wstring> labels;
+        labels.reserve(_projectRefactorKinds.size());
+        for (const auto& kind : _projectRefactorKinds) {
+            labels.push_back(kind.displayName);
+        }
+        _projectRefactorKind->setItems(labels);
+        if (selectedIndex < 0
+            || selectedIndex >= static_cast<int>(_projectRefactorKinds.size())) {
+            selectedIndex = _projectRefactorKinds.empty() ? -1 : 0;
+        }
+        _projectRefactorKind->setSelectedIndex(selectedIndex);
+    }
+    _suppressProjectRefactor = false;
+
+    const bool available = _projectRefactorAction != nullptr
+        && !_projectRefactorKinds.empty() && !_documentPath.empty();
+    setChromeEnabled("btn_project_refactor_preview", available);
+    setChromeEnabled("btn_project_refactor_apply", available);
+    if (_projectRefactorStatus != nullptr
+        && _projectRefactorStatus->getText().empty()) {
+        _projectRefactorStatus->setText(available
+            ? L"Preview all affected files before applying"
+            : L"Project refactoring requires an AYEditor project host");
+    }
+}
+
+void LayoutEditorSession::seedProjectRefactorValue() {
+    if (_projectRefactorOld == nullptr || _projectRefactorKind == nullptr) {
+        return;
+    }
+    const int index = _projectRefactorKind->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(_projectRefactorKinds.size())) {
+        return;
+    }
+    std::string value;
+    switch (_projectRefactorKinds[static_cast<size_t>(index)].seed) {
+    case LayoutProjectRefactorKind::Seed::SelectedWidgetId:
+        if (_selected != nullptr) value = _selected->getId();
+        break;
+    case LayoutProjectRefactorKind::Seed::DocumentPath:
+        value = _documentPath;
+        break;
+    case LayoutProjectRefactorKind::Seed::None:
+        break;
+    }
+    _projectRefactorOld->setText(utf8ToWide(value));
+    if (_projectRefactorNew != nullptr) _projectRefactorNew->setText(L"");
+    if (_projectRefactorPreview != nullptr) _projectRefactorPreview->setItems({});
+}
+
+void LayoutEditorSession::runProjectRefactor(bool apply) {
+    if (_projectRefactorAction == nullptr || _projectRefactorKind == nullptr
+        || _projectRefactorOld == nullptr || _projectRefactorNew == nullptr) {
+        setStatus(L"Project refactoring requires an AYEditor project host");
+        return;
+    }
+    const int index = _projectRefactorKind->getSelectedIndex();
+    if (index < 0 || index >= static_cast<int>(_projectRefactorKinds.size())) {
+        setStatus(L"Choose a project reference kind");
+        return;
+    }
+    const std::string oldValue = wideToUtf8(trimWide(
+        _projectRefactorOld->getText()));
+    const std::string newValue = wideToUtf8(trimWide(
+        _projectRefactorNew->getText()));
+    if (oldValue.empty() || newValue.empty() || oldValue == newValue) {
+        setStatus(L"Safe Rename requires two different non-empty values");
+        return;
+    }
+
+    LayoutProjectRefactorResult result = _projectRefactorAction(
+        _documentPath, _projectRefactorKinds[static_cast<size_t>(index)].id,
+        oldValue, newValue, apply);
+    if (_projectRefactorPreview != nullptr) {
+        _projectRefactorPreview->setItems(result.details);
+        _projectRefactorPreview->setSelectedIndex(-1);
+    }
+    const std::wstring message = utf8ToWide(result.message.empty()
+        ? (result.succeeded ? std::string("Project refactor completed")
+                            : std::string("Project refactor failed"))
+        : result.message);
+    if (_projectRefactorStatus != nullptr) {
+        _projectRefactorStatus->setText(message);
+        _projectRefactorStatus->setStyleId(
+            result.succeeded && result.safe ? "__le_success" : "__le_warning");
+    }
+    setStatus(message);
+}
+
+void LayoutEditorSession::revealProjectRefactorEditor() {
+    syncProjectRefactorEditor();
+    seedProjectRefactorValue();
+    if (_ui != nullptr) {
+        _ui->layout();
+        auto* scroll = dynamic_cast<ScrollView*>(findChromeById("props_scroll"));
+        Widget* section = findChromeById("section_project_refactor");
+        if (scroll != nullptr && section != nullptr) {
+            const math::FRectangle client = scroll->getClientRect();
+            const math::FRectangle bounds = section->getWorldBounds();
+            scroll->setScrollOffset(math::FVector2(
+                scroll->getScrollOffset().x,
+                scroll->getScrollOffset().y + bounds.minY - client.minY - 8.0f));
+        }
+        if (_projectRefactorOld != nullptr) _ui->setFocus(_projectRefactorOld);
     }
 }
 
