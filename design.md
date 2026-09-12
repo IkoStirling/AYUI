@@ -947,9 +947,10 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    transform/CSS/clip/mask/filter 与非 path 图元仍显式拒绝，不隐式承诺任意 SVG 语义。
 3. Windows UI Automation provider 已完成第一阶段；后续补 TextPattern/selection range/live region，
    并以同一 snapshot/action/diff 状态机实现 AT-SPI 与 NSAccessibility，不能在平台层重新推断控件语义。
-4. RichText 的 grapheme/bidi/UAX #14-compatible break、family/weight face 与真实 shaping 已完成第一阶段；
-   下一层是内联对象、跨字体 glyph fallback、可变/彩色字体、完整 selection/editing，以及非 Windows
-   字体发现。portable line-break fallback 是确定性子集，完整 Unicode 表应由平台或生成数据提供。
+4. RichText 第二阶段已完成：inline image/widget、跨字体 grapheme fallback、可变 `wght`/彩色 bitmap
+   字体、鼠标与键盘 selection、剪贴板编辑、IME、undo/redo，以及 Windows/Linux/macOS 字体发现。
+   运行时 texture/widget handle 明确不序列化；JSON 只保存 inline descriptor。下一层是 UI Automation/
+   AT-SPI/NSAccessibility 的 TextPattern/selection range，以及由生成数据提供的完整 Unicode line-break 表。
 5. 将目前自动即时兜底的粒子和资源引用逐类评估为可安全保留的 typed command；不能保证
    句柄生命周期的操作继续保留为排序/缓存屏障。
 6. 可选：统一散落在 loader、serializer、IME 和 i18n 中的 UTF-8 工具为一个经过测试的公共内部组件。
@@ -996,8 +997,9 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
    边界闭环；无障碍 snapshot/action、Theme/Widget 两级继承、TabStrip Scroll/Compress/Clip、
    RichText paragraph layout 和 Win32/macOS/Wayland/X11 Clipboard 均有 API、Serializer、Gallery
    或单测覆盖；本阶段新增 Windows UIA provider、Unicode grapheme/Bidi/断行、HarfBuzz direction/
-   language 与 family/weight 多 face atlas。下一阶段沿现有 adapter/text/backend 契约补平台 provider、
-   TextPattern、字体 fallback 和 inline object，不复制核心路径。
+   language 与 family/weight 多 face atlas；RichText 第二阶段继续补齐跨字体 fallback、inline object、
+   selection/editing、可变/彩色字形和三平台字体发现。下一阶段沿现有 adapter/text/backend 契约补
+   平台 provider 与 TextPattern，不复制核心路径。
 
 `OrderedRuns` 与 `OverlapAware` 只允许在提交顺序规划上分叉；图元记录、合批兼容键、
 顶点/索引构建、shader 和 submit 必须共享。新图元若不能安全重排，应进入统一命令流并声明

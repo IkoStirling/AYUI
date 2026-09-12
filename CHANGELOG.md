@@ -7,6 +7,9 @@
 
 ### Changed
 
+- RichText 第二阶段加入跨字体 grapheme fallback、inline image/widget、selection、剪贴板编辑、IME、
+  undo/redo；AYFont 加入三平台系统字体发现、OpenType variation axis 和 BGRA 彩色 glyph atlas。
+  RichText 公共类型与虚函数扩展后源码 ABI 更新为 122。
 - 明确 1.x 源码/API、JSON wire contract 与 C++ ABI 的边界。
 - 公共控件注释与当前 overlay、typeahead、IME、文本测量及 overflow 实现对齐。
 - `UIManager` 可显式启用 Production root UI Layer；静态主树 clean 帧只做 layer composite，

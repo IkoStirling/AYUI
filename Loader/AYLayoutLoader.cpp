@@ -1316,6 +1316,8 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                 rich->setTextDirection(static_cast<TextDirection>(value));
             }
         }
+        rich->setSelectable(j.value("selectable", true));
+        rich->setEditable(j.value("editable", false));
         if (j.contains("runs") && j["runs"].is_array()) {
             for (const auto& runJson : j["runs"]) {
                 if (!runJson.is_object() || !runJson.contains("text")) continue;
@@ -1346,6 +1348,22 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                 run.strikethrough = runJson.value("strikethrough", false);
                 run.letterSpacing = runJson.value("letterSpacing", 0.0f);
                 run.baselineShift = runJson.value("baselineShift", 0.0f);
+                const int inlineKind = runJson.value("inlineKind", 0);
+                if (inlineKind >= 0
+                    && inlineKind <= static_cast<int>(RichInlineKind::Widget)) {
+                    run.inlineKind = static_cast<RichInlineKind>(inlineKind);
+                }
+                if (runJson.contains("inlineSize")
+                    && runJson["inlineSize"].is_object()) {
+                    run.inlineSize = math::FVector2(
+                        runJson["inlineSize"].value("w", 16.0f),
+                        runJson["inlineSize"].value("h", 16.0f));
+                }
+                run.inlineBaseline = runJson.value("inlineBaseline", 0.0f);
+                if (runJson.contains("inlineAltText")) {
+                    run.inlineAltText = utf8ToWide(
+                        runJson["inlineAltText"].get<std::string>());
+                }
                 rich->addRun(run);
             }
         }
@@ -1622,6 +1640,8 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
             input->setOnTextChanged([callback](const std::wstring&) { callback(); });
         } else if (auto* area = dynamic_cast<TextArea*>(widget)) {
             area->setOnTextChanged([callback](const std::wstring&) { callback(); });
+        } else if (auto* rich = dynamic_cast<RichText*>(widget)) {
+            rich->setOnTextChanged([callback](const std::wstring&) { callback(); });
         }
     }
     if (auto callback = resolveEvent("onSubmit")) {

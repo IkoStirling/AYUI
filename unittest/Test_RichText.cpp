@@ -46,6 +46,8 @@ TEST_CASE(richtext_initial_state) {
     CHECK(rt.getRunCount() == 0u);
     CHECK(rt.getDefaultFontSize() == 14);
     CHECK(rt.getWrapWidth() == 0.0f);
+    CHECK(rt.isSelectable());
+    CHECK(!rt.isEditable());
 }
 
 TEST_CASE(richtext_add_run_accumulates) {
@@ -162,6 +164,7 @@ TEST_CASE(richtext_final_fragments_use_their_actual_shaping_context) {
     const RichTextLayout layout = rt.layout(renderer);
     CHECK(layout.lines.size() >= 2u);
     CHECK(!layout.fragments.empty());
+    int mismatches = 0;
     for (const RichTextFragment& fragment : layout.fragments) {
         const RichRun& run = rt.getRun(fragment.runIndex);
         const std::wstring text = run.text.substr(
@@ -171,8 +174,87 @@ TEST_CASE(richtext_final_fragments_use_their_actual_shaping_context) {
             ? TextDirection::RightToLeft : TextDirection::LeftToRight;
         const auto shaped = renderer.shapeText(text, run.fontSize, style);
         const float submittedWidth = fragment.bounds.maxX - fragment.bounds.minX;
-        CHECK_FLOAT_EQ(submittedWidth, shaped.metrics.width, 1e-3f);
+        if (std::abs(submittedWidth - shaped.metrics.width) > 1e-3f) ++mismatches;
     }
+    CHECK(mismatches == 0);
+}
+
+TEST_CASE(richtext_inline_image_occupies_one_document_cluster) {
+    RichText rt;
+    rt.setSize(FVector2(300.0f, 64.0f));
+    rt.addRun(L"A", FVector4(1, 1, 1, 1), 14);
+    rt.addInlineImage(reinterpret_cast<void*>(0x1234), FVector2(24.0f, 20.0f), L"icon");
+    rt.addRun(L"B", FVector4(1, 1, 1, 1), 14);
+    MockRenderer renderer;
+    const RichTextLayout shaped = rt.layout(renderer);
+    int inlineFragments = 0;
+    float inlineWidth = 0.0f;
+    for (const RichTextFragment& fragment : shaped.fragments) {
+        if (fragment.inlineObject) {
+            ++inlineFragments;
+            inlineWidth = fragment.bounds.maxX - fragment.bounds.minX;
+        }
+    }
+    CHECK(rt.getPlainText() == std::wstring(L"A\xFFFC" L"B"));
+    CHECK(inlineFragments == 1);
+    CHECK_FLOAT_EQ(inlineWidth, 24.0f, 1e-3f);
+}
+
+TEST_CASE(richtext_inline_widget_is_attached_and_laid_out) {
+    RichText rt;
+    Widget inlineWidget;
+    rt.setSize(FVector2(300.0f, 64.0f));
+    rt.addRun(L"A", FVector4(1, 1, 1, 1), 14);
+    rt.addInlineWidget(&inlineWidget, FVector2(30.0f, 18.0f), L"control");
+    MockRenderer renderer;
+    rt.render(renderer);
+    CHECK(inlineWidget.getParent() == &rt);
+    CHECK_FLOAT_EQ(inlineWidget.getSize().x, 30.0f, 1e-3f);
+    CHECK_FLOAT_EQ(inlineWidget.getSize().y, 18.0f, 1e-3f);
+    rt.clearRuns();
+    CHECK(inlineWidget.getParent() == nullptr);
+}
+
+TEST_CASE(richtext_editing_preserves_surrounding_run_styles_and_undo) {
+    RichText rt;
+    RichRun first;
+    first.text = L"red";
+    first.color = FVector4(1, 0, 0, 1);
+    RichRun second;
+    second.text = L" blue";
+    second.color = FVector4(0, 0, 1, 1);
+    rt.addRun(first);
+    rt.addRun(second);
+    rt.setEditable(true);
+    rt.setFocus(true);
+    rt.setSelection(1, 6);
+    CHECK(rt.replaceSelection(L"X"));
+    CHECK(rt.getPlainText() == L"rXue");
+    CHECK(rt.getRun(0).color == first.color);
+    CHECK(rt.getRun(rt.getRunCount() - 1u).color == second.color);
+    CHECK(rt.undo());
+    CHECK(rt.getPlainText() == L"red blue");
+    CHECK(rt.redo());
+    CHECK(rt.getPlainText() == L"rXue");
+}
+
+TEST_CASE(richtext_serializer_persists_editability_and_inline_descriptor) {
+    RichText rt;
+    rt.setEditable(true);
+    rt.addInlineImage(nullptr, FVector2(20.0f, 12.0f), L"status icon");
+    WidgetSerializer serializer;
+    const std::string json = serializer.serialize(&rt, false);
+    Widget* raw = serializer.deserialize(json);
+    RichText* restored = dynamic_cast<RichText*>(raw);
+    CHECK(restored != nullptr);
+    if (restored != nullptr) {
+        CHECK(restored->isEditable());
+        CHECK(restored->getRunCount() == 1u);
+        CHECK(restored->getRun(0).inlineKind == RichInlineKind::Image);
+        CHECK(restored->getRun(0).inlineAltText == L"status icon");
+        CHECK_FLOAT_EQ(restored->getRun(0).inlineSize.x, 20.0f, 1e-3f);
+    }
+    destroyWidgetTree(raw);
 }
 
 TEST_SUITE_END

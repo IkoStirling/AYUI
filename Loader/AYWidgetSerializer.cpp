@@ -103,6 +103,7 @@ static bool hasStructuredChildPayload(Widget* widget) {
         || dynamic_cast<ComboBox*>(widget) != nullptr
         || dynamic_cast<ColorPicker*>(widget) != nullptr
         || dynamic_cast<TreeView*>(widget) != nullptr
+        || dynamic_cast<RichText*>(widget) != nullptr
         || dynamic_cast<MenuItem*>(widget) != nullptr
         || dynamic_cast<Menu*>(widget) != nullptr
         || dynamic_cast<MenuBar*>(widget) != nullptr
@@ -998,6 +999,8 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                     rt->setTextDirection(static_cast<TextDirection>(value));
                 }
             }
+            rt->setSelectable(j.value("selectable", true));
+            rt->setEditable(j.value("editable", false));
             if (j.contains("runs") && j["runs"].is_array()) {
                 for (const auto& r : j["runs"]) {
                     math::FVector4 col = rt->getDefaultColor();
@@ -1028,6 +1031,19 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                         run.strikethrough = r.value("strikethrough", false);
                         run.letterSpacing = r.value("letterSpacing", 0.0f);
                         run.baselineShift = r.value("baselineShift", 0.0f);
+                        const int inlineKind = r.value("inlineKind", 0);
+                        if (inlineKind >= 0 && inlineKind <= static_cast<int>(RichInlineKind::Widget)) {
+                            run.inlineKind = static_cast<RichInlineKind>(inlineKind);
+                        }
+                        if (r.contains("inlineSize") && r["inlineSize"].is_object()) {
+                            run.inlineSize = math::FVector2(
+                                r["inlineSize"].value("w", 16.0f),
+                                r["inlineSize"].value("h", 16.0f));
+                        }
+                        run.inlineBaseline = r.value("inlineBaseline", 0.0f);
+                        if (r.contains("inlineAltText")) {
+                            run.inlineAltText = toWstring(r["inlineAltText"].get<std::string>());
+                        }
                         rt->addRun(run);
                     }
                 }
@@ -1927,6 +1943,8 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
         j["lineSpacing"] = rt->getLineSpacing();
         j["maxLines"] = rt->getMaxLines();
         j["textDirection"] = static_cast<int>(rt->getTextDirection());
+        j["selectable"] = rt->isSelectable();
+        j["editable"] = rt->isEditable();
         j["runs"] = json::array();
         for (size_t i = 0; i < rt->getRunCount(); ++i) {
             const RichRun& r = rt->getRun(i);
@@ -1945,6 +1963,12 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
             rj["strikethrough"] = r.strikethrough;
             rj["letterSpacing"] = r.letterSpacing;
             rj["baselineShift"] = r.baselineShift;
+            if (r.inlineKind != RichInlineKind::None) {
+                rj["inlineKind"] = static_cast<int>(r.inlineKind);
+                rj["inlineSize"] = {{"w", r.inlineSize.x}, {"h", r.inlineSize.y}};
+                rj["inlineBaseline"] = r.inlineBaseline;
+                rj["inlineAltText"] = toUtf8(r.inlineAltText);
+            }
             j["runs"].push_back(rj);
         }
     }

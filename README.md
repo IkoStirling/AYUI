@@ -29,8 +29,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - 平台无关无障碍语义树、稳定节点 ID、角色/状态/动作推断、增量 diff 及 Serializer 元数据
 - Windows UI Automation 原生 Fragment provider，覆盖 Invoke/Toggle/RangeValue/ExpandCollapse/SelectionItem
 - Theme 命名父级继承和控件树 token override 级联
-- TabStrip Scroll/Compress/Clip overflow；RichText 字素簇、双向文本、Unicode 断行和真实字体 shaping
-- RichText run 级 font family/weight/italic/language，以及 AYRenderer 多 face、多 atlas 一致测量/绘制
+- TabStrip Scroll/Compress/Clip overflow；RichText 字素簇、双向文本、Unicode 断行、选择/编辑和 inline object
+- RichText run 级 font family/weight/italic/language，以及 AYRenderer 跨字体 fallback、多 atlas 一致测量/绘制
 - Win32、macOS、Wayland 和 X11 Clipboard 后端
 - 脏标记、世界坐标缓存、颜色/透明度/位置动画和滚动惯性
 - 多轨 Timeline/Keyframe、Sequence 串联、repeat/yoyo、可编辑 Cubic Bezier/物理弹簧、完成/取消/暂停控制、全局动画倍率与系统 reduced-motion 桥接
@@ -553,9 +553,12 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 - Windows UI Automation adapter 已实现 Fragment tree、常用 control pattern、跨线程动作封送和
   增量事件；AT-SPI/NSAccessibility 原生 provider 仍待实现。TextInput/TextArea 的 UIA TextPattern、
   原生 selection range 和 live-region 事件也尚未进入本阶段。
-- RichText 已实现扩展字素 caret、双向可视顺序、Unicode 断行和 HarfBuzz shaping，并支持 Windows
-  已登记 family 的 regular/bold/italic/bold-italic face。内联对象、跨字体 glyph fallback、可变字体、
-  彩色 emoji、完整编辑 selection 和非 Windows 字体发现仍属于后续字体系统工作。
+- RichText 已实现扩展字素 caret、双向可视顺序、Unicode 断行、HarfBuzz shaping、鼠标/键盘 selection、
+  剪贴板编辑、IME、undo/redo 和 inline image/widget；inline widget 由宿主持有并作为 RichText 子节点
+  参与命中，运行时 texture/widget handle 不写入 JSON。AYRenderer 以完整 grapheme 为 fallback 单元，
+  在多 face atlas 间保持测量/绘制一致；AYFont 支持三平台字体发现、`wght` 等 variation axis、
+  BGRA8 color glyph 和 bitmap emoji fixed strike。仍未覆盖的是平台原生 Accessibility TextPattern/
+  selection range，以及完整生成式 Unicode line-break 数据表。
 - 3D spatial UI、像素遮罩命中测试和高级特效不在当前范围。
 
 ## 相关模块

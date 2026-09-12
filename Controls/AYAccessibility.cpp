@@ -89,7 +89,11 @@ std::wstring inferLabel(const Widget* widget) {
     if (const auto* control = dynamic_cast<const Window*>(widget)) return control->getTitle();
     if (const auto* control = dynamic_cast<const RichText*>(widget)) {
         std::wstring text;
-        for (size_t i = 0; i < control->getRunCount(); ++i) text += control->getRun(i).text;
+        for (size_t i = 0; i < control->getRunCount(); ++i) {
+            const RichRun& run = control->getRun(i);
+            text += run.inlineKind == RichInlineKind::None
+                ? run.text : run.inlineAltText;
+        }
         return text;
     }
     return {};

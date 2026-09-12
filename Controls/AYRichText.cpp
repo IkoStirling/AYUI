@@ -1,8 +1,12 @@
 #include "AYUI/RichText.h"
+#include "AYUI/Clipboard.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/UIKeyCode.h"
+#include "AYUI/UIManager.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 #include <limits>
 
 namespace ayt::ui {
@@ -95,6 +99,37 @@ void appendCaretStop(RichTextFragment& fragment, size_t textIndex, float x) {
 RichText::RichText() { setSize(math::FVector2(200.0f, 24.0f)); }
 RichText::~RichText() = default;
 
+void RichText::normalizeRun(RichRun& run) const {
+    if (run.fontSize <= 0) run.fontSize = _defaultFontSize;
+    run.fontWeight = std::clamp(run.fontWeight, 100, 900);
+    if (run.isImage && run.inlineKind == RichInlineKind::None) {
+        run.inlineKind = RichInlineKind::Image;
+    }
+    if (run.inlineKind != RichInlineKind::None) {
+        run.text.assign(1, static_cast<wchar_t>(0xFFFC));
+        run.inlineSize.x = std::max(1.0f, run.inlineSize.x);
+        run.inlineSize.y = std::max(1.0f, run.inlineSize.y);
+        run.isImage = run.inlineKind == RichInlineKind::Image;
+    }
+}
+
+void RichText::syncInlineWidgetChildren() {
+    std::vector<Widget*> required;
+    for (const RichRun& run : _runs) {
+        if (run.inlineKind == RichInlineKind::Widget && run.inlineWidget != nullptr
+            && std::find(required.begin(), required.end(), run.inlineWidget) == required.end()) {
+            required.push_back(run.inlineWidget);
+        }
+    }
+    const std::vector<Widget*> current = getChildren();
+    for (Widget* child : current) {
+        if (std::find(required.begin(), required.end(), child) == required.end()) removeChild(child);
+    }
+    for (Widget* child : required) {
+        if (child->getParent() != this) addChildExternal(child);
+    }
+}
+
 void RichText::addRun(const std::wstring& text, const math::FVector4& color,
                       int fontSize) {
     RichRun run;
@@ -106,20 +141,20 @@ void RichText::addRun(const std::wstring& text, const math::FVector4& color,
 
 void RichText::addRun(const RichRun& run) {
     RichRun normalized = run;
-    if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
-    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
+    normalizeRun(normalized);
     _runs.push_back(std::move(normalized));
+    syncInlineWidgetChildren();
     markBoundsDirty();
     markDirty();
 }
 
 void RichText::insertRun(size_t index, const RichRun& run) {
     RichRun normalized = run;
-    if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
-    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
+    normalizeRun(normalized);
     index = std::min(index, _runs.size());
     _runs.insert(_runs.begin() + static_cast<std::ptrdiff_t>(index),
                  std::move(normalized));
+    syncInlineWidgetChildren();
     markBoundsDirty();
     markDirty();
 }
@@ -127,9 +162,9 @@ void RichText::insertRun(size_t index, const RichRun& run) {
 bool RichText::setRun(size_t index, const RichRun& run) {
     if (index >= _runs.size()) return false;
     RichRun normalized = run;
-    if (normalized.fontSize <= 0) normalized.fontSize = _defaultFontSize;
-    normalized.fontWeight = std::clamp(normalized.fontWeight, 100, 900);
+    normalizeRun(normalized);
     _runs[index] = std::move(normalized);
+    syncInlineWidgetChildren();
     markBoundsDirty();
     markDirty();
     return true;
@@ -138,6 +173,7 @@ bool RichText::setRun(size_t index, const RichRun& run) {
 bool RichText::removeRun(size_t index) {
     if (index >= _runs.size()) return false;
     _runs.erase(_runs.begin() + static_cast<std::ptrdiff_t>(index));
+    syncInlineWidgetChildren();
     markBoundsDirty();
     markDirty();
     return true;
@@ -159,6 +195,8 @@ bool RichText::moveRun(size_t fromIndex, size_t toIndex) {
 
 void RichText::clearRuns() {
     _runs.clear();
+    syncInlineWidgetChildren();
+    _selectionAnchor = _caret = 0;
     markBoundsDirty();
     markDirty();
 }
@@ -167,6 +205,47 @@ std::wstring RichText::getPlainText() const {
     std::wstring result;
     for (const RichRun& run : _runs) result += run.text;
     return result;
+}
+
+void RichText::setPlainText(const std::wstring& text) {
+    _runs.clear();
+    if (!text.empty()) {
+        RichRun run;
+        run.text = text;
+        run.color = _defaultColor;
+        run.fontSize = _defaultFontSize;
+        _runs.push_back(std::move(run));
+    }
+    syncInlineWidgetChildren();
+    _selectionAnchor = _caret = std::min(_caret, text.size());
+    _undoStack.clear();
+    _redoStack.clear();
+    markBoundsDirty();
+    markDirty();
+    if (_onTextChanged) _onTextChanged(getPlainText());
+}
+
+void RichText::addInlineImage(void* textureHandle, const math::FVector2& size,
+                              const std::wstring& altText,
+                              const math::FRectangle& uv) {
+    RichRun run;
+    run.inlineKind = RichInlineKind::Image;
+    run.inlineTexture = textureHandle;
+    run.inlineSize = size;
+    run.inlineAltText = altText;
+    run.inlineUv = uv;
+    addRun(run);
+}
+
+void RichText::addInlineWidget(Widget* widget, const math::FVector2& size,
+                               const std::wstring& altText) {
+    if (widget == nullptr) return;
+    RichRun run;
+    run.inlineKind = RichInlineKind::Widget;
+    run.inlineWidget = widget;
+    run.inlineSize = size;
+    run.inlineAltText = altText;
+    addRun(run);
 }
 
 void RichText::setWrapWidth(float width) {
@@ -226,7 +305,8 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
             atom.documentTextStart = position;
             atom.textLength = partLength;
             atom.text = plainText.substr(position, partLength);
-            atom.height = std::max(1.0f,
+            const bool inlineObject = run.inlineKind != RichInlineKind::None;
+            atom.height = inlineObject ? run.inlineSize.y : std::max(1.0f,
                 static_cast<float>(run.fontSize) * _lineHeight);
             atom.bidiLevel = cluster.bidiLevel;
             atom.whitespace = cluster.whitespace;
@@ -235,7 +315,9 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
             // break opportunity belongs only to its final piece; exposing it
             // on an earlier piece would permit wrapping inside a grapheme.
             atom.softBreakAfter = cluster.softBreakAfter && partLength == remaining;
-            if (!atom.newline) {
+            if (inlineObject) {
+                atom.width = run.inlineSize.x;
+            } else if (!atom.newline) {
                 const TextDirection atomDirection = atom.rightToLeft()
                     ? TextDirection::RightToLeft : TextDirection::LeftToRight;
                 atom.width = measureTextWidth(renderer, atom.text, run, atomDirection);
@@ -253,13 +335,15 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
     // any overflow repair.
     auto shapeAtomSpan = [&](std::vector<LayoutAtom>& shapedAtoms) {
         for (size_t begin = 0; begin < shapedAtoms.size();) {
-            if (shapedAtoms[begin].newline || shapedAtoms[begin].synthetic) {
+            if (shapedAtoms[begin].newline || shapedAtoms[begin].synthetic
+                || _runs[shapedAtoms[begin].runIndex].inlineKind != RichInlineKind::None) {
                 ++begin;
                 continue;
             }
             size_t end = begin + 1u;
             while (end < shapedAtoms.size() && !shapedAtoms[end].newline
                 && !shapedAtoms[end].synthetic
+                && _runs[shapedAtoms[end].runIndex].inlineKind == RichInlineKind::None
                 && shapedAtoms[end].runIndex == shapedAtoms[begin].runIndex
                 && shapedAtoms[end].rightToLeft() == shapedAtoms[begin].rightToLeft()
                 && shapedAtoms[end - 1].runTextStart + shapedAtoms[end - 1].textLength
@@ -495,7 +579,10 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
             const LayoutAtom& atom = source.atoms[atomIndex];
             const RichRun& run = _runs[atom.runIndex];
             const float atomWidth = atom.width + (atom.whitespace ? gapExtra : 0.0f);
-            const float top = y - run.baselineShift;
+            const bool inlineObject = run.inlineKind != RichInlineKind::None;
+            const float top = inlineObject
+                ? y + std::max(0.0f, source.height - run.inlineSize.y) - run.inlineBaseline
+                : y - run.baselineShift;
             const bool rtl = atom.rightToLeft();
             const bool logicalAdjacent = !result.fragments.empty() && !atom.synthetic
                 && (rtl
@@ -503,7 +590,7 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
                         == result.fragments.back().runTextStart
                     : result.fragments.back().runTextStart
                         + result.fragments.back().textLength == atom.runTextStart);
-            const bool canMerge = !result.fragments.empty()
+            const bool canMerge = !inlineObject && !result.fragments.empty()
                 && gapExtra <= 0.0001f
                 && result.fragments.back().lineIndex == lineIndex
                 && result.fragments.back().runIndex == atom.runIndex
@@ -530,6 +617,7 @@ RichTextLayout RichText::layout(IRenderBackend& renderer) const {
                 created.lineIndex = lineIndex;
                 created.bidiLevel = atom.bidiLevel;
                 created.rightToLeft = rtl;
+                created.inlineObject = inlineObject;
                 created.bounds = math::FRectangle(x, top, x + atomWidth,
                                                    top + source.height);
                 result.fragments.push_back(std::move(created));
@@ -611,13 +699,416 @@ math::FRectangle RichText::getCaretRect(IRenderBackend& renderer,
                             b.minY + static_cast<float>(_defaultFontSize) * _lineHeight);
 }
 
+void RichText::setSelectable(bool selectable) {
+    _selectable = selectable;
+    if (!_selectable) {
+        _editable = false;
+        clearSelection();
+    }
+    markDirty();
+}
+
+void RichText::setEditable(bool editable) {
+    _editable = editable;
+    if (editable) _selectable = true;
+    markDirty();
+}
+
+void RichText::setSelection(size_t anchor, size_t caret) {
+    const std::wstring text = getPlainText();
+    _selectionAnchor = floorGraphemeBoundary(text, std::min(anchor, text.size()));
+    _caret = floorGraphemeBoundary(text, std::min(caret, text.size()));
+    _caretBlink = 0.0f;
+    _caretVisible = true;
+    markDirty();
+}
+
+void RichText::clearSelection() {
+    _selectionAnchor = _caret;
+    markDirty();
+}
+
+void RichText::selectAll() {
+    _selectionAnchor = 0;
+    _caret = getPlainText().size();
+    markDirty();
+}
+
+std::wstring RichText::getSelectedText() const {
+    if (!hasSelection()) return {};
+    const std::wstring text = getPlainText();
+    const size_t start = std::min(getSelectionStart(), text.size());
+    const size_t end = std::min(getSelectionEnd(), text.size());
+    return text.substr(start, end - start);
+}
+
+RichRun RichText::insertionStyleAt(size_t index) const {
+    size_t cursor = 0;
+    for (const RichRun& run : _runs) {
+        const size_t end = cursor + run.text.size();
+        if (index <= end && run.inlineKind == RichInlineKind::None) {
+            RichRun style = run;
+            style.text.clear();
+            return style;
+        }
+        cursor = end;
+    }
+    RichRun style;
+    style.color = _defaultColor;
+    style.fontSize = _defaultFontSize;
+    return style;
+}
+
+bool RichText::replaceRange(size_t start, size_t end, const std::wstring& text,
+                            bool recordUndo) {
+    const std::wstring plain = getPlainText();
+    start = floorGraphemeBoundary(plain, std::min(start, plain.size()));
+    end = ceilGraphemeBoundary(plain, std::min(end, plain.size()));
+    if (end < start) std::swap(start, end);
+    if (start == end && text.empty()) return false;
+    if (recordUndo) {
+        _undoStack.push_back({_runs, _selectionAnchor, _caret});
+        if (_undoStack.size() > 100u) _undoStack.erase(_undoStack.begin());
+        _redoStack.clear();
+    }
+
+    RichRun insertion = insertionStyleAt(start);
+    insertion.text = text;
+    normalizeRun(insertion);
+    insertion.inlineKind = RichInlineKind::None;
+    insertion.isImage = false;
+    insertion.inlineTexture = nullptr;
+    insertion.inlineWidget = nullptr;
+
+    std::vector<RichRun> next;
+    bool inserted = text.empty();
+    size_t runStart = 0;
+    for (const RichRun& source : _runs) {
+        const size_t runEnd = runStart + source.text.size();
+        if (runEnd <= start) {
+            next.push_back(source);
+        } else if (runStart >= end) {
+            if (!inserted) { next.push_back(insertion); inserted = true; }
+            next.push_back(source);
+        } else {
+            if (start > runStart) {
+                RichRun prefix = source;
+                prefix.text = source.text.substr(0, start - runStart);
+                next.push_back(std::move(prefix));
+            }
+            if (!inserted) { next.push_back(insertion); inserted = true; }
+            if (end < runEnd) {
+                RichRun suffix = source;
+                suffix.text = source.text.substr(end - runStart);
+                next.push_back(std::move(suffix));
+            }
+        }
+        runStart = runEnd;
+    }
+    if (!inserted) next.push_back(std::move(insertion));
+    next.erase(std::remove_if(next.begin(), next.end(), [](const RichRun& run) {
+        return run.text.empty();
+    }), next.end());
+    _runs = std::move(next);
+    syncInlineWidgetChildren();
+    _caret = start + text.size();
+    _selectionAnchor = _caret;
+    markBoundsDirty();
+    markDirty();
+    if (_onTextChanged) _onTextChanged(getPlainText());
+    return true;
+}
+
+bool RichText::replaceSelection(const std::wstring& text) {
+    if (!_editable) return false;
+    return replaceRange(getSelectionStart(), getSelectionEnd(), text, true);
+}
+
+bool RichText::undo() {
+    if (_undoStack.empty()) return false;
+    _redoStack.push_back({_runs, _selectionAnchor, _caret});
+    EditSnapshot snapshot = std::move(_undoStack.back());
+    _undoStack.pop_back();
+    _runs = std::move(snapshot.runs);
+    _selectionAnchor = snapshot.anchor;
+    _caret = snapshot.caret;
+    syncInlineWidgetChildren();
+    markBoundsDirty();
+    markDirty();
+    if (_onTextChanged) _onTextChanged(getPlainText());
+    return true;
+}
+
+bool RichText::redo() {
+    if (_redoStack.empty()) return false;
+    _undoStack.push_back({_runs, _selectionAnchor, _caret});
+    EditSnapshot snapshot = std::move(_redoStack.back());
+    _redoStack.pop_back();
+    _runs = std::move(snapshot.runs);
+    _selectionAnchor = snapshot.anchor;
+    _caret = snapshot.caret;
+    syncInlineWidgetChildren();
+    markBoundsDirty();
+    markDirty();
+    if (_onTextChanged) _onTextChanged(getPlainText());
+    return true;
+}
+
+void RichText::moveCaret(size_t next, bool extend) {
+    const std::wstring text = getPlainText();
+    next = floorGraphemeBoundary(text, std::min(next, text.size()));
+    if (!extend) _selectionAnchor = next;
+    _caret = next;
+    _caretBlink = 0.0f;
+    _caretVisible = true;
+    markDirty();
+}
+
+bool RichText::onMouseButtonDown(const UIMouseEvent& e) {
+    if (!_selectable || e.mouseButton != 0) return false;
+    if (UIManager* ui = UIManager::tryGet()) ui->setFocus(this);
+    IRenderBackend* backend = UIManager::tryGet() ? UIManager::tryGet()->backend() : nullptr;
+    if (backend == nullptr) return true;
+    const size_t index = hitTestTextIndex(*backend, e.mousePos);
+    const uint32_t mods = UIManager::tryGet()->getModifiers();
+    const bool shift = (mods & 1u) != 0u;
+    if (!shift) _selectionAnchor = index;
+    _caret = index;
+    _dragSelecting = true;
+    _caretBlink = 0.0f;
+    _caretVisible = true;
+    markDirty();
+    return true;
+}
+
+bool RichText::onMouseMove(const UIMouseEvent& e) {
+    if (!_dragSelecting) return false;
+    IRenderBackend* backend = UIManager::tryGet() ? UIManager::tryGet()->backend() : nullptr;
+    if (backend == nullptr) return true;
+    _caret = hitTestTextIndex(*backend, e.mousePos);
+    markDirty();
+    return true;
+}
+
+bool RichText::onMouseButtonUp(const UIMouseEvent& e) {
+    if (e.mouseButton != 0 || !_dragSelecting) return false;
+    _dragSelecting = false;
+    return true;
+}
+
+bool RichText::onTextInput(wchar_t ch) {
+    if (!_editable || !_hasFocus || ch < 0x20) return false;
+    return replaceSelection(std::wstring(1, ch));
+}
+
+bool RichText::onTextInputText(const std::wstring& text) {
+    if (!_editable || !_hasFocus) return false;
+    std::wstring accepted;
+    accepted.reserve(text.size());
+    for (wchar_t ch : text) {
+        if (ch >= 0x20 || ch == L'\n' || ch == L'\t') accepted.push_back(ch);
+    }
+    return accepted.empty() ? true : replaceSelection(accepted);
+}
+
+bool RichText::onKeyDown(int keyCode) {
+    if (!_hasFocus || !_selectable) return false;
+    UIManager* ui = UIManager::tryGet();
+    const uint32_t mods = ui != nullptr ? ui->getModifiers() : 0u;
+    const bool shift = (mods & 1u) != 0u;
+    const bool ctrl = (mods & 2u) != 0u;
+    const std::wstring plain = getPlainText();
+    if (ctrl) {
+        if (keyCode == UIKey_A) { selectAll(); return true; }
+        if (keyCode == UIKey_C) { (void)getClipboard().setText(getSelectedText()); return true; }
+        if (keyCode == UIKey_Z && _editable) return shift ? redo() : undo();
+        if (keyCode == UIKey_Y && _editable) return redo();
+        if (keyCode == UIKey_X && _editable) {
+            if (hasSelection() && getClipboard().setText(getSelectedText())) return replaceSelection({});
+            return true;
+        }
+        if (keyCode == UIKey_V && _editable) {
+            std::wstring clip;
+            if (getClipboard().getText(clip)) (void)replaceSelection(clip);
+            return true;
+        }
+        if (keyCode == UIKey_Left || keyCode == UIKey_Right) {
+            size_t next = _caret;
+            if (keyCode == UIKey_Left) {
+                while (next > 0 && std::iswspace(plain[next - 1])) --next;
+                while (next > 0 && !std::iswspace(plain[next - 1])) --next;
+            } else {
+                while (next < plain.size() && !std::iswspace(plain[next])) ++next;
+                while (next < plain.size() && std::iswspace(plain[next])) ++next;
+            }
+            moveCaret(next, shift);
+            return true;
+        }
+    }
+    switch (keyCode) {
+    case UIKey_Left:
+        moveCaret(previousGraphemeBoundary(plain, _caret), shift); return true;
+    case UIKey_Right:
+        moveCaret(nextGraphemeBoundary(plain, _caret), shift); return true;
+    case UIKey_Home:
+        moveCaret(0, shift); return true;
+    case UIKey_End:
+        moveCaret(plain.size(), shift); return true;
+    case UIKey_Up:
+    case UIKey_Down: {
+        IRenderBackend* backend = ui != nullptr ? ui->backend() : nullptr;
+        if (backend == nullptr) return false;
+        const math::FRectangle caret = getCaretRect(*backend, _caret);
+        const float lineStep = std::max(1.0f, caret.maxY - caret.minY + _lineSpacing);
+        const float targetY = (caret.minY + caret.maxY) * 0.5f
+            + (keyCode == UIKey_Up ? -lineStep : lineStep);
+        moveCaret(hitTestTextIndex(*backend,
+            math::FVector2(caret.minX, targetY)), shift);
+        return true;
+    }
+    case UIKey_Backspace:
+        if (!_editable) return false;
+        if (hasSelection()) return replaceSelection({});
+        if (_caret > 0) return replaceRange(previousGraphemeBoundary(plain, _caret), _caret, {}, true);
+        return true;
+    case UIKey_Delete:
+        if (!_editable) return false;
+        if (hasSelection()) return replaceSelection({});
+        if (_caret < plain.size()) return replaceRange(_caret, nextGraphemeBoundary(plain, _caret), {}, true);
+        return true;
+    case UIKey_Enter:
+        return _editable ? replaceSelection(L"\n") : false;
+    default:
+        return false;
+    }
+}
+
+bool RichText::onImeCompositionStart(const std::string& text, int caret) {
+    if (!_editable || !_hasFocus) return false;
+    _compositionStart = getSelectionStart();
+    _compositionLength = 0;
+    _composing = true;
+    _undoStack.push_back({_runs, _selectionAnchor, _caret});
+    if (_undoStack.size() > 100u) _undoStack.erase(_undoStack.begin());
+    _redoStack.clear();
+    const std::wstring preview = decodeUtf8Text(text);
+    (void)replaceRange(getSelectionStart(), getSelectionEnd(), preview, false);
+    _compositionLength = preview.size();
+    _caret = _compositionStart + std::min<size_t>(std::max(caret, 0), preview.size());
+    _selectionAnchor = _caret;
+    return true;
+}
+
+bool RichText::onImeCompositionUpdate(const std::string& text, int caret) {
+    if (!_composing) return onImeCompositionStart(text, caret);
+    const std::wstring preview = decodeUtf8Text(text);
+    (void)replaceRange(_compositionStart, _compositionStart + _compositionLength, preview, false);
+    _compositionLength = preview.size();
+    _caret = _compositionStart + std::min<size_t>(std::max(caret, 0), preview.size());
+    _selectionAnchor = _caret;
+    return true;
+}
+
+bool RichText::onImeCompositionEnd(const std::string& committed) {
+    if (!_composing) return false;
+    const std::wstring text = decodeUtf8Text(committed);
+    _composing = false;
+    const bool changed = replaceRange(_compositionStart,
+        _compositionStart + _compositionLength, text, false);
+    _compositionLength = 0;
+    return changed || text.empty();
+}
+
+UiCursorHint RichText::getCursorHint() const {
+    return _selectable ? UiCursorHint::Beam : UiCursorHint::Default;
+}
+
+void RichText::onFocusGained() {
+    _caretBlink = 0.0f;
+    _caretVisible = true;
+    markDirty();
+}
+
+void RichText::onFocusLost() {
+    _dragSelecting = false;
+    _caretVisible = false;
+    markDirty();
+}
+
+void RichText::tick(float dt) {
+    CompoundFocusableWidget::tick(dt);
+    if (_hasFocus && _editable) {
+        _caretBlink += std::max(0.0f, dt);
+        if (_caretBlink >= 0.5f) {
+            _caretBlink = std::fmod(_caretBlink, 0.5f);
+            _caretVisible = !_caretVisible;
+            markDirty();
+        }
+    }
+}
+
+void RichText::layoutChildren() {
+    IRenderBackend* backend = UIManager::tryGet() ? UIManager::tryGet()->backend() : nullptr;
+    if (backend != nullptr) placeInlineWidgets(layout(*backend));
+}
+
+void RichText::placeInlineWidgets(const RichTextLayout& result) {
+    const math::FRectangle own = getWorldBounds();
+    for (const RichTextFragment& fragment : result.fragments) {
+        if (!fragment.inlineObject || fragment.runIndex >= _runs.size()) continue;
+        const RichRun& run = _runs[fragment.runIndex];
+        if (run.inlineKind != RichInlineKind::Widget || run.inlineWidget == nullptr) continue;
+        run.inlineWidget->setPosition(math::FVector2(
+            fragment.bounds.minX - own.minX, fragment.bounds.minY - own.minY));
+        run.inlineWidget->setSize(run.inlineSize);
+    }
+}
+
 void RichText::onRender(IRenderBackend& renderer) {
     const RichTextLayout result = layout(renderer);
+    placeInlineWidgets(result);
     if (result.fragments.empty()) return;
     renderer.pushClip(getWorldBounds());
+
+    // Selection is painted below glyphs/inline content. Caret-stop geometry
+    // comes from the same shaped layout, so ligatures and RTL ranges remain
+    // aligned with what the renderer submits.
+    if (hasSelection()) {
+        const size_t selectionStart = getSelectionStart();
+        const size_t selectionEnd = getSelectionEnd();
+        for (const RichTextFragment& fragment : result.fragments) {
+            const size_t fragmentStart = fragment.documentTextStart;
+            const size_t fragmentEnd = fragmentStart + fragment.textLength;
+            if (fragmentEnd <= selectionStart || fragmentStart >= selectionEnd
+                || fragment.caretX.empty()) continue;
+            const size_t begin = std::max(selectionStart, fragmentStart);
+            const size_t end = std::min(selectionEnd, fragmentEnd);
+            auto caretX = [&](size_t index) {
+                size_t nearest = 0;
+                size_t distance = std::numeric_limits<size_t>::max();
+                for (size_t i = 0; i < fragment.caretTextIndices.size(); ++i) {
+                    const size_t candidate = fragment.caretTextIndices[i];
+                    const size_t d = candidate > index ? candidate - index : index - candidate;
+                    if (d < distance) { distance = d; nearest = i; }
+                }
+                return fragment.caretX[nearest];
+            };
+            const float x0 = caretX(begin);
+            const float x1 = caretX(end);
+            renderer.drawRect(math::FRectangle(std::min(x0, x1), fragment.bounds.minY,
+                std::max(x0, x1), fragment.bounds.maxY), _selectionColor);
+        }
+    }
+
     for (const RichTextFragment& fragment : result.fragments) {
         if (fragment.runIndex >= _runs.size()) continue;
         const RichRun& run = _runs[fragment.runIndex];
+        if (fragment.inlineObject) {
+            if (run.inlineKind == RichInlineKind::Image && run.inlineTexture != nullptr) {
+                renderer.drawRect(fragment.bounds, run.inlineTexture, run.inlineUv);
+            }
+            continue;
+        }
         const std::wstring text = fragment.runTextStart == std::numeric_limits<size_t>::max()
             ? std::wstring(L"\x2026")
             : run.text.substr(fragment.runTextStart, fragment.textLength);
@@ -639,6 +1130,15 @@ void RichText::onRender(IRenderBackend& renderer) {
             }
         }
     }
+    if (_hasFocus && _editable && _caretVisible) {
+        renderer.drawRect(getCaretRect(renderer, _caret), _caretColor);
+    }
+    renderer.popClip();
+}
+
+void RichText::renderChildren(IRenderBackend& renderer) {
+    renderer.pushClip(getWorldBounds());
+    Widget::renderChildren(renderer);
     renderer.popClip();
 }
 
