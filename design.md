@@ -880,6 +880,11 @@ Windows Debug 全量集成基线为 AYUI `5660 / 5660`、AYRenderer `4333 / 4333
 数和输入迭代次数均未减少。Retained display-list、Layer、Serializer、vector path、产品化、
 设备输入、容器回归、动画产品化和 TileView 随后把当前基线增加到 `5049 / 5049`。
 
+2026-09-12 将独立 Designer 的视觉验收固化为真实窗口 Golden：capture 模式创建隐藏 HWND 并绑定
+D3D11 backbuffer，使用固定帧步长与截图帧输出 1280×720 无损 TGA、frame/backend/draw-call 指标，
+随后自动退出。回归脚本默认只比较已审阅基线（逐通道容差 2、超阈值像素不超过 0.05%），只有显式
+`-UpdateBaselines` 才能替换基线。它补充 headless MockRenderer 契约，但不替代人工视觉验收。
+
 审计覆盖：
 
 - 全量构建和单测退出码
@@ -1053,6 +1058,7 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
 | 应用 UI 编排 | `*.uiflow.json`；AYUI 定义纯数据，持久 UIRuntime 归 AYApplication/游戏宿主，Scene 通过 Signal 解耦 |
 | Popup | UIManager overlay 集中管理 |
 | 颜色创作 | 通用 ColorPicker；HSV/Hex/命名色组归控件，像素采样和持久化归宿主 |
+| Designer 视觉回归 | Windows D3D11 真实隐藏窗口固定帧 Golden；比较与基线更新分离 |
 | Dock tree | VBox/HBox/Splitter 直接作为 Widget tree |
 | 销毁 | `destroyWidgetTree` + 明确 owned/external API |
 | 线程 | UI 树单线程修改 |

@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -71,6 +72,32 @@ LONG WINAPI layoutEditorCrashFilter(EXCEPTION_POINTERS* info) {
 
 constexpr int kWidth = 1280;
 constexpr int kHeight = 720;
+
+struct VisualCaptureConfig {
+    bool enabled = false;
+    std::string outputBase;
+    int captureFrame = 12;
+    int exitFrame = 15;
+};
+
+VisualCaptureConfig visualCaptureConfig() {
+    VisualCaptureConfig config;
+    if (const char* base = std::getenv("AY_UI_DESIGNER_CAPTURE_BASE");
+        base != nullptr && base[0] != '\0') {
+        config.enabled = true;
+        config.outputBase = base;
+    }
+    if (const char* frame = std::getenv("AY_UI_DESIGNER_CAPTURE_FRAME");
+        frame != nullptr && frame[0] != '\0') {
+        char* end = nullptr;
+        const long parsed = std::strtol(frame, &end, 10);
+        if (end != frame && parsed > 0 && parsed < 10000) {
+            config.captureFrame = static_cast<int>(parsed);
+            config.exitFrame = config.captureFrame + 3;
+        }
+    }
+    return config;
+}
 
 bool fileExists(const std::string& path) {
     struct stat st {};
@@ -313,8 +340,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 #endif
     const bool reproShiftRoot =
         (std::wcsstr(::GetCommandLineW(), L"--repro-shift-root") != nullptr);
+    const VisualCaptureConfig capture = visualCaptureConfig();
 
-    if (!reproShiftRoot) {
+    if (!reproShiftRoot && !capture.enabled) {
         AllocConsole();
         FILE* dummy = nullptr;
         freopen_s(&dummy, "CONOUT$", "w", stdout);
@@ -330,6 +358,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     cfg.window.title = "AYUI Layout Editor";
     cfg.window.width = kWidth;
     cfg.window.height = kHeight;
+    cfg.window.hidden = capture.enabled;
     if (!devices.initialize(cfg)) {
         std::fprintf(stderr, "[AYUI_LayoutEditor] DeviceManager initialize failed\n");
         return 1;
@@ -348,7 +377,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     init.windowHandle = hwnd;
     init.width = kWidth;
     init.height = kHeight;
-    init.vsync = true;
+    init.vsync = !capture.enabled;
+    init.backend = capture.enabled
+        ? ayt::render::Backend::Direct3D11
+        : ayt::render::Backend::Auto;
     init.msaa = 0;
     if (!renderer.initialize(init)) {
         std::fprintf(stderr, "[AYUI_LayoutEditor] Renderer initialize failed\n");
@@ -518,6 +550,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     int reproPhase = reproShiftRoot ? 0 : -1;
     int reproFrames = 0;
+    int visualFrame = 0;
+    bool captureQueued = false;
 
     while (state.running && window.isWindowValid()) {
         devices.pollEvents();
@@ -570,7 +604,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
         LARGE_INTEGER qpcNow{};
         ::QueryPerformanceCounter(&qpcNow);
-        float dt = static_cast<float>(
+        float dt = capture.enabled ? (1.0f / 60.0f) : static_cast<float>(
             static_cast<double>(qpcNow.QuadPart - qpcPrev.QuadPart) /
             static_cast<double>(qpcFreq.QuadPart));
         qpcPrev = qpcNow;
@@ -598,7 +632,27 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         ui.layout();
         ui.populateFrame();
         ui.flushFrame();
+
+        ++visualFrame;
+        if (capture.enabled && visualFrame == capture.captureFrame) {
+            captureQueued = renderer.captureScreenshot(capture.outputBase);
+            const std::string metricsPath = capture.outputBase + ".metrics.txt";
+            FILE* metrics = nullptr;
+            if (fopen_s(&metrics, metricsPath.c_str(), "wb") == 0
+                && metrics != nullptr) {
+                std::fprintf(metrics,
+                    "scenario=default\nframe=%d\nframebuffer=%dx%d\n"
+                    "backend=d3d11\ndrawCalls=%d\nqueued=%s\n",
+                    visualFrame, state.clientW, state.clientH,
+                    uiBackend.getDrawCallCount(), captureQueued ? "yes" : "no");
+                std::fclose(metrics);
+            }
+        }
         renderer.endFrame();
+
+        if (capture.enabled && visualFrame >= capture.exitFrame) {
+            state.running = false;
+        }
     }
 
     session.detach();
@@ -611,5 +665,5 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     uiBackend.shutdown();
     renderer.shutdown();
     devices.shutdown();
-    return 0;
+    return capture.enabled && !captureQueued ? 2 : 0;
 }

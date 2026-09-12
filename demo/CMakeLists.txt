@@ -78,6 +78,18 @@ add_custom_command(TARGET AYUI_LayoutEditor POST_BUILD
     COMMENT "Copy Layout Editor assets next to AYUI_LayoutEditor"
 )
 
+if(WIN32)
+    add_custom_target(AYUI_DesignerGoldenRegression
+        COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File ${CMAKE_CURRENT_SOURCE_DIR}/layout_editor/RunDesignerGoldenRegression.ps1
+            -DesignerExe $<TARGET_FILE:AYUI_LayoutEditor>
+            -OutputDir ${CMAKE_CURRENT_BINARY_DIR}/designer-golden-output
+        DEPENDS AYUI_LayoutEditor
+        USES_TERMINAL
+        COMMENT "Run the real-window AYUI Designer golden regression"
+    )
+endif()
+
 # Headless open→mutate→save→reload check (no HWND).
 add_executable(AYUI_LayoutEditor_RoundTrip
     layout_editor/_roundtrip_check.cpp

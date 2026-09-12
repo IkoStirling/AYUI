@@ -18,9 +18,9 @@
         {
           "type": "MenuBar",
           "id": "designer_menubar",
-          "size": { "w": 280, "h": 32 },
-          "slot": { "width": 280 },
-          "anchorWidth": 69,
+          "size": { "w": 372, "h": 32 },
+          "slot": { "width": 372 },
+          "anchorWidth": 92,
           "anchorSpacing": 1,
           "menus": [
             {

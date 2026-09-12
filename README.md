@@ -515,6 +515,18 @@ OpenGL RenderTarget 读取按 `originBottomLeft` 翻转 V；point-sampled glyph 
 子窗。三栏 Designer、Canvas 选择边框/缩放柄、Inspector、Scene View 与 Assets/Inspector 宿主合成
 均正常；截图和指标保存在构建树的 `out/validation/ui-abi118-20260910`，不进入源码发布物。
 
+Layout Designer 另有可重复的真实窗口 Golden 门禁。它以隐藏但具有真实 HWND/backbuffer 的
+1280×720 D3D11 standalone 窗口运行，固定 1/60 秒步长，在第 12 帧保存无损 TGA 和 draw-call
+指标并自动退出：
+
+```powershell
+& .\demo\layout_editor\RunDesignerGoldenRegression.ps1 `
+    -DesignerExe <build-dir>\AYRuntime\AYUI\demo\AYUI_LayoutEditor.exe
+```
+
+普通运行只做带少量像素容差的基线比较；审阅新截图后必须显式传入 `-UpdateBaselines` 才能更新
+`demo/layout_editor/golden/windows-d3d11`，避免布局回归自动覆盖期望结果。
+
 ## 目录
 
 - `include/AYUI/`：公共 API
