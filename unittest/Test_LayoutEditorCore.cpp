@@ -904,7 +904,8 @@ TEST_CASE(external_component_library_roundtrips_and_expands_widgets) {
     LayoutComponentLibrary library;
     std::string error;
     CHECK(library.define("common.confirm-card", "Confirm Card", "Common",
-                         &panel, &error));
+                         &panel, &error, "Confirmation card with primary action",
+                         {"dialog", "action", "dialog"}));
     CHECK(library.size() == 1u);
     const std::string encoded = library.serialize(false);
 
@@ -915,12 +916,30 @@ TEST_CASE(external_component_library_roundtrips_and_expands_widgets) {
     CHECK(definition != nullptr);
     CHECK(definition != nullptr && definition->displayName == "Confirm Card");
     CHECK(definition != nullptr && definition->category == "Common");
+    CHECK(definition != nullptr
+          && definition->description ==
+             "Confirmation card with primary action");
+    CHECK(definition != nullptr && definition->tags.size() == 2u);
+    CHECK(encoded.find("\"version\":2") != std::string::npos);
 
     Widget* instance = restored.instantiate("common.confirm-card");
     CHECK(instance != nullptr);
     CHECK(instance != nullptr && instance->getId() == "card_root");
     CHECK(instance != nullptr && instance->getChildren().size() == 1u);
     if (instance != nullptr) destroyWidgetTree(instance);
+
+    LayoutComponentLibrary legacy;
+    CHECK(legacy.deserialize(R"({
+      "format":"AYUIComponentLibrary","version":1,"components":[{
+        "id":"legacy.card","displayName":"Legacy Card",
+        "category":"Legacy","widget":{"type":"Panel","id":"legacy"}
+      }]
+    })", &error));
+    const LayoutComponentDefinition* legacyDefinition =
+        legacy.find("legacy.card");
+    CHECK(legacyDefinition != nullptr);
+    CHECK(legacyDefinition != nullptr && legacyDefinition->tags.empty());
+    CHECK(legacyDefinition != nullptr && legacyDefinition->description.empty());
     panel.removeChild(&button);
 }
 

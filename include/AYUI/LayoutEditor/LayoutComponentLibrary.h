@@ -12,6 +12,8 @@ struct LayoutComponentDefinition {
     std::string id;
     std::string displayName;
     std::string category;
+    std::string description;
+    std::vector<std::string> tags;
     std::string widgetJson;
 };
 
@@ -22,7 +24,9 @@ class LayoutComponentLibrary {
 public:
     bool define(const std::string& id, const std::string& displayName,
                 const std::string& category, Widget* widget,
-                std::string* error = nullptr);
+                std::string* error = nullptr,
+                const std::string& description = {},
+                const std::vector<std::string>& tags = {});
     bool defineJson(const LayoutComponentDefinition& definition,
                     std::string* error = nullptr);
     bool remove(const std::string& id);

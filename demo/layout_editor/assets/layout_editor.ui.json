@@ -427,9 +427,14 @@
                   { "type": "TextLabel", "id": "reuse_status", "style": "__le_muted", "text": "Expanded copies remain independently editable", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
 
                   { "type": "TextLabel", "id": "section_component_library", "style": "__le_accent", "text": "PROJECT COMPONENTS", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
+                  { "type": "TextInput", "id": "component_library_search", "style": "__le_input", "text": "", "placeholder": "Search components or tags", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ComboBox", "id": "component_library_filter", "style": "__le_input", "items": ["All Categories"], "selectedIndex": 0, "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "ListView", "id": "component_library_list", "style": "__le_input", "size": { "w": 272, "h": 130 }, "slot": { "height": 130 }, "itemHeight": 26 },
                   { "type": "TextInput", "id": "component_library_id", "style": "__le_input", "text": "", "placeholder": "component.id", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "component_library_display_name", "style": "__le_input", "text": "", "placeholder": "Display name", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   { "type": "TextInput", "id": "component_library_category", "style": "__le_input", "text": "", "placeholder": "Category", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
-                  { "type": "ListView", "id": "component_library_list", "style": "__le_input", "size": { "w": 272, "h": 104 }, "slot": { "height": 104 }, "itemHeight": 26 },
+                  { "type": "TextInput", "id": "component_library_tags", "style": "__le_input", "text": "", "placeholder": "Tags separated by |", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
+                  { "type": "TextInput", "id": "component_library_description", "style": "__le_input", "text": "", "placeholder": "Description", "size": { "w": 272, "h": 30 }, "slot": { "height": 30 } },
                   {
                     "type": "HBox", "id": "row_component_library_actions", "size": { "h": 30 }, "slot": { "height": 30 }, "spacing": 5,
                     "children": [
@@ -438,7 +443,7 @@
                       { "type": "Button", "id": "btn_component_library_remove", "style": "__le_command", "text": "Remove", "size": { "w": 82, "h": 30 }, "slot": { "width": 82 } }
                     ]
                   },
-                  { "type": "TextLabel", "id": "component_library_status", "style": "__le_muted", "text": "Project component library is not configured", "size": { "w": 272, "h": 38 }, "slot": { "height": 38 } },
+                  { "type": "TextLabel", "id": "component_library_status", "style": "__le_muted", "text": "Project component library is not configured", "size": { "w": 272, "h": 48 }, "slot": { "height": 48 } },
 
                   { "type": "TextLabel", "id": "section_theme_editor", "style": "__le_accent", "text": "THEME / TOKENS / STYLES", "size": { "w": 272, "h": 22 }, "slot": { "height": 22 } },
                   {

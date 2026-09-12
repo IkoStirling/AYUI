@@ -183,7 +183,10 @@ int main() {
         "animation_transport_status", "project_refactor_kind",
         "project_refactor_old",
         "project_refactor_new", "project_refactor_preview",
-        "btn_project_refactor_preview", "btn_project_refactor_apply"
+        "btn_project_refactor_preview", "btn_project_refactor_apply",
+        "component_library_search", "component_library_filter",
+        "component_library_display_name", "component_library_tags",
+        "component_library_description"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {

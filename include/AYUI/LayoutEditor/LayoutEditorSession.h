@@ -168,7 +168,9 @@ public:
     bool refreshExternalComponentLibrary();
     bool defineExternalComponent(const std::string& id,
                                  const std::string& displayName,
-                                 const std::string& category);
+                                 const std::string& category,
+                                 const std::string& description = {},
+                                 const std::vector<std::string>& tags = {});
     bool insertExternalComponent(const std::string& id);
     bool removeExternalComponent(const std::string& id);
     const LayoutComponentLibrary& externalComponentLibrary() const {
@@ -677,9 +679,15 @@ private:
     TextLabel* _reuseStatus = nullptr;
     bool _suppressReuse = false;
     ListView* _externalComponentList = nullptr;
+    TextInput* _externalComponentSearch = nullptr;
+    ComboBox* _externalComponentCategoryFilter = nullptr;
     TextInput* _externalComponentId = nullptr;
+    TextInput* _externalComponentDisplayName = nullptr;
     TextInput* _externalComponentCategory = nullptr;
+    TextInput* _externalComponentDescription = nullptr;
+    TextInput* _externalComponentTags = nullptr;
     TextLabel* _externalComponentStatus = nullptr;
+    std::vector<std::size_t> _externalComponentFilteredIndices;
     bool _suppressExternalComponents = false;
     ListView* _themeTokenList = nullptr;
     TextInput* _themeTokenKey = nullptr;

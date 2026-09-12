@@ -53,6 +53,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -182,6 +183,12 @@ std::wstring trimWide(std::wstring value) {
     if (first == std::wstring::npos) return {};
     const auto last = value.find_last_not_of(L" \t\r\n");
     return value.substr(first, last - first + 1);
+}
+
+std::wstring lowerWide(std::wstring value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](wchar_t ch) { return static_cast<wchar_t>(std::towlower(ch)); });
+    return value;
 }
 
 bool parseInt(const std::wstring& s, int& out) {
@@ -698,9 +705,15 @@ void LayoutEditorSession::detach() {
     _reuseStatus = nullptr;
     _suppressReuse = false;
     _externalComponentList = nullptr;
+    _externalComponentSearch = nullptr;
+    _externalComponentCategoryFilter = nullptr;
     _externalComponentId = nullptr;
+    _externalComponentDisplayName = nullptr;
     _externalComponentCategory = nullptr;
+    _externalComponentDescription = nullptr;
+    _externalComponentTags = nullptr;
     _externalComponentStatus = nullptr;
+    _externalComponentFilteredIndices.clear();
     _suppressExternalComponents = false;
     _themeTokenList = nullptr;
     _themeTokenKey = nullptr;
@@ -1004,14 +1017,16 @@ bool LayoutEditorSession::saveExternalComponentLibrary() {
 
 bool LayoutEditorSession::defineExternalComponent(
     const std::string& id, const std::string& displayName,
-    const std::string& category) {
+    const std::string& category, const std::string& description,
+    const std::vector<std::string>& tags) {
     if (_selected == nullptr || _selection.size() != 1u) {
         setStatus(L"Select exactly one Widget to create a project component");
         return false;
     }
     LayoutComponentLibrary updated = _externalComponentLibrary;
     std::string error;
-    if (!updated.define(id, displayName, category, _selected, &error)) {
+    if (!updated.define(id, displayName, category, _selected, &error,
+                        description, tags)) {
         setStatus(L"Project component rejected — " + utf8ToWide(error));
         return false;
     }
@@ -2386,28 +2401,70 @@ void LayoutEditorSession::wireChrome() {
 
     _externalComponentList = dynamic_cast<ListView*>(
         findChromeById("component_library_list"));
+    _externalComponentSearch = dynamic_cast<TextInput*>(
+        findChromeById("component_library_search"));
+    _externalComponentCategoryFilter = dynamic_cast<ComboBox*>(
+        findChromeById("component_library_filter"));
     _externalComponentId = dynamic_cast<TextInput*>(
         findChromeById("component_library_id"));
+    _externalComponentDisplayName = dynamic_cast<TextInput*>(
+        findChromeById("component_library_display_name"));
     _externalComponentCategory = dynamic_cast<TextInput*>(
         findChromeById("component_library_category"));
+    _externalComponentDescription = dynamic_cast<TextInput*>(
+        findChromeById("component_library_description"));
+    _externalComponentTags = dynamic_cast<TextInput*>(
+        findChromeById("component_library_tags"));
     _externalComponentStatus = dynamic_cast<TextLabel*>(
         findChromeById("component_library_status"));
+    if (_externalComponentSearch != nullptr) {
+        _externalComponentSearch->setOnTextChanged([this](const std::wstring&) {
+            if (!_suppressExternalComponents) syncExternalComponentEditor();
+        });
+    }
+    if (_externalComponentCategoryFilter != nullptr) {
+        _externalComponentCategoryFilter->setOnSelectionChanged([this](int) {
+            if (!_suppressExternalComponents) syncExternalComponentEditor();
+        });
+    }
     if (_externalComponentList != nullptr) {
         _externalComponentList->setSelectionMode(ListView::SelectionMode::Single);
         _externalComponentList->setOnSelectionChanged([this](int index) {
             if (_suppressExternalComponents || index < 0
                 || index >= static_cast<int>(
-                    _externalComponentLibrary.components().size())) return;
+                    _externalComponentFilteredIndices.size())) return;
             const LayoutComponentDefinition& definition =
-                _externalComponentLibrary.components()[static_cast<size_t>(index)];
+                _externalComponentLibrary.components()[
+                    _externalComponentFilteredIndices[static_cast<size_t>(index)]];
             if (_externalComponentId != nullptr) {
                 _externalComponentId->setText(utf8ToWide(definition.id));
+            }
+            if (_externalComponentDisplayName != nullptr) {
+                _externalComponentDisplayName->setText(
+                    utf8ToWide(definition.displayName));
             }
             if (_externalComponentCategory != nullptr) {
                 _externalComponentCategory->setText(
                     utf8ToWide(definition.category));
             }
+            if (_externalComponentDescription != nullptr) {
+                _externalComponentDescription->setText(
+                    utf8ToWide(definition.description));
+            }
+            if (_externalComponentTags != nullptr) {
+                std::vector<std::wstring> tags;
+                for (const std::string& tag : definition.tags) {
+                    tags.push_back(utf8ToWide(tag));
+                }
+                _externalComponentTags->setText(joinItems(tags));
+            }
             syncExternalComponentEditor();
+        });
+        _externalComponentList->setOnItemActivated([this](int index) {
+            if (index < 0 || index >= static_cast<int>(
+                    _externalComponentFilteredIndices.size())) return;
+            insertExternalComponent(_externalComponentLibrary.components()[
+                _externalComponentFilteredIndices[static_cast<size_t>(index)]].id);
         });
     }
     bindBtn("btn_component_library_save", [this]() {
@@ -2417,24 +2474,37 @@ void LayoutEditorSession::wireChrome() {
         const std::string category = _externalComponentCategory != nullptr
             ? wideToUtf8(trimWide(_externalComponentCategory->getText()))
             : std::string{};
-        defineExternalComponent(id, id, category);
+        const std::string displayName = _externalComponentDisplayName != nullptr
+            ? wideToUtf8(trimWide(_externalComponentDisplayName->getText()))
+            : id;
+        const std::string description = _externalComponentDescription != nullptr
+            ? wideToUtf8(trimWide(_externalComponentDescription->getText()))
+            : std::string{};
+        std::vector<std::string> tags;
+        if (_externalComponentTags != nullptr) {
+            for (const std::wstring& tag : splitItems(
+                     _externalComponentTags->getText())) {
+                tags.push_back(wideToUtf8(tag));
+            }
+        }
+        defineExternalComponent(id, displayName, category, description, tags);
     });
     bindBtn("btn_component_library_insert", [this]() {
         const int index = _externalComponentList != nullptr
             ? _externalComponentList->getSelectedIndex() : -1;
         if (index >= 0 && index < static_cast<int>(
-                _externalComponentLibrary.components().size())) {
+                _externalComponentFilteredIndices.size())) {
             insertExternalComponent(_externalComponentLibrary.components()[
-                static_cast<size_t>(index)].id);
+                _externalComponentFilteredIndices[static_cast<size_t>(index)]].id);
         }
     });
     bindBtn("btn_component_library_remove", [this]() {
         const int index = _externalComponentList != nullptr
             ? _externalComponentList->getSelectedIndex() : -1;
         if (index >= 0 && index < static_cast<int>(
-                _externalComponentLibrary.components().size())) {
+                _externalComponentFilteredIndices.size())) {
             removeExternalComponent(_externalComponentLibrary.components()[
-                static_cast<size_t>(index)].id);
+                _externalComponentFilteredIndices[static_cast<size_t>(index)]].id);
         }
     });
 
@@ -5975,8 +6045,11 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     setChromeVisible("row_reuse_actions", hasDocument);
     setChromeVisible("reuse_status", hasDocument);
     for (const char* id : {
-             "section_component_library", "component_library_id",
-             "component_library_category", "component_library_list",
+             "section_component_library", "component_library_search",
+             "component_library_filter", "component_library_list",
+             "component_library_id", "component_library_display_name",
+             "component_library_category", "component_library_tags",
+             "component_library_description",
              "row_component_library_actions", "component_library_status"}) {
         setChromeVisible(id, hasDocument);
     }
@@ -6827,50 +6900,121 @@ void LayoutEditorSession::syncExternalComponentEditor() {
     if (_externalComponentList != nullptr) {
         const int oldIndex = _externalComponentList->getSelectedIndex();
         if (oldIndex >= 0 && oldIndex < static_cast<int>(
-                _externalComponentLibrary.components().size())) {
+                _externalComponentFilteredIndices.size())) {
             selectedId = _externalComponentLibrary.components()[
-                static_cast<size_t>(oldIndex)].id;
+                _externalComponentFilteredIndices[static_cast<size_t>(oldIndex)]].id;
         }
     }
-    std::vector<std::wstring> labels;
-    labels.reserve(_externalComponentLibrary.size());
+
+    std::wstring selectedCategory;
+    if (_externalComponentCategoryFilter != nullptr
+        && _externalComponentCategoryFilter->getSelectedIndex() > 0) {
+        selectedCategory = _externalComponentCategoryFilter->getSelectedItem();
+    }
+    std::vector<std::string> categories;
     for (const LayoutComponentDefinition& definition :
          _externalComponentLibrary.components()) {
+        if (!definition.category.empty()) categories.push_back(definition.category);
+    }
+    std::sort(categories.begin(), categories.end());
+    categories.erase(std::unique(categories.begin(), categories.end()),
+                     categories.end());
+
+    _suppressExternalComponents = true;
+    if (_externalComponentCategoryFilter != nullptr) {
+        std::vector<std::wstring> items{L"All Categories"};
+        for (const std::string& category : categories) {
+            items.push_back(utf8ToWide(category));
+        }
+        _externalComponentCategoryFilter->setItems(items);
+        int categoryIndex = 0;
+        for (size_t index = 1; index < items.size(); ++index) {
+            if (items[index] == selectedCategory) {
+                categoryIndex = static_cast<int>(index);
+                break;
+            }
+        }
+        _externalComponentCategoryFilter->setSelectedIndex(categoryIndex);
+        selectedCategory = categoryIndex > 0 ? items[categoryIndex] : L"";
+    }
+
+    const std::wstring query = _externalComponentSearch != nullptr
+        ? lowerWide(trimWide(_externalComponentSearch->getText())) : L"";
+    std::vector<std::wstring> labels;
+    _externalComponentFilteredIndices.clear();
+    const auto& components = _externalComponentLibrary.components();
+    labels.reserve(components.size());
+    for (size_t componentIndex = 0; componentIndex < components.size();
+         ++componentIndex) {
+        const LayoutComponentDefinition& definition = components[componentIndex];
+        if (!selectedCategory.empty()
+            && utf8ToWide(definition.category) != selectedCategory) continue;
+        std::wstring searchable = utf8ToWide(
+            definition.id + " " + definition.displayName + " "
+            + definition.category + " " + definition.description);
+        for (const std::string& tag : definition.tags) {
+            searchable += L" " + utf8ToWide(tag);
+        }
+        if (!query.empty()
+            && lowerWide(std::move(searchable)).find(query)
+                == std::wstring::npos) continue;
         std::wstring label;
         if (!definition.category.empty()) {
             label = utf8ToWide(definition.category) + L" / ";
         }
         label += utf8ToWide(definition.displayName);
+        if (!definition.tags.empty()) {
+            label += L"  #" + utf8ToWide(definition.tags.front());
+        }
+        _externalComponentFilteredIndices.push_back(componentIndex);
         labels.push_back(std::move(label));
     }
-    _suppressExternalComponents = true;
     int selectedIndex = -1;
     if (_externalComponentList != nullptr) {
         _externalComponentList->setItems(labels);
-        for (size_t index = 0;
-             index < _externalComponentLibrary.components().size(); ++index) {
-            if (_externalComponentLibrary.components()[index].id == selectedId) {
+        for (size_t index = 0; index < _externalComponentFilteredIndices.size();
+             ++index) {
+            if (components[_externalComponentFilteredIndices[index]].id
+                == selectedId) {
                 selectedIndex = static_cast<int>(index);
                 break;
             }
         }
-        if (selectedIndex < 0 && !_externalComponentLibrary.empty()) {
+        if (selectedIndex < 0 && !_externalComponentFilteredIndices.empty()) {
             selectedIndex = 0;
         }
         _externalComponentList->setSelectedIndex(selectedIndex);
     }
     if (selectedIndex >= 0) {
         const LayoutComponentDefinition& definition =
-            _externalComponentLibrary.components()[
-                static_cast<size_t>(selectedIndex)];
+            components[_externalComponentFilteredIndices[
+                static_cast<size_t>(selectedIndex)]];
         if (_externalComponentId != nullptr
             && _externalComponentId->getText().empty()) {
             _externalComponentId->setText(utf8ToWide(definition.id));
+        }
+        if (_externalComponentDisplayName != nullptr
+            && _externalComponentDisplayName->getText().empty()) {
+            _externalComponentDisplayName->setText(
+                utf8ToWide(definition.displayName));
         }
         if (_externalComponentCategory != nullptr
             && _externalComponentCategory->getText().empty()) {
             _externalComponentCategory->setText(
                 utf8ToWide(definition.category));
+        }
+        if (_externalComponentDescription != nullptr
+            && _externalComponentDescription->getText().empty()) {
+            _externalComponentDescription->setText(
+                utf8ToWide(definition.description));
+        }
+        if (_externalComponentTags != nullptr
+            && _externalComponentTags->getText().empty()) {
+            std::vector<std::wstring> tags;
+            for (const std::string& tag : definition.tags) {
+                tags.push_back(utf8ToWide(tag));
+            }
+            _externalComponentTags->setText(joinItems(tags));
         }
     }
     _suppressExternalComponents = false;
@@ -6887,8 +7031,10 @@ void LayoutEditorSession::syncExternalComponentEditor() {
             _externalComponentStatus->setText(L"No project components");
         } else {
             _externalComponentStatus->setText(
-                std::to_wstring(_externalComponentLibrary.size())
-                + L" reusable project component(s)");
+                std::to_wstring(_externalComponentFilteredIndices.size())
+                + L" shown / "
+                + std::to_wstring(_externalComponentLibrary.size())
+                + L" reusable project component(s); Enter inserts");
         }
     }
 }

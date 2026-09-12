@@ -890,6 +890,10 @@ D3D11 backbuffer，使用固定帧步长与截图帧输出 1280×720 无损 TGA�
 Signal 与 Layout Reference，并复用原子多文件事务。Apply 前要求当前布局与所有受影响的打开文档均
 已保存，Preview 永不写盘，成功后由 Workspace 重载受影响的干净文档。
 
+外部组件库随后升级到 `AYUIComponentLibrary` v2：定义保留展开式 Widget JSON，同时携带显示名、
+说明、分类和规范化标签；Designer 提供搜索、分类过滤和键盘激活插入。v1 读取兼容、写出统一为 v2，
+运行时仍不解析组件库，也不引入链接实例或隐式依赖。
+
 审计覆盖：
 
 - 全量构建和单测退出码
