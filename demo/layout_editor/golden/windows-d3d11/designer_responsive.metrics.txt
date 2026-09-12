@@ -2,5 +2,5 @@ scenario=responsive
 frame=12
 framebuffer=1280x720
 backend=d3d11
-drawCalls=68
+drawCalls=70
 queued=yes

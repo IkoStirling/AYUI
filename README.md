@@ -534,6 +534,10 @@ Theme/token/style 编辑四种确定性状态：
 `demo/layout_editor/golden/windows-d3d11`，避免布局回归自动覆盖期望结果。可用 `-Scenarios theme`
 只重放单个状态；metrics 同时记录场景名，防止错误图片通过文件名冒充另一场景。
 
+Designer 的 Document Outline 支持按 Widget ID、类型和显示名即时搜索。结果保留必要的祖先上下文，
+摘要区显示匹配数量或当前选择路径；无匹配时仍保留画布/Inspector 的现有选择。筛选期间层级拖放与
+重排会暂时禁用，清除筛选后恢复，避免在隐藏兄弟节点的局部视图中误改文档结构。
+
 ## 目录
 
 - `include/AYUI/`：公共 API

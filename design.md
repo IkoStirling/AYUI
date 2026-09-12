@@ -899,6 +899,12 @@ Signal 与 Layout Reference，并复用原子多文件事务。Apply 前要求�
 说明、分类和规范化标签；Designer 提供搜索、分类过滤和键盘激活插入。v1 读取兼容、写出统一为 v2，
 运行时仍不解析组件库，也不引入链接实例或隐式依赖。
 
+Authoring Quality 的层级导航使用 Session 本地投影，不改变 authored tree：搜索同时匹配 Widget ID、
+注册类型和显示名，命中项保留祖先上下文，并持续保留当前 selection/Inspector。摘要显示匹配数、
+单选 breadcrumb 或多选数量。由于过滤后的顺序不是完整 sibling order，筛选期间禁止 hierarchy
+drag/reorder/nesting；清除筛选后继续使用原有拖放语义。搜索文本属于 transient editor state，
+不进入 undo snapshot 或布局序列化。
+
 审计覆盖：
 
 - 全量构建和单测退出码

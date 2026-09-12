@@ -320,6 +320,8 @@ private:
     void setChromeVisible(const char* id, bool visible);
     void setChromeEnabled(const char* id, bool enabled);
     void syncHierarchySelection();
+    void syncHierarchySummary();
+    bool hierarchyFilterActive() const;
     void syncStyleCombo();
     void syncStyleInspector();
     void syncTextAlignCombos();
@@ -605,6 +607,9 @@ private:
     DeferredAction _deferred = DeferredAction::None;
 
     ListView* _hierarchy = nullptr;
+    TextInput* _hierarchySearch = nullptr;
+    TextLabel* _hierarchySummary = nullptr;
+    std::size_t _hierarchyMatchCount = 0u;
     TextInput* _propId = nullptr;
     TextInput* _propX = nullptr;
     TextInput* _propY = nullptr;

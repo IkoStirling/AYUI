@@ -188,7 +188,9 @@ int main() {
         "component_library_display_name", "component_library_tags",
         "component_library_description", "btn_theme_token_swatch",
         "theme_style_fragment", "theme_style_id", "btn_theme_style_new",
-        "btn_theme_style_duplicate", "btn_theme_style_remove"
+        "btn_theme_style_duplicate", "btn_theme_style_remove",
+        "hierarchy_search", "btn_hierarchy_search_clear",
+        "lbl_hierarchy_summary"
     };
     int missingQualityEntries = 0;
     for (const char* id : requiredQualityIds) {
@@ -271,6 +273,34 @@ int main() {
     if (button == nullptr) {
         std::fprintf(stderr, "button selection failed\n");
         return 10;
+    }
+    auto* hierarchySearch = dynamic_cast<ayt::ui::TextInput*>(
+        ui.findById("hierarchy_search"));
+    auto* hierarchyList = dynamic_cast<ayt::ui::ListView*>(
+        ui.findById("list_hierarchy"));
+    auto* hierarchySummary = dynamic_cast<ayt::ui::TextLabel*>(
+        ui.findById("lbl_hierarchy_summary"));
+    if (hierarchySearch == nullptr || hierarchyList == nullptr
+        || hierarchySummary == nullptr) {
+        std::fprintf(stderr, "hierarchy workflow controls missing\n");
+        return 125;
+    }
+    hierarchySearch->setText(L"Text Label");
+    if (hierarchyList->getItemCount() != 2u
+        || hierarchySummary->getText().find(L"1 match(es)")
+            == std::wstring::npos) {
+        std::fprintf(stderr, "hierarchy type filter/context failed\n");
+        return 126;
+    }
+    hierarchySearch->setText(L"does-not-exist");
+    if (hierarchyList->getItemCount() != 0u || session.selected() != button) {
+        std::fprintf(stderr, "hierarchy empty filter changed selection\n");
+        return 127;
+    }
+    hierarchySearch->setText(L"");
+    if (hierarchyList->getItemCount() != 3u) {
+        std::fprintf(stderr, "hierarchy clear filter failed\n");
+        return 128;
     }
     auto* refactorOld = dynamic_cast<ayt::ui::TextInput*>(
         ui.findById("project_refactor_old"));

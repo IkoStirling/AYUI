@@ -653,6 +653,8 @@ void LayoutEditorSession::detach() {
     _selectionModel.clear();
     _inspectorSelection = nullptr;
     _hierarchy = nullptr;
+    _hierarchySearch = nullptr;
+    _hierarchySummary = nullptr;
     _hierarchyCol = nullptr;
     _chromeRoot = nullptr;
     _propStyleCombo = nullptr;
@@ -2188,6 +2190,21 @@ void LayoutEditorSession::wireChrome() {
         _chromeRoot = findChromeById("layout_editor_root");
     }
     _hierarchy = dynamic_cast<ListView*>(findChromeById("list_hierarchy"));
+    _hierarchySearch = dynamic_cast<TextInput*>(
+        findChromeById("hierarchy_search"));
+    _hierarchySummary = dynamic_cast<TextLabel*>(
+        findChromeById("lbl_hierarchy_summary"));
+    if (_hierarchySearch != nullptr) {
+        _hierarchySearch->setOnTextChanged([this](const std::wstring&) {
+            refreshHierarchy();
+        });
+    }
+    bindBtn("btn_hierarchy_search_clear", [this]() {
+        if (_hierarchySearch != nullptr) _hierarchySearch->setText(L"");
+        if (_hierarchySearch != nullptr && _ui != nullptr) {
+            _ui->setFocus(_hierarchySearch);
+        }
+    });
     if (_hierarchy == nullptr) {
         std::fprintf(stderr,
             "[LayoutEditorSession] list_hierarchy not found\n");
@@ -3632,13 +3649,46 @@ void LayoutEditorSession::syncHierarchySelection() {
     _suppressHierarchy = true;
     _hierarchy->setSelectedIndex(index);
     _suppressHierarchy = false;
+    syncHierarchySummary();
+}
+
+bool LayoutEditorSession::hierarchyFilterActive() const {
+    return _hierarchySearch != nullptr
+        && !trimWide(_hierarchySearch->getText()).empty();
+}
+
+void LayoutEditorSession::syncHierarchySummary() {
+    if (_hierarchySummary == nullptr) return;
+    std::wstring summary;
+    if (_selection.size() > 1u) {
+        summary = std::to_wstring(_selection.size()) + L" widgets selected";
+    } else if (_selected != nullptr) {
+        std::vector<std::wstring> path;
+        for (Widget* node = _selected; node != nullptr; node = node->getParent()) {
+            if (!node->getId().empty()) path.push_back(utf8ToWide(node->getId()));
+            if (node == _docRoot) break;
+        }
+        std::reverse(path.begin(), path.end());
+        for (std::size_t i = 0; i < path.size(); ++i) {
+            if (i != 0u) summary += L" / ";
+            summary += path[i];
+        }
+        if (summary.empty()) summary = L"Anonymous widget selected";
+    } else {
+        summary = L"No selection";
+    }
+    if (hierarchyFilterActive()) {
+        summary = std::to_wstring(_hierarchyMatchCount)
+            + L" match(es) · " + summary;
+    }
+    _hierarchySummary->setText(summary);
 }
 
 void LayoutEditorSession::refreshHierarchy() {
-    _hierarchyIndex.clear();
-    std::vector<std::wstring> labels;
+    std::vector<Widget*> fullIndex;
+    std::vector<std::wstring> fullLabels;
     if (_docRoot != nullptr) {
-        collectHierarchy(_docRoot, 0, labels, _hierarchyIndex);
+        collectHierarchy(_docRoot, 0, fullLabels, fullIndex);
     }
 
     std::vector<Widget*> authoredWidgets;
@@ -3650,6 +3700,42 @@ void LayoutEditorSession::refreshHierarchy() {
         return;
     }
 
+    _hierarchyIndex.clear();
+    std::vector<std::wstring> labels;
+    const std::wstring query = _hierarchySearch != nullptr
+        ? lowerWide(trimWide(_hierarchySearch->getText())) : L"";
+    _hierarchyMatchCount = 0u;
+    if (query.empty()) {
+        labels = std::move(fullLabels);
+        _hierarchyIndex = std::move(fullIndex);
+    } else {
+        std::unordered_set<Widget*> context;
+        for (Widget* widget : fullIndex) {
+            std::wstring searchable = widget != nullptr
+                ? utf8ToWide(widget->getId()) : L"";
+            if (const WidgetAuthoringDescriptor* descriptor =
+                    WidgetAuthoringRegistry::get().findForWidget(widget)) {
+                searchable += L" ";
+                searchable += utf8ToWide(descriptor->typeName);
+                searchable += L" ";
+                searchable += utf8ToWide(descriptor->displayName);
+            }
+            if (lowerWide(std::move(searchable)).find(query)
+                == std::wstring::npos) continue;
+            ++_hierarchyMatchCount;
+            for (Widget* ancestor = widget; ancestor != nullptr;
+                 ancestor = ancestor->getParent()) {
+                context.insert(ancestor);
+                if (ancestor == _docRoot) break;
+            }
+        }
+        for (std::size_t i = 0; i < fullIndex.size(); ++i) {
+            if (context.find(fullIndex[i]) == context.end()) continue;
+            _hierarchyIndex.push_back(fullIndex[i]);
+            labels.push_back(fullLabels[i]);
+        }
+    }
+
     _suppressHierarchy = true;
     _hierarchy->setItems(labels);
     _hierarchy->performLayout();
@@ -3657,17 +3743,9 @@ void LayoutEditorSession::refreshHierarchy() {
 
     pruneSelection();
     syncHierarchySelection();
+    syncHierarchySummary();
     syncSelectionChrome();
     updateContainerHint();
-
-    {
-        std::wostringstream oss;
-        oss << L"Hierarchy: " << labels.size() << L" nodes, listH="
-            << _hierarchy->getSize().y << L" listW=" << _hierarchy->getSize().x;
-        setStatus(oss.str());
-        std::fprintf(stderr, "[LayoutEditorSession] hierarchy nodes=%zu size=%.0fx%.0f\n",
-            labels.size(), _hierarchy->getSize().x, _hierarchy->getSize().y);
-    }
 }
 
 void LayoutEditorSession::updateContainerHint() {
@@ -5540,7 +5618,8 @@ bool LayoutEditorSession::onPointerDown(const math::FVector2& worldPos,
             const bool additive = modifiersAdditive();
             select(node, additive);
             _consumeNextPointerUp = true;
-            if (!additive && node != nullptr && node != _docRoot &&
+            if (!hierarchyFilterActive() && !additive && node != nullptr
+                && node != _docRoot &&
                 structuredContentOwner(node) == nullptr) {
                 _toolDrag = ToolDrag::HierPress;
                 _hierDragWidget = node;
@@ -8042,6 +8121,7 @@ int LayoutEditorSession::siblingIndexOf(Widget* child) const {
 LayoutEditorSession::HierDropTarget LayoutEditorSession::resolveHierDrop(
     const math::FVector2& worldPos, Widget* dragged) const {
     HierDropTarget out;
+    if (hierarchyFilterActive()) return out;
     if (!hitHierarchyList(worldPos) || hierarchyScrollbarHit(worldPos)) {
         return out;
     }

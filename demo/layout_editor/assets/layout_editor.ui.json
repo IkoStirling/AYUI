@@ -87,8 +87,8 @@
             {
               "type": "ScrollView",
               "id": "palette_scroll",
-              "size": { "w": 244, "h": 390 },
-              "slot": { "height": 390 },
+              "size": { "w": 244, "h": 350 },
+              "slot": { "height": 350 },
               "verticalScrollBar": true,
               "horizontalScrollBar": false,
               "verticalScrollBarVisibility": "auto",
@@ -137,7 +137,14 @@
             },
             { "type": "Separator", "id": "sep_palette", "size": { "w": 244, "h": 1 }, "slot": { "height": 1 } },
             { "type": "TextLabel", "id": "lbl_hierarchy", "style": "__le_heading", "text": "Document Outline", "size": { "w": 244, "h": 24 }, "slot": { "height": 24 } },
-            { "type": "TextLabel", "id": "lbl_hierarchy_hint", "style": "__le_muted", "text": "Drag rows to reorder or nest", "size": { "w": 244, "h": 34 }, "slot": { "height": 34 } },
+            {
+              "type": "HBox", "id": "row_hierarchy_search", "size": { "w": 244, "h": 30 }, "slot": { "height": 30 }, "spacing": 4,
+              "children": [
+                { "type": "TextInput", "id": "hierarchy_search", "style": "__le_input", "placeholder": "Filter by ID or type", "size": { "w": 210, "h": 30 }, "slot": { "width": 210 } },
+                { "type": "Button", "id": "btn_hierarchy_search_clear", "style": "__le_command", "text": "×", "size": { "w": 30, "h": 30 }, "slot": { "width": 30 } }
+              ]
+            },
+            { "type": "TextLabel", "id": "lbl_hierarchy_summary", "style": "__le_muted", "text": "No selection", "size": { "w": 244, "h": 28 }, "slot": { "height": 28 } },
             { "type": "ListView", "id": "list_hierarchy", "style": "__le_input", "size": { "h": 0 }, "slot": { "height": 0 } }
           ]
         },
