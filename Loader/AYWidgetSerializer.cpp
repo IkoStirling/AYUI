@@ -158,6 +158,28 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
 
         widget->setId(j.value("id", ""));
 
+        const char* localizedProperties[] = {
+            "text", "title", "acceptText", "rejectText",
+            "accessibilityLabel", "accessibilityDescription",
+            "accessibilityValue"
+        };
+        for (const char* property : localizedProperties) {
+            const std::string keyProperty = std::string(property) + "Key";
+            if (j.contains(keyProperty) && j[keyProperty].is_string()) {
+                widget->setLocalizationKey(
+                    property, j[keyProperty].get<std::string>());
+            }
+        }
+        if (j.contains("itemsKey") && j["itemsKey"].is_array()) {
+            std::vector<std::string> keys;
+            keys.reserve(j["itemsKey"].size());
+            for (const auto& value : j["itemsKey"]) {
+                keys.push_back(value.is_string()
+                    ? value.get<std::string>() : std::string{});
+            }
+            widget->setLocalizationKeys("items", std::move(keys));
+        }
+
         if (j.contains("position")) {
             float x = j["position"].value("x", 0.0f);
             float y = j["position"].value("y", 0.0f);
@@ -848,6 +870,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                 for (const auto& itemJson : j["items"]) {
                     MenuItem* item = menu->addItem(toWstring(
                         itemJson.value("text", std::string())));
+                    if (itemJson.contains("textKey")
+                        && itemJson["textKey"].is_string()) {
+                        item->setLocalizationKey(
+                            "text", itemJson["textKey"].get<std::string>());
+                    }
                     if (itemJson.contains("shortcut")) {
                         item->setShortcut(toWstring(
                             itemJson["shortcut"].get<std::string>()));
@@ -870,6 +897,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                 for (const auto& menuJson : j["menus"]) {
                     Menu* menu = menuBar->addMenu(toWstring(
                         menuJson.value("title", std::string())));
+                    if (menuJson.contains("titleKey")
+                        && menuJson["titleKey"].is_string()) {
+                        menu->setLocalizationKey(
+                            "title", menuJson["titleKey"].get<std::string>());
+                    }
                     const json* payload = &menuJson;
                     if (menuJson.contains("menu") && menuJson["menu"].is_object()) {
                         payload = &menuJson["menu"];
@@ -878,6 +910,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                         for (const auto& itemJson : (*payload)["items"]) {
                             MenuItem* item = menu->addItem(toWstring(
                                 itemJson.value("text", std::string())));
+                            if (itemJson.contains("textKey")
+                                && itemJson["textKey"].is_string()) {
+                                item->setLocalizationKey(
+                                    "text", itemJson["textKey"].get<std::string>());
+                            }
                             if (itemJson.contains("shortcut")) {
                                 item->setShortcut(toWstring(
                                     itemJson["shortcut"].get<std::string>()));
@@ -1386,6 +1423,18 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
     }
     if (widget->isAccessibilityHidden()) j["accessibilityHidden"] = true;
 
+    const char* localizedProperties[] = {
+        "text", "title", "acceptText", "rejectText",
+        "accessibilityLabel", "accessibilityDescription",
+        "accessibilityValue"
+    };
+    for (const char* property : localizedProperties) {
+        const std::string& key = widget->getLocalizationKey(property);
+        if (!key.empty()) j[std::string(property) + "Key"] = key;
+    }
+    const auto& itemKeys = widget->getLocalizationKeys("items");
+    if (!itemKeys.empty()) j["itemsKey"] = itemKeys;
+
     // G11 — emit per-widget token overrides (when any are set) so the
     // round-trip via deserialize restores them. Empty map = omit the
     // key entirely (deserializer treats absent == empty).
@@ -1839,6 +1888,9 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
             json mj;
             mj["title"] = toUtf8(mb->getMenuTitle(i));
             if (Menu* menu = mb->getMenu(i)) {
+                const std::string& titleKey =
+                    menu->getLocalizationKey("title");
+                if (!titleKey.empty()) mj["titleKey"] = titleKey;
                 json menuJson;
                 serializeWidgetToJson(menu, JsonHandle(&menuJson));
                 mj["menu"] = menuJson;

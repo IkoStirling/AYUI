@@ -272,4 +272,26 @@ TEST_CASE(test_unicode_text_roundtrip_uses_utf8) {
     destroyWidgetTree(restored);
 }
 
+TEST_CASE(test_localization_metadata_roundtrip) {
+    Button button;
+    button.setText(L"Fallback");
+    button.setLocalizationKey("text", "ui.test.button");
+    button.setAccessibilityLabel(L"Accessible fallback");
+    button.setLocalizationKey(
+        "accessibilityLabel", "ui.test.button.accessibility");
+
+    const std::string json = WidgetSerializer::serialize(&button);
+    Widget* restored = WidgetSerializer::deserialize(json);
+    auto* restoredButton = dynamic_cast<Button*>(restored);
+    CHECK(restoredButton != nullptr);
+    if (restoredButton != nullptr) {
+        CHECK(restoredButton->getText() == L"Fallback");
+        CHECK(restoredButton->getLocalizationKey("text")
+              == "ui.test.button");
+        CHECK(restoredButton->getLocalizationKey("accessibilityLabel")
+              == "ui.test.button.accessibility");
+    }
+    destroyWidgetTree(restored);
+}
+
 TEST_SUITE_END

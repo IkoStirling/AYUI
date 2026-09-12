@@ -15,6 +15,7 @@
 #include <string>
 #include <unordered_map>
 #include <initializer_list>
+#include <utility>
 
 namespace ayt::ui {
     
@@ -501,6 +502,30 @@ public:
         return _eventBindings;
     }
 
+    // Source localization metadata. Runtime widgets keep the resolved text,
+    // while these keys preserve the authoring contract for JSON round-trips.
+    void setLocalizationKey(const std::string& property,
+                            const std::string& key) {
+        if (key.empty()) _localizationKeys.erase(property);
+        else _localizationKeys[property] = key;
+    }
+    const std::string& getLocalizationKey(const std::string& property) const {
+        static const std::string empty;
+        const auto found = _localizationKeys.find(property);
+        return found != _localizationKeys.end() ? found->second : empty;
+    }
+    void setLocalizationKeys(const std::string& property,
+                             std::vector<std::string> keys) {
+        if (keys.empty()) _localizationKeyLists.erase(property);
+        else _localizationKeyLists[property] = std::move(keys);
+    }
+    const std::vector<std::string>& getLocalizationKeys(
+        const std::string& property) const {
+        static const std::vector<std::string> empty;
+        const auto found = _localizationKeyLists.find(property);
+        return found != _localizationKeyLists.end() ? found->second : empty;
+    }
+
     // =================================================================
     // G11 — per-widget token overrides. When the active theme resolves
     // a `$tokenName` reference in this widget's resolved style, this
@@ -807,6 +832,9 @@ protected:
     std::string _id;
     std::string _controllerId;
     std::unordered_map<std::string, std::string> _eventBindings;
+    std::unordered_map<std::string, std::string> _localizationKeys;
+    std::unordered_map<std::string, std::vector<std::string>>
+        _localizationKeyLists;
     // G11 — per-widget token overrides. Keyed by bare token name (no
     // leading '$'). Resolved during StyleSheet parsing AND during
     // resolveStyle() so a JSON-loaded style with `"$color.bg": "..."`

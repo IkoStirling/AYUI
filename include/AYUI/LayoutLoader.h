@@ -28,6 +28,8 @@ class DockCard;
 
 class UILayoutLoader {
 public:
+    using TextResolver = std::function<std::wstring(
+        std::string_view key, std::wstring_view fallback)>;
     using DeclarativeEventResolver = std::function<std::function<void()>(
         const Widget& widget,
         std::string_view eventName,
@@ -38,6 +40,10 @@ public:
 
     void setWidgetFactory(WidgetFactory* factory) { _factory = factory; }
     void setI18n(I18n* i18n) { _i18n = i18n; }
+    void setTextResolver(TextResolver resolver) {
+        _textResolver = std::move(resolver);
+    }
+    const TextResolver& textResolver() const { return _textResolver; }
 
     Widget* loadFromFile(const std::string& filepath);
     Widget* loadFromString(const std::string& json);
@@ -105,6 +111,12 @@ public:
 private:
     Widget* buildWidgetTree(JsonHandle j);
     DockCard* buildDockCardFromJson(JsonHandle cj);
+    std::wstring resolveLocalizedString(JsonHandle j,
+                                        std::string_view valueProperty,
+                                        std::string_view keyProperty) const;
+    std::vector<std::wstring> resolveLocalizedList(
+        JsonHandle j, std::string_view valueProperty,
+        std::string_view keyProperty) const;
     // Drain the watcher queue and update _dirty. Returns _dirty after the poll.
     // R-4: const-ness relaxed vs the old mtime-based design because FileWatcher
     // pollPending mutates internal queues. Callers that only check the flag
@@ -113,6 +125,7 @@ private:
 
     WidgetFactory* _factory;
     I18n* _i18n;
+    TextResolver _textResolver;
 
     std::unordered_map<std::string, std::function<void()>> _eventBindings;
     DeclarativeEventResolver _declarativeEventResolver;

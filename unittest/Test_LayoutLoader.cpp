@@ -273,6 +273,46 @@ TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
     i18n.clear();
 }
 
+TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
+    UILayoutLoader loader;
+    loader.setTextResolver([](std::string_view key, std::wstring_view fallback) {
+        if (key == "ui.test.button") return std::wstring(L"Translated");
+        if (key == "ui.test.window") return std::wstring(L"Localized Window");
+        if (key == "ui.test.item.first") return std::wstring(L"First Localized");
+        if (key == "ui.test.a11y") return std::wstring(L"Accessible Localized");
+        return std::wstring(fallback);
+    });
+
+    Widget* root = loader.loadFromString(R"({
+        "type":"Window", "id":"window",
+        "titleKey":"ui.test.window", "title":"Window fallback",
+        "children":[
+            {"type":"Button", "id":"button",
+             "textKey":"ui.test.button", "text":"Button fallback",
+             "accessibilityLabelKey":"ui.test.a11y",
+             "accessibilityLabel":"Accessible fallback"},
+            {"type":"ComboBox", "id":"combo",
+             "itemsKey":["ui.test.item.first", "ui.test.missing"],
+             "items":["First fallback", "Second fallback"]}
+        ]
+    })");
+    auto* window = dynamic_cast<Window*>(root);
+    auto* button = dynamic_cast<Button*>(loader.findWidgetById("button"));
+    auto* combo = dynamic_cast<ComboBox*>(loader.findWidgetById("combo"));
+    CHECK(window != nullptr && window->getTitle() == L"Localized Window");
+    CHECK(button != nullptr && button->getText() == L"Translated");
+    CHECK(button != nullptr
+          && button->getAccessibilityLabel() == L"Accessible Localized");
+    CHECK(button != nullptr
+          && button->getLocalizationKey("text") == "ui.test.button");
+    CHECK(combo != nullptr && combo->getItemCount() == 2u);
+    if (combo != nullptr && combo->getItemCount() == 2u) {
+        CHECK(combo->getItem(0) == L"First Localized");
+        CHECK(combo->getItem(1) == L"Second fallback");
+    }
+    destroyWidgetTree(root);
+}
+
 TEST_CASE(test_layout_loader_window) {
     UILayoutLoader loader;
 

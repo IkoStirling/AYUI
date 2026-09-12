@@ -235,6 +235,67 @@ UILayoutLoader::UILayoutLoader()
 UILayoutLoader::~UILayoutLoader() {
 }
 
+std::wstring UILayoutLoader::resolveLocalizedString(
+    JsonHandle h, std::string_view valueProperty,
+    std::string_view keyProperty) const {
+    const json& source = jsonRefConst(h);
+    const std::string valueName(valueProperty);
+    const std::string keyName(keyProperty);
+    const std::string fallback = source.contains(valueName)
+        && source[valueName].is_string()
+        ? source[valueName].get<std::string>() : std::string{};
+    const std::string key = source.contains(keyName)
+        && source[keyName].is_string()
+        ? source[keyName].get<std::string>() : std::string{};
+
+    if (!key.empty()) {
+        if (_textResolver) {
+            return _textResolver(key, utf8ToWide(fallback));
+        }
+        if (_i18n != nullptr) {
+            return utf8ToWide(_i18n->resolve(key, fallback));
+        }
+        return utf8ToWide(fallback);
+    }
+    if (_i18n != nullptr && isI18nKey(fallback)) {
+        return _i18n->resolve(fallback);
+    }
+    return utf8ToWide(fallback);
+}
+
+std::vector<std::wstring> UILayoutLoader::resolveLocalizedList(
+    JsonHandle h, std::string_view valueProperty,
+    std::string_view keyProperty) const {
+    const json& source = jsonRefConst(h);
+    const std::string valuesName(valueProperty);
+    const std::string keysName(keyProperty);
+    const json* values = source.contains(valuesName)
+        && source[valuesName].is_array() ? &source[valuesName] : nullptr;
+    const json* keys = source.contains(keysName)
+        && source[keysName].is_array() ? &source[keysName] : nullptr;
+    const std::size_t count = std::max(
+        values != nullptr ? values->size() : 0u,
+        keys != nullptr ? keys->size() : 0u);
+    std::vector<std::wstring> result;
+    result.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::string fallback = values != nullptr && i < values->size()
+            && (*values)[i].is_string()
+            ? (*values)[i].get<std::string>() : std::string{};
+        const std::string key = keys != nullptr && i < keys->size()
+            && (*keys)[i].is_string()
+            ? (*keys)[i].get<std::string>() : std::string{};
+        if (!key.empty() && _textResolver) {
+            result.push_back(_textResolver(key, utf8ToWide(fallback)));
+        } else if (!key.empty() && _i18n != nullptr) {
+            result.push_back(utf8ToWide(_i18n->resolve(key, fallback)));
+        } else {
+            result.push_back(utf8ToWide(fallback));
+        }
+    }
+    return result;
+}
+
 DockCard* UILayoutLoader::buildDockCardFromJson(JsonHandle h) {
     const json& cj = jsonRefConst(h);
     if (!cj.is_object()) return nullptr;
@@ -244,9 +305,12 @@ DockCard* UILayoutLoader::buildDockCardFromJson(JsonHandle h) {
         id = cj["id"].get<std::string>();
         card->setId(id);
     }
-    if (cj.contains("title")) {
-        std::string u8 = cj["title"].get<std::string>();
-        card->setTitle(utf8ToWide(u8));
+    if (cj.contains("title") || cj.contains("titleKey")) {
+        card->setTitle(resolveLocalizedString(h, "title", "titleKey"));
+        if (cj.contains("titleKey") && cj["titleKey"].is_string()) {
+            card->setLocalizationKey(
+                "title", cj["titleKey"].get<std::string>());
+        }
     }
     if (cj.contains("icon")) {
         card->setIcon(cj["icon"].get<std::string>());
@@ -734,6 +798,47 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     // Visible
     widget->setVisible(j.value("visible", true));
 
+    const auto preserveKey = [&j, widget](const char* property) {
+        const std::string keyProperty = std::string(property) + "Key";
+        if (j.contains(keyProperty) && j[keyProperty].is_string()) {
+            widget->setLocalizationKey(
+                property, j[keyProperty].get<std::string>());
+        }
+    };
+    preserveKey("text");
+    preserveKey("title");
+    preserveKey("acceptText");
+    preserveKey("rejectText");
+    preserveKey("accessibilityLabel");
+    preserveKey("accessibilityDescription");
+    preserveKey("accessibilityValue");
+    if (j.contains("itemsKey") && j["itemsKey"].is_array()) {
+        std::vector<std::string> keys;
+        keys.reserve(j["itemsKey"].size());
+        for (const auto& value : j["itemsKey"]) {
+            keys.push_back(value.is_string()
+                ? value.get<std::string>() : std::string{});
+        }
+        widget->setLocalizationKeys("items", std::move(keys));
+    }
+
+    widget->setAccessibilityHidden(j.value("accessibilityHidden", false));
+    if (j.contains("accessibilityLabel")
+        || j.contains("accessibilityLabelKey")) {
+        widget->setAccessibilityLabel(resolveLocalizedString(
+            h, "accessibilityLabel", "accessibilityLabelKey"));
+    }
+    if (j.contains("accessibilityDescription")
+        || j.contains("accessibilityDescriptionKey")) {
+        widget->setAccessibilityDescription(resolveLocalizedString(
+            h, "accessibilityDescription", "accessibilityDescriptionKey"));
+    }
+    if (j.contains("accessibilityValue")
+        || j.contains("accessibilityValueKey")) {
+        widget->setAccessibilityValue(resolveLocalizedString(
+            h, "accessibilityValue", "accessibilityValueKey"));
+    }
+
     // Style
     std::string style = j.value("style", "");
     if (!style.empty()) {
@@ -890,8 +995,9 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     }
 
     if (Window* window = dynamic_cast<Window*>(widget)) {
-        if (j.contains("title") && j["title"].is_string()) {
-            window->setTitle(utf8ToWide(j["title"].get<std::string>()));
+        if (j.contains("title") || j.contains("titleKey")) {
+            window->setTitle(resolveLocalizedString(
+                h, "title", "titleKey"));
         }
         if (j.contains("movable")) {
             window->setMovable(j["movable"].get<bool>());
@@ -1207,13 +1313,13 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     };
     if (ModalDialog* dialog = dynamic_cast<ModalDialog*>(widget)) {
         restoreModalBase(dialog);
-        if (j.contains("acceptText")) {
-            dialog->setAcceptText(
-                utf8ToWide(j["acceptText"].get<std::string>()));
+        if (j.contains("acceptText") || j.contains("acceptTextKey")) {
+            dialog->setAcceptText(resolveLocalizedString(
+                h, "acceptText", "acceptTextKey"));
         }
-        if (j.contains("rejectText")) {
-            dialog->setRejectText(
-                utf8ToWide(j["rejectText"].get<std::string>()));
+        if (j.contains("rejectText") || j.contains("rejectTextKey")) {
+            dialog->setRejectText(resolveLocalizedString(
+                h, "rejectText", "rejectTextKey"));
         }
         if (j.contains("bodyContent") && j["bodyContent"].is_object()) {
             if (Widget* body = buildWidgetTree(JsonHandle(
@@ -1384,8 +1490,14 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         }
         if (j.contains("menus") && j["menus"].is_array()) {
             for (const auto& menuJson : j["menus"]) {
-                Menu* menu = menuBar->addMenu(utf8ToWide(
-                    menuJson.value("title", std::string())));
+                JsonHandle menuHandle(const_cast<json*>(&menuJson));
+                Menu* menu = menuBar->addMenu(resolveLocalizedString(
+                    menuHandle, "title", "titleKey"));
+                if (menuJson.contains("titleKey")
+                    && menuJson["titleKey"].is_string()) {
+                    menu->setLocalizationKey(
+                        "title", menuJson["titleKey"].get<std::string>());
+                }
                 const json* payload = &menuJson;
                 if (menuJson.contains("menu")
                     && menuJson["menu"].is_object()) {
@@ -1396,8 +1508,14 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                     continue;
                 }
                 for (const auto& itemJson : (*payload)["items"]) {
-                    MenuItem* item = menu->addItem(utf8ToWide(
-                        itemJson.value("text", std::string())));
+                    JsonHandle itemHandle(const_cast<json*>(&itemJson));
+                    MenuItem* item = menu->addItem(resolveLocalizedString(
+                        itemHandle, "text", "textKey"));
+                    if (itemJson.contains("textKey")
+                        && itemJson["textKey"].is_string()) {
+                        item->setLocalizationKey(
+                            "text", itemJson["textKey"].get<std::string>());
+                    }
                     if (itemJson.contains("shortcut")) {
                         item->setShortcut(utf8ToWide(
                             itemJson["shortcut"].get<std::string>()));
@@ -1419,8 +1537,14 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     } else if (Menu* menu = dynamic_cast<Menu*>(widget)) {
         if (j.contains("items") && j["items"].is_array()) {
             for (const auto& itemJson : j["items"]) {
-                MenuItem* item = menu->addItem(utf8ToWide(
-                    itemJson.value("text", std::string())));
+                JsonHandle itemHandle(const_cast<json*>(&itemJson));
+                MenuItem* item = menu->addItem(resolveLocalizedString(
+                    itemHandle, "text", "textKey"));
+                if (itemJson.contains("textKey")
+                    && itemJson["textKey"].is_string()) {
+                    item->setLocalizationKey(
+                        "text", itemJson["textKey"].get<std::string>());
+                }
                 if (itemJson.contains("shortcut")) {
                     item->setShortcut(utf8ToWide(
                         itemJson["shortcut"].get<std::string>()));
@@ -1430,13 +1554,10 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     }
 
     // ComboBox / ListView item lists (mirror WidgetSerializer deserialize).
-    if (j.contains("items") && j["items"].is_array()) {
-        std::vector<std::wstring> items;
-        items.reserve(j["items"].size());
-        for (const auto& s : j["items"]) {
-            if (!s.is_string()) continue;
-            items.push_back(utf8ToWide(s.get<std::string>()));
-        }
+    if ((j.contains("items") && j["items"].is_array())
+        || (j.contains("itemsKey") && j["itemsKey"].is_array())) {
+        const std::vector<std::wstring> items = resolveLocalizedList(
+            h, "items", "itemsKey");
         if (ComboBox* cb = dynamic_cast<ComboBox*>(widget)) {
             cb->setItems(items);
             if (j.contains("selectedIndex")) {
@@ -1528,13 +1649,9 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
 
     // Text with i18n support
     const std::string text = j.value("text", "");
-    if (!text.empty()) {
-        std::wstring wtext;
-        if (_i18n && isI18nKey(text)) {
-            wtext = _i18n->resolve(text);
-        } else {
-            wtext = utf8ToWide(text);
-        }
+    if (!text.empty() || j.contains("textKey")) {
+        const std::wstring wtext = resolveLocalizedString(
+            h, "text", "textKey");
 
         if (type == "Button") {
             if (Button* button = dynamic_cast<Button*>(widget)) {
@@ -1587,7 +1704,8 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                     mi->setShortcut(utf8ToWide(sc));
                 }
             }
-        } else if (type == "Window" && !j.contains("title")) {
+        } else if (type == "Window" && !j.contains("title")
+                   && !j.contains("titleKey")) {
             if (Window* window = dynamic_cast<Window*>(widget)) {
                 window->setTitle(wtext);
             }
@@ -1864,9 +1982,9 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     // when an editor wraps a single floating window in a small file).
     // Apply the same field set so the round-trip is symmetric.
     if (DockCard* card = dynamic_cast<DockCard*>(widget)) {
-        if (j.contains("title")) {
-            std::string u8 = j["title"].get<std::string>();
-            card->setTitle(utf8ToWide(u8));
+        if (j.contains("title") || j.contains("titleKey")) {
+            card->setTitle(resolveLocalizedString(
+                h, "title", "titleKey"));
         }
         if (j.contains("icon")) {
             card->setIcon(j["icon"].get<std::string>());
