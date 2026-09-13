@@ -52,6 +52,7 @@ using nlohmann::json;
 #include <atomic>
 #include <chrono>
 #include <codecvt>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <locale>
@@ -74,6 +75,15 @@ using nlohmann::json;
 
 namespace {
 
+bool loaderHeapCheckEnabled()
+{
+    static const bool enabled = []() {
+        const char* value = std::getenv("AY_UI_LOADER_HEAP_CHECK");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }();
+    return enabled;
+}
+
 void loaderHeapCheck(const char* label)
 {
     if (!_CrtCheckMemory()) {
@@ -90,9 +100,16 @@ void loaderHeapCheckId(const char* prefix, const char* parentId, const char* chi
 }
 
 } // namespace
-#  define LOADER_HEAP_CHECK(label) loaderHeapCheck(label)
-#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId)                                       \
-      loaderHeapCheckId("after_attach", (parentId), (childId))
+#  define LOADER_HEAP_CHECK(label)                                      \
+      do {                                                               \
+          if (loaderHeapCheckEnabled()) loaderHeapCheck(label);          \
+      } while (false)
+#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId)                    \
+      do {                                                               \
+          if (loaderHeapCheckEnabled()) {                                \
+              loaderHeapCheckId("after_attach", (parentId), (childId)); \
+          }                                                              \
+      } while (false)
 #else
 #  define LOADER_HEAP_CHECK(label) ((void)0)
 #  define LOADER_HEAP_CHECK_ATTACH(parentId, childId) ((void)0)
