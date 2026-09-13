@@ -798,8 +798,10 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         return nullptr;
     }
 #if defined(_DEBUG) && defined(_MSC_VER)
-    loaderHeapCheckId("after_factory_create", type.c_str(),
-                      id.empty() ? "anonymous" : id.c_str());
+    if (loaderHeapCheckEnabled()) {
+        loaderHeapCheckId("after_factory_create", type.c_str(),
+                          id.empty() ? "anonymous" : id.c_str());
+    }
 #endif
 
     // ID
