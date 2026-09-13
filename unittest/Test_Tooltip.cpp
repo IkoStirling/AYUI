@@ -54,6 +54,18 @@ TEST_CASE(tooltip_appears_on_hover_delay) {
     destroyWidgetTree(tip);
 }
 
+TEST_CASE(tooltip_cjk_text_uses_full_width_advance) {
+    Tooltip latin;
+    latin.setText(L"abcde");
+    latin.performLayout();
+
+    Tooltip chinese;
+    chinese.setText(L"下移当前层");
+    chinese.performLayout();
+
+    CHECK(chinese.getSize().x > latin.getSize().x + 10.0f);
+}
+
 // Leaving the target hides the tooltip (after one tick).
 TEST_CASE(tooltip_hides_on_mouse_leave) {
     Button btn;
@@ -467,4 +479,3 @@ TEST_CASE(tooltip_does_not_fire_when_target_invisible) {
 }
 
 TEST_SUITE_END
-

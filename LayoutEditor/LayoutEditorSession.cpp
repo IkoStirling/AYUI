@@ -781,6 +781,38 @@ void LayoutEditorSession::detach() {
     _dirty = false;
 }
 
+std::wstring LayoutEditorSession::localizedText(
+    std::string_view key, std::wstring_view fallback) const
+{
+    if (_ui == nullptr) return std::wstring(fallback);
+    const UILayoutLoader::TextResolver& resolver =
+        _ui->loader().textResolver();
+    return resolver ? resolver(key, fallback) : std::wstring(fallback);
+}
+
+void LayoutEditorSession::retranslateChrome()
+{
+    if (_ui == nullptr || _chromeRoot == nullptr) return;
+    _ui->loader().retranslate(_chromeRoot);
+    for (const PropertyFieldSchema& schema : allPropertyFieldSchemas()) {
+        if (schema.displayName == nullptr) continue;
+        if (auto* label = dynamic_cast<TextLabel*>(
+                findChromeById(schema.labelId))) {
+            label->setText(localizedText(
+                std::string("ui.") + "editor.ui_designer.property_field."
+                    + schema.key,
+                utf8ToWide(schema.displayName)));
+        }
+    }
+    syncPreviewControls();
+    syncHierarchySummary();
+    syncAnimationTransportStatus();
+    syncAnimationEditor();
+    updatePropPanelVisibility();
+    _ui->invalidateLayout();
+    _ui->layout();
+}
+
 void LayoutEditorSession::pumpDeferred(float deltaSeconds) {
     syncCanvasViewportGeometry();
     syncAnimationTimelineGeometry();
@@ -1798,7 +1830,9 @@ void LayoutEditorSession::setAnimationPreviewLoop(bool enabled) {
     }
     if (auto* button = dynamic_cast<Button*>(
             findChromeById("btn_animation_loop"))) {
-        button->setText(enabled ? L"Loop: On" : L"Loop: Off");
+        button->setText(enabled
+            ? localizedText("ui.editor.ui_designer.loop_on", L"Loop: On")
+            : localizedText("ui.editor.ui_designer.loop_off", L"Loop: Off"));
     }
     syncAnimationEditor();
 }
@@ -6281,12 +6315,15 @@ void LayoutEditorSession::updatePropPanelVisibility() {
     if (auto* title = dynamic_cast<TextLabel*>(_ui != nullptr
             ? findChromeById("lbl_props") : nullptr)) {
         if (!hasSel) {
-            title->setText(L"Properties");
+            title->setText(localizedText(
+                "ui.editor.ui_designer.properties", L"Properties"));
         } else if (_selection.size() > 1u) {
-            title->setText(L"Properties — " +
+            title->setText(localizedText(
+                "ui.editor.ui_designer.properties", L"Properties") + L" — " +
                 std::to_wstring(_selection.size()) + L" widgets");
         } else {
-            std::wstring t = L"Properties — ";
+            std::wstring t = localizedText(
+                "ui.editor.ui_designer.properties", L"Properties") + L" — ";
             t += authoring != nullptr
                 ? utf8ToWide(authoring->displayName) : L"Widget";
             title->setText(t);
@@ -6793,7 +6830,8 @@ void LayoutEditorSession::syncTextureBrowser() {
     if (_textureStatus != nullptr) {
         const std::string& key = image->getTextureName();
         if (key.empty()) {
-            _textureStatus->setText(L"No texture assigned");
+            _textureStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.no_texture", L"No texture assigned"));
             _textureStatus->setStyleId("__le_muted");
         } else if (_textureCatalog.contains(key) || image->hasTexture()) {
             const ImageTextureHandle& texture = image->getTexture();
@@ -7008,11 +7046,18 @@ void LayoutEditorSession::syncPreviewControls() {
     set(_previewSafeR, settings.safeAreaPixels.z);
     set(_previewSafeB, settings.safeAreaPixels.w);
     if (auto* button = dynamic_cast<Button*>(findChromeById("btn_preview_safe"))) {
-        button->setText(settings.showSafeArea ? L"Safe Area: On" : L"Safe Area: Off");
+        button->setText(settings.showSafeArea
+            ? localizedText("ui.editor.ui_designer.safe_area_on",
+                            L"Safe Area: On")
+            : localizedText("ui.editor.ui_designer.safe_area_off",
+                            L"Safe Area: Off"));
         button->setStyleId(settings.showSafeArea ? "__le_primary" : "__le_command");
     }
     if (auto* button = dynamic_cast<Button*>(findChromeById("btn_preview_mode"))) {
-        button->setText(_mode == Mode::Interact ? L"Stop Preview" : L"Interact");
+        button->setText(_mode == Mode::Interact
+            ? localizedText("ui.editor.ui_designer.stop_preview",
+                            L"Stop Preview")
+            : localizedText("ui.editor.ui_designer.interact", L"Interact"));
         button->setStyleId(_mode == Mode::Interact ? "__le_primary" : "__le_command");
     }
     if (auto* hint = dynamic_cast<TextLabel*>(findChromeById("lbl_canvas_hint"))) {
@@ -7207,7 +7252,9 @@ void LayoutEditorSession::syncExternalComponentEditor() {
                      selectedIndex >= 0 && !_externalComponentLibraryPath.empty());
     if (_externalComponentStatus != nullptr) {
         if (_externalComponentLibraryPath.empty()) {
-            _externalComponentStatus->setText(L"Project component library is not configured");
+            _externalComponentStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.component_library_unconfigured",
+                L"Project component library is not configured"));
         } else if (_externalComponentLibrary.empty()) {
             _externalComponentStatus->setText(L"No project components");
         } else {
@@ -7333,7 +7380,9 @@ void LayoutEditorSession::syncThemeEditor(
     setChromeEnabled("btn_theme_style_remove", loaded && styleIndex >= 0);
     if (_themeEditorStatus != nullptr) {
         if (!loaded) {
-            _themeEditorStatus->setText(L"Open a Theme JSON to edit tokens and styles");
+            _themeEditorStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.open_theme_hint",
+                L"Open a Theme JSON to edit tokens and styles"));
         } else {
             _themeEditorStatus->setText(
                 std::to_wstring(tokens.size()) + L" token(s), "
@@ -7486,7 +7535,9 @@ void LayoutEditorSession::syncResponsiveEditor() {
     setChromeEnabled("btn_responsive_clear", authoredRule != nullptr);
     if (_responsiveStatus != nullptr) {
         if (!editable) {
-            _responsiveStatus->setText(L"Select a non-root widget");
+            _responsiveStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.select_non_root",
+                L"Select a non-root widget"));
         } else {
             const float parentWidth = _selected->getParent() != nullptr
                 ? _selected->getParent()->getSize().x : 0.0f;
@@ -7886,13 +7937,16 @@ void LayoutEditorSession::syncAnimationEditor() {
     setChromeVisible("animation_timeline_workspace", hasClip);
     if (auto* loop = dynamic_cast<Button*>(findChromeById(
             "btn_animation_loop"))) {
-        loop->setText(_animationPreviewLoop ? L"Loop: On" : L"Loop: Off");
+        loop->setText(_animationPreviewLoop
+            ? localizedText("ui.editor.ui_designer.loop_on", L"Loop: On")
+            : localizedText("ui.editor.ui_designer.loop_off", L"Loop: Off"));
     }
     syncAnimationTransportStatus();
     if (_animationStatus != nullptr) {
         if (!hasClip) {
-            _animationStatus->setText(
-                L"Create a clip, bind the selected Widget, then capture keys");
+            _animationStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.animation_hint",
+                L"Create a clip, bind a Widget, then capture keys"));
         } else {
             size_t totalKeys = 0;
             for (const UIAnimationTrack& item : clip->tracks)
@@ -9104,7 +9158,9 @@ void LayoutEditorSession::syncStyleInspector() {
         _styleInspectorModel.backgroundForState(inspection,
                                                 _stylePreviewState);
     if (_styleColorStatus != nullptr) {
-        _styleColorStatus->setText(L"Background  " + formatColorHex(color));
+        _styleColorStatus->setText(localizedText(
+            "ui.editor.ui_designer.property.background", L"Background")
+            + L"  " + formatColorHex(color));
     }
     if (_stylePreviewSwatch != nullptr && sheet != nullptr) {
         WidgetStyle previewStyle = StyleBuilder::makePanel();
@@ -9150,7 +9206,9 @@ void LayoutEditorSession::refreshValidation() {
     if (_interactionGraphStatus != nullptr) {
         const size_t edges = _interactionGraph.edges().size();
         if (edges == 0u) {
-            _interactionGraphStatus->setText(L"No event bindings");
+            _interactionGraphStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.no_event_bindings",
+                L"No event bindings"));
             _interactionGraphStatus->setStyleId("__le_muted");
         } else if (!_interactionContractsConfigured) {
             _interactionGraphStatus->setText(
@@ -9183,7 +9241,9 @@ void LayoutEditorSession::refreshValidation() {
         const size_t errors = _validationModel.errorCount();
         const size_t warnings = _validationModel.warningCount();
         if (errors == 0u && warnings == 0u) {
-            _validationStatus->setText(L"No authoring issues");
+            _validationStatus->setText(localizedText(
+                "ui.editor.ui_designer.status.no_issues",
+                L"No authoring issues"));
             _validationStatus->setStyleId("__le_success");
         } else {
             _validationStatus->setText(
@@ -9274,7 +9334,10 @@ void LayoutEditorSession::ensureSchemaPropertyChrome() {
         auto* label = new TextLabel();
         label->setId(schema->labelId);
         label->setStyleId("__le_label");
-        label->setText(utf8ToWide(schema->displayName));
+        label->setText(localizedText(
+            std::string("ui.") + "editor.ui_designer.property_field."
+                + schema->key,
+            utf8ToWide(schema->displayName)));
         if (schema->rowKind == PropertyRowKind::Vector4) {
             label->setSize({272.0f, 24.0f});
             row->addWidget(label, 24.0f);

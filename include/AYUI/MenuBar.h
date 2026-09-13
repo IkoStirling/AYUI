@@ -58,6 +58,7 @@ public:
     size_t getMenuCount() const { return _menus.size(); }
     Menu* getMenu(size_t index) const;
     const std::wstring& getMenuTitle(size_t index) const;
+    void setMenuTitle(size_t index, const std::wstring& title);
 
     // Anchor layout knobs (MenuBar lays out its own row — not an HBox).
     // Mirrors BoxBase::setSpacing for the bar's top-level buttons.

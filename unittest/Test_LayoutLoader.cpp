@@ -290,6 +290,9 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
         if (key == "ui.test.a11y") return alternateLanguage
             ? std::wstring(L"Accessible alternate")
             : std::wstring(L"Accessible Localized");
+        if (key == "ui.test.placeholder") return alternateLanguage
+            ? std::wstring(L"Placeholder alternate")
+            : std::wstring(L"Placeholder Localized");
         return std::wstring(fallback);
     });
 
@@ -301,6 +304,9 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
              "textKey":"ui.test.button", "text":"Button fallback",
              "accessibilityLabelKey":"ui.test.a11y",
              "accessibilityLabel":"Accessible fallback"},
+            {"type":"TextInput", "id":"input",
+             "placeholderKey":"ui.test.placeholder",
+             "placeholder":"Placeholder fallback"},
             {"type":"ComboBox", "id":"combo",
              "itemsKey":["ui.test.item.first", "ui.test.missing"],
              "items":["First fallback", "Second fallback"]}
@@ -308,6 +314,7 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
     })");
     auto* window = dynamic_cast<Window*>(root);
     auto* button = dynamic_cast<Button*>(loader.findWidgetById("button"));
+    auto* input = dynamic_cast<TextInput*>(loader.findWidgetById("input"));
     auto* combo = dynamic_cast<ComboBox*>(loader.findWidgetById("combo"));
     CHECK(window != nullptr && window->getTitle() == L"Localized Window");
     CHECK(button != nullptr && button->getText() == L"Translated");
@@ -315,6 +322,11 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
           && button->getAccessibilityLabel() == L"Accessible Localized");
     CHECK(button != nullptr
           && button->getLocalizationKey("text") == "ui.test.button");
+    CHECK(input != nullptr
+          && input->getPlaceholder() == L"Placeholder Localized");
+    CHECK(input != nullptr
+          && input->getLocalizationKey("placeholder")
+              == "ui.test.placeholder");
     CHECK(combo != nullptr && combo->getItemCount() == 2u);
     if (combo != nullptr && combo->getItemCount() == 2u) {
         CHECK(combo->getItem(0) == L"First Localized");
@@ -328,6 +340,8 @@ TEST_CASE(test_layout_loader_resolves_explicit_keys_with_fallbacks) {
     CHECK(button != nullptr && button->getText() == L"Translated alternate");
     CHECK(button != nullptr
           && button->getAccessibilityLabel() == L"Accessible alternate");
+    CHECK(input != nullptr
+          && input->getPlaceholder() == L"Placeholder alternate");
     CHECK(combo != nullptr && combo->getItem(0) == L"First alternate");
     CHECK(combo != nullptr && combo->getItem(1) == L"Second fallback");
     CHECK(combo != nullptr && combo->getSelectedIndex() == 1);

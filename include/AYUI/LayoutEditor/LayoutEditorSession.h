@@ -102,6 +102,9 @@ public:
     bool attach(UIManager& ui, Widget* chromeRoot);
     void detach();
     void pumpDeferred(float deltaSeconds = 0.0f);
+    // Re-resolve editor chrome after the host switches language. Authored
+    // document content is intentionally excluded.
+    void retranslateChrome();
 
     bool open(const std::string& path);
     bool save();
@@ -315,6 +318,8 @@ private:
     void restoreDocumentInteraction(Widget* root);
     void rehydrateRuntimePresentation(Widget* root);
     void setStatus(const std::wstring& text);
+    std::wstring localizedText(std::string_view key,
+                               std::wstring_view fallback) const;
     void syncPropertyStrip();
     void updatePropPanelVisibility();
     void setChromeVisible(const char* id, bool visible);

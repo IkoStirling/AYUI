@@ -138,6 +138,12 @@ const std::wstring& MenuBar::getMenuTitle(size_t index) const {
     return _menus[index].anchor ? _menus[index].anchor->getText() : kEmpty;
 }
 
+void MenuBar::setMenuTitle(size_t index, const std::wstring& title) {
+    if (index >= _menus.size() || _menus[index].anchor == nullptr) return;
+    _menus[index].anchor->setText(title);
+    layoutAnchors();
+}
+
 void MenuBar::closeOpenMenu() {
     // Polish (P3) invariant: accelerator dispatch (and any other "menu
     // should dismiss" call) must close ANY menu currently in the open

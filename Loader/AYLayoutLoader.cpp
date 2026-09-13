@@ -278,6 +278,13 @@ void UILayoutLoader::retranslate(Widget* root) const
         }
     }
 
+    if (!root->getLocalizationKey("placeholder").empty()) {
+        if (auto* value = dynamic_cast<TextInput*>(root)) {
+            value->setPlaceholder(resolve(
+                "placeholder", value->getPlaceholder()));
+        }
+    }
+
     if (!root->getLocalizationKey("title").empty()) {
         if (auto* value = dynamic_cast<DockCard*>(root)) {
             value->setTitle(resolve("title", value->getTitle()));
@@ -1180,6 +1187,15 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
         }
     }
     if (TextInput* input = dynamic_cast<TextInput*>(widget)) {
+        if (j.contains("placeholder") || j.contains("placeholderKey")) {
+            input->setPlaceholder(resolveLocalizedString(
+                h, "placeholder", "placeholderKey"));
+            if (j.contains("placeholderKey")
+                && j["placeholderKey"].is_string()) {
+                input->setLocalizationKey(
+                    "placeholder", j["placeholderKey"].get<std::string>());
+            }
+        }
         if (j.contains("password")) {
             input->setPasswordMode(j["password"].get<bool>());
         }

@@ -2,8 +2,26 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/UIManager.h"
 #include <algorithm>
+#include <cwctype>
 
 namespace ayt::ui {
+
+namespace {
+
+float tooltipTextAdvanceUnits(const std::wstring& text) {
+    float units = 0.0f;
+    for (wchar_t ch : text) {
+        if (ch == L'\n' || ch == L'\r') continue;
+        // Latin UI text is typically about half an em wide, while CJK
+        // ideographs and most non-ASCII symbols occupy a full em. Treating
+        // every code point as Latin clipped localized tooltips such as
+        // "下移当前层" even though the English source fitted correctly.
+        units += ch <= 0x7fu ? 0.55f : 1.0f;
+    }
+    return units;
+}
+
+} // namespace
 
 Tooltip::Tooltip() {
     setSize(math::FVector2(0.0f, 0.0f));   // recomputed on layout
@@ -282,10 +300,9 @@ void Tooltip::performLayout() {
         // Widget default 100x50 — which made near-bottom tips fail to
         // flip above the anchor in tests / tiny viewports.
         const float fontPx = static_cast<float>(std::max(1, _label->getFontSize()));
-        const float approxCharW = fontPx * 0.55f;
         const float textW = std::max(
             fontPx,
-            approxCharW * static_cast<float>(_label->getText().size()));
+            fontPx * tooltipTextAdvanceUnits(_label->getText()));
         const float textH = fontPx + 2.0f;
         _label->setSize(math::FVector2(textW, textH));
     }
