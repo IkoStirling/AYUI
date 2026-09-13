@@ -70,12 +70,35 @@ int main() {
 
     ayt::ui::UIManager ui;
     ui.initialize(nullptr);
+    ui.loader().setTextResolver(
+        [](std::string_view key, std::wstring_view fallback) {
+            if (key == "ui.editor.ui_designer.menu.file") return std::wstring(L"文件");
+            if (key == "ui.editor.ui_designer.action.open") return std::wstring(L"打开");
+            return std::wstring(fallback);
+        });
     if (!ui.loadLayout("assets/layout_editor.ui.json")) {
         std::fprintf(stderr, "chrome load failed\n");
         return 1;
     }
 
     ayt::ui::LayoutEditorSession session;
+    int textureResourceProviderCalls = 0;
+    session.setTextureResourceProvider([&textureResourceProviderCalls]() {
+        ++textureResourceProviderCalls;
+        return std::vector<ayt::ui::LayoutTextureResource>{
+            {"Assets/ui/test.png", L"Project / ui / test.png",
+             "D:/PreviewRoot/ui/test.png", L"PNG"}
+        };
+    });
+    if (textureResourceProviderCalls != 0) {
+        std::fprintf(stderr, "texture provider ran before attach\n");
+        return 121;
+    }
+    int openPickerCalls = 0;
+    session.setOpenPathPicker([&openPickerCalls]() {
+        ++openPickerCalls;
+        return std::string{};
+    });
     int refactorPreviewCalls = 0;
     int refactorApplyCalls = 0;
     session.setProjectRefactorKinds({
@@ -105,6 +128,12 @@ int main() {
         std::fprintf(stderr, "attach failed\n");
         return 2;
     }
+    if (textureResourceProviderCalls != 1) {
+        std::fprintf(stderr,
+            "texture provider first-attach count=%d (expected 1)\n",
+            textureResourceProviderCalls);
+        return 122;
+    }
     if (session.documentRoot() == nullptr ||
         session.documentRoot()->isLayoutSizeManaged()) {
         std::fprintf(stderr, "new document root size is not authorable\n");
@@ -116,6 +145,21 @@ int main() {
         std::fprintf(stderr, "designer menu regression: count=%zu\n",
             menuBar != nullptr ? menuBar->getMenuCount() : 0u);
         return 9;
+    }
+    ayt::ui::Menu* fileMenu = menuBar->getMenu(0);
+    ayt::ui::MenuItem* openItem = fileMenu != nullptr
+        ? fileMenu->getItem(0) : nullptr;
+    if (menuBar->getMenuTitle(0) != L"文件" || openItem == nullptr
+        || openItem->getText() != L"打开" || !openItem->handleClick()) {
+        std::fprintf(stderr, "localized designer menu binding failed\n");
+        return 123;
+    }
+    session.pumpDeferred(0.0f);
+    if (openPickerCalls != 1) {
+        std::fprintf(stderr,
+            "localized designer Open callback count=%d (expected 1)\n",
+            openPickerCalls);
+        return 124;
     }
     static const char* requiredPaletteIds[] = {
         "btn_add_image", "btn_add_list", "btn_add_tiles", "btn_add_tree",
@@ -591,12 +635,6 @@ int main() {
         std::fprintf(stderr, "Image palette creation failed\n");
         return 14;
     }
-    session.setTextureResourceProvider([]() {
-        return std::vector<ayt::ui::LayoutTextureResource>{
-            {"Assets/ui/test.png", L"Project / ui / test.png",
-             "D:/PreviewRoot/ui/test.png", L"PNG"}
-        };
-    });
     session.applyProperty("texture", L"Assets/ui/test.png");
     session.applyProperty("imageTint", L"#804020FF");
     session.applyProperty("uvMinX", L"0.1");

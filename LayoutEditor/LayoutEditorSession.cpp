@@ -591,10 +591,12 @@ bool LayoutEditorSession::attach(UIManager& ui, Widget* chromeRoot) {
 
     ensureSelectionChrome();
     ensureHierDropChrome();
-    if (_ui != nullptr) {
-        _ui->invalidateLayout();
-        _ui->layout();
-    }
+    // Complete the initial model population once, after the authored root and
+    // every chrome pointer exist. wireChrome() deliberately performs binding
+    // only; running these synchronizers there as well caused two complete
+    // Inspector passes and two asset scans during first open.
+    refreshTextureResources();
+    syncPreviewControls();
     refreshHierarchy();
     syncPropertyStrip();
     syncSelectionChrome();
@@ -862,7 +864,12 @@ void LayoutEditorSession::setTexturePreviewLoader(TexturePreviewLoader loader) {
 void LayoutEditorSession::setTextureResourceProvider(
     TextureResourceProvider provider) {
     _textureResourceProvider = std::move(provider);
-    refreshTextureResources();
+    // Hosts configure providers while constructing their controller, before
+    // the Designer chrome is attached. Scanning at that point did the same
+    // recursive asset walk again from wireChrome(), blocking the editor UI
+    // twice on first open. Preserve immediate refresh for live/reconfigured
+    // sessions, but let attach() own the initial scan.
+    if (_ui != nullptr) refreshTextureResources();
 }
 
 void LayoutEditorSession::setMode(Mode mode) {
@@ -2088,18 +2095,19 @@ void LayoutEditorSession::wireChrome() {
         }
     };
 
-    auto bindMenuItem = [this](const wchar_t* menuTitle,
-                               const wchar_t* itemText,
+    auto bindMenuItem = [this](const char* menuKey,
+                               const char* itemKey,
                                std::function<void()> fn) {
         auto* bar = dynamic_cast<MenuBar*>(findChromeById("designer_menubar"));
         if (bar == nullptr) return false;
         for (size_t menuIndex = 0; menuIndex < bar->getMenuCount(); ++menuIndex) {
-            if (bar->getMenuTitle(menuIndex) != menuTitle) continue;
             Menu* menu = bar->getMenu(menuIndex);
-            if (menu == nullptr) return false;
+            if (menu == nullptr
+                || menu->getLocalizationKey("title") != menuKey) continue;
             for (size_t itemIndex = 0; itemIndex < menu->getItemCount(); ++itemIndex) {
                 MenuItem* item = menu->getItem(itemIndex);
-                if (item != nullptr && item->getText() == itemText) {
+                if (item != nullptr
+                    && item->getLocalizationKey("text") == itemKey) {
                     item->setOnActivate(std::move(fn));
                     return true;
                 }
@@ -2124,25 +2132,43 @@ void LayoutEditorSession::wireChrome() {
     bindBtn("btn_redo", [this]() { redo(); });
     bindBtn("btn_delete", [this]() { deleteSelected(); });
 
-    bindMenuItem(L"File", L"Open", [this]() { _deferred = DeferredAction::Open; });
-    bindMenuItem(L"File", L"Save", [this]() { _deferred = DeferredAction::Save; });
-    bindMenuItem(L"File", L"Save As", [this]() { _deferred = DeferredAction::SaveAs; });
-    bindMenuItem(L"Edit", L"Undo", [this]() { undo(); });
-    bindMenuItem(L"Edit", L"Redo", [this]() { redo(); });
-    bindMenuItem(L"Edit", L"Copy", [this]() { copySelection(); });
-    bindMenuItem(L"Edit", L"Paste", [this]() { pasteClipboard(); });
-    bindMenuItem(L"Edit", L"Duplicate", [this]() { duplicateSelection(); });
-    bindMenuItem(L"Edit", L"Delete", [this]() { deleteSelected(); });
-    bindMenuItem(L"Edit", L"Select All", [this]() { selectAll(); });
-    bindMenuItem(L"Edit", L"Move Up", [this]() { reorderSelected(-1); });
-    bindMenuItem(L"Edit", L"Move Down", [this]() { reorderSelected(1); });
-    bindMenuItem(L"View", L"Interact Preview", [this]() {
+    bindMenuItem("ui.editor.ui_designer.menu.file",
+                 "ui.editor.ui_designer.action.open",
+                 [this]() { _deferred = DeferredAction::Open; });
+    bindMenuItem("ui.editor.ui_designer.menu.file",
+                 "ui.editor.ui_designer.action.save",
+                 [this]() { _deferred = DeferredAction::Save; });
+    bindMenuItem("ui.editor.ui_designer.menu.file",
+                 "ui.editor.ui_designer.action.save_as",
+                 [this]() { _deferred = DeferredAction::SaveAs; });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.undo", [this]() { undo(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.redo", [this]() { redo(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.copy", [this]() { copySelection(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.paste", [this]() { pasteClipboard(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.duplicate", [this]() { duplicateSelection(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.delete", [this]() { deleteSelected(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.select_all", [this]() { selectAll(); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.move_up", [this]() { reorderSelected(-1); });
+    bindMenuItem("ui.editor.ui_designer.menu.edit",
+                 "ui.editor.ui_designer.action.move_down", [this]() { reorderSelected(1); });
+    bindMenuItem("ui.editor.ui_designer.menu.view",
+                 "ui.editor.ui_designer.action.interact_preview", [this]() {
         setMode(_mode == Mode::Edit ? Mode::Interact : Mode::Edit);
     });
-    bindMenuItem(L"View", L"Safe Area", [this]() {
+    bindMenuItem("ui.editor.ui_designer.menu.view",
+                 "ui.editor.ui_designer.action.safe_area", [this]() {
         setSafeAreaVisible(!_previewModel.settings().showSafeArea);
     });
-    bindMenuItem(L"View", L"Validate Layout", [this]() {
+    bindMenuItem("ui.editor.ui_designer.menu.view",
+                 "ui.editor.ui_designer.action.validate_layout", [this]() {
         refreshValidation();
         setStatus(_validationModel.hasErrors()
             ? L"Validation completed with errors"
@@ -2162,13 +2188,16 @@ void LayoutEditorSession::wireChrome() {
         setStatus(utf8ToWide((ok ? std::string{} : "Workflow failed — ")
             + (message.empty() ? std::string("No details") : message)));
     };
-    bindMenuItem(L"Workflow", L"Open Owning Screen", [this, runProjectWorkflow]() {
+    bindMenuItem("ui.editor.ui_designer.menu.workflow",
+                 "ui.editor.ui_designer.action.open_owning_screen", [this, runProjectWorkflow]() {
         runProjectWorkflow(_openOwningFlowAction);
     });
-    bindMenuItem(L"Workflow", L"Complete Flow Signals", [this, runProjectWorkflow]() {
+    bindMenuItem("ui.editor.ui_designer.menu.workflow",
+                 "ui.editor.ui_designer.action.complete_flow_signals", [this, runProjectWorkflow]() {
         runProjectWorkflow(_completeFlowSignalsAction);
     });
-    bindMenuItem(L"Workflow", L"Safe Rename References", [this]() {
+    bindMenuItem("ui.editor.ui_designer.menu.workflow",
+                 "ui.editor.ui_designer.action.safe_rename", [this]() {
         revealProjectRefactorEditor();
     });
 
@@ -2983,14 +3012,6 @@ void LayoutEditorSession::wireChrome() {
 
     _status = dynamic_cast<TextLabel*>(findChromeById("lbl_status"));
     ensureAnimationTimelineView();
-    refreshTextureResources();
-    syncPreviewControls();
-    syncReuseEditor();
-    syncExternalComponentEditor();
-    syncThemeEditor();
-    syncResponsiveEditor();
-    syncAnimationEditor();
-    refreshValidation();
 }
 
 void LayoutEditorSession::clearDocument() {
