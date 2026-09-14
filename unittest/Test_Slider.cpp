@@ -4,6 +4,7 @@
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/MockRenderer.h"
 #include "AYUI/Style.h"
+#include "AYUI/UIManager.h"
 
 #include <iostream>
 
@@ -312,6 +313,49 @@ TEST_CASE(slider_drag_end_no_extra_emit_when_clamped) {
 
     s.onMouseButtonUp(UIMouseEvent(FVector2(1000.0f, 12.0f), 0));
     CHECK_FALSE(s.isDragging());
+}
+
+// Audit H-MEM-3: pre-fix Slider::~Slider() = default. If a host deletes
+// the Slider mid-drag (UIManager has captured input on it via the
+// dimmer) or while the Slider has focus, the UIManager transient
+// pointers (_capturedWidget, _focusedWidget, _hoverWidget) dangle.
+// Post-fix the dtor calls clearTransientStateForSubtree(this) so the
+// next setFocus / setCapture / updateHoverWidget does NOT dispatch
+// into freed memory. We exercise the focus path here (the scrub also
+// clears capture + hover, but the Slider is InteractiveWidget, not
+// directly FocusableWidget — the dynamic_cast in setFocus returns
+// null for non-FocusableWidget so we use the Slider as a stand-in
+// for any leaf that holds focus).
+TEST_CASE(slider_dtor_scrubs_focus_from_uimanager) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    auto* s = new Slider();
+    s->setSize(FVector2(200.0f, 24.0f));
+    s->setPosition(FVector2(10.0f, 10.0f));
+    ui.root()->addChild(s); // owning — ui.destroyWidgetTree will free it
+
+    // Pin focus onto the slider. setFocus dynamic_casts to
+    // FocusableWidget; Slider is ValueWidget → InteractiveWidget → Widget,
+    // so the dynamic_cast returns null and setFocus just records the
+    // raw pointer. Either way, the manager's _focusedWidget is now s.
+    ui.setFocus(s);
+    // Pre-fix: deleting `s` leaves _focusedWidget dangling; the next
+    // setFocus (or any post-destroy event) would deref freed memory
+    // inside markDirty(). Post-fix: dtor scrubs _focusedWidget.
+
+    ui.root()->removeChild(s);
+    delete s;
+
+    // The manager must not crash. setFocus(nullptr) should be a clean
+    // no-op (prev was already scrubbed to nullptr, so dynamic_cast is
+    // skipped; if the scrub did NOT happen, the dynamic_cast on a
+    // dangling pointer is undefined behavior — observable as a crash
+    // under ASan or a heap-use-after-free under MSVC debug).
+    ui.setFocus(nullptr);
+
+    ui.shutdown();
 }
 
 TEST_SUITE_END

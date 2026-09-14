@@ -1,11 +1,30 @@
 #include "AYUI/SplitterHandle.h"
 #include "AYUI/Box.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/UIManager.h"
 
 #include <cstdio>
 #include <cstdlib>
 
 namespace ayt::ui {
+
+SplitterHandle::~SplitterHandle() {
+    // H-MEM-4: a SplitterHandle captures pointer input during a drag
+    // (UIManager sets _capturedWidget via the dimmer on
+    // SplitterHandle::onMouseButtonDown). If a host deletes the handle
+    // mid-drag (e.g. layout swap, window close), _capturedWidget
+    // dangles and the next onMouseMove dispatches into freed memory.
+    // Scrub the transient subtree state BEFORE the base dtor runs so
+    // the manager doesn't reach back into this widget during its
+    // own unwinding.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearTransientStateForSubtree(this);
+    }
+    // Also force-end the drag bookkeeping so a destructor called while
+    // we are mid-drag doesn't leave _dragging=true. endDrag() also
+    // resets hover-reveal counters.
+    endDrag();
+}
 
 namespace {
 

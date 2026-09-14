@@ -28,7 +28,7 @@ public:
     static constexpr float kHoverRevealDelay = 0.15f;
 
     SplitterHandle();
-    ~SplitterHandle() override = default;
+    ~SplitterHandle() override;
 
     bool isSplitterHandle() const override { return true; }
 

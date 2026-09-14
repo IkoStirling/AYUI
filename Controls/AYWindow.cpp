@@ -2,6 +2,7 @@
 #include "AYUI/ScrollableWidget.h"
 #include "AYUI/ScrollBarSync.h"
 #include "AYUI/IRenderBackend.h"
+#include "AYUI/UIManager.h"
 #include "AYMath/MathUtils.h"
 
 #include <algorithm>
@@ -72,6 +73,14 @@ Window::Window()
 }
 
 Window::~Window() {
+    // H-MEM-6: if a host deletes a top-level Window while the cursor is
+    // hovering it, while it has focus, or while a mouse drag has captured
+    // input on its scrollbar or any descendant, the UIManager transient
+    // pointers would dangle. Scrub them BEFORE the subtree's children are
+    // destroyed so the next event doesn't dispatch into freed memory.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearTransientStateForSubtree(this);
+    }
     // _bodyVBar is an owned child via addChild(owning) — CompoundWidget's
     // dtor does not delete children (UI-OWN-1 invariant), but a host
     // using destroyWidgetTree(root) on us WILL recursively free it.

@@ -1081,6 +1081,15 @@ DockArea::DockArea() {
 }
 
 DockArea::~DockArea() {
+    // H-MEM-7: scrub UIManager transient pointers that may be tracking
+    // this dock area or any descendant. Must happen BEFORE the child
+    // teardown loop below — once we delete the children, any pointer
+    // into them (hover/capture/focus/composition/drag) dangles and the
+    // next event dispatches into freed memory.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearTransientStateForSubtree(this);
+    }
+
     // Clear bookkeeping aliases first — do not delete through them.
     // Actual heap teardown walks getChildren() below.
     _onCardCloseRequested = {};

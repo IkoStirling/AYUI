@@ -2,6 +2,7 @@
 #include "AYUI/ValueWidget.h"
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/Style.h"
+#include "AYUI/UIManager.h"
 #include "AYMath/MathUtils.h"
 
 namespace ayt::ui {
@@ -11,7 +12,17 @@ Slider::Slider() {
     // Leaf widget — InteractiveWidget -> Widget -> no-op performLayout.
 }
 
-Slider::~Slider() = default;
+Slider::~Slider() {
+    // H-MEM-3: a Slider can be captured by UIManager while the user is
+    // dragging the handle (see Slider::onMouseButtonDown, where the
+    // dimmer/UIManager captures the pointer to track subsequent moves).
+    // If a host deletes the Slider mid-drag, _capturedWidget dangles and
+    // the next onMouseMove dispatches into freed memory. Scrub the
+    // transient pointers BEFORE the base dtor unwinds.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearTransientStateForSubtree(this);
+    }
+}
 
 void Slider::setMin(float v) {
     if (v > _max - kMinMaxEpsilon) {

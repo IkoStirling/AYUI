@@ -24,6 +24,14 @@ ComboBox::ComboBox() {
 }
 
 ComboBox::~ComboBox() {
+    // H-MEM-2: scrub UIManager transient pointers that may be tracking
+    // this ComboBox or its popup subtree (hover over the display label,
+    // focus on the display, capture mid-open-animation, etc). Must run
+    // BEFORE the popup teardown below frees the popup — otherwise the
+    // scrub would peek into freed memory.
+    if (UIManager* ui = UIManager::tryGet()) {
+        ui->clearTransientStateForSubtree(this);
+    }
     // Phase A (A2): _display is still a child of ComboBox; destroyWidgetTree
     // frees it when the ComboBox tree is destroyed. _popup may be mounted
     // on the overlay OR held unmounted after a soft closePopup — either
