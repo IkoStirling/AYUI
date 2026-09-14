@@ -348,7 +348,7 @@ Pan/Zoom 由 editor-only `CanvasViewport` 处理，只改变画布视图 transfo
 剪贴板。带 `textureName` 的 Image 在打开、undo/redo 和粘贴后由宿主 preview loader 恢复预览句柄。
 
 Authoring 代码位于独立静态库 `AYUILayoutEditorCore`，不进入游戏只需链接的 AYUI runtime。核心把
-`LayoutDocumentModel`、`LayoutSelectionModel`、`LayoutCommandStack` 与 `LayoutCanvasViewport`
+`LayoutDocumentModel`、`LayoutSelectionModel`、公共 `EditorCommandHistory` 与 `LayoutCanvasViewport`
 从宿主 Session 中拆开；standalone 与 AYEditor 只负责窗口、backend 和资源选择器。Palette、类型图标、
 默认尺寸/初始化与 Inspector schema 统一来自 `WidgetAuthoringRegistry`，新增类型不再需要同步修改多张
 硬编码表。`PropertySchema` 同时声明字段 section、显示名、编辑器种类、数值范围/步长、枚举选项和

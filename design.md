@@ -523,8 +523,8 @@ Hierarchy 和属性栏 id 只在给定子树内解析。文档状态回调只发
 文档类型、Scene、资源或原生窗口语义。
 
 Authoring 状态拆为四个独立组件：`LayoutDocumentModel` 持有 root/path/dirty、全树 ID index 与重复
-检测；`LayoutSelectionModel` 维护 primary/multi-selection 不变量；`LayoutCommandStack` 管理事务、
-coalescing 与 undo/redo；`LayoutCanvasViewport` 维护非破坏性的 view transform。Session 仍协调画布
+检测；`LayoutSelectionModel` 维护 primary/multi-selection 不变量；公共 `EditorCommandHistory` 管理事务、
+coalescing、保存游标与 undo/redo；`LayoutCanvasViewport` 维护非破坏性的 view transform。Session 仍协调画布
 手势和 `UILayoutLoader`/Serializer 往返；owner window、
 渲染 backend、资源身份、关闭提示和工作区命令路由由上层宿主负责。AYEditor 通过一个共享
 Controller 适配 Session，正常路径不再嵌入 Scene Center；AYUI 不知道自己运行在 standalone、
