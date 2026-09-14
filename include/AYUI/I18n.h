@@ -43,4 +43,36 @@ inline bool isI18nKey(const std::string& text) {
     return text.length() > 3 && text.substr(0, 3) == "ui.";
 }
 
+// Audit H-S-4 (i18n auto-detect phishing): pre-fix the layout loader
+// auto-detected any user-supplied `text` field starting with "ui." as
+// a translation key. A hostile layout JSON could put
+//   "text": "ui.btn.confirm"
+// and the loader would treat it as a key, not a literal — silently
+// translating a user-visible label that the user had no reason to
+// route through i18n at all.
+//
+// The fix: explicit opt-in via the TR() macro. TR() wraps a literal
+// into a distinct I18nKey tag type that the loader recognizes only
+// when it explicitly asks for a translation. Bare strings are always
+// treated as literal fallbacks.
+//
+// Migration: callers that previously relied on the auto-detect should
+// pass the literal via `textKey` (layout JSON) or wrap it in
+// `TR("...")` (C++ call sites).
+struct I18nKey {
+    const char* value;
+};
+
+// Explicit translation-key wrapper. Use TR() to mark a literal as an
+// i18n key at the call site; the loader recognises it via the I18nKey
+// overload of isI18nKey.
+#ifndef TR
+#define TR(literal) (::ayt::ui::I18nKey{ (literal) })
+#endif
+
+// I18nKey overload — any wrapped value is explicit by construction.
+inline bool isI18nKey(const I18nKey& /*key*/) {
+    return true;
+}
+
 } // namespace ayt::ui

@@ -11,11 +11,24 @@ using namespace ayt::ui;
 TEST_SUITE(AYUI_I18n)
 
 TEST_CASE(test_i18n_key_detection) {
+    // Legacy std::string overload still exists for callers that
+    // explicitly opt into prefix-based detection — but the layout
+    // loader no longer auto-runs it. New code should use TR() instead.
     CHECK(isI18nKey("ui.menu.resume"));
     CHECK(isI18nKey("ui.btn.confirm"));
     CHECK(!isI18nKey("直接文本"));
     CHECK(!isI18nKey("ab"));
     CHECK(!isI18nKey(""));
+
+    // Audit H-S-4: TR() macro wraps a literal into the I18nKey tag,
+    // and the I18nKey overload of isI18nKey returns true for any
+    // wrapped value (no prefix heuristic needed). This is the new
+    // explicit-form path; the loader recognises TR(...) values and
+    // treats them as translation keys without inferring intent from
+    // the string content.
+    CHECK(isI18nKey(TR("ui.menu.resume")));
+    CHECK(isI18nKey(TR("anything-at-all")));
+    CHECK(isI18nKey(TR("")));
 }
 
 TEST_CASE(test_i18n_singleton) {

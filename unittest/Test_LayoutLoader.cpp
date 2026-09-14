@@ -263,13 +263,31 @@ TEST_CASE(test_layout_loader_decodes_utf8_text_and_i18n) {
     loader.setI18n(&i18n);
 
     Widget* translatedRaw = loader.loadFromString(
-        R"({"type":"Button","text":"ui.resume"})");
+        R"({"type":"Button","textKey":"ui.resume","text":"ui.resume"})");
     Button* translated = dynamic_cast<Button*>(translatedRaw);
     CHECK(translated != nullptr);
     if (translated != nullptr) {
         CHECK(translated->getText() == L"\u7EE7\u7EED");
     }
     destroyWidgetTree(translatedRaw);
+
+    // Audit H-S-4 (i18n auto-detect phishing): pre-fix a literal
+    // `text` starting with "ui." was auto-translated. Post-fix the
+    // loader treats bare `text` as a literal fallback \u2014 translation
+    // must be opted into via `textKey`. A hostile layout that drops
+    // a "ui.*" string into `text` no longer poisons the translation
+    // pipeline.
+    Widget* literalRaw = loader.loadFromString(
+        R"({"type":"Button","text":"ui.resume"})");
+    Button* literal = dynamic_cast<Button*>(literalRaw);
+    CHECK(literal != nullptr);
+    if (literal != nullptr) {
+        // No textKey \u2192 no translation \u2192 text is exactly the literal
+        // we provided. Even though "ui.resume" looks like a key, the
+        // loader no longer infers that intent from the prefix.
+        CHECK(literal->getText() == L"ui.resume");
+    }
+    destroyWidgetTree(literalRaw);
     i18n.clear();
 }
 

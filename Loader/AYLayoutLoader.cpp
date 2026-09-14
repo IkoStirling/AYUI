@@ -388,9 +388,13 @@ std::wstring UILayoutLoader::resolveLocalizedString(
         }
         return utf8ToWide(fallback);
     }
-    if (_i18n != nullptr && isI18nKey(fallback)) {
-        return _i18n->resolve(fallback);
-    }
+    // Audit H-S-4 (i18n auto-detect phishing): pre-fix the loader
+    // auto-detected any `text` starting with "ui." as a translation
+    // key. That allowed a hostile layout to silently route user-supplied
+    // strings through i18n. Removed: `text` is now always a literal
+    // fallback. Translations must be opted into explicitly via
+    // `keyProperty` (e.g. textKey, titleKey, itemsKey) at the JSON
+    // level, or via the TR() macro at C++ call sites.
     return utf8ToWide(fallback);
 }
 
