@@ -490,18 +490,20 @@ public:
     void updateGhostPosition(const math::FVector2& pos);
     void paintGhost(IRenderBackend& renderer);
 
-    // Polish (P3): MenuBar accelerator hook. Called by MenuBar's ctor
-    // (when a UIManager instance is reachable) and dtor (via tryGet). The
-    // vector holds non-owning pointers — destruction order is the host's
-    // job. We cap how often this list can grow (it's a std::vector, push
-    // back is amortized constant).
-    std::vector<MenuBar*> _menuBars;
-
 private:
     // Used by get()'s static fallback: null bookkeeping Widget* so process
     // exit / cross-test get() cannot dereference fixtures that already died.
     void dropTransientWidgetPointers();
     void releaseRootLayer();
+
+    // Polish (P3): MenuBar accelerator hook. Called by MenuBar's ctor
+    // (when a UIManager instance is reachable) and dtor (via tryGet). The
+    // vector holds non-owning pointers — destruction order is the host's
+    // job. We cap how often this list can grow (it's a std::vector, push
+    // back is amortized constant). Audit B-NEW-1: previously public;
+    // now under `private:` so consumer code cannot tamper with the
+    // accelerator registry.
+    std::vector<MenuBar*> _menuBars;
 
     IRenderBackend* _backend = nullptr;
     Widget* _root = nullptr;

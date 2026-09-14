@@ -186,10 +186,10 @@ target_include_directories(${MODULE_NAME}
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/interface
-        ${AYUI_NLOHMANN_DIR}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Controls
         ${CMAKE_CURRENT_SOURCE_DIR}/Events
+        ${AYUI_NLOHMANN_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Layout
         ${CMAKE_CURRENT_SOURCE_DIR}/Loader
         ${CMAKE_CURRENT_SOURCE_DIR}/Style
@@ -224,6 +224,7 @@ add_library(AYUIPackaging STATIC
 target_include_directories(AYUIPackaging
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
         ${AYUI_NLOHMANN_DIR}
 )
 if(nlohmann_json_FOUND)
