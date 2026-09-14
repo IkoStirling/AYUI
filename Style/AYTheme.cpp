@@ -1,7 +1,10 @@
 #include "AYUI/Theme.h"
 #include "AYUI/Style.h"
 #include <nlohmann/json.hpp>
+#include <charconv>
+#include <cmath>
 #include <sstream>
+#include <system_error>
 #include <unordered_set>
 #include <vector>
 
@@ -270,8 +273,41 @@ math::FVector4 Theme::resolveColor(
             std::stringstream ss(s);
             std::string item;
             while (std::getline(ss, item, ',')) {
-                try { vals.push_back(std::stof(item)); }
-                catch (...) { return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f); }
+                // Strip leading + trailing ASCII whitespace. std::getline
+                // includes the delimiter-trailing characters in `item`
+                // (e.g. "0.5 " for the comma-split of "[0.5, 0.5, ...]"),
+                // and std::from_chars does NOT skip leading whitespace
+                // the way std::stof does — so without this trim, every
+                // comma-separated token after the first would fail to
+                // parse and we'd fall back to (0,0,0,1).
+                const auto first = item.find_first_not_of(" \t\r\n");
+                const auto last = item.find_last_not_of(" \t\r\n");
+                if (first == std::string::npos) {
+                    // Empty token — treat as 0 (defensive; matches the
+                    // previous std::stof behaviour for an empty slice).
+                    vals.push_back(0.0f);
+                    continue;
+                }
+                const std::size_t start = first;
+                const std::size_t end = last + 1;
+                // H-S-3: std::stof accepts "1e9999" → +inf, "NaN", and
+                // other float specials that the renderer then propagates
+                // as raw bits to the GPU. std::from_chars rejects those
+                // (returns ec == errc::result_out_of_range) so a
+                // malicious style JSON can't poison downstream draws
+                // with NaN gradients. Also avoids the locale-dependent
+                // overhead of std::stof which silently ignores trailing
+                // non-numeric garbage.
+                float v = 0.0f;
+                auto [ptr, ec] = std::from_chars(
+                    item.data() + start, item.data() + end, v);
+                if (ec != std::errc() || ptr != item.data() + end) {
+                    return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+                if (!std::isfinite(v)) {
+                    return math::FVector4(0.0f, 0.0f, 0.0f, 1.0f);
+                }
+                vals.push_back(v);
             }
             if (vals.size() == 4) {
                 return math::FVector4(vals[0], vals[1], vals[2], vals[3]);
