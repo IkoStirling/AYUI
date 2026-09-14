@@ -1597,14 +1597,20 @@ public:
         const ayt::math::FRectangle before = arrowBounds(false);
         _arrowMoved = true;
         const ayt::math::FRectangle after = arrowBounds(true);
+        // Audit B-NEW-2 / M-R-9: arrowBounds() returns world coordinates.
+        // Convert to this widget's local paint frame before handing the
+        // rect to markDirty() so the propagation chain translates it
+        // correctly through every ancestor. Without the shift the damage
+        // region in the root layer would be wrong when this probe widget
+        // is itself offset inside its host.
+        const ayt::math::FVector2 origin = getWorldBounds().getMin();
         const ayt::math::FRectangle damage(
-            std::min(before.minX, after.minX) - 6.0f,
-            std::min(before.minY, after.minY) - 6.0f,
-            std::max(before.maxX, after.maxX) + 6.0f,
-            std::max(before.maxY, after.maxY) + 6.0f);
-        // Explicit damage uses root-canvas logical coordinates. The union of
-        // old and new sprite bounds proves that partial Transparent clear
-        // erases stale alpha pixels at the old position.
+            std::min(before.minX, after.minX) - 6.0f - origin.x,
+            std::min(before.minY, after.minY) - 6.0f - origin.y,
+            std::max(before.maxX, after.maxX) + 6.0f - origin.x,
+            std::max(before.maxY, after.maxY) + 6.0f - origin.y);
+        // The union of old and new sprite bounds proves that partial
+        // Transparent clear erases stale alpha pixels at the old position.
         markDirty(damage);
     }
 

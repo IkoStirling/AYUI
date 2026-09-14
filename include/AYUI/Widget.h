@@ -767,10 +767,17 @@ public:
         _displayListDirty = true;
         if (_parent != nullptr) {
             if (hasExplicitDamage && !wasFullDirty && damageChanged) {
-                // Explicit damage is already expressed in root/logical
-                // coordinates. Preserve it through every ancestor so a
-                // retained root layer can repaint only that region.
-                _parent->markDirtyFromDescendant(r);
+                // Audit B-NEW-2 / M-R-9: explicit damage is expressed in
+                // THIS widget's local paint frame (not root). Translate
+                // by `_position` so the same region is correctly described
+                // in the parent's local frame on the way up the chain.
+                // The accumulation through every ancestor lands the rect
+                // in the root's local frame at the top, where retained
+                // layer caches compare it against getWorldBounds().
+                const math::FRectangle parentRect(
+                    r.minX + _position.x, r.minY + _position.y,
+                    r.maxX + _position.x, r.maxY + _position.y);
+                _parent->markDirtyFromDescendant(parentRect);
             } else if (!hasExplicitDamage && !wasFullDirty) {
                 // The default form deliberately remains conservative: an
                 // arbitrary widget may paint shadows/outsets beyond bounds.

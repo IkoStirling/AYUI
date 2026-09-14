@@ -326,10 +326,15 @@ TEST_CASE(DirtyRect_ExplicitDamagePropagatesWithoutBecomingFullTreeDirty) {
     CHECK_FALSE(parent.isDirtyThis());
     CHECK_FALSE(parent.hasDirtyRect());
 
-    const FRectangle first(24.0f, 34.0f, 40.0f, 50.0f);
-    const FRectangle second(50.0f, 45.0f, 76.0f, 66.0f);
-    child.markDirty(first);
-    child.markDirty(second);
+    // Audit B-NEW-2 / M-R-9: markDirty(rect) accepts a rect in the
+    // widget's LOCAL paint frame. Propagation translates by
+    // child._position so the same region lands in the parent's local
+    // frame. With child at (20, 30), the parent's stored rect should
+    // equal the child-local rect shifted by (20, 30).
+    const FRectangle firstChildLocal(4.0f, 4.0f, 20.0f, 20.0f);
+    const FRectangle secondChildLocal(30.0f, 15.0f, 56.0f, 36.0f);
+    child.markDirty(firstChildLocal);
+    child.markDirty(secondChildLocal);
 
     CHECK_FALSE(parent.isDirtyThis());
     CHECK_TRUE(parent.hasDirtyRect());
@@ -337,6 +342,74 @@ TEST_CASE(DirtyRect_ExplicitDamagePropagatesWithoutBecomingFullTreeDirty) {
     CHECK(parent.getDirtyRect().minY == 34.0f);
     CHECK(parent.getDirtyRect().maxX == 76.0f);
     CHECK(parent.getDirtyRect().maxY == 66.0f);
+}
+
+// Audit B-NEW-2 / M-R-9 regression: when the parent itself is offset
+// inside its own parent (i.e. grandparent → parent → child, every link
+// with a non-zero local position), explicit damage expressed in the
+// child's local paint frame must be translated at every hop so the
+// rect lands in the grandparent's local frame in the right place.
+//
+// Pre-fix behaviour: the rect was propagated unchanged, so a rect that
+// was correct in child-local became wrong in grandparent-local once any
+// ancestor had a non-zero position. The retained layer cache then
+// repainted the wrong region of the root.
+TEST_CASE(DirtyRect_OffsetParentAndChildTranslateDamageThroughChain) {
+    PainterWidget grandparent;
+    grandparent.setSize(FVector2(400.0f, 300.0f));
+    grandparent.setPosition(FVector2(100.0f, 50.0f)); // origin inside root
+
+    PainterWidget parent;
+    parent.setSize(FVector2(200.0f, 150.0f));
+    parent.setPosition(FVector2(40.0f, 25.0f)); // inside grandparent
+
+    PainterWidget child;
+    child.setSize(FVector2(80.0f, 60.0f));
+    child.setPosition(FVector2(10.0f, 8.0f)); // inside parent
+
+    grandparent.addChildExternal(&parent);
+    parent.addChildExternal(&child);
+
+    MockRenderer renderer;
+    grandparent.render(renderer);
+    CHECK_FALSE(grandparent.isDirtyThis());
+    CHECK_FALSE(parent.isDirtyThis());
+    CHECK_FALSE(child.isDirtyThis());
+
+    // Damage in CHILD local paint frame, e.g. text cursor region.
+    const FRectangle childLocal(4.0f, 6.0f, 32.0f, 28.0f);
+    child.markDirty(childLocal);
+
+    // Parent sees the rect translated by child's position (10, 8).
+    CHECK_FALSE(parent.isDirtyThis());
+    CHECK_TRUE(parent.hasDirtyRect());
+    CHECK(parent.getDirtyRect().minX == 14.0f);
+    CHECK(parent.getDirtyRect().minY == 14.0f);
+    CHECK(parent.getDirtyRect().maxX == 42.0f);
+    CHECK(parent.getDirtyRect().maxY == 36.0f);
+
+    // Grandparent sees the rect translated by (child._position +
+    // parent._position) = (10+40, 8+25) = (50, 33), expressed in
+    // grandparent's own local frame.
+    CHECK_FALSE(grandparent.isDirtyThis());
+    CHECK_TRUE(grandparent.hasDirtyRect());
+    CHECK(grandparent.getDirtyRect().minX == 54.0f);
+    CHECK(grandparent.getDirtyRect().minY == 39.0f);
+    CHECK(grandparent.getDirtyRect().maxX == 82.0f);
+    CHECK(grandparent.getDirtyRect().maxY == 61.0f);
+
+    // A second markDirty on the same child union-merges correctly into
+    // the parent's accumulated rect (no double-translation).
+    const FRectangle secondChildLocal(40.0f, 30.0f, 70.0f, 50.0f);
+    child.markDirty(secondChildLocal);
+    CHECK(parent.getDirtyRect().minX == 14.0f);
+    CHECK(parent.getDirtyRect().minY == 14.0f);
+    // The second child-local rect (40,30,70,50) becomes (50,38,80,58)
+    // in parent local. Union with the first parent-local rect
+    // (14,14,42,36) yields min(14,50)=14, min(14,38)=14,
+    // max(42,80)=80, max(36,58)=58.
+    CHECK(parent.getDirtyRect().maxX == 80.0f);
+    CHECK(parent.getDirtyRect().maxY == 58.0f);
 }
 
 TEST_SUITE_END

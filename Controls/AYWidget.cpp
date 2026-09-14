@@ -628,10 +628,15 @@ void Widget::markDirtyFromDescendant(const math::FRectangle& damage) {
             math::FVector2(std::max(_dirtyRect.maxX, damage.maxX),
                            std::max(_dirtyRect.maxY, damage.maxY)));
     }
-    // Propagate the original region, not the compatibility union. Two small
-    // distant child invalidations must remain two regions at the root.
+    // Audit B-NEW-2 / M-R-9: incoming `damage` is in THIS widget's local
+    // paint frame. Translate by `_position` to the parent's local frame
+    // before propagating so the region lands in the correct frame at
+    // every ancestor on the way to the root.
     if (_parent != nullptr) {
-        _parent->markDirtyFromDescendant(damage);
+        const math::FRectangle parentRect(
+            damage.minX + _position.x, damage.minY + _position.y,
+            damage.maxX + _position.x, damage.maxY + _position.y);
+        _parent->markDirtyFromDescendant(parentRect);
     }
 }
 
