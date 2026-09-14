@@ -367,20 +367,31 @@ namespace {
 
 // AYUI-Perf-2026-08-26: per-(styleId, themeVersion) memo. ResolvedStyle
 // is a small POD-ish value (~32 bytes), so the cache is cheap; the
-// saving is the avoid-the-lookup + avoid-the-std::string("$")+tok +
-// avoid-the-makeDefault allocation on every styled widget every frame.
-// Key includes the StyleManager's resolveCacheVersion so theme swaps
-// invalidate stale entries in O(1).
-using ResolveCacheKey = std::pair<std::string, uint64_t>;
+// Audit B-NEW-3 + M-R-2: Key now includes StyleState. Pre-fix key was
+// (styleId, version); the impl's backgroundStates.forState(state) branch
+// produced a different ResolvedStyle for Hover/Pressed/etc, so a Normal
+// hit would serve stale data to those callers. Adding state keeps the
+// per-axis cache correct.
+struct ResolveCacheKey {
+    std::string styleId;
+    StyleState state;
+    uint64_t version;
+};
 struct ResolveCacheKeyHash {
     size_t operator()(const ResolveCacheKey& k) const noexcept {
         // Combine hash of the string with the version. FNV-style mix
         // is overkill here — a plain XOR works because version is
         // small and varies independently of the string content.
-        return std::hash<std::string>{}(k.first) * 1315423911u
-               + static_cast<size_t>(k.second);
+        return std::hash<std::string>{}(k.styleId) * 1315423911u
+               + static_cast<size_t>(k.state) * 2654435769u
+               + static_cast<size_t>(k.version);
     }
 };
+bool operator==(const ResolveCacheKey& a, const ResolveCacheKey& b) noexcept {
+    return a.version == b.version
+        && a.state == b.state
+        && a.styleId == b.styleId;
+}
 std::unordered_map<ResolveCacheKey, ResolvedStyle, ResolveCacheKeyHash>&
 resolveCache() {
     static std::unordered_map<ResolveCacheKey, ResolvedStyle, ResolveCacheKeyHash> cache;
@@ -405,21 +416,35 @@ ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget) {
 
 ResolvedStyle resolveStyle(const std::string& styleId, const Widget* widget,
                            StyleState state) {
-    // AYUI-Perf-2026-08-26: memoize the result by (styleId, themeVersion).
-    // Memo only applies to the (widget == nullptr) path — a per-widget
-    // override map would require keying by widget pointer too, which is
-    // not worth the cache lookup cost for the rare override case.
-    if (widget == nullptr && state == StyleState::Normal) {
+    // AYUI-Perf-2026-08-26: memoize the result by (styleId, state,
+    // themeVersion). The pre-fix gate `widget == nullptr` was too tight:
+    // production call sites pass a real `this` and the memo never fired,
+    // so every styled widget re-ran the impl each frame. Audit B-NEW-3:
+    // the result is independent of the widget instance as long as the
+    // widget carries no per-token overrides (`setStyleTokenOverride`),
+    // because resolveStyleImpl only consults `widget` when an override
+    // lookup is needed (G11). When overrides are empty the impl falls
+    // back to the active theme + style sheet, which are captured by the
+    // StyleManager::getResolveCacheVersion().
+    //
+    // Memo key now includes `state` (audit M-R-2): the impl's
+    // backgroundStates.forState(state) branch produces different
+    // ResolvedStyle per StyleState, and the pre-fix key ignored the
+    // axis, so re-asking in Hover after a Normal memo hit would return
+    // stale Normal data.
+    const bool canMemo = state == StyleState::Normal
+        && (widget == nullptr || widget->getStyleTokenOverrides().empty());
+    if (canMemo) {
         StyleManager& mgr = StyleManager::get();
         const uint64_t version = mgr.getResolveCacheVersion();
-        const ResolveCacheKey key{styleId, version};
+        const ResolveCacheKey key{styleId, state, version};
         auto& cache = resolveCache();
         const auto it = cache.find(key);
         if (it != cache.end()) {
             return it->second;
         }
 
-        ResolvedStyle out = resolveStyleImpl(styleId, nullptr, state);
+        ResolvedStyle out = resolveStyleImpl(styleId, widget, state);
         cache[key] = out;
         return out;
     }

@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYUI/Style.h"
+#include "AYUI/Theme.h"
 #include "AYUI/MockRenderer.h"
 #include "AYUI/Button.h"
 #include <cstring>
@@ -307,6 +308,97 @@ TEST_CASE(resolve_style_memo_returns_stable_result) {
     // results from the prior sheet don't survive a swap to a fresh one.
     StyleManager::get().setStyleSheet(nullptr);
     CHECK(StyleManager::get().getResolveCacheVersion() != v1);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
+// Audit B-NEW-3 / H-T-6: pre-fix memo gate was
+// `widget == nullptr && state == Normal`, so production call sites that
+// pass `this` (every styled widget on every frame) bypassed the cache.
+// Post-fix the memo fires whenever the widget has no per-token
+// overrides, so the same `(styleId, state, version)` key serves all
+// widgets that don't carry overrides. Verify the per-widget hit rate
+// matches the nullptr hit rate.
+TEST_CASE(resolve_style_memo_hits_when_widget_has_no_overrides) {
+    StyleManager::get().setStyleSheet(nullptr);
+    StyleSheet sheet;
+    WidgetStyle custom = StyleBuilder::makeButton();
+    custom.backgroundColor = ayt::math::FVector4(0.10f, 0.20f, 0.30f, 1.0f);
+    custom.border.cornerRadius = 4.0f;
+    sheet.setStyle("widget_memo_test", custom);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    Widget w;
+    const uint64_t v1 = StyleManager::get().getResolveCacheVersion();
+
+    // First call with widget pointer: populates the cache.
+    const ResolvedStyle firstWithWidget = resolveStyle("widget_memo_test", &w);
+    CHECK(firstWithWidget.hasStyle == true);
+    CHECK_FLOAT_EQ(firstWithWidget.backgroundColor.x, 0.10f, 1e-5f);
+
+    // Second call with widget pointer (no overrides): cache hit. Must
+    // be byte-identical to the first call.
+    const ResolvedStyle secondWithWidget = resolveStyle("widget_memo_test", &w);
+    CHECK_FLOAT_EQ(secondWithWidget.backgroundColor.x, firstWithWidget.backgroundColor.x, 1e-7f);
+    CHECK_FLOAT_EQ(secondWithWidget.cornerRadius, firstWithWidget.cornerRadius, 1e-7f);
+
+    // Version unchanged across hits.
+    CHECK(StyleManager::get().getResolveCacheVersion() == v1);
+
+    // Adding a per-token override skips the memo and does not disturb
+    // the cached entry. A subsequent override-clearing call goes back
+    // to the cache.
+    w.setStyleTokenOverride("color.accent", ayt::math::FVector4(0.9f, 0.1f, 0.1f, 1.0f));
+    const ResolvedStyle withOverride = resolveStyle("widget_memo_test", &w);
+    // The style uses no captured $token, so the override has no effect
+    // on backgroundColor; but the cache path was skipped and we still
+    // get the same ResolvedStyle value.
+    CHECK_FLOAT_EQ(withOverride.backgroundColor.x, firstWithWidget.backgroundColor.x, 1e-7f);
+
+    w.clearStyleTokenOverrides();
+    const ResolvedStyle clearedOverride = resolveStyle("widget_memo_test", &w);
+    CHECK_FLOAT_EQ(clearedOverride.backgroundColor.x, firstWithWidget.backgroundColor.x, 1e-7f);
+
+    StyleManager::get().setStyleSheet(nullptr);
+}
+
+// Audit M-R-3 regression: Theme::setColorToken / setFloatToken must
+// bump the StyleManager's resolve-cache version. Pre-fix these calls
+// updated the token map but never invalidated the cache, so a
+// subsequent resolveStyle() would serve stale theme materialised values
+// for any style with a captured $token slot.
+TEST_CASE(theme_token_mutation_invalidates_resolve_cache_version) {
+    StyleManager::get().setStyleSheet(nullptr);
+    StyleSheet sheet;
+    WidgetStyle custom = StyleBuilder::makeButton();
+    sheet.setStyle("theme_token_test", custom);
+    StyleManager::get().setStyleSheet(&sheet);
+
+    const uint64_t v0 = StyleManager::get().getResolveCacheVersion();
+
+    Theme theme;
+    // First assignment: key did not exist -> must bump.
+    theme.setColorToken("color.bg", ayt::math::FVector4(0.10f, 0.20f, 0.30f, 1.0f));
+    const uint64_t v1 = StyleManager::get().getResolveCacheVersion();
+    CHECK(v1 != v0);
+
+    // Same value again -> no-op, version unchanged.
+    theme.setColorToken("color.bg", ayt::math::FVector4(0.10f, 0.20f, 0.30f, 1.0f));
+    CHECK(StyleManager::get().getResolveCacheVersion() == v1);
+
+    // Changed value -> must bump.
+    theme.setColorToken("color.bg", ayt::math::FVector4(0.70f, 0.10f, 0.90f, 1.0f));
+    const uint64_t v2 = StyleManager::get().getResolveCacheVersion();
+    CHECK(v2 != v1);
+
+    // Float token path also bumps on new key.
+    theme.setFloatToken("space.lg", 16.0f);
+    CHECK(StyleManager::get().getResolveCacheVersion() != v2);
+
+    // Empty key is rejected, no bump.
+    const uint64_t v3 = StyleManager::get().getResolveCacheVersion();
+    theme.setColorToken("", ayt::math::FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+    CHECK(StyleManager::get().getResolveCacheVersion() == v3);
 
     StyleManager::get().setStyleSheet(nullptr);
 }

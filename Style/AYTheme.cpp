@@ -138,7 +138,17 @@ bool Theme::loadFromJson(const std::string& jsonStr) {
 
 void Theme::setColorToken(const std::string& key, const math::FVector4& v) {
     if (key.empty()) return;
+    const bool changed = _colorTokens.find(key) == _colorTokens.end()
+        || _colorTokens[key] != v;
     _colorTokens[key] = v;
+    // Audit M-R-3: a token mutation can change the resolved output of
+    // every cached (styleId, state) entry that captured this token as a
+    // $foo reference. Bump the StyleManager's resolveCacheVersion so the
+    // next resolveStyle() call rebuilds entries instead of serving
+    // stale theme materialised colours.
+    if (changed) {
+        StyleManager::get().invalidateResolveCache();
+    }
 }
 
 math::FVector4 Theme::getColorToken(const std::string& key) const {
@@ -166,7 +176,17 @@ bool Theme::hasColorToken(const std::string& key) const {
 
 void Theme::setFloatToken(const std::string& key, float v) {
     if (key.empty()) return;
+    const bool changed = _floatTokens.find(key) == _floatTokens.end()
+        || _floatTokens[key] != v;
     _floatTokens[key] = v;
+    // Audit M-R-3: float tokens feed resolveFloat(), which is invoked
+    // from widget-side resolvers (spacing, radii). Theme mutations do
+    // not flow through Theme::loadFromJson (which already bumps via
+    // StyleManager::setStyleSheet) so the cache version would otherwise
+    // stay pinned to the pre-mutation snapshot.
+    if (changed) {
+        StyleManager::get().invalidateResolveCache();
+    }
 }
 
 float Theme::getFloatToken(const std::string& key) const {
