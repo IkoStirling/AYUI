@@ -180,7 +180,7 @@ set(AYUI_NLOHMANN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty_)
 find_package(nlohmann_json QUIET CONFIG)
 
 add_library(${MODULE_NAME} STATIC ${SRC_FILES} ${HEAD_FILES})
-target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=127)
+target_compile_definitions(${MODULE_NAME} PUBLIC AYUI_SOURCE_ABI_VERSION=128)
 target_include_directories(${MODULE_NAME}
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -246,7 +246,6 @@ add_library(AYUILayoutEditorCore STATIC
     LayoutEditor/LayoutDocumentModel.cpp
     LayoutEditor/LayoutInteractionModel.cpp
     LayoutEditor/LayoutSelectionModel.cpp
-    LayoutEditor/LayoutCommandStack.cpp
     LayoutEditor/LayoutComponentLibrary.cpp
     LayoutEditor/LayoutPreviewModel.cpp
     LayoutEditor/LayoutPublicationModel.cpp
@@ -267,7 +266,6 @@ add_library(AYUILayoutEditorCore STATIC
     include/AYUI/LayoutEditor/LayoutDocumentModel.h
     include/AYUI/LayoutEditor/LayoutInteractionModel.h
     include/AYUI/LayoutEditor/LayoutSelectionModel.h
-    include/AYUI/LayoutEditor/LayoutCommandStack.h
     include/AYUI/LayoutEditor/LayoutComponentLibrary.h
     include/AYUI/LayoutEditor/LayoutPreviewModel.h
     include/AYUI/LayoutEditor/LayoutPublicationModel.h
@@ -288,7 +286,7 @@ target_include_directories(AYUILayoutEditorCore
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/LayoutEditor
 )
-target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI)
+target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI AYEditor::CommandCore)
 if(MSVC)
     target_compile_options(AYUILayoutEditorCore PRIVATE
         /Zc:__cplusplus /Zc:preprocessor)

@@ -3,7 +3,7 @@
 #include "AYUI/Version.h"
 #include "AYUI/ImageTexture.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
-#include "AYUI/LayoutEditor/LayoutCommandStack.h"
+#include "AYEditorCommand/EditorCommandHistory.h"
 #include "AYUI/LayoutEditor/LayoutComponentLibrary.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
 #include "AYUI/LayoutEditor/LayoutInteractionModel.h"
@@ -27,6 +27,26 @@
 #include <vector>
 
 namespace ayt::ui {
+
+enum class LayoutEditKind {
+    SnapshotFallback,
+    Property,
+    Insert,
+    Delete,
+    Reorder,
+    Transform,
+    Clipboard,
+    Reusable,
+    Responsive,
+    Animation
+};
+
+struct LayoutEditorSnapshot {
+    std::string json;
+    std::vector<std::string> selectedIds;
+    std::string primaryId;
+    bool dirty = false;
+};
 
 class Button;
 class ComboBox;
@@ -123,6 +143,8 @@ public:
 
     void undo();
     void redo();
+    bool canUndo() const { return _history.canUndo(); }
+    bool canRedo() const { return _history.canRedo(); }
     void alignSelection(AlignMode mode);
     void setAnchorPreset(AnchorAxisMode horizontal,
                          AnchorAxisMode vertical,
@@ -279,6 +301,8 @@ public:
     }
 
 private:
+    class SnapshotHistoryCommand;
+    class CallbackHistoryCommand;
     enum class DeferredAction { None, Open, Save, SaveAs };
     enum class DragMode {
         None, Move, Marquee, Pan,
@@ -514,7 +538,8 @@ private:
     LayoutSelectionModel _selectionModel;
     Widget*& _selected;
     std::vector<Widget*>& _selection;
-    LayoutCommandStack _commandStack;
+    ayt::editor::EditorCommandHistory _history;
+    bool _mutationOpen = false;
     std::optional<PendingPropertyMutation> _pendingPropertyMutation;
 
     UIManager* _ui = nullptr;

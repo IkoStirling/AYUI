@@ -534,13 +534,73 @@ void installLayoutEditorChromeStyles() {
 
 } // namespace
 
+class LayoutEditorSession::SnapshotHistoryCommand final
+    : public ayt::editor::IEditorCommand {
+public:
+    SnapshotHistoryCommand(LayoutEditorSession& session, Snapshot before,
+                           std::string label)
+        : _session(&session), _before(std::move(before)),
+          _label(std::move(label)) {}
+
+    const std::string& label() const noexcept override { return _label; }
+    bool execute() override {
+        if (_session == nullptr || !_after.has_value()) return false;
+        _session->restoreSnapshot(*_after);
+        return true;
+    }
+    bool undo() override {
+        if (_session == nullptr) return false;
+        if (!_after.has_value()) _after = _session->captureSnapshot();
+        _session->restoreSnapshot(_before);
+        return true;
+    }
+
+private:
+    LayoutEditorSession* _session = nullptr;
+    Snapshot _before;
+    std::optional<Snapshot> _after;
+    std::string _label;
+};
+
+class LayoutEditorSession::CallbackHistoryCommand final
+    : public ayt::editor::IEditorCommand {
+public:
+    CallbackHistoryCommand(std::function<void()> undoAction,
+                           std::function<void()> redoAction,
+                           std::string label)
+        : _undoAction(std::move(undoAction)),
+          _redoAction(std::move(redoAction)), _label(std::move(label)) {}
+
+    const std::string& label() const noexcept override { return _label; }
+    bool execute() override {
+        if (!_redoAction) return false;
+        _redoAction();
+        return true;
+    }
+    bool undo() override {
+        if (!_undoAction) return false;
+        _undoAction();
+        return true;
+    }
+
+private:
+    std::function<void()> _undoAction;
+    std::function<void()> _redoAction;
+    std::string _label;
+};
+
 LayoutEditorSession::LayoutEditorSession()
     : _docRoot(_documentModel.rootRef()),
       _documentPath(_documentModel.pathRef()),
       _dirty(_documentModel.dirtyRef()),
       _selected(_selectionModel.primaryRef()),
       _selection(_selectionModel.items()),
-      _commandStack(64) {}
+      _history(64u)
+{
+    _history.setChangedCallback([this]() {
+        markDirty(_history.isDirty());
+    });
+}
 
 LayoutEditorSession::~LayoutEditorSession() {
     detach();
@@ -645,7 +705,7 @@ void LayoutEditorSession::detach() {
     _spaceDown = false;
     _paletteType.clear();
     _hierDragWidget = nullptr;
-    _commandStack.end();
+    _mutationOpen = false;
     _deferred = DeferredAction::None;
     _consumeNextPointerUp = false;
     _ui = nullptr;
@@ -776,7 +836,8 @@ void LayoutEditorSession::detach() {
     _previewHeight = nullptr;
     _previewSafeL = _previewSafeT = _previewSafeR = _previewSafeB = nullptr;
     _hierarchyIndex.clear();
-    _commandStack.clear();
+    _history.discardHistory(
+        ayt::editor::EditorHistoryDiscardState::MarkClean);
     _documentPath.clear();
     _reuseLibrary.clear();
     _animationLibrary.clear();
@@ -987,7 +1048,7 @@ bool LayoutEditorSession::insertReusableBlock(const std::string& name) {
     remintTreeIds(created);
     pushUndo(LayoutEditKind::Insert, "Insert reusable block");
     if (!placeNewWidget(created, parent, -1, nullptr)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         destroyWidgetTree(created);
         return false;
     }
@@ -1004,7 +1065,7 @@ bool LayoutEditorSession::removeReusableBlock(const std::string& name) {
     if (_reuseLibrary.find(name) == nullptr) return false;
     pushUndo(LayoutEditKind::Reusable, "Remove reusable block");
     if (!_reuseLibrary.remove(name)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return false;
     }
     markDirty(true);
@@ -1099,7 +1160,7 @@ bool LayoutEditorSession::insertExternalComponent(const std::string& id) {
     remintTreeIds(instance);
     pushUndo(LayoutEditKind::Insert, "Insert project component");
     if (!placeNewWidget(instance, parent, -1, nullptr)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         destroyWidgetTree(instance);
         return false;
     }
@@ -1330,7 +1391,7 @@ void LayoutEditorSession::setResponsiveVisibility(
     pushUndo(LayoutEditKind::Responsive, "Set responsive visibility");
     if (!_responsiveModel.setVisibility(
             *_selected, breakpointIndex, visibility)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -1351,7 +1412,7 @@ void LayoutEditorSession::captureResponsiveAnchors(int breakpointIndex) {
     pushUndo(LayoutEditKind::Responsive, "Capture responsive anchors");
     if (!_responsiveModel.captureAnchorOverride(
             *_selected, breakpointIndex)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -1363,7 +1424,7 @@ void LayoutEditorSession::clearResponsiveRule(int breakpointIndex) {
     if (_selected == nullptr || _selected == _docRoot) return;
     pushUndo(LayoutEditKind::Responsive, "Clear responsive rule");
     if (!_responsiveModel.clearRule(*_selected, breakpointIndex)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -1868,8 +1929,11 @@ bool LayoutEditorSession::beginAnimationKeyframeDrag(
     stopAnimationPreview();
     Snapshot before = captureSnapshot();
     _animationKeyDragSnapshot = before;
-    _commandStack.begin(std::move(before), LayoutEditKind::Animation,
-                        "Move animation keyframe");
+    if (!_mutationOpen) {
+        _history.recordApplied(std::make_unique<SnapshotHistoryCommand>(
+            *this, std::move(before), "Move animation keyframe"));
+        _mutationOpen = true;
+    }
     _animationKeyDragActive = true;
     _animationKeyDragChanged = false;
     _animationKeyDragClip = clipIndex;
@@ -1921,7 +1985,8 @@ void LayoutEditorSession::endAnimationKeyframeDrag() {
         syncAnimationEditor();
         setStatus(L"Animation keyframe moved");
     } else {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
+        _mutationOpen = false;
     }
     _animationKeyDragActive = false;
     _animationKeyDragChanged = false;
@@ -1942,7 +2007,8 @@ void LayoutEditorSession::cancelAnimationKeyframeDrag() {
     std::optional<Snapshot> rollback = std::move(_animationKeyDragSnapshot);
 
     if (_animationPreviewBaseline.has_value()) stopAnimationPreview();
-    _commandStack.discardLastUndo();
+    _history.discardLastApplied();
+    _mutationOpen = false;
     _animationKeyDragActive = false;
     _animationKeyDragChanged = false;
     _animationKeyDragSnapshot.reset();
@@ -3251,7 +3317,8 @@ void LayoutEditorSession::ensureEmptyDocument() {
     _animationClipIndex = -1;
     _animationTrackIndex = -1;
     _animationKeyIndex = -1;
-    markDirty(false);
+    _history.discardHistory(
+        ayt::editor::EditorHistoryDiscardState::MarkClean);
     syncProjectRefactorEditor();
     seedProjectRefactorValue();
 }
@@ -3280,7 +3347,7 @@ bool LayoutEditorSession::open(const std::string& path) {
         setStatus(utf8ToWide("Open failed: " + path));
         return false;
     }
-    _commandStack.clear();
+    _history.discardHistory(ayt::editor::EditorHistoryDiscardState::MarkClean);
     _reuseLibrary = std::move(decodedLibrary);
     _animationLibrary = std::move(decodedAnimations);
     _animationClipIndex = _animationLibrary.empty() ? -1 : 0;
@@ -3353,7 +3420,8 @@ bool LayoutEditorSession::saveAs(const std::string& path) {
     }
     if (restorePreview) applyPreviewToDocument();
     _documentPath = path;
-    markDirty(false);
+    (void)_history.markSaved();
+    markDirty(_history.isDirty());
     syncProjectRefactorEditor();
     setStatus(utf8ToWide("Saved " + path));
     return true;
@@ -3831,7 +3899,7 @@ void LayoutEditorSession::addWidget(const std::string& typeName) {
 
     pushUndo(LayoutEditKind::Insert, "Add widget");
     if (!placeNewWidget(created, parent, -1, nullptr)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         destroyWidgetTree(created);
         return;
     }
@@ -4587,19 +4655,25 @@ void LayoutEditorSession::pushUndo(LayoutEditKind kind, const char* label) {
     if (_docRoot == nullptr) {
         return;
     }
-    _commandStack.push(captureSnapshot(), kind,
-                       label != nullptr ? label : std::string{});
+    (void)kind;
+    _history.recordApplied(std::make_unique<SnapshotHistoryCommand>(
+        *this, captureSnapshot(),
+        label != nullptr ? label : "Edit UI Layout"));
 }
 
 void LayoutEditorSession::beginMutation(LayoutEditKind kind,
                                         const char* label) {
     if (_docRoot == nullptr) return;
-    _commandStack.begin(captureSnapshot(), kind,
-                        label != nullptr ? label : "Edit property");
+    if (_mutationOpen) return;
+    (void)kind;
+    _history.recordApplied(std::make_unique<SnapshotHistoryCommand>(
+        *this, captureSnapshot(),
+        label != nullptr ? label : "Edit property"));
+    _mutationOpen = true;
 }
 
 void LayoutEditorSession::endMutation() {
-    _commandStack.end();
+    _mutationOpen = false;
 }
 
 std::wstring LayoutEditorSession::propertyValueForWidget(
@@ -4791,13 +4865,13 @@ void LayoutEditorSession::endPropertyMutation() {
 
     const bool dirtyAfter = _dirty;
     const std::vector<PropertyValueChange> changes = pending.changes;
-    _commandStack.pushTyped(
+    _history.recordApplied(std::make_unique<CallbackHistoryCommand>(
         [this, changes, dirty = pending.dirtyBefore]() {
             applyTypedPropertyChanges(changes, false, dirty);
         },
         [this, changes, dirtyAfter]() {
             applyTypedPropertyChanges(changes, true, dirtyAfter);
-        }, LayoutEditKind::Property, std::move(pending.label));
+        }, std::move(pending.label)));
 }
 
 void LayoutEditorSession::applyTypedPropertyChanges(
@@ -4824,45 +4898,27 @@ void LayoutEditorSession::applyTypedPropertyChanges(
 void LayoutEditorSession::undo() {
     stopAnimationPreview();
     endPropertyMutation();
-    if (!_commandStack.canUndo() || _docRoot == nullptr) {
+    if (!_history.canUndo() || _docRoot == nullptr) {
         setStatus(L"Nothing to undo");
         return;
     }
-    if (_commandStack.nextUndoIsTyped()) {
-        if (_commandStack.undoTyped()) {
-            _dragMode = DragMode::None;
-            setStatus(L"Undo");
-        }
-        return;
+    if (_history.undo()) {
+        _dragMode = DragMode::None;
+        setStatus(L"Undo");
     }
-    const std::optional<Snapshot> snap =
-        _commandStack.undo(captureSnapshot());
-    if (!snap) return;
-    _dragMode = DragMode::None;
-    restoreSnapshot(*snap);
-    setStatus(L"Undo");
 }
 
 void LayoutEditorSession::redo() {
     stopAnimationPreview();
     endPropertyMutation();
-    if (!_commandStack.canRedo() || _docRoot == nullptr) {
+    if (!_history.canRedo() || _docRoot == nullptr) {
         setStatus(L"Nothing to redo");
         return;
     }
-    if (_commandStack.nextRedoIsTyped()) {
-        if (_commandStack.redoTyped()) {
-            _dragMode = DragMode::None;
-            setStatus(L"Redo");
-        }
-        return;
+    if (_history.redo()) {
+        _dragMode = DragMode::None;
+        setStatus(L"Redo");
     }
-    const std::optional<Snapshot> snap =
-        _commandStack.redo(captureSnapshot());
-    if (!snap) return;
-    _dragMode = DragMode::None;
-    restoreSnapshot(*snap);
-    setStatus(L"Redo");
 }
 
 void LayoutEditorSession::alignSelection(AlignMode mode) {
@@ -4939,7 +4995,7 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     case AlignMode::DistributeH: {
         if (_selection.size() < 3) {
             setStatus(L"DistH needs 3+ widgets");
-            _commandStack.discardLastUndo();
+            _history.discardLastApplied();
             return;
         }
         std::vector<Widget*> sorted = _selection;
@@ -4964,7 +5020,7 @@ void LayoutEditorSession::alignSelection(AlignMode mode) {
     case AlignMode::DistributeV: {
         if (_selection.size() < 3) {
             setStatus(L"DistV needs 3+ widgets");
-            _commandStack.discardLastUndo();
+            _history.discardLastApplied();
             return;
         }
         std::vector<Widget*> sorted = _selection;
@@ -5084,7 +5140,7 @@ void LayoutEditorSession::setAnchorPreset(AnchorAxisMode horizontal,
         ++changed;
     }
     if (changed == 0) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         setStatus(L"Anchors apply only to free-positioned children");
         return;
     }
@@ -5117,7 +5173,7 @@ void LayoutEditorSession::clearSelectedAnchors() {
         ++changed;
     }
     if (changed == 0) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         setStatus(L"Selection has no free-layout anchors");
         return;
     }
@@ -5217,7 +5273,7 @@ void LayoutEditorSession::reorderSelected(int delta) {
 
     endMutation();
     if (!ok) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         setStatus(L"Cannot reorder further");
         return;
     }
@@ -6944,7 +7000,7 @@ void LayoutEditorSession::structuredAdd(bool asChild) {
         return page;
     });
     if (!added) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -6958,7 +7014,7 @@ void LayoutEditorSession::structuredAdd(bool asChild) {
 void LayoutEditorSession::structuredRemove() {
     pushUndo(LayoutEditKind::Delete, "Remove structured item");
     if (!_structuredModel.removeSelected()) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -6971,7 +7027,7 @@ void LayoutEditorSession::structuredRemove() {
 void LayoutEditorSession::structuredMove(int delta) {
     pushUndo(LayoutEditKind::Reorder, "Reorder structured item");
     if (!_structuredModel.moveSelected(delta)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -6991,7 +7047,7 @@ void LayoutEditorSession::commitStructuredText() {
         return;
     pushUndo(LayoutEditKind::Property, "Rename structured item");
     if (!_structuredModel.setSelectedLabel(value)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -7028,7 +7084,7 @@ void LayoutEditorSession::commitStructuredRichStyle() {
         formatColorHex(old.color) == formatColorHex(run.color)) return;
     pushUndo(LayoutEditKind::Property, "Edit rich-text run");
     if (!_structuredModel.setSelectedRichRun(run)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         return;
     }
     markDirty(true);
@@ -8517,7 +8573,7 @@ void LayoutEditorSession::commitPaletteDrop(const math::FVector2& worldPos) {
     }
     pushUndo(LayoutEditKind::Insert, "Drop widget");
     if (!placeNewWidget(created, parent, insertIndex, posPtr)) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         destroyWidgetTree(created);
         return;
     }
@@ -8593,14 +8649,14 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
                                              static_cast<size_t>(dest));
         }
         if (!ok) {
-            _commandStack.discardLastUndo();
+            _history.discardLastApplied();
             setStatus(L"Reorder failed");
             return;
         }
     } else {
         pushUndo(LayoutEditKind::Reorder, "Reparent hierarchy");
         if (!detachFromTree(dragged)) {
-            _commandStack.discardLastUndo();
+            _history.discardLastApplied();
             setStatus(L"Reorder failed");
             return;
         }
@@ -8632,7 +8688,7 @@ void LayoutEditorSession::commitHierarchyDrop(const math::FVector2& worldPos) {
                 attachAt(oldParent, dragged,
                          oldIndex >= 0 ? static_cast<size_t>(oldIndex) : 0);
             }
-            _commandStack.discardLastUndo();
+            _history.discardLastApplied();
             setStatus(L"Reorder failed");
             return;
         }
@@ -9006,7 +9062,7 @@ void LayoutEditorSession::pasteSerializedItems(
         offset += 8.0f;
     }
     if (pasted.empty()) {
-        _commandStack.discardLastUndo();
+        _history.discardLastApplied();
         setStatus(L"Paste failed");
         return;
     }
@@ -9040,7 +9096,7 @@ void LayoutEditorSession::nudgeSelection(float dx, float dy) {
     if (_selection.empty()) {
         return;
     }
-    const std::size_t undoDepthBefore = _commandStack.undoDepth();
+    const std::size_t undoDepthBefore = _history.cursor();
     beginMutation(LayoutEditKind::Transform, "Nudge selection");
     bool moved = false;
     for (Widget* w : _selection) {
@@ -9062,8 +9118,8 @@ void LayoutEditorSession::nudgeSelection(float dx, float dy) {
     }
     endMutation();
     if (!moved) {
-        if (_commandStack.undoDepth() > undoDepthBefore) {
-            _commandStack.discardLastUndo();
+        if (_history.cursor() > undoDepthBefore) {
+            _history.discardLastApplied();
         }
         if (_selected == _docRoot && _selection.size() == 1u) {
             setStatus(L"Document root position is fixed");

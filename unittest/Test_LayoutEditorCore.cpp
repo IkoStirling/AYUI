@@ -4,10 +4,10 @@
 #include "AYUI/GridPanel.h"
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
-#include "AYUI/LayoutEditor/LayoutCommandStack.h"
 #include "AYUI/LayoutEditor/LayoutComponentLibrary.h"
 #include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
 #include "AYUI/LayoutEditor/LayoutDocumentModel.h"
+#include "AYUI/LayoutEditor/LayoutEditorSession.h"
 #include "AYUI/LayoutEditor/LayoutInteractionModel.h"
 #include "AYUI/LayoutEditor/LayoutPreviewModel.h"
 #include "AYUI/LayoutEditor/LayoutResponsiveModel.h"
@@ -92,49 +92,36 @@ TEST_CASE(selection_model_owns_primary_and_multi_selection_invariants) {
     CHECK(selection.primary() == nullptr);
 }
 
-TEST_CASE(command_stack_preserves_kind_and_snapshot_fallback) {
-    LayoutCommandStack commands(2);
-    LayoutEditorSnapshot clean;
-    clean.json = "clean";
-    clean.dirty = false;
-    commands.begin(clean, LayoutEditKind::Property, "Edit text");
-    commands.begin(clean, LayoutEditKind::Property, "same transaction");
-    CHECK(commands.undoDepth() == 1u);
-    CHECK(commands.transactionOpen());
-    commands.end();
-    CHECK(commands.nextUndoKind() == LayoutEditKind::Property);
+TEST_CASE(layout_session_uses_shared_history_for_structural_edits) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(800.0f, 600.0f);
 
-    LayoutEditorSnapshot edited;
-    edited.json = "edited";
-    edited.dirty = true;
-    const auto undo = commands.undo(edited);
-    CHECK(undo.has_value());
-    CHECK(undo->json == "clean");
-    CHECK_FALSE(undo->dirty);
-    CHECK(commands.canRedo());
+    Panel chrome;
+    chrome.setSize({800.0f, 600.0f});
+    auto* canvasHost = new Panel();
+    canvasHost->setId("canvas_host");
+    canvasHost->setSize({600.0f, 500.0f});
+    chrome.addChild(canvasHost);
 
-    const auto redo = commands.redo(*undo);
-    CHECK(redo.has_value());
-    CHECK(redo->json == "edited");
-    CHECK(redo->dirty);
-}
-
-TEST_CASE(command_stack_executes_typed_commands_without_document_snapshots) {
-    LayoutCommandStack commands(4);
-    int value = 7;
-    commands.pushTyped(
-        [&value]() { value = 3; },
-        [&value]() { value = 7; },
-        LayoutEditKind::Property, "Edit width");
-
-    CHECK(commands.nextUndoIsTyped());
-    CHECK_FALSE(commands.nextRedoIsTyped());
-    CHECK(commands.undoTyped());
-    CHECK(value == 3);
-    CHECK(commands.nextRedoIsTyped());
-    CHECK(commands.redoTyped());
-    CHECK(value == 7);
-    CHECK(commands.nextUndoKind() == LayoutEditKind::Property);
+    LayoutEditorSession session;
+    CHECK(session.attach(ui, &chrome));
+    CHECK_FALSE(session.canUndo());
+    CHECK_FALSE(session.isDirty());
+    session.addWidget("Button");
+    CHECK(session.canUndo());
+    CHECK(session.isDirty());
+    session.undo();
+    CHECK_FALSE(session.canUndo());
+    CHECK(session.canRedo());
+    CHECK_FALSE(session.isDirty());
+    session.redo();
+    CHECK(session.canUndo());
+    CHECK_FALSE(session.canRedo());
+    CHECK(session.isDirty());
+    session.detach();
+    ui.shutdown();
 }
 
 TEST_CASE(authoring_registry_is_the_single_palette_and_schema_source) {
