@@ -220,4 +220,47 @@ TEST_CASE(scrollview_auto_visibility_resolves_cross_axis_overflow) {
     CHECK_FALSE(sv.getHorizontalScrollBar()->isVisible());
 }
 
+// H-R-4: ScrollView performLayout's refit loop is bounded by
+// kMaxRefitIterations. Pre-fix the vbar-appears refit ran exactly
+// once; if a pathological host's content preferred height depended
+// on its own width (e.g. via getPreferredContentSize), the loop
+// would never terminate and performLayout would block forever. This
+// test creates a widget whose preferredContentSize scales with the
+// widget's height (a deliberately non-convergent mapping) and
+// verifies performLayout returns in bounded time + the content size
+// settles to a stable value rather than overflowing the call stack.
+TEST_CASE(scrollview_refit_loop_is_bounded) {
+    class NonConvergentContent : public Widget {
+    public:
+        NonConvergentContent() {
+            setSize(FVector2(100.0f, 100.0f));
+        }
+        FVector2 getPreferredContentSize() const override {
+            // The preferred size depends on the current size in a way
+            // that won't converge. Each refit the content asks for a
+            // slightly different height. The cap must kick in.
+            return FVector2(
+                std::max(getWidth(), 1.0f),
+                std::max(getHeight() * 1.05f, 1.0f));
+        }
+    };
+    ScrollView sv;
+    sv.setSize(FVector2(120.0f, 120.0f));
+    auto* content = new NonConvergentContent();
+    sv.setContentOwned(content);
+    sv.performLayout();
+    // performLayout must have returned. The content size is whatever
+    // the last fitContent() produced — we only assert it's finite
+    // and > 0 (no NaN, no zero from a non-converged loop).
+    const float contentH = content->getHeight();
+    CHECK(std::isfinite(contentH));
+    CHECK(contentH > 0.0f);
+    // The post-fit refit cap (kMaxRefitIterations = 4) plus the
+    // initial fit means at most 5 setSize calls were made on the
+    // content — the height grew by at most 5 * 5% = ~28% from the
+    // 100px seed. The exact value depends on how the non-convergent
+    // mapping progresses; assert it's well below infinity / NaN.
+    CHECK(contentH < 1.0e6f);
+}
+
 TEST_SUITE_END

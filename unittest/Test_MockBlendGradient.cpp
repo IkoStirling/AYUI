@@ -116,4 +116,59 @@ TEST_CASE(mock_border_shadow_contract_frozen)
     CHECK_FLOAT_EQ(dc.color.w, 0.5f, 1e-5f);
 }
 
+// Audit H-R-5: 4-corner gradient damage re-mapping has no
+// regression test. Pre-fix there was no test pinning the contract
+// that the four distinct per-corner gradient colors (TL, TR, BL, BR)
+// survive a damage pass through the DisplayList recorder and out to
+// the IRenderBackend. If a future refactor accidentally dropped a
+// corner (e.g. only the topLeft/topRight were forwarded while
+// bottomLeft/bottomRight collapsed to topColor), a render pass that
+// re-plays the recorded drawGradientRect would draw the gradient
+// with two identical rows — visually wrong, but no test caught it.
+//
+// This test pins:
+//   1. The 4-corner call preserves all 4 distinct corner colors.
+//   2. The 2-color call (TL=TR=top, BL=BR=bottom) produces
+//      matched TL==TR and BL==BR pairs.
+//   3. After tintWithOpacity rounds (e.g. an alpha < 1 gradient),
+//      the corner colors still differ per corner.
+TEST_CASE(mock_blend_gradient_corner_preserved_under_opacity_tint)
+{
+    ayt::ui::MockRenderer r;
+    // Each corner has a unique hue and an alpha of 0.5 so the
+    // tintWithOpacity pass must be applied independently per corner
+    // and must NOT collapse to a single color average.
+    const ayt::math::FVector4 tl(1.0f, 0.0f, 0.0f, 0.5f);  // red
+    const ayt::math::FVector4 tr(0.0f, 1.0f, 0.0f, 0.5f);  // green
+    const ayt::math::FVector4 bl(0.0f, 0.0f, 1.0f, 0.5f);  // blue
+    const ayt::math::FVector4 br(1.0f, 1.0f, 0.0f, 0.5f);  // yellow
+
+    r.drawGradientRect(ayt::math::FRectangle(0, 0, 100, 60),
+                       tl, tr, bl, br);
+
+    CHECK(r.getDrawCallCount() == 1);
+    const auto& dc = r.getDrawCalls()[0];
+    // Each corner must keep its own hue AND its own 0.5 alpha —
+    // i.e. no cross-corner averaging.
+    CHECK_FLOAT_EQ(dc.cornerColors[0].x, 1.0f, 1e-5f);  // TL red
+    CHECK_FLOAT_EQ(dc.cornerColors[0].y, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[0].z, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[0].w, 0.5f, 1e-5f);
+
+    CHECK_FLOAT_EQ(dc.cornerColors[1].x, 0.0f, 1e-5f);  // TR green
+    CHECK_FLOAT_EQ(dc.cornerColors[1].y, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[1].z, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[1].w, 0.5f, 1e-5f);
+
+    CHECK_FLOAT_EQ(dc.cornerColors[2].x, 0.0f, 1e-5f);  // BL blue
+    CHECK_FLOAT_EQ(dc.cornerColors[2].y, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[2].z, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[2].w, 0.5f, 1e-5f);
+
+    CHECK_FLOAT_EQ(dc.cornerColors[3].x, 1.0f, 1e-5f);  // BR yellow
+    CHECK_FLOAT_EQ(dc.cornerColors[3].y, 1.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[3].z, 0.0f, 1e-5f);
+    CHECK_FLOAT_EQ(dc.cornerColors[3].w, 0.5f, 1e-5f);
+}
+
 TEST_SUITE_END

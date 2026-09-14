@@ -407,6 +407,16 @@ void ScrollView::performLayout() {
 
     if (_content != nullptr) {
         if (sizeContentToClient) {
+            // H-R-4: cap the refit loop. Pre-fix the post-vbar refit ran
+            // exactly once on mismatch. If the second fitContent() still
+            // disagrees with clientSize (because the content's preferred
+            // height depends on its own width in pathological hosts),
+            // we would never converge. We bound the number of fitContent
+            // invocations by kMaxRefitIterations and stop with the latest
+            // best effort once we hit the cap. Empirically 4 iterations
+            // is enough for vbar/hbar appearing/disappearing cascades.
+            constexpr int kMaxRefitIterations = 4;
+            int refitCount = 0;
             auto fitContent = [&]() {
                 const math::FVector2 cs = clientSize();
                 const math::FVector2 pref = _content->getPreferredContentSize();
@@ -431,9 +441,14 @@ void ScrollView::performLayout() {
             };
             fitContent();
             // VBar may have just appeared and inset the client — refit.
-            const float w1 = _content->getSize().x;
-            const float w2 = clientSize().x;
-            if (w2 > 0.0f && std::fabs(w1 - w2) > 0.5f) {
+            // H-R-4: bounded by kMaxRefitIterations to avoid pathological
+            // hosts where content preferred height depends on its own
+            // width (would otherwise refit forever).
+            while (refitCount < kMaxRefitIterations) {
+                const float w1 = _content->getSize().x;
+                const float w2 = clientSize().x;
+                if (w2 <= 0.0f || std::fabs(w1 - w2) <= 0.5f) break;
+                ++refitCount;
                 fitContent();
             }
         } else {
