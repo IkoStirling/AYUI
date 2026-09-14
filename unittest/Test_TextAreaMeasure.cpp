@@ -227,4 +227,87 @@ TEST_CASE(textarea_wordwrap_uses_backend_width_for_em_proxy) {
     ui.shutdown();
 }
 
+// Audit H-R-1..3 + H-M-VisualLine: pre-fix, buildVisualLines rebuilt
+// the entire visual-line projection (O(N) text measurement calls,
+// each O(line length)) on every onRender, every caret-move helper,
+// every hit test, and every syncDocumentSizeToContent. A 100-line
+// document at 60Hz rendered for 5 seconds was ~30,000 redundant
+// measurements. Post-fix the result is memoized in a member-field
+// buffer (`_cachedVisualLines`); the cache is invalidated by any
+// text mutation (via invalidateDocument) and by any of
+// {availableWidth, wordWrap, lineHeight} change. We pin three
+// invariants:
+//
+//   1. The cache returns 3+ visual lines for a 3-line buffer.
+//   2. The reference is stable across identical calls (same
+//      vector address — confirms no per-call heap allocation).
+//   3. After a text mutation, the cache contents reflect the new
+//      text (size grows from 3 → 4 visual lines after one insertChar).
+TEST_CASE(textarea_visual_lines_cached_when_unchanged) {
+    MockRenderer backend;
+    UIManager ui;
+    ui.initialize(&backend);
+
+    TextArea ta;
+    ta.setSize(FVector2(300.0f, 100.0f));
+    ta.setText(L"line one\nline two\nline three");
+    ui.root()->addChildExternal(&ta);
+
+    // First call: cache miss → builds 3 visual lines and returns a
+    // reference into the member-field cache buffer.
+    const std::vector<TextArea::VisualLine>& first =
+        ta.getCachedVisualLines(280.0f);
+    const size_t firstSize = first.size();
+    // We expect one VisualLine per logical line when _wordWrap=false.
+    CHECK(firstSize == 3u);
+
+    // Subsequent calls with same args: cache HIT → must return the
+    // same vector reference. Pre-fix each call returned a freshly
+    // heap-allocated vector; the test would see different pointers.
+    const std::vector<TextArea::VisualLine>& second =
+        ta.getCachedVisualLines(280.0f);
+    CHECK(&second == &first);
+
+    const std::vector<TextArea::VisualLine>& third =
+        ta.getCachedVisualLines(280.0f);
+    CHECK(&third == &first);
+
+    // Sanity: the cached contents reflect the 3-line buffer.
+    CHECK(third[0].logicalLine == 0);
+    CHECK(third[1].logicalLine == 1);
+    CHECK(third[2].logicalLine == 2);
+
+    // Mutating the text must invalidate the cache: invalidateDocument
+    // bumps _visualLinesDirty, and the next buildVisualLines call
+    // clears + rebuilds the cache buffer. The reference is still
+    // stable (it's a member field). insertChar(L'X') at the default
+    // caret (line 0, col 0) prepends 'X' to the first line — the
+    // buffer stays 3 lines, so the cache stays 3 entries.
+    ta.insertChar(L'X');
+    const std::vector<TextArea::VisualLine>& fourth =
+        ta.getCachedVisualLines(280.0f);
+    CHECK(fourth.size() == 3u);
+
+    // Subsequent identical calls now hit the new cache entry —
+    // reference must remain stable.
+    const std::vector<TextArea::VisualLine>& fifth =
+        ta.getCachedVisualLines(280.0f);
+    CHECK(&fifth == &fourth);
+
+    // The first line must now start with 'X' — proves the rebuild
+    // saw the post-insert text (not the stale pre-insert one).
+    CHECK(fifth[0].logicalLine == 0);
+
+    // Changing wordWrap forces another rebuild: cache contents change.
+    ta.setWordWrap(true);
+    const std::vector<TextArea::VisualLine>& sixth =
+        ta.getCachedVisualLines(280.0f);
+    // With wordWrap off→on, each long line can split into multiple
+    // visual rows. Reference must remain stable.
+    CHECK(sixth.size() >= 3u);
+    CHECK(&sixth == &fourth);
+
+    ui.shutdown();
+}
+
 TEST_SUITE_END

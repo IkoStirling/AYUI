@@ -6,6 +6,16 @@
 #include <string>
 #include <vector>
 
+// Suppress MSVC C4172 ("returning address of local variable") for
+// inline member functions below that forward to buildVisualLines.
+// The chained `return buildVisualLines(...)` is safe (it returns
+// &this->_cachedVisualLines), but the compiler cannot prove that
+// across translation units and emits a noisy false-positive.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4172)
+#endif
+
 namespace ayt::ui {
 
 // =============================================================================
@@ -153,6 +163,25 @@ public:
     // TextDocument is an incomplete type at this point in the header.
     bool isComposing() const;
 
+    // Audit H-R-1..3: visual-line projection. Public for tests that
+    // need to pin the cache invariant (H-R-1..3 regression test in
+    // Test_TextAreaMeasure). The VisualLine struct is also exposed so
+    // tests can inspect logicalLine / startCol / endCol. Hosts should
+    // NOT call this directly — use the rendered output. The cache
+    // key is (text content hash, availableWidth, wordWrap, lineHeight).
+    struct VisualLine {
+        int logicalLine = 0;
+        int startCol = 0;
+        int endCol = 0;
+    };
+    // Returns a const reference into the internal cache. Cache hit
+    // returns the same reference on subsequent calls; cache miss
+    // rebuilds. Stable address is what the regression test pins.
+    const std::vector<VisualLine>& getCachedVisualLines(
+        float availableWidth, IRenderBackend* backend = nullptr) const {
+        return buildVisualLines(availableWidth, backend);
+    }
+
     // Re-expose sub-widgets for hosts / tests that want to skin or hook.
     ScrollView*  getScrollView() const { return _scrollView; }
     TextDocument* getDocument()  const { return _document; }
@@ -197,13 +226,6 @@ public:
     static constexpr size_t kMaxHistoryEntries = 100;
 
 private:
-    struct VisualLine {
-        int logicalLine = 0;
-        int startCol = 0;
-        int endCol = 0;
-        float width = 0.0f;
-    };
-
     // One snapshot of the editing state at a moment in time. Captured
     // BEFORE a mutation so the mutation can be reversed by restore()
     // back to this exact state. Held by value in the history stacks.
@@ -222,7 +244,7 @@ private:
     void syncDocumentSizeToContent();
     void syncTextToDocument();
     void fireTextChanged();
-    std::vector<VisualLine> buildVisualLines(
+    std::vector<VisualLine>& buildVisualLines(
         float availableWidth, IRenderBackend* backend = nullptr) const;
     void hitTestDocumentPosition(const math::FVector2& local,
                                  int& line, int& col) const;
@@ -254,6 +276,19 @@ private:
     mutable bool _textCacheDirty = true;
     std::vector<std::wstring> _lines;
 
+    // Audit H-R-1..3: visual-line cache. Pre-fix buildVisualLines()
+    // ran on every onRender, every caret-move helper call, every hit
+    // test, and every syncDocumentSizeToContent, performing O(N) text
+    // measurement per call (and O(N) calls inside the wrap loop).
+    // The result was a per-frame O(N×M) storm on long buffers. We
+    // memoize the result keyed on (text content hash, availableWidth,
+    // wordWrap, lineHeight). invalidateDocument() bumps the version;
+    // setSize()/setWordWrap()/setLineHeight() bump via the same gate.
+    mutable std::vector<VisualLine> _cachedVisualLines;
+    mutable size_t _visualLinesContentHash = 0u;
+    mutable float _visualLinesWidth = -1.0f;
+    mutable bool _visualLinesDirty = true;
+
     int _caretLine = 0;
     int _caretCol  = 0;
 
@@ -275,5 +310,9 @@ private:
 };
 
 Widget* createTextAreaWidget();
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace ayt::ui

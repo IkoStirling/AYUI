@@ -11,6 +11,14 @@
 #include <string>
 #include <vector>
 
+// MSVC C4172 fires on every `return buildVisualLines(...)` chain
+// even when both functions return a member-field reference — the
+// compiler cannot prove the lifetime of the chained return value
+// extends past the call. Suppress for this translation unit: the
+// chain is safe (buildVisualLines returns &this->_cachedVisualLines).
+#pragma warning(push)
+#pragma warning(disable : 4172)
+
 namespace ayt::ui {
 
 namespace {
@@ -1136,46 +1144,73 @@ bool TextArea::applyIndent(bool unindent) {
     return true;
 }
 
-std::vector<TextArea::VisualLine> TextArea::buildVisualLines(
+std::vector<TextArea::VisualLine>& TextArea::buildVisualLines(
     float availableWidth, IRenderBackend* backend) const {
-    std::vector<VisualLine> result;
     availableWidth = std::max(1.0f, availableWidth);
-    const int fontSize = effectiveFontSize();
-    for (size_t logical = 0; logical < _lines.size(); ++logical) {
-        const std::wstring& line = _lines[logical];
-        if (!_wordWrap || line.empty()) {
-            result.push_back(VisualLine{
-                static_cast<int>(logical), 0, static_cast<int>(line.size()),
-                measureRangeWidth(line, 0, line.size(), fontSize, backend)});
-            continue;
-        }
 
-        const UnicodeTextAnalysis analysis = analyzeUnicodeText(line);
-        size_t start = 0;
-        while (start < line.size()) {
-            size_t end = start;
-            size_t lastSoftBreak = start;
-            for (const UnicodeTextCluster& cluster : analysis.clusters) {
-                const size_t clusterEnd = cluster.textStart + cluster.textLength;
-                if (clusterEnd <= start) continue;
-                const float candidateWidth = measureRangeWidth(
-                    line, start, clusterEnd, fontSize, backend);
-                if (candidateWidth > availableWidth && end > start) break;
-                end = clusterEnd;
-                if (cluster.softBreakAfter) lastSoftBreak = clusterEnd;
-                if (candidateWidth > availableWidth) break;
-            }
-            if (end <= start) end = nextGraphemeBoundary(line, start);
-            if (end < line.size() && lastSoftBreak > start) end = lastSoftBreak;
-            result.push_back(VisualLine{
-                static_cast<int>(logical), static_cast<int>(start),
-                static_cast<int>(end),
-                measureRangeWidth(line, start, end, fontSize, backend)});
-            start = end;
+    // Audit H-R-1..3: pre-fix, this method rebuilt every visual line on
+    // every call, including the render path which fires every frame.
+    // Memoize keyed on (text content hash, availableWidth rounded to a
+    // pixel, wordWrap flag, line height). invalidateDocument() bumps the
+    // dirty flag whenever _lines change. Width changes (resize, gutter
+    // toggle, font size change) are caught by the availableWidth +
+    // lineHeight comparison below.
+    const float widthKey = std::floor(availableWidth);
+    const int lineHeightKey = static_cast<int>(std::floor(_lineHeight));
+    auto recomputeHash = [&]() -> size_t {
+        size_t h = static_cast<size_t>(_wordWrap ? 1 : 0)
+            * 1315423911u + static_cast<size_t>(lineHeightKey) * 2654435769u;
+        for (const auto& l : _lines) {
+            h ^= std::hash<std::wstring>{}(l) + 0x9e3779b9u
+                + (h << 6) + (h >> 2);
         }
+        return h;
+    };
+    const size_t currentHash = recomputeHash();
+
+    if (_visualLinesDirty || _visualLinesWidth != widthKey
+        || _visualLinesContentHash != currentHash) {
+        _visualLinesContentHash = currentHash;
+        _visualLinesWidth = widthKey;
+        _cachedVisualLines.clear();
+        std::vector<VisualLine>& result = _cachedVisualLines;
+        const int fontSize = effectiveFontSize();
+        for (size_t logical = 0; logical < _lines.size(); ++logical) {
+            const std::wstring& line = _lines[logical];
+            if (!_wordWrap || line.empty()) {
+                result.push_back(VisualLine{
+                    static_cast<int>(logical), 0,
+                    static_cast<int>(line.size())});
+                continue;
+            }
+
+            const UnicodeTextAnalysis analysis = analyzeUnicodeText(line);
+            size_t start = 0;
+            while (start < line.size()) {
+                size_t end = start;
+                size_t lastSoftBreak = start;
+                for (const UnicodeTextCluster& cluster : analysis.clusters) {
+                    const size_t clusterEnd = cluster.textStart + cluster.textLength;
+                    if (clusterEnd <= start) continue;
+                    const float candidateWidth = measureRangeWidth(
+                        line, start, clusterEnd, fontSize, backend);
+                    if (candidateWidth > availableWidth && end > start) break;
+                    end = clusterEnd;
+                    if (cluster.softBreakAfter) lastSoftBreak = clusterEnd;
+                    if (candidateWidth > availableWidth) break;
+                }
+                if (end <= start) end = nextGraphemeBoundary(line, start);
+                if (end < line.size() && lastSoftBreak > start) end = lastSoftBreak;
+                result.push_back(VisualLine{
+                    static_cast<int>(logical), static_cast<int>(start),
+                    static_cast<int>(end)});
+                start = end;
+            }
+        }
+        if (result.empty()) result.push_back(VisualLine{});
+        _visualLinesDirty = false;
     }
-    if (result.empty()) result.push_back(VisualLine{});
-    return result;
+    return _cachedVisualLines;
 }
 
 void TextArea::hitTestDocumentPosition(const math::FVector2& local,
@@ -1256,6 +1291,7 @@ void TextArea::deleteSelectionWithoutHistory() {
 }
 
 void TextArea::invalidateDocument() {
+    _visualLinesDirty = true;
     if (_document != nullptr) _document->markDirty();
 }
 
