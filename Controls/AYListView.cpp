@@ -1,4 +1,5 @@
 #include "AYUI/ListView.h"
+#include "AYUI/VirtualList.h"
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/Style.h"
 #include "AYUI/ScrollBarSync.h"
@@ -198,16 +199,9 @@ void ListView::setVisibleRowCount(int rows) {
 // =============================================================================
 
 int ListView::computePoolSize() const {
-    if (_items.empty()) return 0;
-    // +2 buffer rows so the half-visible top/bottom rows that scroll
-    // into view don't pop in/out one frame at a time. For 200px /
-    // 24px items → ceil(200/24) + 2 = 9 + 2 = 11. For a 24px-tall
-    // list with 1 item → 1 + 2 = 3 (cap at item count below).
-    const float vpH = std::max(0.0f, getHeight());
-    const int visibleRows = std::max(1,
-        static_cast<int>(vpH / _itemHeight) + 1);
-    const int poolSize = visibleRows + 2;
-    return std::min(static_cast<int>(_items.size()), poolSize);
+    return computeVirtualListWindow(
+        _items.size(), getHeight(), _itemHeight,
+        _scrollState.getScrollOffset().y).poolSize;
 }
 
 ListView::Row* ListView::rowForLogical(int index) const {
@@ -235,12 +229,10 @@ void ListView::rebindPoolRows() {
     // Derive first visible index from the current scrollOffset.y.
     // Each itemHeight step moves by one logical item. Clamp so the
     // last logical item is never beyond _items.size() - poolSize().
-    const float yOff = _scrollState.getScrollOffset().y;
-    const int rawFirst = static_cast<int>(yOff / _itemHeight);
-    const int maxFirst = std::max(0,
-        static_cast<int>(_items.size())
-        - static_cast<int>(_rowPool.size()));
-    _firstVisibleIndex = std::max(0, std::min(rawFirst, maxFirst));
+    const VirtualListWindow window = computeVirtualListWindow(
+        _items.size(), getHeight(), _itemHeight,
+        _scrollState.getScrollOffset().y);
+    _firstVisibleIndex = window.firstIndex;
 
     const float barW = ScrollBar::kDefaultBarWidth;
     const bool needsVbar = needsVerticalScrollBar();
@@ -260,9 +252,8 @@ void ListView::rebindPoolRows() {
         row->setSize(math::FVector2(rowW, _itemHeight));
         // Fractional scroll: offset rows by the sub-item remainder so
         // content tracks the thumb continuously (not only on row boundaries).
-        const float fracY = yOff - static_cast<float>(_firstVisibleIndex) * _itemHeight;
         row->setPosition(math::FVector2(0.0f,
-            static_cast<float>(slot) * _itemHeight - fracY));
+            static_cast<float>(slot) * _itemHeight - window.leadingOffset));
         row->setText(_items[logical]);
         row->setIndex(logical);
         row->setSelected(isSelected(logical));

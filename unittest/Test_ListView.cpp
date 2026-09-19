@@ -1,5 +1,6 @@
 #include "AYTest.h"
 #include "AYUI/ListView.h"
+#include "AYUI/VirtualList.h"
 #include "AYUI/ScrollBar.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/WidgetFactory.h"
@@ -52,6 +53,24 @@ using namespace ayt::ui;
 using namespace ayt::math;
 
 TEST_SUITE(AYUI_ListView)
+
+TEST_CASE(virtual_list_window_is_shared_and_clamped) {
+    const VirtualListWindow top = computeVirtualListWindow(
+        5000u, 200.0f, 24.0f, 0.0f);
+    CHECK(top.firstIndex == 0);
+    CHECK(top.poolSize == 11);
+    CHECK_FLOAT_EQ(top.leadingOffset, 0.0f, 1e-5f);
+
+    const VirtualListWindow middle = computeVirtualListWindow(
+        5000u, 200.0f, 24.0f, 240.0f);
+    CHECK(middle.firstIndex == 10);
+    CHECK(middle.poolSize == top.poolSize);
+
+    const VirtualListWindow shortList = computeVirtualListWindow(
+        3u, 200.0f, 24.0f, 500.0f);
+    CHECK(shortList.firstIndex == 0);
+    CHECK(shortList.poolSize == 3);
+}
 
 // C-5: default state — empty items, no selection, no vbar selectedIndex,
 // single scrollbar pre-created.

@@ -30,6 +30,7 @@
 #include "AYUI/Slider.h"
 #include "AYUI/ColorPicker.h"
 #include "AYUI/ListView.h"
+#include "AYUI/VirtualList.h"
 #include "AYUI/TileView.h"
 #include "AYUI/ComboBox.h"
 #include "AYUI/SelectableWidget.h"

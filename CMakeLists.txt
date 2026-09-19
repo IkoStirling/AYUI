@@ -118,6 +118,7 @@ set(HEAD_FILES
     include/AYUI/InteractiveWidget.h
     include/AYUI/LeafWidget.h
     include/AYUI/ListView.h
+    include/AYUI/VirtualList.h
     include/AYUI/TileView.h
     include/AYUI/ComboBox.h
     include/AYUI/TabControl.h

@@ -4,17 +4,19 @@
 // C-12 TreeView: a scrollable tree of selectable nodes.
 // =============================================================================
 //
-// Architecture (v1 — matches C-5 ListView pattern):
+// Architecture (v2 — fixed row pool shared with ListView's strategy):
 //   TreeView (CompoundWidget)
 //     └─ vScrollBar: ScrollBar* (auto-managed)
-//     └─ node widgets: TreeNode* x N (one per visible flat-list entry)
+//     └─ node widgets: TreeNode* x K (visible rows + overscan only)
 //
 // Flatten strategy (D1 in C-12 plan):
 //   The caller provides TreeNodeData entries with `parentIndex` (-1 for
 //   roots) and `expanded` flags. TreeView walks the entries depth-first
 //   starting at every root, emitting only visible nodes (children of
 //   collapsed parents are skipped). The resulting flat list is what
-//   `_nodes` widgets track 1:1.
+//   `_nodes` is a small reusable pool. Each slot is rebound to a logical
+//   flattened index as scrolling changes; the full model never creates one
+//   widget per entry.
 //
 //   Tradeoff: rebuild on every expand/collapse is O(n). Acceptable for
 //   editor-chrome datasets (<10k nodes). Future PR adds delta-tracking.
@@ -55,7 +57,7 @@ public:
     TreeView();
     ~TreeView() override;
 
-    // Replace the entire tree. Triggers flatten + rebuild of _nodes.
+    // Replace the entire tree. Triggers flatten + pool rebind.
     // The caller is responsible for keeping TreeNodeData alive for as
     // long as the TreeView references it — we copy into _source, but the
     // caller may want to update _source.expanded and call setTree() again
@@ -77,7 +79,7 @@ public:
     }
 
     // Layout knobs
-    void  setItemHeight(float h) { _itemHeight = h; markBoundsDirty(); }
+    void  setItemHeight(float h);
     float getItemHeight() const { return _itemHeight; }
 
     // Scroll
@@ -114,6 +116,9 @@ public:
     // Authoring/serialization access to the complete source model. Unlike
     // getNodeData(), this includes descendants hidden by collapsed parents.
     const std::vector<TreeNodeData>& getTreeDataRef() const { return _source; }
+    size_t getNodePoolSize() const { return _nodes.size(); }
+    int getFirstVisibleIndex() const { return _firstVisibleIndex; }
+    int getNodePoolLogicalIndex(size_t slot) const;
 
 protected:
     void rebuildNodes();
@@ -122,14 +127,16 @@ private:
     void flatten();
     void ensureBarCreated();
     void syncBarToOffset();
-    void syncNodePositions();
+    int computePoolSize() const;
+    void rebindNodes();
+    TreeNode* nodeForLogical(int index) const;
     void handleNodeClick(int flatIndex);
 
     std::vector<TreeNodeData> _source;          // caller-supplied model
     std::vector<TreeNodeData> _flatData;        // visible flat list (after flatten)
-    std::vector<TreeNode*>    _nodes;           // matching widgets (owned via addChild)
+    std::vector<TreeNode*>    _nodes;           // visible-row pool (owned via addChild)
     std::vector<int>          _flatToSrc;       // flat index → source index (1:1)
-    std::vector<int>          _pendingDepths;   // depth per flat entry (rebuilt each flatten)
+    std::vector<int>          _flatDepths;      // depth per flat entry (rebuilt each flatten)
 
     // AYUI-Perf-2026-08-26: parentIndex → [child indices] map rebuilt
     // once per setTree() so flatten()'s DFS does an O(1) lookup instead
@@ -138,6 +145,7 @@ private:
     std::unordered_map<int, std::vector<int>> _childrenByParent;
 
     int  _selectedIndex = -1;
+    int  _firstVisibleIndex = 0;
     float _itemHeight = 16.0f;
 
     ScrollBar*       _vbar = nullptr;

@@ -36,6 +36,7 @@ TEST_CASE(treeview_initial_state) {
     CHECK(tv.getNodeCount() == 0u);
     CHECK(tv.getSelectedIndex() == -1);
     CHECK(tv.getVerticalScrollBar() != nullptr);
+    CHECK(tv.getNodePoolSize() == 0u);
 }
 
 TEST_CASE(treeview_set_tree_flattens_visible) {
@@ -321,6 +322,34 @@ TEST_CASE(treeview_flatten_balanced_1000_nodes) {
     TreeView tv;
     tv.setTree(big);
     CHECK(tv.getNodeCount() == 1000u);
+}
+
+TEST_CASE(treeview_pool_only_keeps_visible_rows_and_rebinds_on_scroll) {
+    std::vector<TreeNodeData> nodes;
+    nodes.reserve(5000);
+    for (int i = 0; i < 5000; ++i) {
+        nodes.push_back({L"node " + std::to_wstring(i), L"", false, false, -1});
+    }
+
+    TreeView tv;
+    tv.setSize(FVector2(240.0f, 160.0f));
+    tv.setItemHeight(16.0f);
+    tv.setTree(nodes);
+
+    CHECK(tv.getNodeCount() == 5000u);
+    CHECK(tv.getNodePoolSize() <= 13u);
+    CHECK(tv.getNodePoolSize() < tv.getNodeCount());
+    CHECK(tv.getNodePoolLogicalIndex(0) == 0);
+
+    tv.setScrollOffset(FVector2(0.0f, 25.0f * 16.0f));
+    CHECK(tv.getFirstVisibleIndex() == 25);
+    CHECK(tv.getNodePoolLogicalIndex(0) == 25);
+    CHECK(tv.getNodePoolLogicalIndex(1) == 26);
+
+    tv.setSelectedIndex(4000);
+    CHECK(tv.getSelectedIndex() == 4000);
+    tv.setScrollOffset(FVector2(0.0f, 4000.0f * 16.0f));
+    CHECK(tv.getNodePoolLogicalIndex(0) == 4000);
 }
 
 TEST_SUITE_END

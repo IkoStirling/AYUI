@@ -2,6 +2,7 @@
 #include "AYUI/IRenderBackend.h"
 #include "AYUI/ScrollBarSync.h"
 #include "AYUI/UIManager.h"
+#include "AYUI/VirtualList.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -32,6 +33,12 @@ TreeView::~TreeView() {
             ui->clearCaptureNoDispatch(_vbar);
             ui->clearFocusNoDispatch(_vbar);
         }
+        for (TreeNode* node : _nodes) {
+            if (node == nullptr) continue;
+            ui->clearHoverNoDispatch(node);
+            ui->clearCaptureNoDispatch(node);
+            ui->clearFocusNoDispatch(node);
+        }
     }
     _nodes.clear();
     _vbar = nullptr;
@@ -39,10 +46,10 @@ TreeView::~TreeView() {
 
 void TreeView::setTree(const std::vector<TreeNodeData>& nodes) {
     _source = nodes;
-    if (_selectedIndex >= static_cast<int>(_source.size())) {
+    flatten();
+    if (_selectedIndex >= static_cast<int>(_flatData.size())) {
         _selectedIndex = -1;
     }
-    flatten();
     rebuildNodes();
 }
 
@@ -50,7 +57,7 @@ void TreeView::clearTree() {
     _source.clear();
     _flatData.clear();
     _flatToSrc.clear();
-    _pendingDepths.clear();
+    _flatDepths.clear();
     _selectedIndex = -1;
     rebuildNodes();
 }
@@ -58,10 +65,10 @@ void TreeView::clearTree() {
 void TreeView::flatten() {
     _flatData.clear();
     _flatToSrc.clear();
-    _pendingDepths.clear();
+    _flatDepths.clear();
     _flatData.reserve(_source.size());
     _flatToSrc.reserve(_source.size());
-    _pendingDepths.reserve(_source.size());
+    _flatDepths.reserve(_source.size());
 
     // AYUI-Perf-2026-08-26: precompute the parent → [child indices]
     // map once per setTree() so the DFS below does O(1) child lookup
@@ -88,7 +95,7 @@ void TreeView::flatten() {
         if (srcIdx < 0 || srcIdx >= static_cast<int>(_source.size())) return;
         _flatData.push_back(_source[srcIdx]);
         _flatToSrc.push_back(srcIdx);
-        _pendingDepths.push_back(depth);
+        _flatDepths.push_back(depth);
         if (_source[srcIdx].expanded) {
             // AYUI-Perf-2026-08-26: O(1) child lookup via the
             // precomputed parent→children map. The pre-fix code did an
@@ -115,62 +122,52 @@ void TreeView::flatten() {
 }
 
 void TreeView::rebuildNodes() {
-    // Keep a stable pool of row widgets. setTree() is used by model-driven
-    // views and may run every frame; deleting and reallocating every row made
-    // an otherwise O(N) flatten pass dominated by allocator churn.
-    while (_nodes.size() > _flatData.size()) {
+    const float contentH = static_cast<float>(_flatData.size()) * _itemHeight;
+    const bool showVbar = contentH > getHeight() + 0.5f;
+    if (_vbar != nullptr) _vbar->setVisible(showVbar);
+    const float barW = showVbar ? ScrollBar::kDefaultBarWidth : 0.0f;
+    const float rowW = std::max(0.0f, getWidth() - barW);
+    _contentSize = math::FVector2(rowW, contentH);
+    _scrollState.setContentSize(_contentSize);
+
+    const math::FVector2 clamped = ScrollableWidget::clampScrollOffset(
+        _scrollState.getScrollOffset(),
+        math::FVector2(getWidth(), getHeight()), _contentSize);
+    _scrollState.setScrollOffset(clamped);
+
+    const size_t needed = static_cast<size_t>(computePoolSize());
+    while (_nodes.size() > needed) {
         TreeNode* n = _nodes.back();
         _nodes.pop_back();
         if (n == nullptr) continue;
+        if (UIManager* ui = UIManager::tryGet()) {
+            ui->clearHoverNoDispatch(n);
+            ui->clearCaptureNoDispatch(n);
+            ui->clearFocusNoDispatch(n);
+        }
         removeChild(n);
         delete n;
     }
-    while (_nodes.size() < _flatData.size()) {
+    while (_nodes.size() < needed) {
         TreeNode* node = new TreeNode();
         addChild(node);
         _nodes.push_back(node);
     }
-
-    const float contentH = static_cast<float>(_flatData.size()) * _itemHeight;
-    const bool showVbar = contentH > getHeight() + 0.5f;
-    if (_vbar != nullptr) {
-        _vbar->setVisible(showVbar);
-    }
-    const float barW = showVbar ? ScrollBar::kDefaultBarWidth : 0.0f;
-    const float rowW = std::max(0.0f, getWidth() - barW);
-    for (size_t i = 0; i < _flatData.size(); ++i) {
-        TreeNode* node = _nodes[i];
-        node->setLabel(_flatData[i].label);
-        node->setIcon(_flatData[i].icon);
-        node->setHasChildren(_flatData[i].hasChildren);
-        // A pooled node still owns the callback installed for its previous
-        // flat index. Programmatic model synchronisation must be silent:
-        // setExpanded() emits its callback when the value changes, which
-        // would otherwise re-enter toggleExpand()/rebuildNodes() while this
-        // rebuild is in progress (and can recurse until stack overflow when
-        // an inserted child shifts an expanded root to another pool slot).
-        node->setOnExpandToggled({});
-        node->setExpanded(_flatData[i].expanded);
-        // Depth from the parallel handoff vector.
-        const int d = (i < _pendingDepths.size()) ? _pendingDepths[i] : 0;
-        node->setDepth(d);
-        node->_index = static_cast<int>(i);
-        node->setSelected(static_cast<int>(i) == _selectedIndex);
-        node->setSize(math::FVector2(rowW, _itemHeight));
-        node->setOnExpandToggled([this, i](bool) {
-            toggleExpand(static_cast<int>(i));
-        });
-        node->setOnClickByNode([this](int idx) { handleNodeClick(idx); });
-    }
-    _pendingDepths.clear();
-
-    _contentSize = math::FVector2(rowW, contentH);
-    _scrollState.setContentSize(_contentSize);
-    // Content shrink/expand can invalidate the previous offset. Route it
-    // through the same clamp used by wheel and scrollbar input.
-    setScrollOffset(_scrollState.getScrollOffset());
     syncBarToOffset();
-    syncNodePositions();
+    rebindNodes();
+}
+
+void TreeView::setItemHeight(float h) {
+    const float next = std::max(1.0f, h);
+    if (std::fabs(next - _itemHeight) <= 1e-5f) return;
+    _itemHeight = next;
+    rebuildNodes();
+    markBoundsDirty();
+}
+
+int TreeView::getNodePoolLogicalIndex(size_t slot) const {
+    if (slot >= _nodes.size() || _nodes[slot] == nullptr) return -1;
+    return _nodes[slot]->_index;
 }
 
 void TreeView::setSelectedIndex(int idx) {
@@ -179,16 +176,12 @@ void TreeView::setSelectedIndex(int idx) {
     if (clamped >= static_cast<int>(_flatData.size())) clamped = -1;
     if (clamped == _selectedIndex) return;
     // Clear old node's selection.
-    if (_selectedIndex >= 0 &&
-        _selectedIndex < static_cast<int>(_nodes.size()) &&
-        _nodes[_selectedIndex] != nullptr) {
-        _nodes[_selectedIndex]->setSelected(false);
+    if (TreeNode* old = nodeForLogical(_selectedIndex)) {
+        old->setSelected(false);
     }
     _selectedIndex = clamped;
-    if (_selectedIndex >= 0 &&
-        _selectedIndex < static_cast<int>(_nodes.size()) &&
-        _nodes[_selectedIndex] != nullptr) {
-        _nodes[_selectedIndex]->setSelected(true);
+    if (TreeNode* selected = nodeForLogical(_selectedIndex)) {
+        selected->setSelected(true);
     }
     if (_onSelectionChanged) _onSelectionChanged(_selectedIndex);
 }
@@ -200,6 +193,9 @@ void TreeView::toggleExpand(int flatIndex) {
     if (srcIdx < 0 || srcIdx >= static_cast<int>(_source.size())) return;
     _source[srcIdx].expanded = !_source[srcIdx].expanded;
     flatten();
+    if (_selectedIndex >= static_cast<int>(_flatData.size())) {
+        _selectedIndex = -1;
+    }
     rebuildNodes();
     if (_onExpandToggled) {
         _onExpandToggled(flatIndex, _source[srcIdx].expanded);
@@ -221,7 +217,7 @@ void TreeView::setScrollOffset(const math::FVector2& offset) {
         std::fabs(clamped.y - _scrollState.getScrollOffset().y) > 1e-5f) {
         _scrollState.setScrollOffset(clamped);
         syncBarToOffset();
-        syncNodePositions();
+        rebindNodes();
         markDirty();
     }
 }
@@ -232,7 +228,7 @@ bool TreeView::scrollBy(float deltaY) {
         return false;
     }
     syncBarToOffset();
-    syncNodePositions();
+    rebindNodes();
     markDirty();
     return true;
 }
@@ -243,7 +239,7 @@ bool TreeView::onMouseWheel(const UIMouseWheelEvent& e) {
         math::FVector2(0.0f, e.deltaY), vp);
     if (changed) {
         syncBarToOffset();
-        syncNodePositions();
+        rebindNodes();
         markDirty();
     }
     return changed;
@@ -276,13 +272,66 @@ void TreeView::syncBarToOffset() {
                     _scrollState.getScrollOffset().y);
 }
 
-void TreeView::syncNodePositions() {
-    const float yOff = -_scrollState.getScrollOffset().y;
-    for (size_t i = 0; i < _nodes.size(); ++i) {
-        if (_nodes[i] != nullptr) {
-            _nodes[i]->setPosition(math::FVector2(
-                0.0f, static_cast<float>(i) * _itemHeight + yOff));
+int TreeView::computePoolSize() const {
+    return computeVirtualListWindow(
+        _flatData.size(), getHeight(), _itemHeight,
+        _scrollState.getScrollOffset().y).poolSize;
+}
+
+TreeNode* TreeView::nodeForLogical(int index) const {
+    if (index < _firstVisibleIndex) return nullptr;
+    const int slot = index - _firstVisibleIndex;
+    if (slot < 0 || slot >= static_cast<int>(_nodes.size())) return nullptr;
+    TreeNode* node = _nodes[static_cast<size_t>(slot)];
+    return node != nullptr && node->_index == index ? node : nullptr;
+}
+
+void TreeView::rebindNodes() {
+    if (_nodes.empty() || _flatData.empty()) {
+        for (TreeNode* node : _nodes) {
+            if (node != nullptr) node->setVisible(false);
         }
+        _firstVisibleIndex = 0;
+        return;
+    }
+
+    const VirtualListWindow window = computeVirtualListWindow(
+        _flatData.size(), getHeight(), _itemHeight,
+        _scrollState.getScrollOffset().y);
+    _firstVisibleIndex = window.firstIndex;
+    const bool showVbar = _vbar != nullptr && _vbar->isVisible();
+    const float rowW = std::max(0.0f, getWidth()
+        - (showVbar ? ScrollBar::kDefaultBarWidth : 0.0f));
+
+    for (size_t slot = 0; slot < _nodes.size(); ++slot) {
+        TreeNode* node = _nodes[slot];
+        if (node == nullptr) continue;
+        const int logical = _firstVisibleIndex + static_cast<int>(slot);
+        if (logical >= static_cast<int>(_flatData.size())) {
+            node->setVisible(false);
+            node->_index = -1;
+            continue;
+        }
+
+        const TreeNodeData& data = _flatData[static_cast<size_t>(logical)];
+        node->setVisible(true);
+        node->setLabel(data.label);
+        node->setIcon(data.icon);
+        node->setHasChildren(data.hasChildren);
+        node->setOnExpandToggled({});
+        node->setExpanded(data.expanded);
+        node->setDepth(static_cast<size_t>(logical) < _flatDepths.size()
+            ? _flatDepths[static_cast<size_t>(logical)] : 0);
+        node->_index = logical;
+        node->setSelected(logical == _selectedIndex);
+        node->setSize(math::FVector2(rowW, _itemHeight));
+        node->setPosition(math::FVector2(
+            0.0f, static_cast<float>(slot) * _itemHeight
+                - window.leadingOffset));
+        node->setOnExpandToggled([this, logical](bool) {
+            toggleExpand(logical);
+        });
+        node->setOnClickByNode([this](int idx) { handleNodeClick(idx); });
     }
 }
 
@@ -333,6 +382,7 @@ void TreeView::onRender(IRenderBackend& renderer) {
 
 bool TreeView::onMouseButtonUp(const UIMouseEvent& e) {
     if (e.mouseButton != 0) return false;
+    if (!getClientRect().contains(e.mousePos)) return false;
     for (auto it = _nodes.rbegin(); it != _nodes.rend(); ++it) {
         if (*it == nullptr) continue;
         if ((*it)->getWorldBounds().contains(e.mousePos)) {
