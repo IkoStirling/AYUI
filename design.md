@@ -954,6 +954,11 @@ drag/reorder/nesting；清除筛选后继续使用原有拖放语义。搜索文
 - AYUI 单测试采用单 translation unit include 模式；CMake 显式声明全部 `Test_*.cpp` 为
   `main.cpp` 的对象依赖，防止 MSVC/Ninja 漏记 include 后运行陈旧测试二进制。
 - TreeView 千节点性能门槛按测试名统一为单次平均 `< 5ms`，不再误用 50 次总耗时 `< 100ms`。
+- `UILayoutLoader` 暴露最近一次加载的字节数、Widget/ID/深度、parse/build 微秒数和调试堆扫描次数；
+  正常加载路径以回归测试保证 `heapValidationCount == 0`，显式诊断环境变量仍可恢复逐节点堆检查。
+- ListView 与 TreeView 共用 `VirtualListWindow` 可见区计算；TreeView 的逻辑节点数不再决定实体
+  `TreeNode` 数量，只维护 viewport 加 2 行 overscan 的复用池。5000 节点/160 DIP 视口的回归上限为
+  13 个 row Widget，并覆盖滚动重绑、选择保持和 UIManager 瞬态指针清理。
 - 独立 Factory 补齐 Dimmer/Modal/ModalDialog/TabStrip 注册。
 - ScrollView 运行时 scrollbar enable/disable、Box 自然尺寸缓存和多个视觉 setter 的 invalidation。
 - 公共聚合头和 CMake header 清单补齐。
