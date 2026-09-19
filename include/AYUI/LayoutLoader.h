@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,20 @@ class Widget;
 class WidgetFactory;
 class I18n;
 class DockCard;
+
+// Lightweight telemetry for the most recent load attempt. Durations are
+// diagnostic only; callers should use the structural counters for regression
+// checks because wall-clock timings vary across machines and build modes.
+struct UILayoutLoadStats {
+    bool succeeded = false;
+    std::size_t inputBytes = 0;
+    std::size_t widgetCount = 0;
+    std::size_t maxDepth = 0;
+    std::size_t registeredIdCount = 0;
+    std::uint64_t parseMicroseconds = 0;
+    std::uint64_t buildMicroseconds = 0;
+    std::uint64_t heapValidationCount = 0;
+};
 
 class UILayoutLoader {
 public:
@@ -52,6 +67,9 @@ public:
 
     Widget* loadFromFile(const std::string& filepath);
     Widget* loadFromString(const std::string& json);
+    const UILayoutLoadStats& getLastLoadStats() const noexcept {
+        return _lastLoadStats;
+    }
 
     // Stop filesystem watching for the last loaded path (no-op if idle).
     // Layout editors call this after chrome load so Save of a sibling
@@ -137,6 +155,8 @@ private:
     std::unordered_map<std::string, Widget*> _widgetsById;
     std::unordered_set<std::string> _declarativeEventHandlers;
     UIAnimationLibrary _animationLibrary;
+    UILayoutLoadStats _lastLoadStats;
+    std::size_t _buildDepth = 0;
 
     std::string _lastJson;
     std::string _lastFilePath;

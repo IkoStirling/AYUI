@@ -30,6 +30,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -410,6 +411,20 @@ TEST_CASE(test_layout_loader_nested) {
 
     Widget* btn2 = loader.findWidgetById("btn2");
     CHECK(btn2 != nullptr);
+
+    const UILayoutLoadStats& stats = loader.getLastLoadStats();
+    CHECK(stats.succeeded);
+    CHECK(stats.inputBytes == std::char_traits<char>::length(json));
+    CHECK(stats.widgetCount == 3u);
+    CHECK(stats.maxDepth == 2u);
+    CHECK(stats.registeredIdCount == 3u);
+    const char* heapChecks = std::getenv("AY_UI_LOADER_HEAP_CHECK");
+    if (heapChecks == nullptr || heapChecks[0] == '\0'
+        || heapChecks[0] == '0') {
+        // Regression guard for the 12-second Designer startup stall: normal
+        // layout loads must never run a full debug-heap validation per node.
+        CHECK(stats.heapValidationCount == 0u);
+    }
 
     destroyWidgetTree(root);
 }

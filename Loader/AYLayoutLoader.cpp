@@ -72,8 +72,18 @@ using nlohmann::json;
 
 #if defined(_DEBUG) && defined(_MSC_VER)
 #  include <crtdbg.h>
+#endif
 
 namespace {
+
+std::atomic<std::uint64_t> gLoaderHeapValidationCount{0};
+
+std::uint64_t loaderHeapValidationCount() noexcept
+{
+    return gLoaderHeapValidationCount.load(std::memory_order_relaxed);
+}
+
+#if defined(_DEBUG) && defined(_MSC_VER)
 
 bool loaderHeapCheckEnabled()
 {
@@ -86,6 +96,7 @@ bool loaderHeapCheckEnabled()
 
 void loaderHeapCheck(const char* label)
 {
+    gLoaderHeapValidationCount.fetch_add(1, std::memory_order_relaxed);
     if (!_CrtCheckMemory()) {
         // Headless UnitTests hang on _CrtDbgBreak's dialog — log only.
         std::fprintf(stderr, "[LoaderHeapCheck] FAIL at %s\n", label);
@@ -99,21 +110,25 @@ void loaderHeapCheckId(const char* prefix, const char* parentId, const char* chi
     loaderHeapCheck(buf);
 }
 
-} // namespace
 #  define LOADER_HEAP_CHECK(label)                                      \
       do {                                                               \
           if (loaderHeapCheckEnabled()) loaderHeapCheck(label);          \
       } while (false)
-#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId)                    \
+#  define LOADER_HEAP_CHECK_ID(prefix, parentId, childId)                \
       do {                                                               \
           if (loaderHeapCheckEnabled()) {                                \
-              loaderHeapCheckId("after_attach", (parentId), (childId)); \
+              loaderHeapCheckId((prefix), (parentId), (childId));        \
           }                                                              \
       } while (false)
+#  define LOADER_HEAP_CHECK_ATTACH(parentId, childId)                    \
+      LOADER_HEAP_CHECK_ID("after_attach", (parentId), (childId))
 #else
 #  define LOADER_HEAP_CHECK(label) ((void)0)
+#  define LOADER_HEAP_CHECK_ID(prefix, parentId, childId) ((void)0)
 #  define LOADER_HEAP_CHECK_ATTACH(parentId, childId) ((void)0)
 #endif
+
+} // namespace
 
 namespace ayt::ui {
 
@@ -473,6 +488,7 @@ DockCard* UILayoutLoader::buildDockCardFromJson(JsonHandle h) {
 Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
+        _lastLoadStats = {};
         return nullptr;
     }
 
@@ -492,6 +508,8 @@ Widget* UILayoutLoader::loadFromFile(const std::string& filepath) {
     // single-allocation threshold for typical desktop heap budgets.
     constexpr size_t kMaxJsonBytes = 64ULL * 1024 * 1024;
     if (_lastJson.size() > kMaxJsonBytes) {
+        _lastLoadStats = {};
+        _lastLoadStats.inputBytes = _lastJson.size();
         std::fprintf(stderr,
             "[UILayoutLoader] rejecting oversized layout file '%s' "
             "(%zu bytes > 64 MiB cap)\n",
@@ -534,6 +552,15 @@ void UILayoutLoader::stopHotReload() {
 }
 
 Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
+    _lastLoadStats = {};
+    _lastLoadStats.inputBytes = jsonStr.size();
+    _buildDepth = 0;
+    const std::uint64_t heapChecksBefore = loaderHeapValidationCount();
+    const auto refreshHeapValidationCount = [&]() {
+        _lastLoadStats.heapValidationCount =
+            loaderHeapValidationCount() - heapChecksBefore;
+    };
+
     // AYUI-Audit-2026-08-26 DoS: cap the raw payload at 64 MiB before
     // touching nlohmann. Mirrors the loadFromFile check so a malicious
     // or runaway layout JSON cannot exhaust memory regardless of which
@@ -545,6 +572,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         std::fprintf(stderr,
             "[UILayoutLoader] rejecting oversized layout JSON "
             "(%zu bytes > 64 MiB cap)\n", jsonStr.size());
+        refreshHeapValidationCount();
         return nullptr;
     }
 
@@ -568,8 +596,17 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
     oldDeclarativeEventHandlers.swap(_declarativeEventHandlers);
     UIAnimationLibrary oldAnimations = std::move(_animationLibrary);
 
+    const auto parseStart = std::chrono::steady_clock::now();
+    bool parseCompleted = false;
+    auto buildStart = parseStart;
+    bool buildStarted = false;
     try {
         json j = json::parse(jsonStr);
+        const auto parseEnd = std::chrono::steady_clock::now();
+        _lastLoadStats.parseMicroseconds =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<
+                std::chrono::microseconds>(parseEnd - parseStart).count());
+        parseCompleted = true;
         LOADER_HEAP_CHECK("after_json_parse");
         // Reusable authoring documents wrap the runtime root with a local
         // block library. Instances are expanded when inserted, so runtime
@@ -587,8 +624,16 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
                 }
             }
         }
+        buildStart = std::chrono::steady_clock::now();
+        buildStarted = true;
         Widget* root = buildWidgetTree(JsonHandle(rootJson));
+        _lastLoadStats.buildMicroseconds =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<
+                std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - buildStart).count());
+        _lastLoadStats.registeredIdCount = _widgetsById.size();
         if (root == nullptr) {
+            refreshHeapValidationCount();
             _widgetsById = std::move(oldIndex);
             _declarativeEventHandlers =
                 std::move(oldDeclarativeEventHandlers);
@@ -596,6 +641,7 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
             return nullptr;
         }
         LOADER_HEAP_CHECK("after_build_widget_tree");
+        refreshHeapValidationCount();
         // Success: the new tree's buildWidgetTree path already populated
         // _widgetsById during recursion (the early-swap above restored
         // the old map's empty state). Build succeeded; commit the new
@@ -604,9 +650,22 @@ Widget* UILayoutLoader::loadFromString(const std::string& jsonStr) {
         // the new index IS what _widgetsById holds now.)
         (void)oldIndex;
         _animationLibrary = std::move(decodedAnimations);
+        _lastLoadStats.succeeded = true;
         return root;
     }
     catch (const std::exception& e) {
+        const auto failedAt = std::chrono::steady_clock::now();
+        if (!parseCompleted) {
+            _lastLoadStats.parseMicroseconds =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<
+                    std::chrono::microseconds>(failedAt - parseStart).count());
+        } else if (buildStarted) {
+            _lastLoadStats.buildMicroseconds =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<
+                    std::chrono::microseconds>(failedAt - buildStart).count());
+        }
+        _lastLoadStats.registeredIdCount = _widgetsById.size();
+        refreshHeapValidationCount();
         std::fprintf(stderr, "[UILayoutLoader] parse error: %s\n", e.what());
         // Also dump to a fixed file so we can debug when stderr is
         // detached (Gallery AllocConsole + GUI apps lose stderr under
@@ -792,6 +851,14 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     const json& j = jsonRefConst(h);
     if (!j.is_object()) return nullptr;
 
+    struct BuildDepthScope {
+        explicit BuildDepthScope(std::size_t& value) : depth(value) {
+            ++depth;
+        }
+        ~BuildDepthScope() { --depth; }
+        std::size_t& depth;
+    } depthScope(_buildDepth);
+
     std::string type = j.value("type", "Widget");
     std::string id = j.value("id", "");
 
@@ -801,12 +868,11 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                      type.c_str());
         return nullptr;
     }
-#if defined(_DEBUG) && defined(_MSC_VER)
-    if (loaderHeapCheckEnabled()) {
-        loaderHeapCheckId("after_factory_create", type.c_str(),
-                          id.empty() ? "anonymous" : id.c_str());
-    }
-#endif
+    ++_lastLoadStats.widgetCount;
+    _lastLoadStats.maxDepth = std::max(
+        _lastLoadStats.maxDepth, _buildDepth);
+    LOADER_HEAP_CHECK_ID("after_factory_create", type.c_str(),
+                         id.empty() ? "anonymous" : id.c_str());
 
     // ID
     if (!id.empty()) {
