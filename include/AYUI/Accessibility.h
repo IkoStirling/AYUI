@@ -55,6 +55,26 @@ enum class AccessibilityAction : uint8_t {
     Dismiss,
 };
 
+enum class AccessibilityLiveSetting : uint8_t {
+    Off,
+    Polite,
+    Assertive,
+};
+
+enum class AccessibilityTextSpanKind : uint8_t {
+    Text,
+    Paragraph,
+    Link,
+};
+
+struct AccessibilityTextSpan {
+    size_t start = 0;
+    size_t end = 0;
+    AccessibilityTextSpanKind kind = AccessibilityTextSpanKind::Text;
+    std::wstring label;
+    std::wstring target;
+};
+
 enum AccessibilityState : uint32_t {
     AccessibilityState_None          = 0,
     AccessibilityState_Enabled       = 1u << 0,
@@ -90,6 +110,13 @@ struct AccessibilityNode {
     double numericMaximum = 0.0;
     double numericSmallChange = 0.0;
     double numericLargeChange = 0.0;
+    bool hasTextContent = false;
+    bool textReadOnly = true;
+    std::wstring text;
+    size_t textSelectionStart = 0;
+    size_t textSelectionEnd = 0;
+    AccessibilityLiveSetting liveSetting = AccessibilityLiveSetting::Off;
+    std::vector<AccessibilityTextSpan> textSpans;
     std::vector<AccessibilityNode> children;
 };
 

@@ -742,6 +742,19 @@ std::wstring RichText::getSelectedText() const {
     return text.substr(start, end - start);
 }
 
+std::wstring RichText::getLinkTargetAt(size_t textIndex) const {
+    size_t offset = 0;
+    for (const RichRun& run : _runs) {
+        const size_t length = run.text.size();
+        if (textIndex >= offset && textIndex < offset + length
+            && run.semanticKind == RichSemanticKind::Link) {
+            return run.linkTarget;
+        }
+        offset += length;
+    }
+    return {};
+}
+
 RichRun RichText::insertionStyleAt(size_t index) const {
     size_t cursor = 0;
     for (const RichRun& run : _runs) {
@@ -870,6 +883,7 @@ bool RichText::onMouseButtonDown(const UIMouseEvent& e) {
     IRenderBackend* backend = UIManager::tryGet() ? UIManager::tryGet()->backend() : nullptr;
     if (backend == nullptr) return true;
     const size_t index = hitTestTextIndex(*backend, e.mousePos);
+    _pressedLinkTarget = getLinkTargetAt(index);
     const uint32_t mods = UIManager::tryGet()->getModifiers();
     const bool shift = (mods & 1u) != 0u;
     if (!shift) _selectionAnchor = index;
@@ -893,6 +907,14 @@ bool RichText::onMouseMove(const UIMouseEvent& e) {
 bool RichText::onMouseButtonUp(const UIMouseEvent& e) {
     if (e.mouseButton != 0 || !_dragSelecting) return false;
     _dragSelecting = false;
+    IRenderBackend* backend = UIManager::tryGet() ? UIManager::tryGet()->backend() : nullptr;
+    if (backend != nullptr && _selectionAnchor == _caret
+        && !_pressedLinkTarget.empty()
+        && getLinkTargetAt(hitTestTextIndex(*backend, e.mousePos)) == _pressedLinkTarget
+        && _onLinkActivated) {
+        _onLinkActivated(_pressedLinkTarget);
+    }
+    _pressedLinkTarget.clear();
     return true;
 }
 
@@ -1031,6 +1053,7 @@ void RichText::onFocusGained() {
 
 void RichText::onFocusLost() {
     _dragSelecting = false;
+    _pressedLinkTarget.clear();
     _caretVisible = false;
     markDirty();
 }

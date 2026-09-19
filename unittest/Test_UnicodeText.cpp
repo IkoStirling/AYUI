@@ -41,6 +41,18 @@ TEST_CASE(unicode_line_break_keeps_cjk_closing_punctuation_attached) {
     CHECK(a.clusters[2].softBreakAfter);
 }
 
+TEST_CASE(unicode_line_break_table_honors_nonbreaking_and_word_joiner) {
+    const UnicodeTextAnalysis nbsp = analyzeUnicodeText(L"a\u00a0b");
+    CHECK(nbsp.clusters.size() == 3u);
+    CHECK(!nbsp.clusters[0].softBreakAfter);
+    CHECK(!nbsp.clusters[1].softBreakAfter);
+
+    const UnicodeTextAnalysis joiner = analyzeUnicodeText(L"a\u2060b");
+    CHECK(joiner.clusters.size() == 3u);
+    CHECK(!joiner.clusters[0].softBreakAfter);
+    CHECK(!joiner.clusters[1].softBreakAfter);
+}
+
 TEST_CASE(unicode_bidi_reorders_pure_rtl_line_visually) {
     const UnicodeTextAnalysis a = analyzeUnicodeText(
         L"\x05d0\x05d1\x05d2", TextDirection::RightToLeft);

@@ -16,6 +16,7 @@ enum class RichTextAlignment { Left, Center, Right, Justify };
 enum class RichTextVerticalAlignment { Top, Center, Bottom };
 enum class RichTextOverflow { Clip, Ellipsis };
 enum class RichInlineKind { None, Image, Widget };
+enum class RichSemanticKind { Text, Paragraph, Link };
 
 struct RichRun {
     std::wstring text;
@@ -38,6 +39,9 @@ struct RichRun {
     void* inlineTexture = nullptr; // runtime-only; never serialized
     math::FRectangle inlineUv = math::FRectangle(0, 0, 1, 1);
     Widget* inlineWidget = nullptr; // runtime-only; externally owned
+    RichSemanticKind semanticKind = RichSemanticKind::Text;
+    std::wstring semanticLabel;
+    std::wstring linkTarget;
 };
 
 struct RichTextFragment {
@@ -142,6 +146,10 @@ public:
     size_t getSelectionEnd() const { return std::max(_selectionAnchor, _caret); }
     size_t getCaretIndex() const { return _caret; }
     std::wstring getSelectedText() const;
+    std::wstring getLinkTargetAt(size_t textIndex) const;
+    void setOnLinkActivated(std::function<void(const std::wstring&)> callback) {
+        _onLinkActivated = std::move(callback);
+    }
     bool replaceSelection(const std::wstring& text);
     bool undo();
     bool redo();
@@ -215,6 +223,8 @@ private:
     size_t _compositionStart = 0;
     size_t _compositionLength = 0;
     std::function<void(const std::wstring&)> _onTextChanged;
+    std::function<void(const std::wstring&)> _onLinkActivated;
+    std::wstring _pressedLinkTarget;
 };
 
 Widget* createRichTextWidget();

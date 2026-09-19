@@ -10,6 +10,8 @@
 #include "AYUI/ScrollBar.h"
 #include "AYUI/Style.h"
 #include "AYUI/TabStrip.h"
+#include "AYUI/TextArea.h"
+#include "AYUI/TextInput.h"
 #include "AYUI/Theme.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/WidgetSerializer.h"
@@ -241,6 +243,7 @@ TEST_CASE(accessibility_metadata_round_trips_through_serializer) {
     original.setAccessibilityRole(AccessibilityRole::MenuItem);
     original.setAccessibilityLabel(L"Open recent");
     original.setAccessibilityDescription(L"Opens the recent project list");
+    original.setAccessibilityLiveSetting(AccessibilityLiveSetting::Polite);
     const std::string json = WidgetSerializer::serializeWidget(&original);
     Widget* restored = WidgetSerializer::deserialize(json);
     CHECK_NOT_NULL(restored);
@@ -248,7 +251,121 @@ TEST_CASE(accessibility_metadata_round_trips_through_serializer) {
     CHECK(restored->getAccessibilityRole() == AccessibilityRole::MenuItem);
     CHECK(restored->getAccessibilityLabel() == L"Open recent");
     CHECK(restored->getAccessibilityDescription() == L"Opens the recent project list");
+    CHECK(restored->getAccessibilityLiveSetting() == AccessibilityLiveSetting::Polite);
     destroyWidgetTree(restored);
+}
+
+TEST_CASE(accessibility_text_ranges_track_selection_and_live_updates) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(480, 240);
+
+    TextInput input;
+    input.setText(L"alpha beta");
+    input.setSelection(1, 5);
+    input.setAccessibilityLiveSetting(AccessibilityLiveSetting::Polite);
+    input.setSize(FVector2(180, 28));
+    ui.root()->addChildExternal(&input);
+
+    AccessibilityNode tree = ui.buildAccessibilityTree();
+    const AccessibilityNode* node = findSemanticNode(tree, input.getAccessibilityId());
+    CHECK_NOT_NULL(node);
+    if (node != nullptr) {
+        CHECK(node->hasTextContent);
+        CHECK(!node->textReadOnly);
+        CHECK(node->text == L"alpha beta");
+        CHECK(node->textSelectionStart == 1u);
+        CHECK(node->textSelectionEnd == 5u);
+        CHECK(node->liveSetting == AccessibilityLiveSetting::Polite);
+    }
+
+    auto adapter = createNativeAccessibilityAdapter(ui, nullptr);
+    input.setSelection(6, 10);
+    adapter->update();
+    size_t selectionChanges = 0;
+    for (const AccessibilityChange& change : adapter->changes()) {
+        if (change.nodeId == input.getAccessibilityId()
+            && change.kind == AccessibilityChangeKind::TextSelection) {
+            ++selectionChanges;
+        }
+    }
+    CHECK(selectionChanges == 1u);
+
+    input.setText(L"updated");
+    adapter->update();
+    size_t liveChanges = 0;
+    for (const AccessibilityChange& change : adapter->changes()) {
+        if (change.nodeId == input.getAccessibilityId()
+            && change.kind == AccessibilityChangeKind::LiveRegion) {
+            ++liveChanges;
+        }
+    }
+    CHECK(liveChanges == 1u);
+    CHECK(ui.setAccessibilityTextSelection(input.getAccessibilityId(), 1, 4));
+    CHECK(input.getSelectionStart() == 1u);
+    CHECK(input.getSelectionEnd() == 4u);
+    adapter.reset();
+    ui.shutdown();
+}
+
+TEST_CASE(accessibility_exposes_textarea_offsets_and_rich_semantic_ranges) {
+    MockRenderer renderer;
+    UIManager ui;
+    ui.initialize(&renderer);
+    ui.setClientSize(640, 320);
+
+    TextArea area;
+    area.setText(L"first\nsecond");
+    area.setSelection(0, 2, 1, 3);
+    area.setSize(FVector2(220, 100));
+    ui.root()->addChildExternal(&area);
+
+    RichText rich;
+    RichRun paragraph;
+    paragraph.text = L"Read ";
+    paragraph.semanticKind = RichSemanticKind::Paragraph;
+    paragraph.semanticLabel = L"Introduction";
+    rich.addRun(paragraph);
+    RichRun link;
+    link.text = L"documentation";
+    link.semanticKind = RichSemanticKind::Link;
+    link.linkTarget = L"docs://getting-started";
+    rich.addRun(link);
+    rich.setSelection(5, 18);
+    rich.setPosition(FVector2(0, 120));
+    rich.setSize(FVector2(300, 40));
+    ui.root()->addChildExternal(&rich);
+
+    const AccessibilityNode tree = ui.buildAccessibilityTree();
+    const AccessibilityNode* areaNode = findSemanticNode(tree, area.getAccessibilityId());
+    const AccessibilityNode* richNode = findSemanticNode(tree, rich.getAccessibilityId());
+    CHECK_NOT_NULL(areaNode);
+    CHECK_NOT_NULL(richNode);
+    if (areaNode != nullptr) {
+        CHECK(areaNode->textSelectionStart == 2u);
+        CHECK(areaNode->textSelectionEnd == 9u);
+    }
+    if (richNode != nullptr) {
+        CHECK(richNode->text == L"Read documentation");
+        CHECK(richNode->textSpans.size() == 2u);
+        CHECK(richNode->textSpans[0].kind == AccessibilityTextSpanKind::Paragraph);
+        CHECK(richNode->textSpans[1].kind == AccessibilityTextSpanKind::Link);
+        CHECK(richNode->textSpans[1].target == L"docs://getting-started");
+    }
+
+    const std::string encoded = WidgetSerializer::serializeWidget(&rich);
+    Widget* restoredWidget = WidgetSerializer::deserialize(encoded);
+    auto* restored = dynamic_cast<RichText*>(restoredWidget);
+    CHECK_NOT_NULL(restored);
+    if (restored != nullptr && restored->getRunCount() == 2u) {
+        CHECK(restored->getRun(0).semanticKind == RichSemanticKind::Paragraph);
+        CHECK(restored->getRun(0).semanticLabel == L"Introduction");
+        CHECK(restored->getRun(1).semanticKind == RichSemanticKind::Link);
+        CHECK(restored->getRun(1).linkTarget == L"docs://getting-started");
+    }
+    destroyWidgetTree(restoredWidget);
+    ui.shutdown();
 }
 
 TEST_CASE(theme_inherits_parent_tokens_and_child_overrides) {

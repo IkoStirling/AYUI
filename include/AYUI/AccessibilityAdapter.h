@@ -18,6 +18,9 @@ enum class AccessibilityChangeKind : uint8_t {
     Bounds,
     State,
     Focus,
+    TextContent,
+    TextSelection,
+    LiveRegion,
 };
 
 struct AccessibilityChange {

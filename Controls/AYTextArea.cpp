@@ -975,6 +975,57 @@ bool TextArea::hasSelection() const {
     return _selStartLine != _selEndLine || _selStartCol != _selEndCol;
 }
 
+size_t TextArea::getCaretTextOffset() const {
+    size_t offset = 0;
+    for (int line = 0; line < _caretLine; ++line) {
+        offset += _lines[static_cast<size_t>(line)].size() + 1u;
+    }
+    return offset + static_cast<size_t>(_caretCol);
+}
+
+namespace {
+size_t textAreaOffset(const std::vector<std::wstring>& lines, int line, int col) {
+    line = std::clamp(line, 0, static_cast<int>(lines.size()) - 1);
+    size_t offset = 0;
+    for (int i = 0; i < line; ++i) offset += lines[static_cast<size_t>(i)].size() + 1u;
+    return offset + std::min(static_cast<size_t>(std::max(0, col)),
+                             lines[static_cast<size_t>(line)].size());
+}
+
+std::pair<int, int> textAreaPosition(const std::vector<std::wstring>& lines,
+                                     size_t offset) {
+    for (size_t line = 0; line < lines.size(); ++line) {
+        if (offset <= lines[line].size()) {
+            return {static_cast<int>(line), static_cast<int>(offset)};
+        }
+        offset -= lines[line].size();
+        if (line + 1u < lines.size()) {
+            if (offset == 0) return {static_cast<int>(line),
+                                     static_cast<int>(lines[line].size())};
+            --offset;
+        }
+    }
+    return {static_cast<int>(lines.size()) - 1,
+            static_cast<int>(lines.back().size())};
+}
+} // namespace
+
+size_t TextArea::getSelectionStartTextOffset() const {
+    return std::min(textAreaOffset(_lines, _selStartLine, _selStartCol),
+                    textAreaOffset(_lines, _selEndLine, _selEndCol));
+}
+
+size_t TextArea::getSelectionEndTextOffset() const {
+    return std::max(textAreaOffset(_lines, _selStartLine, _selStartCol),
+                    textAreaOffset(_lines, _selEndLine, _selEndCol));
+}
+
+void TextArea::setSelectionByTextOffset(size_t start, size_t end) {
+    const auto first = textAreaPosition(_lines, start);
+    const auto last = textAreaPosition(_lines, end);
+    setSelection(first.first, first.second, last.first, last.second);
+}
+
 // PR-A2: get the currently-selected text as a single wstring (lines
 // joined by '\n'). Selection is internal-ordered so start <= end per
 // axis (setSelection enforces that). Used by TextDocument::onKeyDown's

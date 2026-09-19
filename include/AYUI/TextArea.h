@@ -103,6 +103,10 @@ public:
     void clearSelection();
     void selectAll();
     bool hasSelection() const;
+    size_t getCaretTextOffset() const;
+    size_t getSelectionStartTextOffset() const;
+    size_t getSelectionEndTextOffset() const;
+    void setSelectionByTextOffset(size_t start, size_t end);
     // PR-A2: read the currently-selected text as a single wstring, with
     // line boundaries joined by '\n'. Returns empty when no selection
     // is active. Used by TextDocument::onKeyDown's Ctrl+C / Ctrl+X paths.

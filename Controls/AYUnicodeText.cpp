@@ -224,6 +224,59 @@ bool isBreakPunctuation(uint32_t cp) {
         || cp == 0x2014u;
 }
 
+enum class LineBreakClass : uint8_t {
+    Alphabetic,
+    Space,
+    Mandatory,
+    Glue,
+    WordJoiner,
+    Opening,
+    Closing,
+    Hyphen,
+    Ideographic,
+};
+
+struct LineBreakRange {
+    uint32_t first;
+    uint32_t last;
+    LineBreakClass value;
+};
+
+// Compact, ordered subset of the Unicode Line_Break property table used by
+// the portable path. Windows still augments these results with Uniscribe.
+// The table deliberately covers the classes that change boundary decisions;
+// unlisted code points use the alphabetic fallback.
+constexpr LineBreakRange kLineBreakRanges[] = {
+    {0x0009u, 0x0009u, LineBreakClass::Space},
+    {0x000au, 0x000au, LineBreakClass::Mandatory},
+    {0x000du, 0x000du, LineBreakClass::Mandatory},
+    {0x0020u, 0x0020u, LineBreakClass::Space},
+    {0x00a0u, 0x00a0u, LineBreakClass::Glue},
+    {0x1680u, 0x1680u, LineBreakClass::Space},
+    {0x2000u, 0x200au, LineBreakClass::Space},
+    {0x200bu, 0x200bu, LineBreakClass::Space},
+    {0x2028u, 0x2029u, LineBreakClass::Mandatory},
+    {0x202fu, 0x202fu, LineBreakClass::Glue},
+    {0x205fu, 0x205fu, LineBreakClass::Space},
+    {0x2060u, 0x2060u, LineBreakClass::WordJoiner},
+    {0x2e80u, 0x9fffu, LineBreakClass::Ideographic},
+    {0xac00u, 0xd7a3u, LineBreakClass::Ideographic},
+    {0xf900u, 0xfaffu, LineBreakClass::Ideographic},
+    {0xfeffu, 0xfeffu, LineBreakClass::WordJoiner},
+    {0x1f000u, 0x1faffu, LineBreakClass::Ideographic},
+    {0x20000u, 0x323afu, LineBreakClass::Ideographic},
+};
+
+LineBreakClass lineBreakClass(uint32_t cp) {
+    if (isOpeningPunctuation(cp)) return LineBreakClass::Opening;
+    if (isClosingPunctuation(cp)) return LineBreakClass::Closing;
+    if (isBreakPunctuation(cp)) return LineBreakClass::Hyphen;
+    for (const LineBreakRange& range : kLineBreakRanges) {
+        if (cp >= range.first && cp <= range.last) return range.value;
+    }
+    return LineBreakClass::Alphabetic;
+}
+
 size_t codePointIndexAt(const std::vector<CodePoint>& cps, size_t textIndex) {
     const auto it = std::upper_bound(cps.begin(), cps.end(), textIndex,
         [](size_t value, const CodePoint& cp) { return value < cp.start; });
@@ -443,14 +496,24 @@ UnicodeTextAnalysis analyzeUnicodeText(const std::wstring& text,
         UnicodeTextCluster& cluster = out.clusters[i];
         const size_t cpIndex = codePointIndexAt(cps, cluster.textStart);
         const uint32_t cp = cps[cpIndex].value;
-        cluster.softBreakAfter = cluster.hardBreak || cluster.whitespace
-            || isBreakPunctuation(cp);
+        const LineBreakClass currentClass = lineBreakClass(cp);
+        cluster.softBreakAfter = currentClass == LineBreakClass::Mandatory
+            || currentClass == LineBreakClass::Space
+            || currentClass == LineBreakClass::Hyphen;
         if (i + 1 < out.clusters.size()) {
             const size_t nextCpIndex = codePointIndexAt(cps, out.clusters[i + 1].textStart);
             const uint32_t next = cps[nextCpIndex].value;
-            if (isOpeningPunctuation(cp) || isClosingPunctuation(next)) {
+            const LineBreakClass nextClass = lineBreakClass(next);
+            if (currentClass == LineBreakClass::WordJoiner
+                || nextClass == LineBreakClass::WordJoiner
+                || currentClass == LineBreakClass::Glue
+                || nextClass == LineBreakClass::Glue
+                || currentClass == LineBreakClass::Opening
+                || nextClass == LineBreakClass::Closing) {
                 cluster.softBreakAfter = false;
-            } else if (isClosingPunctuation(cp) || (isCjk(cp) && isCjk(next))) {
+            } else if (currentClass == LineBreakClass::Closing
+                       || (currentClass == LineBreakClass::Ideographic
+                           && nextClass == LineBreakClass::Ideographic)) {
                 cluster.softBreakAfter = true;
             }
         }

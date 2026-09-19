@@ -1,9 +1,11 @@
 #include "AYUI/AccessibilityAdapter.h"
 #include "AYUI/UIManager.h"
+#include "AYUI/UnicodeText.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cwctype>
 #include <mutex>
 #include <unordered_map>
 
@@ -70,6 +72,18 @@ bool sameNumericValue(const AccessibilityNode& left,
         && left.numericLargeChange == right.numericLargeChange;
 }
 
+bool sameTextSpans(const AccessibilityNode& left,
+                   const AccessibilityNode& right) {
+    if (left.textSpans.size() != right.textSpans.size()) return false;
+    for (size_t i = 0; i < left.textSpans.size(); ++i) {
+        const AccessibilityTextSpan& a = left.textSpans[i];
+        const AccessibilityTextSpan& b = right.textSpans[i];
+        if (a.start != b.start || a.end != b.end || a.kind != b.kind
+            || a.label != b.label || a.target != b.target) return false;
+    }
+    return true;
+}
+
 void appendChanges(const FlatAccessibilityTree& oldTree,
                    const FlatAccessibilityTree& newTree,
                    std::vector<AccessibilityChange>& out) {
@@ -98,6 +112,22 @@ void appendChanges(const FlatAccessibilityTree& oldTree,
             || !sameNumericValue(previous.node, current.node)) {
             out.push_back({AccessibilityChangeKind::Value, id});
         }
+        if (previous.node.hasTextContent != current.node.hasTextContent
+            || previous.node.text != current.node.text
+            || !sameTextSpans(previous.node, current.node)) {
+            out.push_back({AccessibilityChangeKind::TextContent, id});
+        }
+        if (previous.node.textSelectionStart != current.node.textSelectionStart
+            || previous.node.textSelectionEnd != current.node.textSelectionEnd) {
+            out.push_back({AccessibilityChangeKind::TextSelection, id});
+        }
+        if (current.node.liveSetting != AccessibilityLiveSetting::Off
+            && (previous.node.label != current.node.label
+                || previous.node.description != current.node.description
+                || previous.node.value != current.node.value
+                || previous.node.text != current.node.text)) {
+            out.push_back({AccessibilityChangeKind::LiveRegion, id});
+        }
         if (!sameBounds(previous.node.bounds, current.node.bounds)) {
             out.push_back({AccessibilityChangeKind::Bounds, id});
         }
@@ -124,13 +154,15 @@ void appendChanges(const FlatAccessibilityTree& oldTree,
 
 constexpr UINT kAccessibilityActionMessage = WM_APP + 0x35A;
 
-enum class NativeActionKind : uint8_t { Semantic, Numeric };
+enum class NativeActionKind : uint8_t { Semantic, Numeric, TextSelection };
 
 struct NativeActionRequest {
     NativeActionKind kind = NativeActionKind::Semantic;
     uint64_t nodeId = 0;
     AccessibilityAction action = AccessibilityAction::Focus;
     double value = 0.0;
+    size_t textStart = 0;
+    size_t textEnd = 0;
     bool result = false;
 };
 
@@ -195,6 +227,32 @@ struct WindowsAccessibilityState {
         request.kind = NativeActionKind::Numeric;
         request.nodeId = id;
         request.value = value;
+        ::SendMessageW(targetWindow, kAccessibilityActionMessage,
+                       reinterpret_cast<WPARAM>(&request), 0);
+        return request.result;
+    }
+
+    bool setTextSelection(uint64_t id, size_t start, size_t end) {
+        UIManager* target = nullptr;
+        HWND targetWindow = nullptr;
+        DWORD targetThread = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!alive) return false;
+            target = manager;
+            targetWindow = window;
+            targetThread = ownerThread;
+        }
+        if (target == nullptr) return false;
+        if (::GetCurrentThreadId() == targetThread) {
+            return target->setAccessibilityTextSelection(id, start, end);
+        }
+        if (targetWindow == nullptr || !::IsWindow(targetWindow)) return false;
+        NativeActionRequest request;
+        request.kind = NativeActionKind::TextSelection;
+        request.nodeId = id;
+        request.textStart = start;
+        request.textEnd = end;
         ::SendMessageW(targetWindow, kAccessibilityActionMessage,
                        reinterpret_cast<WPARAM>(&request), 0);
         return request.result;
@@ -322,6 +380,54 @@ void setVariantDouble(VARIANT* value, double number) {
     value->dblVal = number;
 }
 
+class WindowsUiaProvider;
+
+class WindowsUiaTextRangeProvider final : public ITextRangeProvider {
+public:
+    WindowsUiaTextRangeProvider(std::shared_ptr<WindowsAccessibilityState> state,
+                                uint64_t nodeId, size_t start, size_t end);
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override;
+    ULONG STDMETHODCALLTYPE AddRef() override;
+    ULONG STDMETHODCALLTYPE Release() override;
+    HRESULT STDMETHODCALLTYPE Clone(ITextRangeProvider** value) override;
+    HRESULT STDMETHODCALLTYPE Compare(ITextRangeProvider* range, BOOL* value) override;
+    HRESULT STDMETHODCALLTYPE CompareEndpoints(TextPatternRangeEndpoint endpoint,
+        ITextRangeProvider* targetRange, TextPatternRangeEndpoint targetEndpoint,
+        int* value) override;
+    HRESULT STDMETHODCALLTYPE ExpandToEnclosingUnit(TextUnit unit) override;
+    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID attributeId, VARIANT value,
+        BOOL backward, ITextRangeProvider** result) override;
+    HRESULT STDMETHODCALLTYPE FindText(BSTR text, BOOL backward, BOOL ignoreCase,
+        ITextRangeProvider** result) override;
+    HRESULT STDMETHODCALLTYPE GetAttributeValue(TEXTATTRIBUTEID attributeId,
+        VARIANT* value) override;
+    HRESULT STDMETHODCALLTYPE GetBoundingRectangles(SAFEARRAY** value) override;
+    HRESULT STDMETHODCALLTYPE GetEnclosingElement(IRawElementProviderSimple** value) override;
+    HRESULT STDMETHODCALLTYPE GetText(int maxLength, BSTR* value) override;
+    HRESULT STDMETHODCALLTYPE Move(TextUnit unit, int count, int* moved) override;
+    HRESULT STDMETHODCALLTYPE MoveEndpointByUnit(TextPatternRangeEndpoint endpoint,
+        TextUnit unit, int count, int* moved) override;
+    HRESULT STDMETHODCALLTYPE MoveEndpointByRange(TextPatternRangeEndpoint endpoint,
+        ITextRangeProvider* targetRange, TextPatternRangeEndpoint targetEndpoint) override;
+    HRESULT STDMETHODCALLTYPE Select() override;
+    HRESULT STDMETHODCALLTYPE AddToSelection() override;
+    HRESULT STDMETHODCALLTYPE RemoveFromSelection() override;
+    HRESULT STDMETHODCALLTYPE ScrollIntoView(BOOL alignToTop) override;
+    HRESULT STDMETHODCALLTYPE GetChildren(SAFEARRAY** value) override;
+
+private:
+    bool readNode(AccessibilityNode& node) const;
+    size_t endpoint(TextPatternRangeEndpoint which) const;
+    void setEndpoint(TextPatternRangeEndpoint which, size_t value);
+    size_t movePosition(const std::wstring& text, size_t position,
+                        TextUnit unit, int direction) const;
+    std::atomic<ULONG> _references{1};
+    std::shared_ptr<WindowsAccessibilityState> _state;
+    uint64_t _nodeId = 0;
+    size_t _start = 0;
+    size_t _end = 0;
+};
+
 class WindowsUiaProvider final : public IRawElementProviderSimple,
                                  public IRawElementProviderFragment,
                                  public IRawElementProviderFragmentRoot,
@@ -329,7 +435,8 @@ class WindowsUiaProvider final : public IRawElementProviderSimple,
                                  public IToggleProvider,
                                  public IRangeValueProvider,
                                  public IExpandCollapseProvider,
-                                 public ISelectionItemProvider {
+                                 public ISelectionItemProvider,
+                                 public ITextProvider {
 public:
     WindowsUiaProvider(std::shared_ptr<WindowsAccessibilityState> state,
                        uint64_t nodeId)
@@ -362,6 +469,9 @@ public:
         } else if (available && iid == IID_ISelectionItemProvider
                    && hasAction(record.node, AccessibilityAction::Select)) {
             *object = static_cast<ISelectionItemProvider*>(this);
+        } else if (available && iid == IID_ITextProvider
+                   && record.node.hasTextContent) {
+            *object = static_cast<ITextProvider*>(this);
         } else {
             return E_NOINTERFACE;
         }
@@ -401,6 +511,7 @@ public:
         if (pattern == UIA_SelectionItemPatternId) {
             return queryPattern(IID_ISelectionItemProvider);
         }
+        if (pattern == UIA_TextPatternId) return queryPattern(IID_ITextProvider);
         return S_OK;
     }
 
@@ -450,6 +561,14 @@ public:
                                   || hasAction(node, AccessibilityAction::Collapse)); break;
         case UIA_IsSelectionItemPatternAvailablePropertyId:
             setVariantBool(value, hasAction(node, AccessibilityAction::Select)); break;
+        case UIA_IsTextPatternAvailablePropertyId:
+            setVariantBool(value, node.hasTextContent); break;
+        case UIA_LiveSettingPropertyId:
+            setVariantInt(value, node.liveSetting == AccessibilityLiveSetting::Assertive
+                ? 2
+                : (node.liveSetting == AccessibilityLiveSetting::Polite
+                    ? 1 : 0));
+            break;
         case UIA_ToggleToggleStatePropertyId:
             setVariantInt(value, (node.states & AccessibilityState_Indeterminate)
                 ? ToggleState_Indeterminate
@@ -655,6 +774,79 @@ public:
         return S_OK;
     }
 
+    HRESULT STDMETHODCALLTYPE GetSelection(SAFEARRAY** value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = nullptr;
+        FlatAccessibilityNode record;
+        if (!_state || !_state->getNode(_nodeId, record)) return UIA_E_ELEMENTNOTAVAILABLE;
+        if (!record.node.hasTextContent) return UIA_E_NOTSUPPORTED;
+        *value = ::SafeArrayCreateVector(VT_UNKNOWN, 0, 1);
+        if (*value == nullptr) return E_OUTOFMEMORY;
+        IUnknown* range = static_cast<ITextRangeProvider*>(new WindowsUiaTextRangeProvider(
+            _state, _nodeId, record.node.textSelectionStart,
+            record.node.textSelectionEnd));
+        LONG index = 0;
+        const HRESULT hr = ::SafeArrayPutElement(*value, &index, range);
+        range->Release();
+        if (FAILED(hr)) { ::SafeArrayDestroy(*value); *value = nullptr; }
+        return hr;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetVisibleRanges(SAFEARRAY** value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = nullptr;
+        FlatAccessibilityNode record;
+        if (!_state || !_state->getNode(_nodeId, record)) return UIA_E_ELEMENTNOTAVAILABLE;
+        *value = ::SafeArrayCreateVector(VT_UNKNOWN, 0, 1);
+        if (*value == nullptr) return E_OUTOFMEMORY;
+        IUnknown* range = static_cast<ITextRangeProvider*>(new WindowsUiaTextRangeProvider(
+            _state, _nodeId, 0, record.node.text.size()));
+        LONG index = 0;
+        const HRESULT hr = ::SafeArrayPutElement(*value, &index, range);
+        range->Release();
+        if (FAILED(hr)) { ::SafeArrayDestroy(*value); *value = nullptr; }
+        return hr;
+    }
+
+    HRESULT STDMETHODCALLTYPE RangeFromChild(IRawElementProviderSimple*,
+                                              ITextRangeProvider** value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = nullptr;
+        return UIA_E_NOTSUPPORTED;
+    }
+
+    HRESULT STDMETHODCALLTYPE RangeFromPoint(UiaPoint point,
+                                              ITextRangeProvider** value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = nullptr;
+        FlatAccessibilityNode record;
+        if (!_state || !_state->getNode(_nodeId, record)) return UIA_E_ELEMENTNOTAVAILABLE;
+        const UiaRect bounds = _state->screenBounds(record.node.bounds);
+        const double ratio = bounds.width <= 0.0 ? 0.0
+            : std::clamp((point.x - bounds.left) / bounds.width, 0.0, 1.0);
+        const size_t position = floorGraphemeBoundary(record.node.text,
+            static_cast<size_t>(ratio * static_cast<double>(record.node.text.size())));
+        *value = new WindowsUiaTextRangeProvider(_state, _nodeId, position, position);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_DocumentRange(ITextRangeProvider** value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = nullptr;
+        FlatAccessibilityNode record;
+        if (!_state || !_state->getNode(_nodeId, record)) return UIA_E_ELEMENTNOTAVAILABLE;
+        *value = new WindowsUiaTextRangeProvider(
+            _state, _nodeId, 0, record.node.text.size());
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_SupportedTextSelection(
+        SupportedTextSelection* value) override {
+        if (value == nullptr) return E_POINTER;
+        *value = SupportedTextSelection_Single;
+        return S_OK;
+    }
+
 private:
     HRESULT invokeAction(AccessibilityAction action) {
         FlatAccessibilityNode record;
@@ -683,6 +875,287 @@ private:
     std::shared_ptr<WindowsAccessibilityState> _state;
     uint64_t _nodeId = 0;
 };
+
+WindowsUiaTextRangeProvider::WindowsUiaTextRangeProvider(
+    std::shared_ptr<WindowsAccessibilityState> state, uint64_t nodeId,
+    size_t start, size_t end)
+    : _state(std::move(state)), _nodeId(nodeId),
+      _start(std::min(start, end)), _end(std::max(start, end)) {}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::QueryInterface(
+    REFIID iid, void** object) {
+    if (object == nullptr) return E_POINTER;
+    *object = nullptr;
+    if (iid == IID_IUnknown || iid == IID_ITextRangeProvider) {
+        *object = static_cast<ITextRangeProvider*>(this);
+        AddRef();
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+ULONG STDMETHODCALLTYPE WindowsUiaTextRangeProvider::AddRef() { return ++_references; }
+ULONG STDMETHODCALLTYPE WindowsUiaTextRangeProvider::Release() {
+    const ULONG remaining = --_references;
+    if (remaining == 0) delete this;
+    return remaining;
+}
+
+bool WindowsUiaTextRangeProvider::readNode(AccessibilityNode& node) const {
+    FlatAccessibilityNode record;
+    if (!_state || !_state->getNode(_nodeId, record) || !record.node.hasTextContent) {
+        return false;
+    }
+    node = std::move(record.node);
+    return true;
+}
+
+size_t WindowsUiaTextRangeProvider::endpoint(TextPatternRangeEndpoint which) const {
+    return which == TextPatternRangeEndpoint_Start ? _start : _end;
+}
+
+void WindowsUiaTextRangeProvider::setEndpoint(TextPatternRangeEndpoint which,
+                                               size_t value) {
+    if (which == TextPatternRangeEndpoint_Start) {
+        _start = value;
+        if (_start > _end) _end = _start;
+    } else {
+        _end = value;
+        if (_end < _start) _start = _end;
+    }
+}
+
+size_t WindowsUiaTextRangeProvider::movePosition(const std::wstring& text,
+                                                  size_t position,
+                                                  TextUnit unit,
+                                                  int direction) const {
+    position = std::min(position, text.size());
+    if (direction == 0) return position;
+    if (unit == TextUnit_Character || unit == TextUnit_Format) {
+        return direction > 0 ? nextGraphemeBoundary(text, position)
+                             : previousGraphemeBoundary(text, position);
+    }
+    if (unit == TextUnit_Word) {
+        if (direction > 0) {
+            while (position < text.size() && !std::iswspace(text[position])) ++position;
+            while (position < text.size() && std::iswspace(text[position])) ++position;
+        } else {
+            while (position > 0 && std::iswspace(text[position - 1u])) --position;
+            while (position > 0 && !std::iswspace(text[position - 1u])) --position;
+        }
+        return floorGraphemeBoundary(text, position);
+    }
+    if (unit == TextUnit_Line || unit == TextUnit_Paragraph) {
+        if (direction > 0) {
+            const size_t newline = text.find(L'\n', position);
+            return newline == std::wstring::npos ? text.size() : newline + 1u;
+        }
+        if (position > 0) --position;
+        const size_t newline = text.rfind(L'\n', position == 0 ? 0 : position - 1u);
+        return newline == std::wstring::npos ? 0u : newline + 1u;
+    }
+    return direction > 0 ? text.size() : 0u;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::Clone(
+    ITextRangeProvider** value) {
+    if (value == nullptr) return E_POINTER;
+    *value = new WindowsUiaTextRangeProvider(_state, _nodeId, _start, _end);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::Compare(
+    ITextRangeProvider* range, BOOL* value) {
+    if (value == nullptr) return E_POINTER;
+    const auto* other = dynamic_cast<WindowsUiaTextRangeProvider*>(range);
+    *value = other != nullptr && other->_nodeId == _nodeId
+        && other->_start == _start && other->_end == _end ? TRUE : FALSE;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::CompareEndpoints(
+    TextPatternRangeEndpoint endpointValue, ITextRangeProvider* targetRange,
+    TextPatternRangeEndpoint targetEndpoint, int* value) {
+    if (value == nullptr || targetRange == nullptr) return E_POINTER;
+    const auto* other = dynamic_cast<WindowsUiaTextRangeProvider*>(targetRange);
+    if (other == nullptr || other->_nodeId != _nodeId) return E_INVALIDARG;
+    const size_t left = endpoint(endpointValue);
+    const size_t right = other->endpoint(targetEndpoint);
+    *value = left < right ? -1 : (left > right ? 1 : 0);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::ExpandToEnclosingUnit(TextUnit unit) {
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    _start = std::min(_start, node.text.size());
+    if (unit == TextUnit_Character || unit == TextUnit_Format) {
+        _start = floorGraphemeBoundary(node.text, _start);
+        _end = nextGraphemeBoundary(node.text, _start);
+    } else if (unit == TextUnit_Word) {
+        _start = movePosition(node.text, _start, TextUnit_Word, -1);
+        _end = movePosition(node.text, _start, TextUnit_Word, 1);
+    } else if (unit == TextUnit_Line || unit == TextUnit_Paragraph) {
+        _start = movePosition(node.text, _start, unit, -1);
+        _end = movePosition(node.text, _start, unit, 1);
+    } else {
+        _start = 0;
+        _end = node.text.size();
+    }
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::FindAttribute(
+    TEXTATTRIBUTEID, VARIANT, BOOL, ITextRangeProvider** result) {
+    if (result == nullptr) return E_POINTER;
+    *result = nullptr;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::FindText(
+    BSTR needle, BOOL backward, BOOL ignoreCase, ITextRangeProvider** result) {
+    if (result == nullptr) return E_POINTER;
+    *result = nullptr;
+    if (needle == nullptr) return E_INVALIDARG;
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    std::wstring haystack = node.text.substr(std::min(_start, node.text.size()),
+        std::min(_end, node.text.size()) - std::min(_start, node.text.size()));
+    std::wstring search(needle, ::SysStringLen(needle));
+    if (ignoreCase) {
+        std::transform(haystack.begin(), haystack.end(), haystack.begin(), std::towupper);
+        std::transform(search.begin(), search.end(), search.begin(), std::towupper);
+    }
+    const size_t found = backward ? haystack.rfind(search) : haystack.find(search);
+    if (found != std::wstring::npos) {
+        *result = new WindowsUiaTextRangeProvider(
+            _state, _nodeId, _start + found, _start + found + search.size());
+    }
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::GetAttributeValue(
+    TEXTATTRIBUTEID, VARIANT* value) {
+    if (value == nullptr) return E_POINTER;
+    ::VariantInit(value);
+    IUnknown* reserved = nullptr;
+    const HRESULT result = ::UiaGetReservedNotSupportedValue(&reserved);
+    if (FAILED(result)) return result;
+    value->vt = VT_UNKNOWN;
+    value->punkVal = reserved;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::GetBoundingRectangles(
+    SAFEARRAY** value) {
+    if (value == nullptr) return E_POINTER;
+    *value = nullptr;
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    *value = ::SafeArrayCreateVector(VT_R8, 0, _start == _end ? 0 : 4);
+    if (*value == nullptr) return E_OUTOFMEMORY;
+    if (_start == _end) return S_OK;
+    const UiaRect bounds = _state->screenBounds(node.bounds);
+    const double values[] = {bounds.left, bounds.top, bounds.width, bounds.height};
+    for (LONG i = 0; i < 4; ++i) {
+        double entry = values[i];
+        const HRESULT hr = ::SafeArrayPutElement(*value, &i, &entry);
+        if (FAILED(hr)) return hr;
+    }
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::GetEnclosingElement(
+    IRawElementProviderSimple** value) {
+    if (value == nullptr) return E_POINTER;
+    *value = static_cast<IRawElementProviderSimple*>(
+        new WindowsUiaProvider(_state, _nodeId));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::GetText(
+    int maxLength, BSTR* value) {
+    if (value == nullptr) return E_POINTER;
+    *value = nullptr;
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    const size_t start = std::min(_start, node.text.size());
+    size_t length = std::min(_end, node.text.size()) - start;
+    if (maxLength >= 0) length = std::min(length, static_cast<size_t>(maxLength));
+    *value = ::SysAllocStringLen(node.text.data() + start, static_cast<UINT>(length));
+    return *value != nullptr || length == 0 ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::Move(
+    TextUnit unit, int count, int* moved) {
+    if (moved == nullptr) return E_POINTER;
+    *moved = 0;
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    const bool degenerate = _start == _end;
+    size_t position = _start;
+    const int direction = count < 0 ? -1 : 1;
+    for (int i = 0; i < std::abs(count); ++i) {
+        const size_t next = movePosition(node.text, position, unit, direction);
+        if (next == position) break;
+        position = next;
+        *moved += direction;
+    }
+    _start = position;
+    _end = degenerate ? position : movePosition(node.text, position, unit, 1);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::MoveEndpointByUnit(
+    TextPatternRangeEndpoint which, TextUnit unit, int count, int* moved) {
+    if (moved == nullptr) return E_POINTER;
+    *moved = 0;
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    size_t position = endpoint(which);
+    const int direction = count < 0 ? -1 : 1;
+    for (int i = 0; i < std::abs(count); ++i) {
+        const size_t next = movePosition(node.text, position, unit, direction);
+        if (next == position) break;
+        position = next;
+        *moved += direction;
+    }
+    setEndpoint(which, position);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::MoveEndpointByRange(
+    TextPatternRangeEndpoint which, ITextRangeProvider* targetRange,
+    TextPatternRangeEndpoint targetEndpoint) {
+    if (targetRange == nullptr) return E_POINTER;
+    const auto* other = dynamic_cast<WindowsUiaTextRangeProvider*>(targetRange);
+    if (other == nullptr || other->_nodeId != _nodeId) return E_INVALIDARG;
+    setEndpoint(which, other->endpoint(targetEndpoint));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::Select() {
+    AccessibilityNode node;
+    if (!readNode(node)) return UIA_E_ELEMENTNOTAVAILABLE;
+    return _state->setTextSelection(_nodeId,
+        std::min(_start, node.text.size()), std::min(_end, node.text.size()))
+        ? S_OK : UIA_E_NOTSUPPORTED;
+}
+
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::AddToSelection() {
+    return Select();
+}
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::RemoveFromSelection() {
+    return UIA_E_NOTSUPPORTED;
+}
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::ScrollIntoView(BOOL) {
+    return S_OK;
+}
+HRESULT STDMETHODCALLTYPE WindowsUiaTextRangeProvider::GetChildren(SAFEARRAY** value) {
+    if (value == nullptr) return E_POINTER;
+    *value = ::SafeArrayCreateVector(VT_UNKNOWN, 0, 0);
+    return *value != nullptr ? S_OK : E_OUTOFMEMORY;
+}
 
 void raisePropertyString(const std::shared_ptr<WindowsAccessibilityState>& state,
                          uint64_t id, PROPERTYID property,
@@ -785,9 +1258,16 @@ public:
         if (message == kAccessibilityActionMessage) {
             auto* request = reinterpret_cast<NativeActionRequest*>(wParam);
             if (request != nullptr) {
-                request->result = request->kind == NativeActionKind::Numeric
-                    ? _manager.setAccessibilityNumericValue(request->nodeId, request->value)
-                    : _manager.performAccessibilityAction(request->nodeId, request->action);
+                if (request->kind == NativeActionKind::Numeric) {
+                    request->result = _manager.setAccessibilityNumericValue(
+                        request->nodeId, request->value);
+                } else if (request->kind == NativeActionKind::TextSelection) {
+                    request->result = _manager.setAccessibilityTextSelection(
+                        request->nodeId, request->textStart, request->textEnd);
+                } else {
+                    request->result = _manager.performAccessibilityAction(
+                        request->nodeId, request->action);
+                }
             }
             result = 0;
             return true;
@@ -899,6 +1379,18 @@ private:
                                && (newNode.states & AccessibilityState_Focused) != 0) {
                         auto* provider = new WindowsUiaProvider(_windows, change.nodeId);
                         ::UiaRaiseAutomationEvent(provider, UIA_AutomationFocusChangedEventId);
+                        provider->Release();
+                    } else if (change.kind == AccessibilityChangeKind::TextSelection) {
+                        auto* provider = new WindowsUiaProvider(_windows, change.nodeId);
+                        ::UiaRaiseAutomationEvent(provider, UIA_Text_TextSelectionChangedEventId);
+                        provider->Release();
+                    } else if (change.kind == AccessibilityChangeKind::TextContent) {
+                        auto* provider = new WindowsUiaProvider(_windows, change.nodeId);
+                        ::UiaRaiseAutomationEvent(provider, UIA_Text_TextChangedEventId);
+                        provider->Release();
+                    } else if (change.kind == AccessibilityChangeKind::LiveRegion) {
+                        auto* provider = new WindowsUiaProvider(_windows, change.nodeId);
+                        ::UiaRaiseAutomationEvent(provider, UIA_LiveRegionChangedEventId);
                         provider->Release();
                     }
                 }

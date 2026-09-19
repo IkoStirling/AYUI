@@ -599,6 +599,12 @@ public:
     const std::wstring& getAccessibilityValue() const { return _accessibilityValue; }
     void setAccessibilityHidden(bool hidden) { _accessibilityHidden = hidden; }
     bool isAccessibilityHidden() const { return _accessibilityHidden; }
+    void setAccessibilityLiveSetting(AccessibilityLiveSetting setting) {
+        _accessibilityLiveSetting = setting;
+    }
+    AccessibilityLiveSetting getAccessibilityLiveSetting() const {
+        return _accessibilityLiveSetting;
+    }
     void setAccessibilityActionHandler(
         std::function<bool(AccessibilityAction)> handler) {
         _accessibilityActionHandler = std::move(handler);
@@ -878,6 +884,7 @@ protected:
     AccessibilityRole _accessibilityRole = AccessibilityRole::Generic;
     bool _accessibilityRoleExplicit = false;
     bool _accessibilityHidden = false;
+    AccessibilityLiveSetting _accessibilityLiveSetting = AccessibilityLiveSetting::Off;
     std::wstring _accessibilityLabel;
     std::wstring _accessibilityDescription;
     std::wstring _accessibilityValue;

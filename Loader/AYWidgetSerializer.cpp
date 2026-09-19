@@ -273,6 +273,11 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
         widget->setLayoutSizeManaged(j.value(
             "layoutSizeManaged", !widget->hasAnchorLayout()));
         widget->setAccessibilityHidden(j.value("accessibilityHidden", false));
+        const std::string live = j.value("accessibilityLive", "off");
+        widget->setAccessibilityLiveSetting(live == "assertive"
+            ? AccessibilityLiveSetting::Assertive
+            : (live == "polite" ? AccessibilityLiveSetting::Polite
+                                  : AccessibilityLiveSetting::Off));
         if (j.contains("accessibilityRole") && j["accessibilityRole"].is_string()) {
             AccessibilityRole role;
             if (accessibilityRoleFromName(j["accessibilityRole"].get<std::string>(), role)) {
@@ -1081,6 +1086,17 @@ Widget* WidgetSerializer::deserialize(const std::string& jsonStr) {
                         if (r.contains("inlineAltText")) {
                             run.inlineAltText = toWstring(r["inlineAltText"].get<std::string>());
                         }
+                        const int semanticKind = r.value("semanticKind", 0);
+                        if (semanticKind >= 0
+                            && semanticKind <= static_cast<int>(RichSemanticKind::Link)) {
+                            run.semanticKind = static_cast<RichSemanticKind>(semanticKind);
+                        }
+                        if (r.contains("semanticLabel")) {
+                            run.semanticLabel = toWstring(r["semanticLabel"].get<std::string>());
+                        }
+                        if (r.contains("linkTarget")) {
+                            run.linkTarget = toWstring(r["linkTarget"].get<std::string>());
+                        }
                         rt->addRun(run);
                     }
                 }
@@ -1422,6 +1438,10 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
         j["accessibilityValue"] = toUtf8(widget->getAccessibilityValue());
     }
     if (widget->isAccessibilityHidden()) j["accessibilityHidden"] = true;
+    if (widget->getAccessibilityLiveSetting() != AccessibilityLiveSetting::Off) {
+        j["accessibilityLive"] = widget->getAccessibilityLiveSetting()
+            == AccessibilityLiveSetting::Assertive ? "assertive" : "polite";
+    }
 
     const char* localizedProperties[] = {
         "text", "title", "acceptText", "rejectText",
@@ -2021,6 +2041,11 @@ void WidgetSerializer::serializeWidgetToJson(Widget* widget, JsonHandle h) {
                 rj["inlineBaseline"] = r.inlineBaseline;
                 rj["inlineAltText"] = toUtf8(r.inlineAltText);
             }
+            if (r.semanticKind != RichSemanticKind::Text) {
+                rj["semanticKind"] = static_cast<int>(r.semanticKind);
+            }
+            if (!r.semanticLabel.empty()) rj["semanticLabel"] = toUtf8(r.semanticLabel);
+            if (!r.linkTarget.empty()) rj["linkTarget"] = toUtf8(r.linkTarget);
             j["runs"].push_back(rj);
         }
     }

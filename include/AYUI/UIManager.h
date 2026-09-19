@@ -199,6 +199,7 @@ public:
     bool performAccessibilityAction(uint64_t nodeId,
                                     AccessibilityAction action);
     bool setAccessibilityNumericValue(uint64_t nodeId, double value);
+    bool setAccessibilityTextSelection(uint64_t nodeId, size_t start, size_t end);
 
     // =====================================================================
     // Phase A — DropdownManager (S2): PopupLayer API.

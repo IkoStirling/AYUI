@@ -1026,6 +1026,11 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
     }
 
     widget->setAccessibilityHidden(j.value("accessibilityHidden", false));
+    const std::string accessibilityLive = j.value("accessibilityLive", "off");
+    widget->setAccessibilityLiveSetting(accessibilityLive == "assertive"
+        ? AccessibilityLiveSetting::Assertive
+        : (accessibilityLive == "polite" ? AccessibilityLiveSetting::Polite
+                                          : AccessibilityLiveSetting::Off));
     if (j.contains("accessibilityLabel")
         || j.contains("accessibilityLabelKey")) {
         widget->setAccessibilityLabel(resolveLocalizedString(
@@ -1681,6 +1686,19 @@ Widget* UILayoutLoader::buildWidgetTree(JsonHandle h) {
                 if (runJson.contains("inlineAltText")) {
                     run.inlineAltText = utf8ToWide(
                         runJson["inlineAltText"].get<std::string>());
+                }
+                const int semanticKind = runJson.value("semanticKind", 0);
+                if (semanticKind >= 0
+                    && semanticKind <= static_cast<int>(RichSemanticKind::Link)) {
+                    run.semanticKind = static_cast<RichSemanticKind>(semanticKind);
+                }
+                if (runJson.contains("semanticLabel")) {
+                    run.semanticLabel = utf8ToWide(
+                        runJson["semanticLabel"].get<std::string>());
+                }
+                if (runJson.contains("linkTarget")) {
+                    run.linkTarget = utf8ToWide(
+                        runJson["linkTarget"].get<std::string>());
                 }
                 rich->addRun(run);
             }

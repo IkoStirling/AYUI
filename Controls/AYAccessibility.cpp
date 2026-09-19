@@ -229,6 +229,55 @@ void inferNumericRange(const Widget* widget, AccessibilityNode& node) {
     node.numericLargeChange = std::max(span / 10.0, node.numericSmallChange);
 }
 
+void inferTextContent(const Widget* widget, AccessibilityNode& node) {
+    if (const auto* input = dynamic_cast<const TextInput*>(widget)) {
+        node.hasTextContent = true;
+        node.textReadOnly = input->isReadOnly();
+        node.text = input->isPasswordMode()
+            ? std::wstring(input->getText().size(), L'\x2022') : input->getText();
+        node.textSelectionStart = std::min(input->getSelectionStart(), node.text.size());
+        node.textSelectionEnd = std::min(input->getSelectionEnd(), node.text.size());
+        return;
+    }
+    if (const auto* area = dynamic_cast<const TextArea*>(widget)) {
+        node.hasTextContent = true;
+        node.textReadOnly = area->isReadOnly();
+        node.text = area->getText();
+        node.textSelectionStart = area->getSelectionStartTextOffset();
+        node.textSelectionEnd = area->getSelectionEndTextOffset();
+        return;
+    }
+    if (const auto* rich = dynamic_cast<const RichText*>(widget)) {
+        node.hasTextContent = true;
+        node.textReadOnly = !rich->isEditable();
+        size_t offset = 0;
+        for (size_t i = 0; i < rich->getRunCount(); ++i) {
+            const RichRun& run = rich->getRun(i);
+            const std::wstring& content = run.inlineKind == RichInlineKind::None
+                ? run.text : run.inlineAltText;
+            const size_t begin = offset;
+            node.text += content;
+            offset += content.size();
+            AccessibilityTextSpan span;
+            span.start = begin;
+            span.end = offset;
+            span.label = run.semanticLabel;
+            span.target = run.linkTarget;
+            span.kind = run.semanticKind == RichSemanticKind::Link
+                ? AccessibilityTextSpanKind::Link
+                : (run.semanticKind == RichSemanticKind::Paragraph
+                    ? AccessibilityTextSpanKind::Paragraph
+                    : AccessibilityTextSpanKind::Text);
+            if (span.kind != AccessibilityTextSpanKind::Text
+                || !span.label.empty() || !span.target.empty()) {
+                node.textSpans.push_back(std::move(span));
+            }
+        }
+        node.textSelectionStart = std::min(rich->getSelectionStart(), node.text.size());
+        node.textSelectionEnd = std::min(rich->getSelectionEnd(), node.text.size());
+    }
+}
+
 bool appendNode(const Widget* widget, const UIManager& manager,
                 AccessibilityNode& parent) {
     if (widget == nullptr || !widget->isVisible() || widget->isAccessibilityHidden()) return false;
@@ -241,7 +290,9 @@ bool appendNode(const Widget* widget, const UIManager& manager,
     node.bounds = widget->getWorldBounds();
     node.states = inferStates(widget, manager);
     node.actions = inferActions(widget);
+    node.liveSetting = widget->getAccessibilityLiveSetting();
     inferNumericRange(widget, node);
+    inferTextContent(widget, node);
     for (const Widget* child : widget->getChildren()) appendNode(child, manager, node);
     parent.children.push_back(std::move(node));
     return true;
@@ -393,6 +444,31 @@ bool UIManager::setAccessibilityNumericValue(uint64_t nodeId, double value) {
     }
     if (auto* scroll = dynamic_cast<ScrollBar*>(widget)) {
         scroll->setValue(static_cast<float>(value));
+        return true;
+    }
+    return false;
+}
+
+bool UIManager::setAccessibilityTextSelection(uint64_t nodeId,
+                                              size_t start, size_t end) {
+    Widget* widget = findNode(_root, nodeId);
+    if (widget == nullptr) widget = findNode(_overlayRoot, nodeId);
+    if (widget == nullptr || !widget->isVisible() || widget->isAccessibilityHidden()) {
+        return false;
+    }
+    if (auto* input = dynamic_cast<TextInput*>(widget)) {
+        input->setSelection(start, end);
+        setFocus(input);
+        return true;
+    }
+    if (auto* area = dynamic_cast<TextArea*>(widget)) {
+        area->setSelectionByTextOffset(start, end);
+        setFocus(area);
+        return true;
+    }
+    if (auto* rich = dynamic_cast<RichText*>(widget); rich && rich->isSelectable()) {
+        rich->setSelection(start, end);
+        setFocus(rich);
         return true;
     }
     return false;
