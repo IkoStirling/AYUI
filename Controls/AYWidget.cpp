@@ -26,6 +26,12 @@ struct WidgetRetainedState {
     bool autoActive = false;
     uint32_t stableFrames = 0;
     uint32_t unstableFrames = 0;
+    AutoLayerCacheTuning autoTuning{};
+    float invalidationRate = 1.0f;
+    float estimatedCommands = 0.0f;
+    float expectedCommandSavings = 0.0f;
+    uint64_t promotions = 0;
+    uint64_t demotions = 0;
 };
 
 std::unordered_map<const Widget*, WidgetRetainedState> g_widgetRetainedStates;
@@ -947,9 +953,41 @@ void Widget::setLayerCachePolicy(LayerCachePolicy policy) {
         state.autoActive = false;
         state.stableFrames = 0;
         state.unstableFrames = 0;
+        state.invalidationRate = 1.0f;
+        state.estimatedCommands = 0.0f;
+        state.expectedCommandSavings = 0.0f;
     }
     state.policy = policy;
     markDirty();
+}
+
+void Widget::setAutoLayerCacheTuning(const AutoLayerCacheTuning& tuning) {
+    WidgetRetainedState& state = g_widgetRetainedStates[this];
+    state.autoTuning.minimumArea = std::max(0.0f, tuning.minimumArea);
+    state.autoTuning.minimumCommands = std::max<size_t>(1u, tuning.minimumCommands);
+    state.autoTuning.promotionStableFrames =
+        std::max<uint32_t>(1u, tuning.promotionStableFrames);
+    state.autoTuning.demotionInvalidFrames =
+        std::max<uint32_t>(1u, tuning.demotionInvalidFrames);
+    state.autoTuning.sampleWeight =
+        std::clamp(tuning.sampleWeight, 0.01f, 1.0f);
+    state.autoTuning.minimumExpectedCommandSavings =
+        std::max(0.0f, tuning.minimumExpectedCommandSavings);
+}
+
+AutoLayerCacheTuning Widget::getAutoLayerCacheTuning() const {
+    const auto it = g_widgetRetainedStates.find(this);
+    return it == g_widgetRetainedStates.end()
+        ? AutoLayerCacheTuning{} : it->second.autoTuning;
+}
+
+AutoLayerCacheMetrics Widget::getAutoLayerCacheMetrics() const {
+    const auto it = g_widgetRetainedStates.find(this);
+    if (it == g_widgetRetainedStates.end()) return {};
+    const WidgetRetainedState& state = it->second;
+    return {state.autoActive, state.stableFrames, state.unstableFrames,
+            state.promotions, state.demotions, state.invalidationRate,
+            state.estimatedCommands, state.expectedCommandSavings};
 }
 
 LayerCachePolicy Widget::getLayerCachePolicy() const {
@@ -986,13 +1024,25 @@ bool Widget::tryRenderLayerCache(IRenderBackend& renderer) {
     WidgetRetainedState& state = stateIt->second;
     const bool invalidated = _dirtyThis || hasDirtyRect();
     if (state.policy == LayerCachePolicy::Auto) {
+        const float weight = state.autoTuning.sampleWeight;
+        const float commands = static_cast<float>(
+            estimateSubtreeDisplayCommandCount());
+        state.invalidationRate +=
+            ((invalidated ? 1.0f : 0.0f) - state.invalidationRate) * weight;
+        state.estimatedCommands +=
+            (commands - state.estimatedCommands) * weight;
+        state.expectedCommandSavings = std::max(0.0f,
+            state.estimatedCommands - 1.0f
+            - state.invalidationRate * state.estimatedCommands);
         if (state.autoActive) {
             state.unstableFrames = invalidated ? state.unstableFrames + 1u : 0u;
-            if (state.unstableFrames >= 3u) {
+            if (state.unstableFrames
+                >= state.autoTuning.demotionInvalidFrames) {
                 releaseWidgetLayer(state);
                 state.autoActive = false;
                 state.stableFrames = 0;
                 state.unstableFrames = 0;
+                ++state.demotions;
                 return false;
             }
         } else {
@@ -1000,11 +1050,16 @@ bool Widget::tryRenderLayerCache(IRenderBackend& renderer) {
             const math::FRectangle bounds = getWorldBounds();
             const float area = std::max(0.0f, bounds.maxX - bounds.minX)
                 * std::max(0.0f, bounds.maxY - bounds.minY);
-            if (state.stableFrames < 3u || area < 4096.0f
-                || estimateSubtreeDisplayCommandCount() < 12u) {
+            if (state.stableFrames < state.autoTuning.promotionStableFrames
+                || area < state.autoTuning.minimumArea
+                || commands < static_cast<float>(
+                    state.autoTuning.minimumCommands)
+                || state.expectedCommandSavings
+                    < state.autoTuning.minimumExpectedCommandSavings) {
                 return false;
             }
             state.autoActive = true;
+            ++state.promotions;
         }
     }
 

@@ -357,6 +357,11 @@ TEST_CASE(WidgetLayer_AutoPromotesStableComplexSubtreeAndDemotesChurn) {
     }
     CHECK_TRUE(parent.hasActiveLayerCache());
     CHECK(renderer.getLayerCacheStats().layerCreates == 1u);
+    AutoLayerCacheMetrics metrics = parent.getAutoLayerCacheMetrics();
+    CHECK(metrics.active);
+    CHECK(metrics.promotions == 1u);
+    CHECK(metrics.estimatedCommands > 0.0f);
+    CHECK(metrics.expectedCommandSavings >= 2.0f);
 
     for (int frame = 0; frame < 3; ++frame) {
         parent.markDirty();
@@ -365,6 +370,34 @@ TEST_CASE(WidgetLayer_AutoPromotesStableComplexSubtreeAndDemotesChurn) {
     }
     CHECK_FALSE(parent.hasActiveLayerCache());
     CHECK(renderer.getLayerCacheStats().layerReleases == 1u);
+    metrics = parent.getAutoLayerCacheMetrics();
+    CHECK_FALSE(metrics.active);
+    CHECK(metrics.demotions == 1u);
+    CHECK(metrics.invalidationRate > 0.5f);
+}
+
+TEST_CASE(WidgetLayer_AutoTuningCanRejectLowValueCachePromotion) {
+    Widget parent;
+    parent.setSize(FVector2(240.0f, 120.0f));
+    parent.setLayerCachePolicy(LayerCachePolicy::Auto);
+    AutoLayerCacheTuning tuning;
+    tuning.minimumExpectedCommandSavings = 1000.0f;
+    parent.setAutoLayerCacheTuning(tuning);
+    std::array<CountingPainter, 12> children;
+    for (CountingPainter& child : children) {
+        child.setSize(FVector2(28.0f, 28.0f));
+        parent.addChildExternal(&child);
+    }
+
+    MockRenderer renderer;
+    for (int frame = 0; frame < 12; ++frame) {
+        renderer.beginFrame();
+        parent.render(renderer);
+    }
+    CHECK_FALSE(parent.hasActiveLayerCache());
+    CHECK(parent.getAutoLayerCacheMetrics().promotions == 0u);
+    CHECK(parent.getAutoLayerCacheTuning().minimumExpectedCommandSavings
+          == 1000.0f);
 }
 
 TEST_CASE(UILayer_MockLifecycleTracksDpiDamageAndComposite) {

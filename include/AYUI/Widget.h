@@ -102,6 +102,29 @@ enum class LayerCachePolicy : uint8_t {
     Auto
 };
 
+struct AutoLayerCacheTuning {
+    float minimumArea = 4096.0f;
+    size_t minimumCommands = 12u;
+    uint32_t promotionStableFrames = 3u;
+    uint32_t demotionInvalidFrames = 3u;
+    // EMA weight of the newest frame. Higher values react faster to churn.
+    float sampleWeight = 0.25f;
+    // Estimated command submissions saved per frame after accounting for
+    // repaint probability and the one Layer composite.
+    float minimumExpectedCommandSavings = 2.0f;
+};
+
+struct AutoLayerCacheMetrics {
+    bool active = false;
+    uint32_t stableFrames = 0u;
+    uint32_t unstableFrames = 0u;
+    uint64_t promotions = 0u;
+    uint64_t demotions = 0u;
+    float invalidationRate = 1.0f;
+    float estimatedCommands = 0.0f;
+    float expectedCommandSavings = 0.0f;
+};
+
 // Responsive placement for a free-positioned child. Anchor coordinates are
 // normalized to the parent rectangle. offsetMin/offsetMax are signed pixel
 // deltas from those anchor points to the child's near/far edges:
@@ -682,6 +705,9 @@ public:
     // cache widget. Allocation/paint failures fall back to normal rendering.
     void setLayerCachePolicy(LayerCachePolicy policy);
     LayerCachePolicy getLayerCachePolicy() const;
+    void setAutoLayerCacheTuning(const AutoLayerCacheTuning& tuning);
+    AutoLayerCacheTuning getAutoLayerCacheTuning() const;
+    AutoLayerCacheMetrics getAutoLayerCacheMetrics() const;
     bool hasActiveLayerCache() const;
 
     void markBoundsDirty() {
