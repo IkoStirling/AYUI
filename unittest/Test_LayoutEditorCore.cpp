@@ -159,6 +159,58 @@ TEST_CASE(authoring_registry_is_the_single_palette_and_schema_source) {
     destroyWidgetTree(created);
 }
 
+TEST_CASE(authoring_registry_reloads_plugin_toolbox_and_inspector_schema_atomically) {
+    WidgetAuthoringRegistry& registry = WidgetAuthoringRegistry::get();
+    WidgetAuthoringDescriptor plugin;
+    plugin.typeName = "ExamplePluginPanel";
+    plugin.displayName = "Example Panel";
+    plugin.paletteButtonId = "plugin_example_panel";
+    plugin.idPrefix = "example";
+    plugin.defaultSize = {180.0f, 96.0f};
+    plugin.iconPath = "M4 4h16v16H4z";
+    plugin.properties = PropertySchema{
+        AuthoringProperty::Id, AuthoringProperty::Width,
+        AuthoringProperty::Height, AuthoringProperty::Style};
+    plugin.matches = [](const Widget& widget) {
+        return dynamic_cast<const Panel*>(&widget) != nullptr;
+    };
+
+    std::string error;
+    CHECK(registry.replaceOwnerDescriptors(
+        "test.example.plugin", {plugin}, &error));
+    const WidgetAuthoringDescriptor* registered =
+        registry.find("ExamplePluginPanel");
+    CHECK_NOT_NULL(registered);
+    CHECK(registered != nullptr
+          && registered->ownerId == "test.example.plugin");
+    CHECK(registered != nullptr
+          && registered->properties.contains(AuthoringProperty::Style));
+    CHECK(registry.findByPaletteButton("plugin_example_panel") == registered);
+
+    WidgetAuthoringDescriptor replacement = plugin;
+    replacement.displayName = "Example Panel v2";
+    replacement.defaultSize = {240.0f, 120.0f};
+    CHECK(registry.replaceOwnerDescriptors(
+        "test.example.plugin", {replacement}, &error));
+    registered = registry.find("ExamplePluginPanel");
+    CHECK(registered != nullptr && registered->displayName == "Example Panel v2");
+    CHECK(registered != nullptr
+          && registered->defaultSize.x == 240.0f);
+
+    WidgetAuthoringDescriptor conflict = plugin;
+    conflict.typeName = "Button";
+    conflict.paletteButtonId = "plugin_illegal_button";
+    CHECK_FALSE(registry.replaceOwnerDescriptors(
+        "test.example.plugin", {conflict}, &error));
+    // Failed reload restores the previous plugin contribution.
+    CHECK(registry.find("ExamplePluginPanel") != nullptr);
+    CHECK(registry.find("Button") != nullptr
+          && registry.find("Button")->ownerId == "AYUI.Core");
+    CHECK(registry.unregisterOwner("test.example.plugin"));
+    CHECK(registry.find("ExamplePluginPanel") == nullptr);
+    CHECK_FALSE(registry.unregisterOwner("AYUI.Core"));
+}
+
 TEST_CASE(property_schema_carries_editor_types_constraints_and_enum_options) {
     const PropertyFieldSchema& width =
         propertyFieldSchema(AuthoringProperty::Width);
@@ -907,13 +959,51 @@ TEST_CASE(external_component_library_roundtrips_and_expands_widgets) {
           && definition->description ==
              "Confirmation card with primary action");
     CHECK(definition != nullptr && definition->tags.size() == 2u);
-    CHECK(encoded.find("\"version\":2") != std::string::npos);
+    CHECK(encoded.find("\"version\":3") != std::string::npos);
+    CHECK(definition != nullptr && !definition->sourceRevision.empty());
 
     Widget* instance = restored.instantiate("common.confirm-card");
     CHECK(instance != nullptr);
     CHECK(instance != nullptr && instance->getId() == "card_root");
     CHECK(instance != nullptr && instance->getChildren().size() == 1u);
     if (instance != nullptr) destroyWidgetTree(instance);
+
+    LayoutComponentInstance tracked;
+    CHECK(restored.createInstance("common.confirm-card", tracked));
+    tracked.overrides.push_back({"/children/0/text", "\"Proceed\""});
+    const std::string trackedJson =
+        LayoutComponentLibrary::serializeInstance(tracked, false);
+    LayoutComponentInstance decodedTracked;
+    CHECK(LayoutComponentLibrary::deserializeInstance(
+        trackedJson, decodedTracked, &error));
+    LayoutComponentMaterialization materialized =
+        restored.materialize(decodedTracked);
+    CHECK_NOT_NULL(materialized.widget);
+    CHECK(materialized.conflicts.empty());
+    CHECK_FALSE(materialized.sourceChanged);
+    if (materialized.widget != nullptr) {
+        const auto& children = materialized.widget->getChildren();
+        auto* materializedButton = children.empty()
+            ? nullptr : dynamic_cast<Button*>(children.front());
+        CHECK_NOT_NULL(materializedButton);
+        CHECK(materializedButton != nullptr
+              && materializedButton->getText() == L"Proceed");
+        destroyWidgetTree(materialized.widget);
+    }
+
+    panel.setSize({300.0f, 140.0f});
+    CHECK(restored.define("common.confirm-card", "Confirm Card", "Common",
+                          &panel, &error));
+    materialized = restored.materialize(decodedTracked);
+    CHECK(materialized.sourceChanged);
+    CHECK(materialized.conflicts.empty());
+    if (materialized.widget != nullptr) destroyWidgetTree(materialized.widget);
+    decodedTracked.overrides.push_back({"/children/9/text", "\"Missing\""});
+    const std::string oldRevision = decodedTracked.sourceRevision;
+    materialized = restored.rebase(decodedTracked);
+    CHECK(materialized.widget == nullptr);
+    CHECK(materialized.conflicts.size() == 1u);
+    CHECK(decodedTracked.sourceRevision == oldRevision);
 
     LayoutComponentLibrary legacy;
     CHECK(legacy.deserialize(R"({

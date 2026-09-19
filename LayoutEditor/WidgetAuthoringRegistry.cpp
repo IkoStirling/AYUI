@@ -28,6 +28,7 @@
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/Window.h"
 
+#include <algorithm>
 #include <typeinfo>
 #include <utility>
 
@@ -90,6 +91,35 @@ WidgetAuthoringDescriptor::Initializer textInitializer(const wchar_t* text) {
                      const WidgetAuthoringDescriptor::UniqueIdFactory&) {
         setInitialText(widget, initial);
     };
+}
+
+bool registryFail(std::string* error, const std::string& message) {
+    if (error != nullptr) *error = message;
+    return false;
+}
+
+bool prepareDescriptor(WidgetAuthoringDescriptor& descriptor,
+                       const std::string& ownerId,
+                       std::string* error) {
+    if (ownerId.empty()) return registryFail(error, "Authoring owner cannot be empty");
+    if (descriptor.typeName.empty())
+        return registryFail(error, "Authoring Widget type cannot be empty");
+    if (descriptor.displayName.empty()) descriptor.displayName = descriptor.typeName;
+    if (descriptor.idPrefix.empty()) descriptor.idPrefix = "w";
+    if (descriptor.defaultSize.x <= 0.0f || descriptor.defaultSize.y <= 0.0f)
+        return registryFail(error, "Authoring Widget default size must be positive");
+    if (!descriptor.matches)
+        return registryFail(error, "Authoring Widget requires a runtime matcher");
+    const std::string svg =
+        "<svg viewBox=\"0 0 24 24\" fill=\"none\" "
+        "stroke=\"currentColor\" stroke-width=\"1.7\" "
+        "stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"" +
+        descriptor.iconPath + "\"/></svg>";
+    descriptor.icon = SvgDocument::parse(svg);
+    if (descriptor.icon == nullptr)
+        return registryFail(error, "Authoring Widget icon path is invalid");
+    descriptor.ownerId = ownerId;
+    return true;
 }
 
 } // namespace
@@ -339,21 +369,62 @@ Widget* WidgetAuthoringRegistry::create(
     return widget;
 }
 
-void WidgetAuthoringRegistry::registerDescriptor(
-    WidgetAuthoringDescriptor descriptor) {
-    const std::string svg =
-        "<svg viewBox=\"0 0 24 24\" fill=\"none\" "
-        "stroke=\"currentColor\" stroke-width=\"1.7\" "
-        "stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"" +
-        descriptor.iconPath + "\"/></svg>";
-    descriptor.icon = SvgDocument::parse(svg);
+bool WidgetAuthoringRegistry::registerDescriptor(
+    WidgetAuthoringDescriptor descriptor, const std::string& ownerId,
+    std::string* error) {
+    if (!prepareDescriptor(descriptor, ownerId, error)) return false;
+    if (!descriptor.paletteButtonId.empty()) {
+        for (const WidgetAuthoringDescriptor& existing : _descriptors) {
+            if (existing.paletteButtonId == descriptor.paletteButtonId
+                && existing.typeName != descriptor.typeName) {
+                return registryFail(error, "Palette entry is already registered: "
+                    + descriptor.paletteButtonId);
+            }
+        }
+    }
     for (WidgetAuthoringDescriptor& existing : _descriptors) {
         if (existing.typeName == descriptor.typeName) {
+            if (existing.ownerId != ownerId) {
+                return registryFail(error, "Widget type is owned by "
+                    + existing.ownerId + ": " + descriptor.typeName);
+            }
             existing = std::move(descriptor);
-            return;
+            return true;
         }
     }
     _descriptors.push_back(std::move(descriptor));
+    return true;
+}
+
+bool WidgetAuthoringRegistry::replaceOwnerDescriptors(
+    const std::string& ownerId,
+    std::vector<WidgetAuthoringDescriptor> descriptors,
+    std::string* error) {
+    if (ownerId.empty() || ownerId == "AYUI.Core") {
+        return registryFail(error, "Plugin owner must not be empty or AYUI.Core");
+    }
+    const std::vector<WidgetAuthoringDescriptor> previous = _descriptors;
+    _descriptors.erase(std::remove_if(_descriptors.begin(), _descriptors.end(),
+        [&ownerId](const WidgetAuthoringDescriptor& descriptor) {
+            return descriptor.ownerId == ownerId;
+        }), _descriptors.end());
+    for (WidgetAuthoringDescriptor& descriptor : descriptors) {
+        if (!registerDescriptor(std::move(descriptor), ownerId, error)) {
+            _descriptors = previous;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool WidgetAuthoringRegistry::unregisterOwner(const std::string& ownerId) {
+    if (ownerId.empty() || ownerId == "AYUI.Core") return false;
+    const auto oldSize = _descriptors.size();
+    _descriptors.erase(std::remove_if(_descriptors.begin(), _descriptors.end(),
+        [&ownerId](const WidgetAuthoringDescriptor& descriptor) {
+            return descriptor.ownerId == ownerId;
+        }), _descriptors.end());
+    return _descriptors.size() != oldSize;
 }
 
 } // namespace ayt::ui

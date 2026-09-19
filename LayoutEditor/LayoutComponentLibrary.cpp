@@ -4,7 +4,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <iomanip>
 #include <nlohmann/json.hpp>
+#include <sstream>
 
 namespace ayt::ui {
 
@@ -15,6 +18,17 @@ namespace {
 bool fail(std::string* error, const std::string& message) {
     if (error != nullptr) *error = message;
     return false;
+}
+
+std::string sourceRevision(const std::string& canonicalJson) {
+    std::uint64_t value = 14695981039346656037ull;
+    for (const unsigned char byte : canonicalJson) {
+        value ^= byte;
+        value *= 1099511628211ull;
+    }
+    std::ostringstream encoded;
+    encoded << std::hex << std::setfill('0') << std::setw(16) << value;
+    return encoded.str();
 }
 
 } // namespace
@@ -74,6 +88,7 @@ bool LayoutComponentLibrary::defineJson(
         normalized.tags.erase(std::unique(normalized.tags.begin(),
             normalized.tags.end()), normalized.tags.end());
         normalized.widgetJson = widget.dump();
+        normalized.sourceRevision = sourceRevision(normalized.widgetJson);
         auto found = std::lower_bound(
             _components.begin(), _components.end(), normalized.id,
             [](const LayoutComponentDefinition& value,
@@ -116,10 +131,71 @@ Widget* LayoutComponentLibrary::instantiate(const std::string& id) const {
         ? WidgetSerializer::deserialize(definition->widgetJson) : nullptr;
 }
 
+bool LayoutComponentLibrary::createInstance(
+    const std::string& id, LayoutComponentInstance& outInstance) const {
+    const LayoutComponentDefinition* definition = find(id);
+    if (definition == nullptr) return false;
+    outInstance = {};
+    outInstance.componentId = definition->id;
+    outInstance.sourceRevision = definition->sourceRevision;
+    return true;
+}
+
+LayoutComponentMaterialization LayoutComponentLibrary::materialize(
+    const LayoutComponentInstance& instance) const {
+    LayoutComponentMaterialization result;
+    const LayoutComponentDefinition* definition = find(instance.componentId);
+    if (definition == nullptr) {
+        result.conflicts.push_back("Component source is missing: "
+                                   + instance.componentId);
+        return result;
+    }
+    result.appliedRevision = definition->sourceRevision;
+    result.sourceChanged = !instance.sourceRevision.empty()
+        && instance.sourceRevision != definition->sourceRevision;
+    try {
+        json widget = json::parse(definition->widgetJson);
+        for (const LayoutComponentOverride& overrideValue : instance.overrides) {
+            try {
+                const json::json_pointer pointer(overrideValue.path);
+                if (!widget.contains(pointer)) {
+                    result.conflicts.push_back(
+                        "Override target no longer exists: " + overrideValue.path);
+                    continue;
+                }
+                widget[pointer] = json::parse(overrideValue.valueJson);
+            } catch (const std::exception& ex) {
+                result.conflicts.push_back("Invalid override "
+                    + overrideValue.path + ": " + ex.what());
+            }
+        }
+        if (result.conflicts.empty()) {
+            result.widget = WidgetSerializer::deserialize(widget.dump());
+            if (result.widget == nullptr) {
+                result.conflicts.push_back(
+                    "Materialized component Widget could not be created");
+            }
+        }
+    } catch (const std::exception& ex) {
+        result.conflicts.push_back(std::string("Component source is invalid: ")
+                                   + ex.what());
+    }
+    return result;
+}
+
+LayoutComponentMaterialization LayoutComponentLibrary::rebase(
+    LayoutComponentInstance& instance) const {
+    LayoutComponentMaterialization result = materialize(instance);
+    if (result.widget != nullptr && result.conflicts.empty()) {
+        instance.sourceRevision = result.appliedRevision;
+    }
+    return result;
+}
+
 std::string LayoutComponentLibrary::serialize(bool pretty) const {
     json root = {
         {"format", "AYUIComponentLibrary"},
-        {"version", 2},
+        {"version", 3},
         {"components", json::array()},
     };
     for (const LayoutComponentDefinition& definition : _components) {
@@ -129,6 +205,7 @@ std::string LayoutComponentLibrary::serialize(bool pretty) const {
             {"category", definition.category},
             {"description", definition.description},
             {"tags", definition.tags},
+            {"sourceRevision", definition.sourceRevision},
             {"widget", json::parse(definition.widgetJson)},
         });
     }
@@ -144,7 +221,7 @@ bool LayoutComponentLibrary::deserialize(const std::string& jsonText,
             return fail(error, "Not an AYUI component library");
         }
         const int version = root.value("version", 0);
-        if (version != 1 && version != 2) {
+        if (version != 1 && version != 2 && version != 3) {
             return fail(error, "Unsupported AYUI component library version");
         }
         if (!root.contains("components") || !root["components"].is_array()) {
@@ -182,6 +259,67 @@ bool LayoutComponentLibrary::deserialize(const std::string& jsonText,
         return true;
     } catch (const std::exception& ex) {
         return fail(error, std::string("Invalid component library JSON: ") + ex.what());
+    }
+}
+
+std::string LayoutComponentLibrary::serializeInstance(
+    const LayoutComponentInstance& instance, bool pretty) {
+    json overrides = json::array();
+    for (const LayoutComponentOverride& overrideValue : instance.overrides) {
+        overrides.push_back({
+            {"path", overrideValue.path},
+            {"value", json::parse(overrideValue.valueJson)},
+        });
+    }
+    const json encoded = {
+        {"format", "AYUIComponentInstance"},
+        {"version", 1},
+        {"componentId", instance.componentId},
+        {"sourceRevision", instance.sourceRevision},
+        {"overrides", std::move(overrides)},
+    };
+    return pretty ? encoded.dump(4) : encoded.dump();
+}
+
+bool LayoutComponentLibrary::deserializeInstance(
+    const std::string& jsonText, LayoutComponentInstance& outInstance,
+    std::string* error) {
+    try {
+        const json encoded = json::parse(jsonText);
+        if (!encoded.is_object()
+            || encoded.value("format", std::string{})
+                != "AYUIComponentInstance"
+            || encoded.value("version", 0) != 1) {
+            return fail(error, "Not a supported AYUI component instance");
+        }
+        LayoutComponentInstance decoded;
+        decoded.componentId = encoded.value("componentId", std::string{});
+        decoded.sourceRevision = encoded.value("sourceRevision", std::string{});
+        if (!validateId(decoded.componentId, error)) return false;
+        if (!encoded.contains("overrides") || !encoded["overrides"].is_array()) {
+            return fail(error, "Component instance requires an overrides array");
+        }
+        if (encoded["overrides"].size() > 512u) {
+            return fail(error, "Component instance contains too many overrides");
+        }
+        for (const json& entry : encoded["overrides"]) {
+            if (!entry.is_object() || !entry.contains("path")
+                || !entry["path"].is_string() || !entry.contains("value")) {
+                return fail(error, "Component override is malformed");
+            }
+            const std::string path = entry["path"].get<std::string>();
+            try {
+                (void)json::json_pointer(path);
+            } catch (const std::exception&) {
+                return fail(error, "Component override path is not a JSON Pointer");
+            }
+            decoded.overrides.push_back({path, entry["value"].dump()});
+        }
+        outInstance = std::move(decoded);
+        return true;
+    } catch (const std::exception& ex) {
+        return fail(error, std::string("Invalid component instance JSON: ")
+                           + ex.what());
     }
 }
 

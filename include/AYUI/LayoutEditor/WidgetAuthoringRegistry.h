@@ -26,6 +26,9 @@ struct WidgetAuthoringDescriptor {
     using Initializer = std::function<void(Widget&, const UniqueIdFactory&)>;
 
     std::string typeName;
+    // Registration owner used to atomically unload/reload editor plugins.
+    // Built-in entries use "AYUI.Core".
+    std::string ownerId;
     std::string displayName;
     std::string paletteButtonId;
     WidgetAuthoringCategory category = WidgetAuthoringCategory::BasicContent;
@@ -52,7 +55,14 @@ public:
 
     Widget* create(const std::string& typeName,
                    const WidgetAuthoringDescriptor::UniqueIdFactory& idFactory) const;
-    void registerDescriptor(WidgetAuthoringDescriptor descriptor);
+    bool registerDescriptor(WidgetAuthoringDescriptor descriptor,
+                            const std::string& ownerId = "AYUI.Core",
+                            std::string* error = nullptr);
+    bool replaceOwnerDescriptors(
+        const std::string& ownerId,
+        std::vector<WidgetAuthoringDescriptor> descriptors,
+        std::string* error = nullptr);
+    bool unregisterOwner(const std::string& ownerId);
 
 private:
     WidgetAuthoringRegistry();
