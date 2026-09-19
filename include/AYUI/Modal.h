@@ -117,6 +117,14 @@ public:
     void openModal();
     void closeModal();
 
+    // Clamp the modal to the available viewport and place it at the visual
+    // centre.  Call this before openModal() so the opening animation returns
+    // to the centred position instead of animating from the viewport origin.
+    // A non-zero outerMargin keeps the plate away from screen edges when the
+    // preferred size is larger than the available client area.
+    void fitAndCenterInViewport(const math::FVector2& viewportSize,
+                                float outerMargin = 0.0f);
+
     // Invoked by UIManager::openModal when this modal is the SINGLE-ACTIVE
     // victim of a new modal mounting (Q14). Mirrors ComboBox's
     // onPopupDismissedByManager (Phase A landmine #2). Clears the open
@@ -150,8 +158,11 @@ public:
     void layoutChildren() override;
 
 private:
+    friend class UIManager;
+
     void onDimmerClicked();   // sink bound to _dimmer->_onDismiss
     void setContentImpl(Widget* content, bool owned);
+    void updateViewportLayout(const math::FVector2& viewportSize);
 
     Dimmer* _dimmer = nullptr;
     // Code-review 2026-08-02 #12: tracks whether ~Modal should delete
@@ -163,6 +174,9 @@ private:
     Widget* _focusedBefore = nullptr;
     bool    _isOpen = false;
     bool    _dismissOnDimmerClick = true;
+    bool    _fitAndCenterWithViewport = false;
+    float   _viewportOuterMargin = 0.0f;
+    math::FVector2 _viewportPreferredSize{0.0f, 0.0f};
     std::function<void()> _onClose;
 };
 

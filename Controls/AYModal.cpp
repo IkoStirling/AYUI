@@ -3,6 +3,7 @@
 #include "AYUI/WidgetFactory.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace ayt::ui {
 
@@ -195,6 +196,7 @@ void Modal::openModal() {
     // Industrial default: full-viewport scrim when the host forgot one.
     // Stack/test fixtures that already called setDimmer keep theirs.
     ensureDimmer();
+    updateViewportLayout(ui.getClientSize());
 
     // Q14 — single-active invariant. If another modal is open, close it
     // first. UIManager::openModal owns this rule.
@@ -259,6 +261,46 @@ void Modal::openModal() {
     const math::FVector2 p = getPosition();
     setPosition(p + math::FVector2(0.0f, -8.0f));
     animatePositionTo(p, 160.0f, AnimationCurve::EaseOut);
+}
+
+void Modal::fitAndCenterInViewport(const math::FVector2& viewportSize,
+                                   float outerMargin) {
+    _fitAndCenterWithViewport = true;
+    _viewportOuterMargin = std::max(0.0f, outerMargin);
+    _viewportPreferredSize = getSize();
+    updateViewportLayout(viewportSize);
+}
+
+void Modal::updateViewportLayout(const math::FVector2& viewportSize) {
+    const float viewportWidth = std::max(0.0f, viewportSize.x);
+    const float viewportHeight = std::max(0.0f, viewportSize.y);
+    if (viewportWidth <= 0.0f || viewportHeight <= 0.0f) {
+        return;
+    }
+
+    if (_dimmer != nullptr) {
+        _dimmer->setPosition(math::FVector2(0.0f, 0.0f));
+        _dimmer->setSize(math::FVector2(viewportWidth, viewportHeight));
+    }
+    if (!_fitAndCenterWithViewport) {
+        return;
+    }
+
+    const float margin = _viewportOuterMargin;
+    const float availableWidth = std::max(1.0f,
+        viewportWidth - 2.0f * std::min(margin, viewportWidth * 0.5f));
+    const float availableHeight = std::max(1.0f,
+        viewportHeight - 2.0f * std::min(margin, viewportHeight * 0.5f));
+
+    math::FVector2 size = _viewportPreferredSize;
+    size.x = std::min(std::max(1.0f, size.x), availableWidth);
+    size.y = std::min(std::max(1.0f, size.y), availableHeight);
+    setSize(size);
+    setLayoutPositionManaged(false);
+    setPosition(math::FVector2(
+        std::round(std::max(0.0f, (viewportWidth - size.x) * 0.5f)),
+        std::round(std::max(0.0f, (viewportHeight - size.y) * 0.5f))));
+    performLayout();
 }
 
 void Modal::closeModal() {

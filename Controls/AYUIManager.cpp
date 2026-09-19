@@ -790,6 +790,10 @@ void UIManager::setClientSize(float width, float height) {
         _overlayRoot->setPosition(math::FVector2(0.0f, 0.0f));
         _overlayRoot->setSize(math::FVector2(_clientWidth, _clientHeight));
     }
+    if (_activeModal != nullptr) {
+        _activeModal->updateViewportLayout(
+            math::FVector2(_clientWidth, _clientHeight));
+    }
     if (auto it = g_rootLayerStates.find(this); it != g_rootLayerStates.end()) {
         it->second.descValid = false;
     }

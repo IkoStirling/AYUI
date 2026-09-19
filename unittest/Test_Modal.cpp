@@ -33,6 +33,68 @@ TEST_CASE(modal_initial_state_focused_off) {
     CHECK(m.getContent() == nullptr);
 }
 
+TEST_CASE(modal_fit_and_center_in_viewport) {
+    Modal modal;
+    modal.setSize(FVector2(560.0f, 440.0f));
+
+    modal.fitAndCenterInViewport(FVector2(1000.0f, 700.0f), 24.0f);
+    CHECK(modal.getSize().x == 560.0f);
+    CHECK(modal.getSize().y == 440.0f);
+    CHECK(modal.getPosition().x == 220.0f);
+    CHECK(modal.getPosition().y == 130.0f);
+    CHECK_FALSE(modal.isLayoutPositionManaged());
+
+    // Oversized dialogs retain the requested edge margin and remain centred.
+    modal.setSize(FVector2(560.0f, 440.0f));
+    modal.fitAndCenterInViewport(FVector2(400.0f, 300.0f), 24.0f);
+    CHECK(modal.getSize().x == 352.0f);
+    CHECK(modal.getSize().y == 252.0f);
+    CHECK(modal.getPosition().x == 24.0f);
+    CHECK(modal.getPosition().y == 24.0f);
+}
+
+TEST_CASE(modal_center_and_dimmer_follow_client_resize) {
+    UIManager ui;
+    ui.initialize(nullptr);
+    ui.setClientSize(640.0f, 480.0f);
+
+    Modal modal;
+    modal.setSize(FVector2(400.0f, 300.0f));
+    modal.fitAndCenterInViewport(ui.getClientSize(), 24.0f);
+    ui.root()->addChildExternal(&modal);
+    modal.openModal();
+
+    ui.setClientSize(1000.0f, 700.0f);
+    CHECK(modal.getSize().x == 400.0f);
+    CHECK(modal.getSize().y == 300.0f);
+    CHECK(modal.getPosition().x == 300.0f);
+    CHECK(modal.getPosition().y == 200.0f);
+    CHECK(modal.getDimmer() != nullptr);
+    CHECK(modal.getDimmer()->getSize().x == 1000.0f);
+    CHECK(modal.getDimmer()->getSize().y == 700.0f);
+
+    // A constrained modal expands back to its preferred size when the host
+    // grows again; the first small viewport must not become the new preferred
+    // size.
+    ui.setClientSize(300.0f, 200.0f);
+    CHECK(modal.getSize().x == 252.0f);
+    CHECK(modal.getSize().y == 152.0f);
+    CHECK(modal.getPosition().x == 24.0f);
+    CHECK(modal.getPosition().y == 24.0f);
+    CHECK(modal.getDimmer()->getSize().x == 300.0f);
+    CHECK(modal.getDimmer()->getSize().y == 200.0f);
+
+    ui.setClientSize(1000.0f, 700.0f);
+    CHECK(modal.getSize().x == 400.0f);
+    CHECK(modal.getSize().y == 300.0f);
+    CHECK(modal.getPosition().x == 300.0f);
+    CHECK(modal.getPosition().y == 200.0f);
+
+    modal.closeModal();
+    ui.root()->removeChild(&modal);
+    ui.shutdown();
+}
+
 TEST_CASE(modal_open_auto_attaches_default_dimmer) {
     UIManager um;
     um.initialize(nullptr);
