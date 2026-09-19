@@ -6,6 +6,9 @@ param(
     [ValidateSet("auto", "d3d11", "d3d12", "vulkan", "opengl")]
     [string]$Backend = "auto",
 
+    [ValidateRange(0.5, 4.0)]
+    [float[]]$Scales = @(1.0, 1.25, 1.5, 2.0),
+
     [string]$OutputDir = (Join-Path $env:TEMP "AYUI-layer-visual")
 )
 
@@ -236,7 +239,7 @@ $results = @()
 $semanticResults = @()
 $lifecycleResults = @()
 try {
-    foreach ($scale in @(1.0, 1.5)) {
+    foreach ($scale in $Scales) {
         $scaleTag = "s" + [int]($scale * 100)
         $stableRef = Invoke-GalleryCapture `
             "${scaleTag}_stable_immediate" "immediate" "stable" 8 6 $scale
@@ -282,7 +285,7 @@ try {
         }
     }
 
-    foreach ($scale in @(1.0, 1.5)) {
+    foreach ($scale in $Scales) {
         $scaleTag = "s" + [int]($scale * 100)
         foreach ($scenario in @("transparent", "opacity", "blend")) {
             $reference = Invoke-LayerMatrixCapture `
