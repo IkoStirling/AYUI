@@ -742,9 +742,12 @@ void LayoutEditorSession::detach() {
     _gridSize = 8.0f;
     _propId = _propX = _propY = _propW = _propH = _propText = nullptr;
     _propTexture = _propItems = _propController = nullptr;
-    _propOnClick = _propOnToggled = _propOnValueChanged = nullptr;
+    _propOnClick = nullptr;
+    _propOnToggled = _propOnValueChanged = nullptr;
     _propOnTextChanged = _propOnSubmit = nullptr;
     _propOnSelectionChanged = _propOnItemActivated = _propOnClose = nullptr;
+    _applicationCommandCatalog.clear();
+    _applicationCommandValues.clear();
     _propSpacing = nullptr;
     _propPadL = _propPadT = _propPadR = _propPadB = nullptr;
     _status = nullptr;
@@ -2077,6 +2080,65 @@ void LayoutEditorSession::refreshInteractionContracts() {
     }
 }
 
+void LayoutEditorSession::setApplicationCommandProvider(
+    ApplicationCommandProvider provider)
+{
+    _applicationCommandProvider = std::move(provider);
+    if (_ui != nullptr) refreshApplicationCommands();
+}
+
+void LayoutEditorSession::refreshApplicationCommands()
+{
+    _applicationCommandCatalog = _applicationCommandProvider
+        ? _applicationCommandProvider() : std::vector<std::string>{};
+    _applicationCommandCatalog.erase(std::remove_if(
+        _applicationCommandCatalog.begin(), _applicationCommandCatalog.end(),
+        [](const std::string& value) { return value.empty(); }),
+        _applicationCommandCatalog.end());
+    std::sort(_applicationCommandCatalog.begin(), _applicationCommandCatalog.end());
+    _applicationCommandCatalog.erase(std::unique(
+        _applicationCommandCatalog.begin(), _applicationCommandCatalog.end()),
+        _applicationCommandCatalog.end());
+    syncApplicationCommandPicker();
+}
+
+void LayoutEditorSession::syncApplicationCommandPicker()
+{
+    if (_propOnClick == nullptr) return;
+    std::vector<std::string> commands = _applicationCommandCatalog;
+
+    const std::string current = _selected == nullptr
+        ? std::string{} : _selected->getEventBinding("onClick");
+    if (!current.empty()
+        && std::find(commands.begin(), commands.end(), current) == commands.end()) {
+        commands.push_back(current);
+    }
+
+    _applicationCommandValues.clear();
+    _applicationCommandValues.push_back({});
+    _applicationCommandValues.insert(
+        _applicationCommandValues.end(), commands.begin(), commands.end());
+    std::vector<std::wstring> labels;
+    labels.reserve(_applicationCommandValues.size());
+    labels.push_back(localizedText(
+        "ui.editor.ui_designer.command.none", L"None"));
+    for (const std::string& command : commands) {
+        labels.push_back(utf8ToWide(command));
+    }
+    const bool previous = _suppressProp;
+    _suppressProp = true;
+    _propOnClick->setItems(labels);
+    int selected = 0;
+    for (size_t index = 1; index < _applicationCommandValues.size(); ++index) {
+        if (_applicationCommandValues[index] == current) {
+            selected = static_cast<int>(index);
+            break;
+        }
+    }
+    _propOnClick->setSelectedIndex(selected);
+    _suppressProp = previous;
+}
+
 void LayoutEditorSession::bindPropField(const char* id, const char* field,
                                         TextInput*& slot, bool numericScrub) {
     slot = dynamic_cast<TextInput*>(findChromeById(id));
@@ -2370,7 +2432,20 @@ void LayoutEditorSession::wireChrome() {
     bindPropField("prop_texture", "texture", _propTexture, false);
     bindPropField("prop_items", "items", _propItems, false);
     bindPropField("prop_controller", "controller", _propController, false);
-    bindPropField("prop_on_click", "event:onClick", _propOnClick, false);
+    _propOnClick = dynamic_cast<ComboBox*>(findChromeById("prop_on_click"));
+    if (_propOnClick != nullptr) {
+        _propOnClick->setOnSelectionChanged([this](int index) {
+            if (_suppressProp || index < 0
+                || index >= static_cast<int>(_applicationCommandValues.size())) {
+                return;
+            }
+            beginPropertyMutation("event:onClick");
+            applyProperty("event:onClick", utf8ToWide(
+                _applicationCommandValues[static_cast<size_t>(index)]));
+            endPropertyMutation();
+        });
+        refreshApplicationCommands();
+    }
     bindPropField("prop_on_toggled", "event:onToggled", _propOnToggled, false);
     bindPropField("prop_on_value_changed", "event:onValueChanged",
                   _propOnValueChanged, false);
@@ -4048,6 +4123,7 @@ void LayoutEditorSession::applyProperty(const std::string& field,
         _selected->setEventBinding(field.substr(6),
                                    wideToUtf8(trimWide(value)));
         markDirty(true);
+        if (field == "event:onClick") syncApplicationCommandPicker();
         return;
     }
 
@@ -6443,7 +6519,7 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(_propTexture, L"");
         setField(_propItems, L"");
         setField(_propController, L"");
-        setField(_propOnClick, L"");
+        syncApplicationCommandPicker();
         setField(_propOnToggled, L"");
         setField(_propOnValueChanged, L"");
         setField(_propOnTextChanged, L"");
@@ -6525,7 +6601,7 @@ void LayoutEditorSession::syncPropertyStrip() {
         setField(field, commonPropertyValue(
             std::string("event:") + eventName));
     };
-    syncEvent(_propOnClick, "onClick");
+    syncApplicationCommandPicker();
     syncEvent(_propOnToggled, "onToggled");
     syncEvent(_propOnValueChanged, "onValueChanged");
     syncEvent(_propOnTextChanged, "onTextChanged");

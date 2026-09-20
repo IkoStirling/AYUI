@@ -94,6 +94,11 @@ int main() {
         std::fprintf(stderr, "texture provider ran before attach\n");
         return 121;
     }
+    int applicationCommandProviderCalls = 0;
+    session.setApplicationCommandProvider([&applicationCommandProviderCalls]() {
+        ++applicationCommandProviderCalls;
+        return std::vector<std::string>{"menu.start", "game.return-menu"};
+    });
     int openPickerCalls = 0;
     session.setOpenPathPicker([&openPickerCalls]() {
         ++openPickerCalls;
@@ -127,6 +132,13 @@ int main() {
     if (!session.attach(ui)) {
         std::fprintf(stderr, "attach failed\n");
         return 2;
+    }
+    auto* onClickCommand = dynamic_cast<ayt::ui::ComboBox*>(
+        ui.findById("prop_on_click"));
+    if (onClickCommand == nullptr || applicationCommandProviderCalls == 0
+        || onClickCommand->getItemCount() != 3u) {
+        std::fprintf(stderr, "application command picker setup failed\n");
+        return 125;
     }
     if (textureResourceProviderCalls != 1) {
         std::fprintf(stderr,

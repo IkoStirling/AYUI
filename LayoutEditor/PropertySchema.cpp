@@ -100,7 +100,7 @@ const std::vector<PropertyFieldSchema>& allPropertyFieldSchemas() {
               0.0f, 0.0f, {}, "Controller"),
         field(AuthoringProperty::OnClick, PropertySection::Interaction,
               "event:onClick", "row_prop_on_click", "lbl_prop_on_click",
-              "prop_on_click", PropertyEditorKind::Text, false, 0.0f,
+              "prop_on_click", PropertyEditorKind::Enum, false, 0.0f,
               0.0f, 0.0f, {}, "On Click"),
         field(AuthoringProperty::OnToggled, PropertySection::Interaction,
               "event:onToggled", "row_prop_on_toggled", "lbl_prop_on_toggled",

@@ -89,6 +89,8 @@ public:
         std::function<void(const std::string& path, bool dirty)>;
     using InteractionContractProvider =
         std::function<std::vector<LayoutControllerContract>()>;
+    using ApplicationCommandProvider =
+        std::function<std::vector<std::string>()>;
     using ThemePathPicker = std::function<std::string()>;
     using ProjectWorkflowAction = std::function<bool(
         const std::string& layoutPath, std::string& message)>;
@@ -175,6 +177,8 @@ public:
     void setInteractionContractProvider(
         InteractionContractProvider provider);
     void refreshInteractionContracts();
+    void setApplicationCommandProvider(ApplicationCommandProvider provider);
+    void refreshApplicationCommands();
     const LayoutInteractionGraphModel& interactionGraph() const {
         return _interactionGraph;
     }
@@ -345,6 +349,7 @@ private:
     std::wstring localizedText(std::string_view key,
                                std::wstring_view fallback) const;
     void syncPropertyStrip();
+    void syncApplicationCommandPicker();
     void updatePropPanelVisibility();
     void setChromeVisible(const char* id, bool visible);
     void setChromeEnabled(const char* id, bool enabled);
@@ -659,7 +664,7 @@ private:
     TextInput* _propTexture = nullptr;
     TextInput* _propItems = nullptr;
     TextInput* _propController = nullptr;
-    TextInput* _propOnClick = nullptr;
+    ComboBox* _propOnClick = nullptr;
     TextInput* _propOnToggled = nullptr;
     TextInput* _propOnValueChanged = nullptr;
     TextInput* _propOnTextChanged = nullptr;
@@ -792,6 +797,9 @@ private:
     ProjectWorkflowAction _completeFlowSignalsAction;
     ProjectRefactorAction _projectRefactorAction;
     InteractionContractProvider _interactionContractProvider;
+    ApplicationCommandProvider _applicationCommandProvider;
+    std::vector<std::string> _applicationCommandCatalog;
+    std::vector<std::string> _applicationCommandValues;
     TitleUpdater _titleUpdater;
     DocumentStateUpdater _documentStateUpdater;
     UILayoutLoader _docLoader;
