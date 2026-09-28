@@ -120,11 +120,9 @@ using namespace ayt::ui;
 using namespace ayt::math;
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
     // Unbuffered stdout so a crash mid-suite does not hide CASE/PASS lines
     // when output is redirected to a file.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
-    return runTest();
+    return ayt::test::runTests("AYUI", argc, argv);
 }

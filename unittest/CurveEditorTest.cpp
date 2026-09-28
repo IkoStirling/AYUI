@@ -623,4 +623,4 @@ TEST_CASE(property_field_refresh_validation_readonly_and_enum_preservation)
 }
 TEST_SUITE_END
 
-int main() { return ayt::test::runAllTests("AYUI curve authoring"); }
+int main(int argc, char* argv[]) { return ayt::test::runTests("AYUI curve authoring", argc, argv); }
