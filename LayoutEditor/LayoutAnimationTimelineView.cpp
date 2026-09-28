@@ -1,6 +1,7 @@
 #include "AYUI/LayoutEditor/LayoutAnimationTimelineView.h"
 
 #include "AYUI/Tween.h"
+#include "AYUI/Authoring/AuthoringPrimitives.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,14 +17,7 @@ float finiteOr(float value, float fallback) {
 }
 
 std::wstring timeLabel(float timeMs) {
-    std::wostringstream text;
-    if (timeMs >= 1000.0f) {
-        text << std::fixed << std::setprecision(timeMs >= 10000.0f ? 0 : 1)
-             << timeMs / 1000.0f << L"s";
-    } else {
-        text << static_cast<int>(std::lround(timeMs)) << L"ms";
-    }
-    return text.str();
+    return authoring::formatTime(timeMs * 0.001, authoring::TimeDisplay::Adaptive);
 }
 
 } // namespace
@@ -260,9 +254,8 @@ math::FRectangle LayoutAnimationTimelineView::keyframeBounds(
     if (keyIndex < 0 || keyIndex >= static_cast<int>(keys.size())) return {};
     const math::FRectangle bounds = getWorldBounds();
     const float cx = worldXForTime(keys[static_cast<size_t>(keyIndex)]);
-    const float cy = bounds.minY + kHeaderHeight +
-        (static_cast<float>(trackIndex) + 0.5f) * kTrackHeight -
-        verticalScrollOffset();
+    const float cy = static_cast<float>(authoring::TimelineRowLayout{
+        bounds.minY + kHeaderHeight, kTrackHeight, verticalScrollOffset()}.rowCenter(trackIndex));
     return math::FRectangle(cx - kKeySize * 0.5f, cy - kKeySize * 0.5f,
                             cx + kKeySize * 0.5f, cy + kKeySize * 0.5f);
 }
@@ -526,23 +519,9 @@ void LayoutAnimationTimelineView::onRender(IRenderBackend& renderer) {
                          plot.minX, bounds.maxY),
         math::FVector4(0.20f, 0.24f, 0.31f, 1.0f));
 
-    const float plotWidth = std::max(1.0f, plot.maxX - plot.minX);
-    const float msPerPixel = visibleDurationMs() / plotWidth;
-    const float targetTick = msPerPixel * 84.0f;
-    const float candidates[] = {
-        10.0f, 20.0f, 50.0f, 100.0f, 200.0f, 500.0f,
-        1000.0f, 2000.0f, 5000.0f, 10000.0f, 20000.0f
-    };
-    float tickMs = candidates[sizeof(candidates) / sizeof(candidates[0]) - 1];
-    for (float candidate : candidates) {
-        if (candidate >= targetTick) {
-            tickMs = candidate;
-            break;
-        }
-    }
-    const float firstTick = std::ceil(_viewStartMs / tickMs) * tickMs;
-    const float viewEnd = _viewStartMs + visibleDurationMs();
-    for (float tick = firstTick; tick <= viewEnd + 0.01f; tick += tickMs) {
+    for (double seconds : authoring::timelineTicks(
+            {_viewStartMs * 0.001, visibleDurationMs() * 0.001}, plot.maxX - plot.minX)) {
+        const float tick = static_cast<float>(seconds * 1000.0);
         const float x = worldXForTime(tick);
         renderer.drawRect(
             math::FRectangle(x, bounds.minY + 18.0f, x + 1.0f, bounds.maxY),
@@ -558,12 +537,11 @@ void LayoutAnimationTimelineView::onRender(IRenderBackend& renderer) {
     renderer.pushClip(math::FRectangle(
         bounds.minX, std::min(bounds.maxY, bounds.minY + kHeaderHeight),
         plot.maxX, bounds.maxY));
-    const float verticalOffset = verticalScrollOffset();
-    for (int track = 0; track < static_cast<int>(_tracks.size()); ++track) {
-        const float y = bounds.minY + kHeaderHeight +
-            static_cast<float>(track) * kTrackHeight - verticalOffset;
-        if (y + kTrackHeight <= bounds.minY + kHeaderHeight) continue;
-        if (y >= bounds.maxY) break;
+    const authoring::TimelineRowLayout rows{bounds.minY + kHeaderHeight,
+                                           kTrackHeight, verticalScrollOffset()};
+    const auto visible = rows.visibleRows(_tracks.size(), bounds.maxY - rows.top);
+    for (int track = static_cast<int>(visible.first); track < static_cast<int>(visible.second); ++track) {
+        const float y = static_cast<float>(rows.rowTop(track));
         const bool selected = track == _selectedTrack;
         if (selected) {
             renderer.drawRect(

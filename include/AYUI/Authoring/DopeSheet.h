@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYUI/Authoring/TimelineModel.h"
+#include "AYUI/Authoring/AuthoringPrimitives.h"
 
 #include <AYUI/Widget.h>
 
@@ -57,8 +58,7 @@ private:
     bool _panning = false;
     bool _draggingKey = false;
     bool _gestureChanged = false;
-    bool _gestureActive = false;
-    TimelineSelection _gestureSelection;
+    EditGestureSession _gesture;
     ayt::math::FVector2 _lastPointer{};
     std::function<void(const std::string&, const std::string&)>
         _onSelectionChanged;

@@ -86,6 +86,8 @@ struct TimeViewport {
  * Use one shared source per document for coordinated selection. Hosts invalidate
  * attached views after owner/selection/playhead changes; use the view callbacks
  * to refresh sibling views and inspectors. All time values use seconds.
+ * AuthoringPrimitives.h supplies optional ruler, row layout, scoped gesture and
+ * change-gating helpers without adding domain responsibilities to this source.
  */
 class ICurveEditorSource {
 public:

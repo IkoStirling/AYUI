@@ -64,6 +64,20 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 共享作者基础（第二阶段）
+
+`AuthoringPrimitives.h` 属于 UI-free `AYUITimelineCore`：`timelineTicks` 按像素密度
+生成有数量上限的 1/2/5 刻度，`formatTime` 支持秒/帧/自适应毫秒，
+`snapTimeToInterval` 只计算吸附（边界仍由 owner 校验），`TimelineRowLayout`
+共用行坐标和可见行范围。曲线/DopeSheet/Layout 时间轴已接入相应基础。
+
+`EditGestureSession` 对 owner 的 begin/endEdit 做有所有权的生命周期管理，
+只取消自身成功开始的事务，取消时恢复开始选择；endEdit 失败时保留所有权以便重试。
+CurveCanvas 与 DopeSheet 共用它；不会建立另一套历史。
+`AuthoringRefreshGate` 比较宿主提供的内容、选择、姿势版本和播放状态/位置，
+不扫描资源、不自动订阅；动画/骨骼页已替换各自版本检测，播放刷新不重建作者面板。
+`acknowledge` 用于显式全刷新之后同步基线；选择变化仍可由原 UI 回调立即处理。
+
 AYEditor 的动画页已完整使用公共曲线画布/DopeSheet，并共享同一 source。
 UI Layout 的现有 `LayoutAnimationTimelineView` 复用公共 TimeViewport 和手势阶段
 顺序，保留毫秒 API、垂直滚动及现有 Bezier/Spring 参数编辑；并未强制替换成新控件。

@@ -21,7 +21,8 @@ constexpr float kKeyRadius = 5.0f;
 DopeSheet::DopeSheet(
     std::shared_ptr<ICurveEditorSource> document)
     : _document(std::move(document)),
-      _selection(_document ? _document->selectionState() : std::make_shared<TimelineSelection>())
+      _selection(_document ? _document->selectionState() : std::make_shared<TimelineSelection>()),
+      _gesture(_document)
 {
     setId("dope_sheet");
 }
@@ -82,9 +83,10 @@ DopeSheet::KeyHit DopeSheet::hitKey(
     if (!snapshot) return {};
     const auto& tracks = snapshot->tracks;
     const auto& keys = snapshot->keys;
-    for (std::size_t row = 0u; row < tracks.size(); ++row) {
-        const float y = getWorldBounds().minY + kHeaderHeight
-            + (static_cast<float>(row) + 0.5f) * kRowHeight;
+    const TimelineRowLayout rows{plotBounds().minY, kRowHeight, 0.0};
+    const auto visible = rows.visibleRows(tracks.size(), plotBounds().maxY - plotBounds().minY);
+    for (std::size_t row = visible.first; row < visible.second; ++row) {
+        const float y = static_cast<float>(rows.rowCenter(row));
         for (const auto& key : keys) {
             if (key.trackId != tracks[row].id) continue;
             const ayt::math::FVector2 center{worldX(key.timeSeconds), y};
@@ -128,10 +130,8 @@ bool DopeSheet::onMouseButtonDown(
     }
     markDirty();
     if (_document != nullptr
-        && _document->beginEdit(
+        && _gesture.begin(
             "Move timeline key")) {
-        _gestureActive = true;
-        _gestureSelection = *_selection;
         _draggingKey = true;
         return true;
     }
@@ -203,11 +203,7 @@ bool DopeSheet::onMouseWheel(
 
 void DopeSheet::finishDrag(bool cancel)
 {
-    if (_document != nullptr && _gestureActive) {
-        (void)_document->endEdit(cancel);
-        if (cancel) *_selection = _gestureSelection;
-    }
-    _gestureActive = false;
+    (void)_gesture.finish(cancel);
     const bool changed = _gestureChanged;
     _draggingKey = false;
     _dragKeyId.clear();
@@ -249,15 +245,12 @@ void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
     renderer.drawText({bounds.minX + 8.0f, bounds.minY,
                        bounds.minX + kLabelWidth, bounds.minY + kHeaderHeight},
         L"DOPE SHEET", 11, ayt::math::FVector4{0.66f, 0.72f, 0.82f, 1.0f});
-    for (int tick = 0; tick <= 10; ++tick) {
-        const double seconds = _viewStart + _viewDuration * tick / 10.0;
+    for (double seconds : timelineTicks({_viewStart, _viewDuration}, plot.maxX - plot.minX)) {
         const float x = worldX(seconds);
         renderer.drawRect({x, bounds.minY, x + 1.0f, bounds.maxY},
                           {0.11f, 0.13f, 0.17f, 1.0f});
-        std::wostringstream label;
-        label << std::fixed << std::setprecision(2) << seconds;
         renderer.drawText({x + 3.0f, bounds.minY, x + 58.0f,
-                           bounds.minY + kHeaderHeight}, label.str(), 9,
+                           bounds.minY + kHeaderHeight}, formatTime(seconds, TimeDisplay::Seconds, 2), 9,
                           ayt::math::FVector4{0.47f, 0.53f, 0.62f, 1.0f});
     }
     const auto snapshot = _document->timelineSnapshot();
@@ -267,10 +260,10 @@ void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
     }
     const auto& tracks = snapshot->tracks;
     const auto& keys = snapshot->keys;
-    for (std::size_t row = 0u; row < tracks.size(); ++row) {
-        const float y = bounds.minY + kHeaderHeight
-            + static_cast<float>(row) * kRowHeight;
-        if (y >= bounds.maxY) break;
+    const TimelineRowLayout rows{plot.minY, kRowHeight, 0.0};
+    const auto visible = rows.visibleRows(tracks.size(), plot.maxY - plot.minY);
+    for (std::size_t row = visible.first; row < visible.second; ++row) {
+        const float y = static_cast<float>(rows.rowTop(row));
         const bool selected = tracks[row].id == _selection->trackId;
         if (selected) {
             renderer.drawRect({bounds.minX, y, bounds.maxX,

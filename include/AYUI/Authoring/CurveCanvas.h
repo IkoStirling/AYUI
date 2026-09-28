@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYUI/Authoring/TimelineModel.h"
+#include "AYUI/Authoring/AuthoringPrimitives.h"
 
 #include <AYUI/Widget.h>
 
@@ -82,8 +83,7 @@ private:
     bool _boxSelecting = false;
     bool _boxMoved = false;
     bool _gestureChanged = false;
-    bool _gestureActive = false;
-    TimelineSelection _gestureSelection;
+    EditGestureSession _gesture;
     Hit _dragHit;
     std::shared_ptr<const CurveTrack> _sampleTrack;
     double _sampleStart = 0.0;

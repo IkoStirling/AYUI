@@ -47,7 +47,8 @@ float distanceSquared(ayt::math::FVector2 a, ayt::math::FVector2 b) noexcept
 CurveCanvas::CurveCanvas(
     std::shared_ptr<ICurveEditorSource> document)
     : _document(std::move(document)),
-      _selection(_document ? _document->selectionState() : std::make_shared<TimelineSelection>())
+      _selection(_document ? _document->selectionState() : std::make_shared<TimelineSelection>()),
+      _gesture(_document)
 {
     setId("curve_canvas");
 }
@@ -293,11 +294,9 @@ bool CurveCanvas::onMouseButtonDown(
         _onSelectionChanged(_selection->primaryKeyId, _dragHit.component);
     }
     markDirty();
-    if (_document->beginEdit(
+    if (_gesture.begin(
             hit.kind == HitKind::Key ? "Move curve key"
                                      : "Edit curve tangent")) {
-        _gestureActive = true;
-        _gestureSelection = *_selection;
         return true;
     }
     _dragHit = {};
@@ -373,7 +372,7 @@ bool CurveCanvas::onMouseMove(
             double deltaTime = (event.mousePos.x - _lastPointer.x)
                 / std::max(1.0f, plot.maxX - plot.minX) * _viewDuration;
             if (frame > 0.0) {
-                deltaTime = std::round(deltaTime / frame) * frame;
+                deltaTime = snapTimeToInterval(deltaTime, frame);
             }
             const float deltaValue = std::round(
                 (-(event.mousePos.y - _lastPointer.y)
@@ -491,11 +490,7 @@ bool CurveCanvas::onMouseWheel(
 
 void CurveCanvas::finishGesture(bool cancel)
 {
-    if (_document != nullptr && _gestureActive) {
-        (void)_document->endEdit(cancel);
-        if (cancel) *_selection = _gestureSelection;
-    }
-    _gestureActive = false;
+    (void)_gesture.finish(cancel);
     const bool changed = _gestureChanged;
     _dragHit = {};
     _gestureChanged = false;
@@ -534,11 +529,13 @@ void CurveCanvas::onRender(ayt::ui::IRenderBackend& renderer)
     ensureView(track);
     const auto plot = plotBounds();
     renderer.drawRect(plot, {0.055f, 0.065f, 0.085f, 1.0f});
-    for (int line = 0; line <= 10; ++line) {
-        const float x = plot.minX + (plot.maxX - plot.minX) * line / 10.0f;
-        const float y = plot.minY + (plot.maxY - plot.minY) * line / 10.0f;
+    for (double tick : timelineTicks({_viewStart, _viewDuration}, plot.maxX - plot.minX)) {
+        const float x = worldX(tick);
         renderer.drawRect({x, plot.minY, x + 1.0f, plot.maxY},
                           {0.105f, 0.12f, 0.15f, 1.0f});
+    }
+    for (int line = 0; line <= 10; ++line) {
+        const float y = plot.minY + (plot.maxY - plot.minY) * line / 10.0f;
         renderer.drawRect({plot.minX, y, plot.maxX, y + 1.0f},
                           {0.105f, 0.12f, 0.15f, 1.0f});
     }

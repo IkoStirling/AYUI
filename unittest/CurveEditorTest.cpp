@@ -64,6 +64,73 @@ public:
 
 TEST_SUITE(AYUI_CurveEditor)
 
+TEST_CASE(shared_ticks_rows_snap_and_units)
+{
+    using namespace ayt::ui::authoring;
+    const auto ticks = timelineTicks({-0.1, 1.0}, 500.0);
+    CHECK(ticks.size() == 5u);
+    CHECK(std::fabs(ticks[1] - 0.2) < 1e-9);
+    CHECK(timelineTicks({0, 0}, 500).empty());
+    CHECK(timelineTicks({0, 1}, 0).empty());
+    CHECK(timelineTicks({0, 1e300}, 500).size() <= 1024u);
+    CHECK(formatTime(0.25, TimeDisplay::Adaptive) == L"250ms");
+    CHECK(formatTime(2.0, TimeDisplay::Frames, 3, 24) == L"48f");
+    CHECK(std::fabs(snapTimeToInterval(0.26, 0.1) - 0.3) < 1e-9);
+    CHECK(snapTimeToInterval(0.26, 0) == 0.26);
+    TimelineRowLayout rows{30, 28, 42};
+    const auto range = rows.visibleRows(10, 56);
+    CHECK(range.first == 1u);
+    CHECK(range.second == 4u);
+    CHECK(rows.rowCenter(2) == 58.0);
+    CHECK(rows.visibleRows(0, 100).second == 0u);
+}
+
+TEST_CASE(refresh_gate_separates_content_selection_pose_and_transport)
+{
+    using namespace ayt::ui::authoring;
+    AuthoringRefreshGate gate;
+    AuthoringStateStamp stamp{1, 2, 3, 0, false};
+    CHECK(gate.consume(stamp).content);
+    CHECK(!gate.consume(stamp).any());
+    stamp.positionSeconds = 0.1;
+    auto changed = gate.consume(stamp);
+    CHECK(changed.transport && !changed.content && !changed.pose && !changed.selection);
+    ++stamp.selection;
+    changed = gate.consume(stamp);
+    CHECK(changed.selection && !changed.content && !changed.transport);
+    ++stamp.pose;
+    CHECK(gate.consume(stamp).pose);
+    ++stamp.content;
+    CHECK(gate.consume(stamp).content);
+    stamp.playing = true;
+    CHECK(gate.consume(stamp).transport);
+    gate.acknowledge({5, 6, 7, 1, false});
+    CHECK(!gate.consume({5, 6, 7, 1, false}).any());
+}
+
+TEST_CASE(scoped_gesture_retries_failed_finish_and_cancels_on_destruction)
+{
+    using namespace ayt::ui::authoring;
+    int begins = 0, ends = 0;
+    bool rejectEnd = true, cancelled = false;
+    auto selection = std::make_shared<TimelineSelection>();
+    selection->primaryKeyId = "before";
+    {
+        EditGestureSession gesture([&](const auto&) { ++begins; return true; },
+            [&](bool cancel) { ++ends; cancelled = cancel; return !rejectEnd; }, selection);
+        CHECK(gesture.begin("edit"));
+        CHECK(!gesture.begin("nested"));
+        CHECK(begins == 1);
+        selection->primaryKeyId = "after";
+        CHECK(!gesture.finish(false));
+        CHECK(gesture.active());
+        rejectEnd = false;
+    }
+    CHECK(ends == 2);
+    CHECK(cancelled);
+    CHECK(selection->primaryKeyId == "before");
+}
+
 TEST_CASE(seconds_viewport_preserves_zoom_anchor_and_tangent_units)
 {
     ayt::ui::authoring::TimeViewport view{2.0, 4.0};
