@@ -64,6 +64,15 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 大选择与播放重绘（2026-09-29）
+
+DopeSheet 按不可变 TimelineSnapshot 身份缓存行→key 索引；同一快照播放头重绘
+不会重建索引，`rowIndexBuildCount` 仅作诊断。owner 必须更换内容快照，不能原地改它。
+选择去重/ID 重映射保持输入顺序，使用哈希避免大选择平方扫描；绘制建立选中 ID 集合。
+CurveCanvas 的分量手势会先过滤到当前轨道可见 keys，避免跨行选择使其他轨道被隐式
+修改；跨行时间移动使用 DopeSheet 的 owner 批量接口。动画 Clipboard/retime 是
+领域核心能力，不移入通用 UI。5 万项选择/200 行回归检查索引次数而非耗时阈值。
+
 ### 稳定 ID 列表与拖放来源
 
 `StableListRows<Id>` 保存 owner 范围内的可见行/ID 双向映射；过滤/重排后按选中 ID
