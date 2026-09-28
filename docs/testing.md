@@ -65,5 +65,6 @@ CTest 标签使用 `ui-fast/ui-integration/ui-stress/ui-full` 以及领域标签
 文件监听、持久化与打包测试使用 `AYTestFixtures.h` 的 `ScratchDirectory`：
 只清理独占创建的子目录，不复用或删除别的进程留下的目录。无 CTest 环境时，
 临时根也按进程隔离；同一分区的多次并发调用也不共享相对路径文件。
+CTest 临时根使用短分区标识，可从注册项的 `AY_TEST_TMPDIR` 查询对应关系。
 文件监听使用 `waitUntil` 的 2 秒截止时间，不依赖固定睡眠。
 真正访问原生剪贴板、共享窗口或 GPU 的新测试必须显式声明资源锁或串行策略。
