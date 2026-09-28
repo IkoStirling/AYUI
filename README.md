@@ -53,6 +53,10 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
   断点可见性和锚点覆盖；Animation Authoring 层提供按稳定 Widget ID 绑定的 opacity/position/size
   轨道、关键帧、Cubic Bezier/物理弹簧参数、repeat/yoyo/reduced-motion importance，以及不污染源数据的时间点 scrub 预览
 
+当前测试组织与用例口径见 [测试维护文档](docs/testing.md)：2026-09-28 基线为
+1208 个 UI 用例＋19 个创作控件用例，共 1227 个；用例数是主指标，断言数单独统计。
+以下为历史断言通过数/总数，不是用例数量：
+
 2026-09-10 VS 2026 Insider Windows Debug 全量集成基线为 AYUI `5660 / 5660`、
 AYRenderer `4333 / 4333`、AYEditor `2549 / 2549`，Default Editor Module Assembly `13 / 13`；
 Layout Editor headless round-trip 与 AYEditor level-4（三帧 GPU UI 合成及完整 shutdown）同步通过。
