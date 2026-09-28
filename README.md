@@ -7,6 +7,7 @@ AYUI 是 AliyatEngine 的保留模式（retained-mode）2D UI 模块，覆盖控
 - 最近全模块审计：2026-09-10
 - 权威架构文档：[design.md](design.md)
 - 变更记录：[CHANGELOG.md](CHANGELOG.md)
+- 测试运行与维护：[testing.md](docs/testing.md)
 - 历史方案：[AYUI-v1-Design.md](AYUI-v1-Design.md)（仅供追溯，不代表当前实现）
 
 ## 当前状态

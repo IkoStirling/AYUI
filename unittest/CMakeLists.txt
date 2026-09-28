@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.12)
 include(TestGroups.cmake)
 
+# Partition, do not duplicate: these cases run separately from fast domains.
+set(AYUI_TIER_CASES
+    "Layout|AYUI_LayoutLoader|test_layout_loader_hot_reload_via_file_watcher|integration"
+    "Interaction|AYUI_UIManager|test_uimanager_reload_during_capture|integration"
+    "Text|AYUI_I18n|I18n_RejectsHugeJSON|stress"
+    "Controls|AYUI_TreeView|treeview_flatten_1000_nodes_under_5ms|stress")
+
 set(AYUI_TEST_OBJECT_TARGETS)
 set(AYUI_TEST_GROUP_TARGETS)
 set(AYUI_OWNED_TEST_SOURCES)
@@ -30,6 +37,26 @@ foreach(group IN LISTS AYUI_TEST_GROUPS)
     add_executable(${binary} main.cpp)
     target_compile_definitions(${binary} PRIVATE AYUI_TEST_MODULE="${binary}")
     target_link_libraries(${binary} PRIVATE ${objects})
+    string(TOLOWER "${group}" group_label)
+    set(fast_args)
+    foreach(entry IN LISTS AYUI_TIER_CASES)
+        string(REPLACE "|" ";" fields "${entry}")
+        list(GET fields 0 owner)
+        if(NOT owner STREQUAL group)
+            continue()
+        endif()
+        list(GET fields 1 suite)
+        list(GET fields 2 case_name)
+        list(GET fields 3 tier)
+        list(APPEND fast_args --exclude-case "${suite}.${case_name}")
+        ay_add_test(${binary} NAME "${binary}.${case_name}"
+            SUITE "${suite}" ARGS --case "${case_name}"
+            LABELS "ui;ui-full;ui-${tier};${tier};ui-${group_label}"
+            TIMEOUT 60 RUN_SERIAL)
+    endforeach()
+    ay_add_test(${binary} ARGS ${fast_args}
+        LABELS "ui;ui-full;ui-fast;unit;ui-${group_label}"
+        TIMEOUT 30 RUN_SERIAL)
     list(APPEND AYUI_TEST_OBJECT_TARGETS ${objects})
     list(APPEND AYUI_TEST_GROUP_TARGETS ${binary})
     list(APPEND AYUI_OWNED_TEST_SOURCES ${AYUI_TEST_${group}_SOURCES})
@@ -47,9 +74,11 @@ endif()
 # Compatibility executable: same test inventory, now independently compiled.
 add_executable(AYUI_UnitTests main.cpp)
 target_link_libraries(AYUI_UnitTests PRIVATE ${AYUI_TEST_OBJECT_TARGETS})
-ay_add_test(AYUI_UnitTests)
+# Do not register the aggregate as well: CTest's domain partition covers every
+# case exactly once. The compatibility executable is still available manually.
 add_custom_target(AYUI_TestGroups DEPENDS ${AYUI_TEST_GROUP_TARGETS})
 
 add_executable(AYUICurveEditorTest CurveEditorTest.cpp)
 target_link_libraries(AYUICurveEditorTest PRIVATE AYUICurveEditor AYTest)
-ay_add_test(AYUICurveEditorTest)
+ay_add_test(AYUICurveEditorTest LABELS "ui;ui-full;ui-fast;unit;ui-authoring"
+    TIMEOUT 30 RUN_SERIAL)
