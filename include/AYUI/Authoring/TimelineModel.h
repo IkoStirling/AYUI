@@ -79,15 +79,11 @@ struct TimeViewport {
 
 /** @brief Owner adapter for reusable curve and timeline authoring widgets.
  * Link AYUITimelineCore for this UI-free contract, AYUICurveEditor for views.
- * Immutable snapshots may outlive a document revision. Cache them until content
- * changes; playback position is intentionally separate from content revision.
- * IDs are opaque. Successful mutations return any remapped IDs after sorting.
- * Validation, persistence, history and typed sampling remain in the owner.
- * Use one shared source per document for coordinated selection. Hosts invalidate
- * attached views after owner/selection/playhead changes; use the view callbacks
- * to refresh sibling views and inspectors. All time values use seconds.
- * AuthoringPrimitives.h supplies optional ruler, row layout, scoped gesture and
- * change-gating helpers without adding domain responsibilities to this source.
+ * Cache immutable snapshots per content revision; playback is separate.
+ * Snapshots own data and can outlive revisions. IDs are opaque and remappable.
+ * Owner handles validation, sampling, history and persistence. All times are seconds.
+ * Share one source for selection; hosts invalidate views on owner/selection/playhead changes.
+ * AuthoringPrimitives.h provides ruler, row, gesture and refresh helpers.
  */
 class ICurveEditorSource {
 public:
