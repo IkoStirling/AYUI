@@ -44,6 +44,12 @@ std::wstring decodeUtf8Text(
     const std::string& utf8,
     std::vector<size_t>* byteToTextOffset = nullptr);
 
+/** @brief Encode UI code units as strict UTF-8, preserving embedded NULs.
+ * UTF-16 surrogate pairs are combined; unpaired surrogates and invalid UTF-32
+ * scalars become U+FFFD. No locale, platform API or normalization is involved.
+ */
+std::string encodeUtf8Text(const std::wstring& text);
+
 // Grapheme-safe editing helpers. Indices are std::wstring code-unit offsets.
 // floor/ceil keep an already-valid boundary unchanged; previous/next always
 // move by one complete extended grapheme cluster when possible.

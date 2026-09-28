@@ -5,6 +5,29 @@ using namespace ayt::ui;
 
 TEST_SUITE(AYUI_UnicodeText)
 
+TEST_CASE(unicode_utf8_encoding_roundtrips_scalar_boundaries_and_embedded_nul) {
+    const std::wstring text = L"中文\u007f\u0080\u07ff\u0800\ud7ff\ue000\uffff\U00010000\U0010ffff\U0001f600";
+    CHECK(decodeUtf8Text(encodeUtf8Text(text)) == text);
+    const std::wstring embedded{L'a', L'\0', L'b'};
+    CHECK(encodeUtf8Text(embedded) == std::string("a\0b", 3));
+    CHECK(decodeUtf8Text(encodeUtf8Text(embedded)) == embedded);
+    CHECK(encodeUtf8Text(L"\U0001f600") == std::string("\xf0\x9f\x98\x80"));
+    CHECK(encodeUtf8Text(L"").empty());
+}
+TEST_CASE(unicode_utf8_encoding_replaces_invalid_code_units_without_losing_neighbors) {
+    const std::wstring unpaired{static_cast<wchar_t>(0xd800u), L'x',
+        static_cast<wchar_t>(0xdc00u)};
+    CHECK(encodeUtf8Text(unpaired) == std::string("\xef\xbf\xbdx\xef\xbf\xbd"));
+    const std::wstring validPair{static_cast<wchar_t>(0xd83du), static_cast<wchar_t>(0xde00u)};
+    if constexpr (sizeof(wchar_t) == 2) {
+        CHECK(encodeUtf8Text(validPair) == std::string("\xf0\x9f\x98\x80"));
+    } else {
+        CHECK(encodeUtf8Text(validPair) == std::string("\xef\xbf\xbd\xef\xbf\xbd"));
+        CHECK(encodeUtf8Text(std::wstring{static_cast<wchar_t>(0x110000u)})
+            == std::string("\xef\xbf\xbd"));
+    }
+}
+
 TEST_CASE(unicode_grapheme_combining_mark_is_one_cluster) {
     const UnicodeTextAnalysis a = analyzeUnicodeText(L"e\x0301x");
     CHECK(a.clusters.size() == 2u);

@@ -357,6 +357,39 @@ void augmentWithUniscribe(const std::wstring& text,
 
 } // namespace
 
+std::string encodeUtf8Text(const std::wstring& text) {
+    std::string output;
+    output.reserve(text.size());
+    for (size_t index = 0; index < text.size(); ++index) {
+        uint32_t cp = static_cast<uint32_t>(text[index]);
+        if constexpr (sizeof(wchar_t) == 2) {
+            if (cp >= 0xd800u && cp <= 0xdbffu && index + 1 < text.size()) {
+                const auto low = static_cast<uint32_t>(text[index + 1]);
+                if (low >= 0xdc00u && low <= 0xdfffu) {
+                    cp = 0x10000u + ((cp - 0xd800u) << 10u) + (low - 0xdc00u);
+                    ++index;
+                }
+            }
+        }
+        if ((cp >= 0xd800u && cp <= 0xdfffu) || cp > 0x10ffffu) cp = 0xfffdu;
+        if (cp <= 0x7fu) output.push_back(static_cast<char>(cp));
+        else if (cp <= 0x7ffu) {
+            output.push_back(static_cast<char>(0xc0u | (cp >> 6u)));
+            output.push_back(static_cast<char>(0x80u | (cp & 0x3fu)));
+        } else if (cp <= 0xffffu) {
+            output.push_back(static_cast<char>(0xe0u | (cp >> 12u)));
+            output.push_back(static_cast<char>(0x80u | ((cp >> 6u) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | (cp & 0x3fu)));
+        } else {
+            output.push_back(static_cast<char>(0xf0u | (cp >> 18u)));
+            output.push_back(static_cast<char>(0x80u | ((cp >> 12u) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | ((cp >> 6u) & 0x3fu)));
+            output.push_back(static_cast<char>(0x80u | (cp & 0x3fu)));
+        }
+    }
+    return output;
+}
+
 std::wstring decodeUtf8Text(const std::string& utf8,
                             std::vector<size_t>* byteToTextOffset) {
     std::wstring out;

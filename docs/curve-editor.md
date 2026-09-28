@@ -64,6 +64,13 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 编辑器文本编码
+
+界面到资源/文档的 UTF-8 转换共用 `AYUI/UnicodeText.h` 的 `encodeUtf8Text`，
+与 `decodeUtf8Text` 配对。保留内嵌 NUL，UTF-16 代理对编码成四字节 UTF-8，
+孤立代理项和超出 Unicode 范围的标量替换为 U+FFFD。不依赖系统代码页，不做归一化。
+动画、骨骼、GameFlow、UIFlow、DSL、项目设置、主编辑器/子窗口及 Layout 作者页已迁移。
+
 ### 公共属性表单字段
 
 `PropertyField` 提供文本/枚举属性行、稳定子控件 ID、静默刷新、只读/显隐、

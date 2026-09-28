@@ -1,4 +1,5 @@
 #include "AYUI/LayoutEditor/LayoutEditorSession.h"
+#include <AYUI/UnicodeText.h>
 
 #include "AYUI/LayoutEditor/LayoutCanvasViewport.h"
 #include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
@@ -136,30 +137,9 @@ std::wstring utf8ToWide(const std::string& s) {
 #endif
 }
 
-std::string wideToUtf8(const std::wstring& s) {
-    if (s.empty()) {
-        return {};
-    }
-#if defined(_WIN32)
-    const int n = ::WideCharToMultiByte(CP_UTF8, 0, s.c_str(),
-                                        static_cast<int>(s.size()), nullptr, 0,
-                                        nullptr, nullptr);
-    if (n <= 0) {
-        return {};
-    }
-    std::string out(static_cast<size_t>(n), '\0');
-    ::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()),
-                          out.data(), n, nullptr, nullptr);
-    return out;
-#else
-    if constexpr (sizeof(wchar_t) == 2) {
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-        return converter.to_bytes(s);
-    } else {
-        std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-        return converter.to_bytes(s);
-    }
-#endif
+std::string wideToUtf8(const std::wstring& text)
+{
+    return ayt::ui::encodeUtf8Text(text);
 }
 
 std::wstring formatFloat(float v) {
