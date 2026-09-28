@@ -64,6 +64,15 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 后台任务状态展示与宿主绑定
+
+`JobPresentation.h` 是 UI-free 的任务快照/展示绑定：显式 begin(generation)，忽略旧任务，
+终态不得回退，每代完成通知只消费一次；reset 用于项目/来源关闭。进度按整数百分比
+抑制重复刷新并限制在 0–100，非法进度显示为 0。`formatJobReport` 共用进度、消息与输出列表。
+取消请求必须提供刚轮询的同代快照与宿主回调，不支持取消的任务不会获得取消能力。
+骨骼烘焙与资产导入状态已接入；骨骼完成后的指纹校验、保存、导入后的索引更新仍由原宿主处理。
+公共层不持有线程/future，不运行任务、不写入文件，失败/取消不冒充成功。
+
 ### 编辑器文本编码
 
 界面到资源/文档的 UTF-8 转换共用 `AYUI/UnicodeText.h` 的 `encodeUtf8Text`，

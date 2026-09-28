@@ -10,12 +10,14 @@
 #include <AYUI/Authoring/TimelineSelectionOps.h>
 #include <AYUI/Authoring/DiagnosticsPanel.h>
 #include <AYUI/Authoring/PropertyField.h>
+#include <AYUI/Authoring/JobPresentation.h>
 #include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
 #include <AYUI/ComboBox.h>
 #include <AYUI/Slider.h>
 #include <cmath>
+#include <limits>
 
 namespace {
 // A non-animation owner with arbitrary event IDs. This test target links only
@@ -448,6 +450,56 @@ TEST_CASE(diagnostics_filter_expand_locate_and_plain_reports_are_safe)
     panel->setEntries(entries); CHECK(located == 4);
     panel->setOnLocate({}); CHECK(!panel->locateVisible(0));
     ayt::ui::destroyWidgetTree(panel);
+}
+TEST_SUITE_END
+
+TEST_SUITE(AYUI_JobPresentation)
+TEST_CASE(job_presentation_ignores_stale_results_and_notifies_completion_once)
+{
+    using namespace ayt::ui::authoring;
+    JobPresentation view;
+    JobStatusSnapshot job{7, JobState::Running, 0.1f, L"working", {}, true};
+    CHECK(!view.observe(job).accepted);
+    view.begin(7);
+    auto change = view.observe(job);
+    CHECK(change.accepted); CHECK(change.changed); CHECK(!change.completed);
+    CHECK(!view.observe(job).changed);
+    job.progress = 0.101f; CHECK(!view.observe(job).changed);
+    job.message = L"step two"; CHECK(view.observe(job).changed);
+    job.generation = 6; CHECK(!view.observe(job).accepted);
+    job.generation = 7; job.state = JobState::Succeeded;
+    job.progress = 1; job.outputs = {L"owner/output"};
+    change = view.observe(job); CHECK(change.changed); CHECK(change.completed);
+    CHECK(!view.observe(job).completed);
+    job.state = JobState::Running; CHECK(!view.observe(job).accepted);
+    view.begin(8); job.generation = 7; CHECK(!view.observe(job).accepted);
+    job.generation = 8; job.state = JobState::Failed; CHECK(view.observe(job).completed);
+    CHECK(formatJobReport(job, L"FAILED", false).find(L"owner/output") != std::wstring::npos);
+    view.reset(); CHECK(!view.observe(job).accepted);
+}
+TEST_CASE(job_progress_and_cancel_use_bounded_values_and_fresh_capabilities)
+{
+    using namespace ayt::ui::authoring;
+    JobProgressPresentation progress;
+    CHECK(progress.consume(-1) == 0); CHECK(!progress.consume(0));
+    CHECK(progress.consume(2) == 100);
+    CHECK(progress.consume(std::numeric_limits<float>::quiet_NaN()) == 0);
+    progress.reset(); CHECK(progress.consume(0) == 0);
+    JobPresentation view; view.begin(2);
+    JobStatusSnapshot job{2, JobState::Running, 0.4f, L"", {}, true};
+    int cancels = 0;
+    auto cancel = [&](std::uint64_t id) { CHECK(id == 2u); ++cancels; return true; };
+    auto stale = job; stale.generation = 1;
+    CHECK(!view.requestCancel(stale, cancel));
+    stale = job; stale.cancellable = false; CHECK(!view.requestCancel(stale, cancel));
+    stale = job; stale.state = JobState::Succeeded; CHECK(!view.requestCancel(stale, cancel));
+    CHECK(!view.requestCancel(job, {})); CHECK(cancels == 0);
+    CHECK(!view.requestCancel(job, [](std::uint64_t) { return false; }));
+    CHECK(view.requestCancel(job, cancel)); CHECK(cancels == 1);
+    CHECK(!view.requestCancel(job, cancel));
+    view.begin(2); job.state = JobState::Cancelled; CHECK(view.observe(job).completed);
+    job.state = JobState::Running; CHECK(!view.requestCancel(job, cancel));
+    CHECK(formatJobReport(job, L"Importing", true) == L"Importing 40%");
 }
 TEST_SUITE_END
 
