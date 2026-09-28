@@ -92,6 +92,41 @@ public:
 
 TEST_SUITE(AYUI_CurveEditor)
 
+TEST_CASE(large_selection_and_timeline_index_reuse_content_not_playhead) {
+    using namespace ayt::ui::authoring;
+    auto source = std::make_shared<TestCurveOwner>();
+    auto snapshot = std::make_shared<TimelineSnapshot>();
+    TimelineSelection selected;
+    for (int row = 0; row < 200; ++row) {
+        const auto id = "row-" + std::to_string(row);
+        snapshot->tracks.push_back({id, id, TimelineTrackKind::Value});
+        for (int key = 0; key < 250; ++key) {
+            const auto keyId = id + "-" + std::to_string(key);
+            snapshot->keys.push_back({keyId, id, key / 250.0});
+            selected.keyIds.push_back(keyId);
+        }
+    }
+    selected.trackId = "row-0"; selected.primaryKeyId = selected.keyIds.back();
+    selected.keyIds.push_back(selected.keyIds.front());
+    CHECK(TimelineSelectionOps::replace(*source->selectionState(), selected));
+    CHECK(source->selectionState()->keyIds.size() == 50000);
+    auto remapped = source->selectionState()->keyIds;
+    for (auto& id : remapped) id += "-moved";
+    CHECK(TimelineSelectionOps::remap(*source->selectionState(), source->selectionState()->keyIds, remapped));
+    CHECK(source->selectionState()->primaryKeyId == remapped.back());
+    source->currentTimeline = snapshot;
+    DopeSheet sheet(source); sheet.setSize({640, 180});
+    ayt::ui::MockRenderer renderer;
+    for (int frame = 0; frame < 10; ++frame) {
+        source->position = frame / 10.0;
+        sheet.markDirty(); sheet.render(renderer);
+    }
+    CHECK(sheet.rowIndexBuildCount() == 1);
+    source->currentTimeline = std::make_shared<TimelineSnapshot>(*snapshot);
+    sheet.markDirty(); sheet.render(renderer);
+    CHECK(sheet.rowIndexBuildCount() == 2);
+}
+
 TEST_CASE(dope_sheet_box_selects_cross_rows_and_drag_is_one_gesture) {
     using namespace ayt::ui::authoring;
     auto source = std::make_shared<TestCurveOwner>();

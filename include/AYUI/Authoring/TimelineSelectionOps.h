@@ -1,6 +1,8 @@
 #pragma once
 #include <AYUI/Authoring/TimelineModel.h>
 #include <utility>
+#include <unordered_set>
+#include <unordered_map>
 
 namespace ayt::ui::authoring {
 /** @brief Normalized selection operations shared by curve and timeline views.
@@ -13,7 +15,9 @@ public:
     using Changed = std::function<void(const TimelineSelection&)>;
     static bool replace(TimelineSelection& selection, TimelineSelection next, Changed changed = {}) {
         std::vector<std::string> keys;
-        for (auto& id : next.keyIds) if (!id.empty() && std::find(keys.begin(), keys.end(), id) == keys.end()) keys.push_back(std::move(id));
+        std::unordered_set<std::string> seen;
+        seen.reserve(next.keyIds.size());
+        for (auto& id : next.keyIds) if (!id.empty() && seen.emplace(id).second) keys.push_back(std::move(id));
         next.keyIds = std::move(keys);
         if (std::find(next.keyIds.begin(), next.keyIds.end(), next.primaryKeyId) == next.keyIds.end())
             next.primaryKeyId = next.keyIds.empty() ? std::string{} : next.keyIds.front();
@@ -42,9 +46,11 @@ public:
                       const std::vector<std::string>& after, Changed changed = {}) {
         if (before.size() != after.size()) return false;
         auto next = selection;
+        std::unordered_map<std::string, std::string> mapping;
+        mapping.reserve(before.size());
+        for (std::size_t i = 0; i < before.size(); ++i) mapping.try_emplace(before[i], after[i]);
         const auto map = [&](std::string& id) {
-            const auto found = std::find(before.begin(), before.end(), id);
-            if (found != before.end()) id = after[static_cast<std::size_t>(found - before.begin())];
+            if (const auto found = mapping.find(id); found != mapping.end()) id = found->second;
         };
         map(next.primaryKeyId);
         for (auto& id : next.keyIds) map(id);

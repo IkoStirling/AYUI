@@ -8,6 +8,8 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace ayt::ui::authoring {
 namespace {
@@ -78,6 +80,7 @@ DopeSheet::KeyHit DopeSheet::hitKey(
 {
     if (_document == nullptr || !plotBounds().contains(point)) return {};
     const auto snapshot = _document->timelineSnapshot();
+    indexRows(snapshot);
     if (!snapshot) return {};
     const auto& tracks = snapshot->tracks;
     const auto& keys = snapshot->keys;
@@ -85,8 +88,8 @@ DopeSheet::KeyHit DopeSheet::hitKey(
     const auto visible = rows.visibleRows(tracks.size(), plotBounds().maxY - plotBounds().minY);
     for (std::size_t row = visible.first; row < visible.second; ++row) {
         const float y = static_cast<float>(rows.rowCenter(row));
-        for (const auto& key : keys) {
-            if (key.trackId != tracks[row].id) continue;
+        for (const auto index : _rowKeys[row]) {
+            const auto& key = keys[index];
             const ayt::math::FVector2 center{worldX(key.timeSeconds), y};
             const float dx = point.x - center.x;
             const float dy = point.y - center.y;
@@ -157,6 +160,7 @@ bool DopeSheet::onMouseMove(
         if (_boxMoved) {
             TimelineSelection next;
             const auto snapshot = _document->timelineSnapshot();
+            indexRows(snapshot);
             const auto plot = plotBounds();
             const auto minX = std::max(plot.minX, std::min(_boxStart.x, _boxEnd.x));
             const auto maxX = std::min(plot.maxX, std::max(_boxStart.x, _boxEnd.x));
@@ -167,7 +171,8 @@ bool DopeSheet::onMouseMove(
                 for (std::size_t row = 0; row < snapshot->tracks.size(); ++row) {
                     const auto y = rows.rowCenter(row);
                     if (y < minY || y > maxY) continue;
-                    for (const auto& key : snapshot->keys) {
+                    for (const auto index : _rowKeys[row]) {
+                        const auto& key = snapshot->keys[index];
                         const auto x = worldX(key.timeSeconds);
                         if (key.trackId != snapshot->tracks[row].id || x < minX || x > maxX) continue;
                         if (next.keyIds.empty()) { next.trackId = key.trackId; next.primaryKeyId = key.id; }
@@ -304,6 +309,7 @@ ayt::ui::UiCursorHint DopeSheet::getCursorHint() const
 
 void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
 {
+    const std::unordered_set<std::string> selectedIds(_selection->keyIds.begin(), _selection->keyIds.end());
     const auto bounds = getWorldBounds();
     renderer.pushClip(bounds);
     renderer.drawRect(bounds, {0.043f, 0.052f, 0.069f, 1.0f});
@@ -332,6 +338,7 @@ void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
                           ayt::math::FVector4{0.47f, 0.53f, 0.62f, 1.0f});
     }
     const auto snapshot = _document->timelineSnapshot();
+    indexRows(snapshot);
     if (!snapshot) {
         renderer.popClip();
         return;
@@ -356,13 +363,12 @@ void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
             ayt::ui::decodeUtf8Text(tracks[row].name), 10,
             selected ? ayt::math::FVector4{0.83f, 0.91f, 1.0f, 1.0f}
                      : ayt::math::FVector4{0.59f, 0.65f, 0.74f, 1.0f});
-        for (const auto& key : keys) {
-            if (key.trackId != tracks[row].id) continue;
+        for (const auto index : _rowKeys[row]) {
+            const auto& key = keys[index];
             const float x = worldX(key.timeSeconds);
             if (x < plot.minX - kKeyRadius || x > plot.maxX + kKeyRadius) continue;
             const float centerY = y + kRowHeight * 0.5f;
-            const bool keySelected = std::find(_selection->keyIds.begin(), _selection->keyIds.end(), key.id)
-                != _selection->keyIds.end();
+            const bool keySelected = selectedIds.contains(key.id);
             renderer.drawRoundedRect(
                 {x - kKeyRadius, centerY - kKeyRadius,
                  x + kKeyRadius, centerY + kKeyRadius},
@@ -386,4 +392,18 @@ void DopeSheet::onRender(ayt::ui::IRenderBackend& renderer)
     renderer.popClip();
 }
 
+void DopeSheet::indexRows(std::shared_ptr<const TimelineSnapshot> snapshot) const {
+    if (_rowSnapshot == snapshot) return;
+    _rowSnapshot = std::move(snapshot);
+    _rowKeys.clear();
+    if (!_rowSnapshot) return;
+    _rowKeys.resize(_rowSnapshot->tracks.size());
+    std::unordered_map<std::string, std::size_t> rows;
+    rows.reserve(_rowKeys.size());
+    for (std::size_t i = 0; i < _rowKeys.size(); ++i) rows.try_emplace(_rowSnapshot->tracks[i].id, i);
+    for (std::size_t i = 0; i < _rowSnapshot->keys.size(); ++i)
+        if (const auto row = rows.find(_rowSnapshot->keys[i].trackId); row != rows.end())
+            _rowKeys[row->second].push_back(i);
+    ++_rowIndexBuilds;
+}
 } // namespace ayt::ui::authoring

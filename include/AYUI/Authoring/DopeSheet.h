@@ -18,6 +18,8 @@ public:
     ~DopeSheet() override;
 
     void frameAll();
+    /// Diagnostic reconstruction count; playhead-only redraws reuse row indices.
+    std::uint64_t rowIndexBuildCount() const noexcept { return _rowIndexBuilds; }
     void setSelection(std::string trackId, std::string keyId);
     void setOnSelectionChanged(
         std::function<void(const std::string&, const std::string&)> callback) {
@@ -48,9 +50,13 @@ private:
     float worldX(double seconds) const noexcept;
     KeyHit hitKey(ayt::math::FVector2 point) const;
     void finishDrag(bool cancel);
+    void indexRows(std::shared_ptr<const TimelineSnapshot> snapshot) const;
 
     std::shared_ptr<ICurveEditorSource> _document;
     std::shared_ptr<TimelineSelection> _selection;
+    mutable std::shared_ptr<const TimelineSnapshot> _rowSnapshot;
+    mutable std::vector<std::vector<std::size_t>> _rowKeys;
+    mutable std::uint64_t _rowIndexBuilds = 0;
     std::string _dragKeyId;
     double _viewStart = 0.0;
     double _viewDuration = 1.0;

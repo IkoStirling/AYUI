@@ -4,6 +4,7 @@
 #include <AYUI/IRenderBackend.h>
 
 #include <algorithm>
+#include <unordered_set>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -274,6 +275,13 @@ bool CurveCanvas::onMouseButtonDown(
         markDirty();
         return true;
     }
+    // A curve component gesture applies only to keys visible on this curve.
+    // Cross-row selections remain available in DopeSheet for time-only edits.
+    std::unordered_set<std::string> visibleIds;
+    for (const auto& key : track.keys) visibleIds.insert(key.id);
+    auto curveSelection = *_selection;
+    std::erase_if(curveSelection.keyIds, [&](const auto& id) { return !visibleIds.contains(id); });
+    TimelineSelectionOps::replace(*_selection, std::move(curveSelection));
     TimelineSelectionOps::single(*_selection, _trackId, hit.keyId, hit.component, true);
     _dragHit = hit;
     _gestureChanged = false;
@@ -505,6 +513,7 @@ ayt::ui::UiCursorHint CurveCanvas::getCursorHint() const
 
 void CurveCanvas::onRender(ayt::ui::IRenderBackend& renderer)
 {
+    const std::unordered_set<std::string> selectedIds(_selection->keyIds.begin(), _selection->keyIds.end());
     const auto bounds = getWorldBounds();
     renderer.pushClip(bounds);
     renderer.drawRect(bounds, {0.038f, 0.045f, 0.061f, 1.0f});
@@ -575,7 +584,7 @@ void CurveCanvas::onRender(ayt::ui::IRenderBackend& renderer)
             const auto& key = track.keys[keyIndex];
             const float x = worldX(key.timeSeconds);
             const float y = worldY(key.values[component]);
-            const bool selected = isSelected(key.id);
+            const bool selected = selectedIds.contains(key.id);
             renderer.drawRoundedRect({x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f},
                 selected ? ayt::math::FVector4{1.0f, 0.86f, 0.48f, 1.0f}
                          : kColors[component], 2.0f);
