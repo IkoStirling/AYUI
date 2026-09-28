@@ -246,6 +246,7 @@ add_library(AYUICurveEditor STATIC
     Authoring/CurveCanvas.cpp
     Authoring/PlaybackControls.cpp
     Authoring/NumericFields.cpp
+    Authoring/ResourceReferenceField.cpp
     Authoring/DopeSheet.cpp)
 target_link_libraries(AYUICurveEditor PUBLIC AYUI AYUITimelineCore)
 if(MSVC)

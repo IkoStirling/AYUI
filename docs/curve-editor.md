@@ -75,6 +75,11 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ### 数值与关键帧分量字段
 
+`ResourceReferenceField` 共用资源引用输入/可选 Pick/Load/简短状态；传入宿主的
+picker 和校验加载回调，不依赖原生对话框或资源系统。`setPath` 不发起加载，
+取消 picker 保留原输入，失败不清空文本，只读禁止提交。详细失败信息由宿主显示。
+动画预览绑定和骨骼目标/动画加载已接入，原输入别名与目标控件 ID 保留。
+
 `NumericFields` 共用分量输入创建、格式、维数显隐、只读、unit 标签和提交回调。
 `setValues` 是无提交的界面刷新；`readValues` 要求完整、有限的 Float 数值，失败时
 不改输出数组。超出字段容量或包含非有限值的刷新整体拒绝，不留下半更新界面。

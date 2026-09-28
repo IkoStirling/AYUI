@@ -6,6 +6,8 @@
 #include <AYUI/Authoring/PlaybackControls.h>
 #include <AYUI/Authoring/NumericFields.h>
 #include <AYUI/Authoring/PreviewViewport.h>
+#include <AYUI/Authoring/ResourceReferenceField.h>
+#include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
 #include <AYUI/ComboBox.h>
@@ -348,6 +350,33 @@ TEST_CASE(preview_projection_orbit_and_cache_are_resource_neutral)
     ++stamp.bounds.maxX; CHECK(cache.consume(stamp));
     ++stamp.yaw; CHECK(cache.consume(stamp));
     cache.invalidate(); CHECK(cache.consume(stamp));
+}
+TEST_CASE(resource_reference_refresh_pick_rejection_and_readonly)
+{
+    using namespace ayt::ui::authoring;
+    auto* field = new ResourceReferenceField({L"Resource", L"opaque path", L"Apply", "ref_input"});
+    int loads = 0, picks = 0;
+    CHECK(!field->loadButton()->isEnabled());
+    CHECK(!field->pickButton()->isVisible());
+    field->setOnLoad([&](const auto& path) {
+        ++loads; return ResourceReferenceResult{path == L"valid", L"Result details"};
+    });
+    field->setPath(L"bad"); CHECK(loads == 0);
+    CHECK(field->input()->getId() == "ref_input");
+    CHECK(!field->requestLoad()); CHECK(loads == 1);
+    CHECK(field->input()->getText() == L"bad");
+    CHECK(field->statusLabel()->getText() == L"Failed");
+    field->setPicker([&] { ++picks; return std::wstring{}; });
+    CHECK(!field->requestPick()); CHECK(loads == 1); CHECK(picks == 1);
+    CHECK(field->input()->getText() == L"bad");
+    field->setPicker([] { return std::wstring{L"valid"}; });
+    CHECK(field->requestPick()); CHECK(loads == 2);
+    CHECK(field->statusLabel()->getText() == L"Ready");
+    field->setReadOnly(true);
+    CHECK(field->input()->isReadOnly());
+    CHECK(!field->requestLoad()); CHECK(!field->requestPick()); CHECK(loads == 2);
+    field->setPath(L"refresh"); CHECK(loads == 2);
+    ayt::ui::destroyWidgetTree(field);
 }
 TEST_SUITE_END
 
