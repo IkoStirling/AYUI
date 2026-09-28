@@ -141,10 +141,10 @@
 
 ## 关联
 
-- Capabilities 场景 UT：`unittest/Test_Scene_Suite_G.cpp`  
+- Capabilities 场景 UT：`unittest/Test_GalleryScenarios.cpp`
 - Dock UT：`Test_DockTree.cpp` / `Test_DockFloat.cpp` / `Test_DockTabGroup.cpp` / `Test_Layout.cpp`（min panel）  
 - Backend 页 demo：`AYUI_Gallery.cpp` `BackendDemoWidget` / `wireBackendPage` / `teardownBackendPage`  
 - 渲染后端：AYRenderer `UIRenderBackend` / `UiGpuContext`（SDF shader cache-key `editor_ui_sdf`）  
 - 设计顺序：`design.md` §17 / §19  
 - PR-Container-Contract-Cut2：`aac3b74`  
-- Dock 内容 clip：DockCard / DockTabGroup `compoundDescendClippedRender`（2026-08-11）  
+- Dock 内容 clip：DockCard / DockTabGroup `compoundDescendClippedRender`（2026-08-11）

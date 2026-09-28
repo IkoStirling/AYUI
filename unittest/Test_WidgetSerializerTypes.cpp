@@ -13,13 +13,12 @@
 // recursive content, GridPanel row/column + children, Window minSize,
 // etc.) we provide the smallest valid payload needed.
 #include "AYTest.h"
+#include "fixtures/WidgetRoundTrip.h"
 #include <nlohmann/json.hpp>
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/WidgetFactory.h"
 #include <cstdio>
 #include <string>
-#include <vector>
-#include <utility>
 
 using namespace ayt::ui;
 
@@ -34,78 +33,77 @@ namespace {
 struct TypePayload {
     const char* typeName;
     const char* json;
-    bool canRoundTrip;
 };
 
-static const std::vector<TypePayload> kPayloads = {
+static constexpr TypePayload kPayloads[] = {
     // Leaf widgets — empty payload is enough.
-    {"Widget",         R"({"type":"Widget"})",         true},
-    {"Button",         R"({"type":"Button","text":"B"})", true},
-    {"TextLabel",      R"({"type":"TextLabel","text":"L"})", true},
-    {"CheckBox",       R"({"type":"CheckBox","text":"C","checked":true})", true},
-    {"RadioButton",    R"({"type":"RadioButton","text":"R","checked":false,"groupId":0})", true},
-    {"Slider",         R"({"type":"Slider","min":0,"max":10,"value":3})", true},
-    {"ProgressBar",    R"({"type":"ProgressBar","min":0,"max":100,"value":50})", true},
-    {"Spinner",        R"({"type":"Spinner"})",        true},
-    {"TextInput",      R"({"type":"TextInput","text":"input","password":false,"readOnly":false,"maxLength":64,"hAlign":0})", true},
-    {"TextArea",       R"({"type":"TextArea","text":"area","readOnly":false,"maxLength":1024,"lineHeight":1.2})", true},
-    {"Tooltip",        R"({"type":"Tooltip","text":"tip","hoverDelay":0.5})", true},
-    {"Separator",      R"({"type":"Separator","orientation":"horizontal","thickness":1.0,"inset":2.0})", true},
-    {"ToolBarSeparator", R"({"type":"ToolBarSeparator","orientation":"horizontal","thickness":1.0,"inset":2.0})", true},
-    {"MenuItem",       R"({"type":"MenuItem","text":"Item","shortcut":"Ctrl+I","hasSubmenu":false})", true},
-    {"Image",          R"({"type":"Image"})",          true},
-    {"VBox",           R"({"type":"VBox","spacing":3,"gravity":"BottomRight"})", true},
-    {"HBox",           R"({"type":"HBox","spacing":4,"padding":{"left":1,"top":2,"right":3,"bottom":4}})", true},
-    {"SplitterHandle", R"({"type":"SplitterHandle"})", true},
+    {"Widget",         R"({"type":"Widget"})"},
+    {"Button",         R"({"type":"Button","text":"B"})"},
+    {"TextLabel",      R"({"type":"TextLabel","text":"L"})"},
+    {"CheckBox",       R"({"type":"CheckBox","text":"C","checked":true})"},
+    {"RadioButton",    R"({"type":"RadioButton","text":"R","checked":false,"groupId":0})"},
+    {"Slider",         R"({"type":"Slider","min":0,"max":10,"value":3})"},
+    {"ProgressBar",    R"({"type":"ProgressBar","min":0,"max":100,"value":50})"},
+    {"Spinner",        R"({"type":"Spinner"})"},
+    {"TextInput",      R"({"type":"TextInput","text":"input","password":false,"readOnly":false,"maxLength":64,"hAlign":0})"},
+    {"TextArea",       R"({"type":"TextArea","text":"area","readOnly":false,"maxLength":1024,"lineHeight":1.2})"},
+    {"Tooltip",        R"({"type":"Tooltip","text":"tip","hoverDelay":0.5})"},
+    {"Separator",      R"({"type":"Separator","orientation":"horizontal","thickness":1.0,"inset":2.0})"},
+    {"ToolBarSeparator", R"({"type":"ToolBarSeparator","orientation":"horizontal","thickness":1.0,"inset":2.0})"},
+    {"MenuItem",       R"({"type":"MenuItem","text":"Item","shortcut":"Ctrl+I","hasSubmenu":false})"},
+    {"Image",          R"({"type":"Image"})"},
+    {"VBox",           R"({"type":"VBox","spacing":3,"gravity":"BottomRight"})"},
+    {"HBox",           R"({"type":"HBox","spacing":4,"padding":{"left":1,"top":2,"right":3,"bottom":4}})"},
+    {"SplitterHandle", R"({"type":"SplitterHandle"})"},
+    {"ColorPicker", R"({"type":"ColorPicker"})"},
     // Containers that accept no payload.
-    {"Panel",          R"({"type":"Panel","borderEnabled":true})", true},
-    {"ScrollView",     R"({"type":"ScrollView"})",     true},
+    {"Panel",          R"({"type":"Panel","borderEnabled":true})"},
+    {"ScrollView",     R"({"type":"ScrollView"})"},
     // Window: needs title. minSize object is optional but we ship a
     // full one to make sure the object form is parsed cleanly.
-    {"Window",         R"({"type":"Window","title":"Win","titleBarHeight":24,"movable":true,"resizable":true,"minSize":{"w":120,"h":80}})", true},
+    {"Window",         R"({"type":"Window","title":"Win","titleBarHeight":24,"movable":true,"resizable":true,"minSize":{"w":120,"h":80}})"},
     // ScrollBar: needs orientation string.
-    {"ScrollBar",      R"({"type":"ScrollBar","orientation":"vertical"})", true},
+    {"ScrollBar",      R"({"type":"ScrollBar","orientation":"vertical"})"},
     // ComboBox: items[] + selectedIndex + maxPopupItems.
-    {"ComboBox",       R"({"type":"ComboBox","items":["a","b","c"],"selectedIndex":1,"maxPopupItems":5})", true},
+    {"ComboBox",       R"({"type":"ComboBox","items":["a","b","c"],"selectedIndex":1,"maxPopupItems":5})"},
     // ListView: items[] + selectedIndex + selectionMode + selectedIndices + itemHeight.
-    {"ListView",       R"({"type":"ListView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"itemHeight":24.0})", true},
-    {"TileView",       R"({"type":"TileView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"tileSize":{"w":104.0,"h":150.0},"tileSpacing":8.0,"infoStripHeight":16.0,"cornerMarkerSize":12.0,"thumbnailAspectRatio":1.0,"labelHeight":28.0})", true},
+    {"ListView",       R"({"type":"ListView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"itemHeight":24.0})"},
+    {"TileView",       R"({"type":"TileView","items":["x","y"],"selectedIndex":0,"selectionMode":0,"selectedIndices":[0],"tileSize":{"w":104.0,"h":150.0},"tileSpacing":8.0,"infoStripHeight":16.0,"cornerMarkerSize":12.0,"thumbnailAspectRatio":1.0,"labelHeight":28.0})"},
     // Menu: minimal.
-    {"Menu",           R"({"type":"Menu","open":false})", true},
+    {"Menu",           R"({"type":"Menu","open":false})"},
     // MenuBar: needs menus[] but accepts empty list.
-    {"MenuBar",        R"({"type":"MenuBar","menus":[]})", true},
+    {"MenuBar",        R"({"type":"MenuBar","menus":[]})"},
     // ToolBar: accepts no payload (itemCount is read-only).
-    {"ToolBar",        R"({"type":"ToolBar","itemCount":0})", true},
+    {"ToolBar",        R"({"type":"ToolBar","itemCount":0})"},
     // StatusBar: needs panels[] — empty list works.
-    {"StatusBar",      R"({"type":"StatusBar","panels":[]})", true},
+    {"StatusBar",      R"({"type":"StatusBar","panels":[]})"},
     // TreeNode: label/icon/hasChildren/expanded/depth.
-    {"TreeNode",       R"({"type":"TreeNode","label":"root","icon":"","hasChildren":true,"expanded":false,"depth":0})", true},
+    {"TreeNode",       R"({"type":"TreeNode","label":"root","icon":"","hasChildren":true,"expanded":false,"depth":0})"},
     // TreeView: tree[] + selectedIndex + itemHeight.
-    {"TreeView",       R"({"type":"TreeView","tree":[{"label":"root","icon":"","hasChildren":false,"expanded":false,"parentIndex":-1}],"selectedIndex":0,"itemHeight":24.0})", true},
+    {"TreeView",       R"({"type":"TreeView","tree":[{"label":"root","icon":"","hasChildren":false,"expanded":false,"parentIndex":-1}],"selectedIndex":0,"itemHeight":24.0})"},
     // RichText: defaultColor + defaultFontSize + wrapWidth + runs[].
-    {"RichText",       R"({"type":"RichText","defaultColor":{"r":1,"g":1,"b":1,"a":1},"defaultFontSize":14,"wrapWidth":200.0,"runs":[{"text":"hi","color":{"r":1,"g":1,"b":1,"a":1},"fontSize":14}]})", true},
-    {"TabControl",     R"({"type":"TabControl","tabs":[{"label":"A","content":{"type":"TextLabel","text":"body"}}],"selectedIndex":0,"headerHeight":26})", true},
-    {"GridPanel",      R"({"type":"GridPanel","rowCount":1,"columnCount":1,"cells":[{"row":0,"col":0,"content":{"type":"Button","text":"cell"}}]})", true},
-    {"DockCard",       R"({"type":"DockCard","id":"card","title":"Card","content":{"type":"TextLabel","text":"body"}})", true},
-    {"DockOverlay",    R"({"type":"DockOverlay","floating":[{"type":"DockCard","id":"float","x":4,"y":5,"w":200,"h":120}]})", true},
-    {"DockArea",       R"({"type":"DockArea","slotWeights":{"Left":0.2,"Center":0.8},"cards":[{"type":"DockCard","id":"dock","slot":"Center"}],"floating":[{"type":"DockCard","id":"float","x":8,"y":9,"w":210,"h":140}]})", true},
-    {"Dimmer",         R"({"type":"Dimmer","scrimColor":{"r":0.1,"g":0.2,"b":0.3,"a":0.4}})", true},
-    {"Modal",          R"({"type":"Modal","dismissOnDimmerClick":false,"content":{"type":"TextLabel","text":"modal"}})", true},
-    {"ModalDialog",    R"({"type":"ModalDialog","acceptText":"Apply","rejectText":"Back","bodyContent":{"type":"TextLabel","text":"dialog"}})", true},
-    {"TabStrip",       R"({"type":"TabStrip","tabs":["One","Two"],"selectedIndex":1,"tabHeight":30,"spacing":6,"indicatorTweenMs":0})", true},
+    {"RichText",       R"({"type":"RichText","defaultColor":{"r":1,"g":1,"b":1,"a":1},"defaultFontSize":14,"wrapWidth":200.0,"runs":[{"text":"hi","color":{"r":1,"g":1,"b":1,"a":1},"fontSize":14}]})"},
+    {"TabControl",     R"({"type":"TabControl","tabs":[{"label":"A","content":{"type":"TextLabel","text":"body"}}],"selectedIndex":0,"headerHeight":26})"},
+    {"GridPanel",      R"({"type":"GridPanel","rowCount":1,"columnCount":1,"cells":[{"row":0,"col":0,"content":{"type":"Button","text":"cell"}}]})"},
+    {"DockCard",       R"({"type":"DockCard","id":"card","title":"Card","content":{"type":"TextLabel","text":"body"}})"},
+    {"DockOverlay",    R"({"type":"DockOverlay","floating":[{"type":"DockCard","id":"float","x":4,"y":5,"w":200,"h":120}]})"},
+    {"DockArea",       R"({"type":"DockArea","slotWeights":{"Left":0.2,"Center":0.8},"cards":[{"type":"DockCard","id":"dock","slot":"Center"}],"floating":[{"type":"DockCard","id":"float","x":8,"y":9,"w":210,"h":140}]})"},
+    {"Dimmer",         R"({"type":"Dimmer","scrimColor":{"r":0.1,"g":0.2,"b":0.3,"a":0.4}})"},
+    {"Modal",          R"({"type":"Modal","dismissOnDimmerClick":false,"content":{"type":"TextLabel","text":"modal"}})"},
+    {"ModalDialog",    R"({"type":"ModalDialog","acceptText":"Apply","rejectText":"Back","bodyContent":{"type":"TextLabel","text":"dialog"}})"},
+    {"TabStrip",       R"({"type":"TabStrip","tabs":["One","Two"],"selectedIndex":1,"tabHeight":30,"spacing":6,"indicatorTweenMs":0})"},
 };
 
 } // namespace
 
 // AYUI-Audit-2026-08-26: parameterized loop. For every entry in
-// kPayloads whose canRoundTrip is true: (1) deserialize the JSON,
+// kPayloads: (1) deserialize the JSON,
 // (2) assert the result is non-null AND its type tag matches,
 // (3) serialize the result back to JSON,
 // (4) re-parse the serialized JSON and assert it round-trips to a
 // non-null widget of the same type.
 //
-// The test logs (via the SUITE summary) a one-line PASS/FAIL per
-// type so a regression is reported by name.
+// Aggregate successful inputs; report the specific type only on failure.
 TEST_CASE(serializer_round_trip_all_registered_types) {
     int covered = 0;
     int passed  = 0;
@@ -115,7 +113,8 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
     for (const TypePayload& entry : kPayloads) {
         ++covered;
         // (1) deserialize.
-        Widget* widget = WidgetSerializer::deserialize(entry.json);
+        ayt::ui::test::WidgetTree source(WidgetSerializer::deserialize(entry.json));
+        Widget* widget = source.get();
         if (widget == nullptr) {
             // Factory must at least recognize the type. A null return
             // here means the JSON path returned null, which is a real
@@ -127,8 +126,8 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
         // `type` based on the actual subclass; if deserialize() ever
         // fell back to a bare Widget, the re-serialized type would be
         // "Widget" instead of `entry.typeName`.
-        const std::string serialized =
-            WidgetSerializer::serializeWidget(widget);
+        ayt::ui::test::WidgetRoundTrip roundTrip(widget, ayt::ui::test::SerializationForm::Widget);
+        const std::string& serialized = roundTrip.serialized;
         const auto serializedJson =
             nlohmann::json::parse(serialized, nullptr, false);
         const bool typeOk =
@@ -143,17 +142,21 @@ TEST_CASE(serializer_round_trip_all_registered_types) {
                         entry.typeName, actualType.c_str());
         }
         // (3) serialize and (4) re-deserialize.
-        Widget* roundTripped = WidgetSerializer::deserialize(serialized);
+        Widget* roundTripped = roundTrip.restored.get();
         if (roundTripped != nullptr) {
             ++passed;
-            destroyWidgetTree(roundTripped);
+            const auto restoredJson = nlohmann::json::parse(
+                WidgetSerializer::serializeWidget(roundTripped), nullptr, false);
+            if (restoredJson.is_discarded() || restoredJson.value("type", std::string()) != entry.typeName) {
+                ++roundTripFailureCount;
+                std::printf("         restored type mismatch: %s\n", entry.typeName);
+            }
         } else {
             ++roundTripFailureCount;
         }
-        destroyWidgetTree(widget);
     }
-    // Pin the current factory surface: the table covers all 41 built-ins.
-    CHECK(covered == 41);
+    // Pin the current factory surface: the table covers all 42 built-ins.
+    CHECK(covered == 42);
     CHECK(deserializeFailureCount == 0);
     CHECK(typeMismatchCount == 0);
     CHECK(roundTripFailureCount == 0);
@@ -188,6 +191,7 @@ TEST_CASE(serializer_factory_recognizes_every_payload_type) {
     for (const TypePayload& entry : kPayloads) {
         if (!factory.isRegistered(entry.typeName)) {
             ++missingCreatorCount;
+            std::printf("         missing factory type: %s\n", entry.typeName);
         }
     }
     CHECK(missingCreatorCount == 0);

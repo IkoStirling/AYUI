@@ -44,6 +44,17 @@ CTest 标签使用 `ui-fast/ui-integration/ui-stress/ui-full` 以及领域标签
 套件、用例数和断言数分别统计，不能把 `Total` 断言数当作用例覆盖率。
 性能比较应标注构建配置、机器、是否包含编译及应用日志；不以减少断言数作为优化目标。
 
+## 内容整理规则
+
+测试文件按功能命名，历史阶段编号保留在注释和稳定 suite/case 标识中，不再用于
+文件分组。当前整理不删除任何用例；生命周期、资源释放、UTF-8、旧 wire 格式及
+复杂容器结构等专门断言不能被“通用往返通过”替代。
+
+`unittest/fixtures/WidgetRoundTrip.h` 仅复用序列化往返和 Widget 树 RAII 清理，
+具体行为仍由原用例断言。所有内置类型的基础 wire/factory 检查集中在
+`Test_WidgetSerializerTypes.cpp` 的 42 项数据表；同时检查恢复后的具体类型。
+新增内置类型应补齐此表，并添加它独有的字段/交互/所有权回归。
+
 ## 隔离与并行
 
 普通分区默认允许 4 路进程并行；进程内不并行访问 Widget/UIManager。

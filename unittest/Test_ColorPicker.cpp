@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "fixtures/WidgetRoundTrip.h"
 #include "AYUI/ColorPicker.h"
 #include "AYUI/WidgetSerializer.h"
 
@@ -81,8 +82,8 @@ TEST_CASE(ColorPickerSerializerKeepsTypeColorAndBanks)
     picker.setActivePalette(1u);
     picker.setHexCode(L"#336699CC", false);
 
-    const std::string json = WidgetSerializer::serializeWidget(&picker);
-    Widget* restoredBase = WidgetSerializer::deserialize(json);
+    ayt::ui::test::WidgetRoundTrip roundTrip(&picker, ayt::ui::test::SerializationForm::Widget);
+    Widget* restoredBase = roundTrip.restored.get();
     auto* restored = dynamic_cast<ColorPicker*>(restoredBase);
     CHECK_NOT_NULL(restored);
     if (restored != nullptr) {
@@ -92,7 +93,6 @@ TEST_CASE(ColorPickerSerializerKeepsTypeColorAndBanks)
         CHECK_TRUE(restored->paletteBanks()[0].name == L"Project");
         CHECK_INT_EQ(restored->paletteBanks()[0].colors.size(), 1u);
     }
-    destroyWidgetTree(restoredBase);
 }
 
 TEST_SUITE_END

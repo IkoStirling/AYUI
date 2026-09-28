@@ -23,13 +23,12 @@ set(AYUI_TEST_Controls_SOURCES
     Test_ToolBar.cpp
     Test_ToolBarSeparator.cpp
     Test_StatusBar.cpp
-    Test_StatusBar_G8.cpp
+    Test_StatusBarOwnership.cpp
     Test_TreeNode.cpp
     Test_TreeView.cpp
     Test_TabStrip.cpp
-    Test_Style_G9.cpp
-    Test_Theme_G11.cpp
-    Test_UndoRedo_P1.cpp
+    Test_StyleRendering.cpp
+    Test_ThemeCascade.cpp
     Test_Leak.cpp
     Test_Spinner.cpp
     Test_Productization.cpp
@@ -40,11 +39,12 @@ set(AYUI_TEST_Text_SOURCES
     Test_TextLabel.cpp
     Test_I18n.cpp
     Test_TextArea.cpp
+    Test_TextAreaUndoRedo.cpp
     Test_RichText.cpp
     Test_TextAreaMeasure.cpp
     Test_Clipboard.cpp
-    Test_TextInput_Selection.cpp
-    Test_TextStyle_Fields.cpp
+    Test_TextInputSelection.cpp
+    Test_TextStyleFields.cpp
     Test_TextAreaLifecycle.cpp
     Test_UnicodeText.cpp
 )
@@ -56,17 +56,17 @@ set(AYUI_TEST_Layout_SOURCES
     Test_LayoutLoader.cpp
     Test_Serializer.cpp
     Test_SerializerCompleteness.cpp
-    Test_R6_CompoundWidget.cpp
-    Test_R9_NamespaceEnum.cpp
+    Test_CompoundWidget.cpp
+    Test_NamespaceEnums.cpp
     Test_GridPanel.cpp
-    Test_Constraint_G13.cpp
+    Test_ConstraintLayout.cpp
     Test_DockAreaLoader.cpp
     Test_LayoutPersistence.cpp
     Test_ContainerContract.cpp
     Test_ScrollView.cpp
     Test_SyncVerticalBar.cpp
-    Test_ContainerContract_Cut2.cpp
-    Test_WidgetSerializer_AllTypes.cpp
+    Test_ContainerClipping.cpp
+    Test_WidgetSerializerTypes.cpp
     Test_AnchorLayout.cpp
     Test_UIFlow.cpp
 )
@@ -83,12 +83,12 @@ set(AYUI_TEST_Interaction_SOURCES
     Test_Modal.cpp
     Test_ModalDialog.cpp
     Test_DragDrop.cpp
-    Test_MenuShortcut_P3.cpp
+    Test_MenuShortcuts.cpp
     Test_UIManagerPerWindow.cpp
     Test_WindowResize.cpp
     Test_WheelRouting.cpp
     Test_TypeaheadBuffer.cpp
-    Test_Scene_Suite_G.cpp
+    Test_GalleryScenarios.cpp
     Test_MenuBarLifecycle.cpp
     Test_DeviceInputBridge.cpp
 )
@@ -102,17 +102,17 @@ set(AYUI_TEST_Docking_SOURCES
 )
 
 set(AYUI_TEST_Rendering_SOURCES
-    Test_B3RoundedFill.cpp
+    Test_RoundedFill.cpp
     Test_RenderBackend.cpp
     Test_MockBlendGradient.cpp
-    Test_ImageTexture_G10.cpp
+    Test_ImageTexture.cpp
     Test_Theme_Gallery.cpp
     Test_OpacityAnimation.cpp
     Test_Tween.cpp
     Test_ColorAnimation.cpp
     Test_AnimationProductization.cpp
     Test_PopupFade.cpp
-    Test_CardStyle_Render.cpp
+    Test_CardStyleRendering.cpp
     Test_DirtyRect.cpp
     Test_RetainedDisplayListLayer.cpp
     Test_GetWorldBoundsCache.cpp

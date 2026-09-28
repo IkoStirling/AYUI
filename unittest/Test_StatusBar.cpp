@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "fixtures/WidgetRoundTrip.h"
 #include "AYUI/StatusBar.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/MockRenderer.h"
@@ -57,7 +58,8 @@ TEST_CASE(statusbar_factory_and_serializer_round_trip) {
     WidgetFactory& factory = WidgetFactory::get();
     CHECK_TRUE(factory.isRegistered("StatusBar"));
 
-    Widget* widget = factory.create("StatusBar");
+    ayt::ui::test::WidgetTree source(factory.create("StatusBar"));
+    Widget* widget = source.get();
     CHECK_NOT_NULL(widget);
     StatusBar* original = dynamic_cast<StatusBar*>(widget);
     CHECK_NOT_NULL(original);
@@ -65,11 +67,12 @@ TEST_CASE(statusbar_factory_and_serializer_round_trip) {
     original->addPanel(L"Ready");
     original->addPanel(L"Line 1");
 
-    std::string json = WidgetSerializer::serialize(widget);
+    ayt::ui::test::WidgetRoundTrip roundTrip(widget);
+    const std::string& json = roundTrip.serialized;
     CHECK(json.find("\"type\": \"StatusBar\"") != std::string::npos);
     CHECK(json.find("Ready") != std::string::npos);
 
-    Widget* restored = WidgetSerializer::deserialize(json);
+    Widget* restored = roundTrip.restored.get();
     CHECK_NOT_NULL(restored);
     StatusBar* restoredSb = dynamic_cast<StatusBar*>(restored);
     CHECK_NOT_NULL(restoredSb);
@@ -78,9 +81,6 @@ TEST_CASE(statusbar_factory_and_serializer_round_trip) {
     CHECK(restoredSb->getPanel(0)->getText() == L"Ready");
     CHECK(restoredSb->getPanel(1)->getText() == L"Line 1");
 
-    destroyWidgetTree(widget);
-    destroyWidgetTree(restored);
 }
 
 TEST_SUITE_END
-

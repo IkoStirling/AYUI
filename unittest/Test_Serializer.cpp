@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "fixtures/WidgetRoundTrip.h"
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/TextLabel.h"
 #include "AYUI/Button.h"
@@ -214,15 +215,16 @@ TEST_CASE(test_deserialize_with_children) {
 }
 
 TEST_CASE(test_roundtrip) {
-    Window* window = new Window();
+    ayt::ui::test::WidgetTree source(new Window());
+    auto* window = static_cast<Window*>(source.get());
     window->setId("test_window");
     window->setTitle(L"Original Title");
     window->setPosition(FVector2(100.0f, 100.0f));
     window->setSize(FVector2(400.0f, 300.0f));
 
-    std::string json = WidgetSerializer::serialize(window);
+    ayt::ui::test::WidgetRoundTrip roundTrip(window);
 
-    Widget* restored = WidgetSerializer::deserialize(json);
+    Widget* restored = roundTrip.restored.get();
     CHECK(restored != nullptr);
     CHECK(restored->getId() == "test_window");
 
@@ -230,8 +232,6 @@ TEST_CASE(test_roundtrip) {
     CHECK(restoredWindow != nullptr);
     CHECK(restoredWindow->getTitle() == L"Original Title");
 
-    destroyWidgetTree(window);
-    destroyWidgetTree(restored);
 }
 
 TEST_CASE(test_scrollview_visibility_policy_roundtrip) {
@@ -241,11 +241,12 @@ TEST_CASE(test_scrollview_visibility_policy_roundtrip) {
     scroll.setHorizontalScrollBarVisibility(
         ScrollView::ScrollBarVisibility::Auto);
 
-    const std::string json = WidgetSerializer::serialize(&scroll);
+    ayt::ui::test::WidgetRoundTrip roundTrip(&scroll);
+    const std::string& json = roundTrip.serialized;
     CHECK(json.find("verticalScrollBarVisibility") != std::string::npos);
     CHECK(json.find("horizontalScrollBarVisibility") != std::string::npos);
 
-    Widget* restored = WidgetSerializer::deserialize(json);
+    Widget* restored = roundTrip.restored.get();
     ScrollView* restoredScroll = dynamic_cast<ScrollView*>(restored);
     CHECK_NOT_NULL(restoredScroll);
     if (restoredScroll != nullptr) {
@@ -254,22 +255,20 @@ TEST_CASE(test_scrollview_visibility_policy_roundtrip) {
         CHECK(restoredScroll->getHorizontalScrollBarVisibility()
               == ScrollView::ScrollBarVisibility::Auto);
     }
-    destroyWidgetTree(restored);
 }
 
 TEST_CASE(test_unicode_text_roundtrip_uses_utf8) {
     Button button;
     button.setText(L"\u7EE7\u7EED");
 
-    const std::string json = WidgetSerializer::serialize(&button);
-    Widget* restored = WidgetSerializer::deserialize(json);
+    ayt::ui::test::WidgetRoundTrip roundTrip(&button);
+    Widget* restored = roundTrip.restored.get();
     Button* restoredButton = dynamic_cast<Button*>(restored);
 
     CHECK(restoredButton != nullptr);
     if (restoredButton != nullptr) {
         CHECK(restoredButton->getText() == L"\u7EE7\u7EED");
     }
-    destroyWidgetTree(restored);
 }
 
 TEST_CASE(test_localization_metadata_roundtrip) {
@@ -280,8 +279,8 @@ TEST_CASE(test_localization_metadata_roundtrip) {
     button.setLocalizationKey(
         "accessibilityLabel", "ui.test.button.accessibility");
 
-    const std::string json = WidgetSerializer::serialize(&button);
-    Widget* restored = WidgetSerializer::deserialize(json);
+    ayt::ui::test::WidgetRoundTrip roundTrip(&button);
+    Widget* restored = roundTrip.restored.get();
     auto* restoredButton = dynamic_cast<Button*>(restored);
     CHECK(restoredButton != nullptr);
     if (restoredButton != nullptr) {
@@ -291,7 +290,6 @@ TEST_CASE(test_localization_metadata_roundtrip) {
         CHECK(restoredButton->getLocalizationKey("accessibilityLabel")
               == "ui.test.button.accessibility");
     }
-    destroyWidgetTree(restored);
 }
 
 TEST_SUITE_END
