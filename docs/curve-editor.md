@@ -64,6 +64,14 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 公共属性表单字段
+
+`PropertyField` 提供文本/枚举属性行、稳定子控件 ID、静默刷新、只读/显隐、
+可选失焦/枚举提交、owner 校验和提交回调。未列出的枚举值保留，隐藏字段保留草稿，
+校验失败不调用提交，提交回调不能重入。它不解释领域 schema，不建立历史。
+GameFlow 属性行已接入，原草稿整体校验与命令仍由页面拥有。完整表单可组合
+`NumericFields`、`ResourceReferenceField` 与现有 Layout 专用字段；Layout schema 不改名或泛化。
+
 ### 通用诊断展示
 
 `DiagnosticsPanel` 接受 owner 的 severity/code/message/opaque target，提供数量限制、

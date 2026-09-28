@@ -9,6 +9,7 @@
 #include <AYUI/Authoring/ResourceReferenceField.h>
 #include <AYUI/Authoring/TimelineSelectionOps.h>
 #include <AYUI/Authoring/DiagnosticsPanel.h>
+#include <AYUI/Authoring/PropertyField.h>
 #include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
@@ -447,6 +448,44 @@ TEST_CASE(diagnostics_filter_expand_locate_and_plain_reports_are_safe)
     panel->setEntries(entries); CHECK(located == 4);
     panel->setOnLocate({}); CHECK(!panel->locateVisible(0));
     ayt::ui::destroyWidgetTree(panel);
+}
+TEST_SUITE_END
+
+TEST_SUITE(AYUI_PropertyField)
+TEST_CASE(property_field_refresh_validation_readonly_and_enum_preservation)
+{
+    using namespace ayt::ui::authoring;
+    PropertyFieldOptions options;
+    options.inputId = "owner-value";
+    auto* field = new PropertyField(options);
+    int edits = 0, submits = 0;
+    field->setOnEdited([&] { ++edits; });
+    field->setOnSubmitted([&] { ++submits; CHECK(!field->requestSubmit()); });
+    field->setTextValue(L"Name", L"old");
+    CHECK(field->input()->getId() == "owner-value");
+    CHECK(edits == 0); CHECK(submits == 0);
+    field->input()->setText(L"draft");
+    CHECK(edits == 1);
+    field->setValidator([](const std::wstring& value, std::wstring& error) {
+        if (value == L"draft") { error = L"owner rejected"; return false; }
+        return true;
+    });
+    CHECK(!field->requestSubmit()); CHECK(submits == 0);
+    CHECK(field->validationError() == L"owner rejected");
+    field->setTextValue(L"Name", L"good", true);
+    CHECK(!field->requestSubmit());
+    field->setChoiceValue(L"Type", L"unknown", {L"A", L"B", L"A"}, true);
+    CHECK(field->value() == L"unknown"); CHECK(submits == 0);
+    field->choice()->setSelectedIndexAndNotify(1);
+    CHECK(field->value() == L"A"); CHECK(submits == 1);
+    field->setChoiceValue(L"Type", L"B", {L"A", L"B"}, false, true);
+    CHECK(!field->choice()->isEnabled()); CHECK(!field->requestSubmit());
+    field->setTextValue(L"", L"ignored");
+    CHECK(!field->isVisible()); CHECK(field->value() == L"B");
+    CHECK(!field->requestSubmit());
+    field->setTextValue(L"Name", L"good");
+    CHECK(field->requestSubmit()); CHECK(submits == 2);
+    ayt::ui::destroyWidgetTree(field);
 }
 TEST_SUITE_END
 
