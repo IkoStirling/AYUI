@@ -8,6 +8,7 @@
 #include <AYUI/Authoring/PreviewViewport.h>
 #include <AYUI/Authoring/ResourceReferenceField.h>
 #include <AYUI/Authoring/TimelineSelectionOps.h>
+#include <AYUI/Authoring/DiagnosticsPanel.h>
 #include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
@@ -370,6 +371,11 @@ TEST_CASE(resource_reference_refresh_pick_rejection_and_readonly)
     field->setPicker([&] { ++picks; return std::wstring{}; });
     CHECK(!field->requestPick()); CHECK(loads == 1); CHECK(picks == 1);
     CHECK(field->input()->getText() == L"bad");
+    field->setPicker([&] {
+        CHECK(!field->requestPick()); CHECK(!field->requestLoad());
+        return std::wstring{};
+    });
+    CHECK(!field->requestPick()); CHECK(loads == 1);
     field->setPicker([] { return std::wstring{L"valid"}; });
     CHECK(field->requestPick()); CHECK(loads == 2);
     CHECK(field->statusLabel()->getText() == L"Ready");
@@ -406,6 +412,41 @@ TEST_CASE(selection_operations_normalize_preserve_remap_and_notify_empty)
     view.setOnSelectionChanged([&](const std::string& key, std::size_t) { if (key.empty()) ++cleared; });
     view.setTrackId("gain"); view.selectAllKeys(); view.clearSelection();
     CHECK(cleared == 1);
+}
+TEST_CASE(diagnostics_filter_expand_locate_and_plain_reports_are_safe)
+{
+    using namespace ayt::ui::authoring;
+    auto* panel = new DiagnosticsPanel(2);
+    int located = 0;
+    std::string target;
+    panel->setOnLocate([&](const auto& id) { ++located; target = id; });
+    const std::vector<DiagnosticEntry> entries{
+        {DiagnosticSeverity::Error, L"E", L"broken", "opaque-one"},
+        {DiagnosticSeverity::Warning, L"W", L"attention", {}},
+        {DiagnosticSeverity::Info, L"I", L"ready", "opaque-three"}};
+    panel->setEntries(entries, L"Owner heading");
+    CHECK(located == 0);
+    CHECK(panel->reportText().find(L"1 more issue(s)") != std::wstring::npos);
+    CHECK(!panel->locateVisible(2));
+    CHECK(panel->locateVisible(0)); CHECK(target == "opaque-one");
+    CHECK(!panel->locateVisible(1));
+    panel->setExpanded(true);
+    CHECK(panel->locateVisible(2)); CHECK(target == "opaque-three");
+    CHECK(panel->reportText().find(L"more issue(s)") == std::wstring::npos);
+    panel->filterControl()->setSelectedIndexAndNotify(1);
+    CHECK(panel->reportText().find(L"broken") != std::wstring::npos);
+    CHECK(panel->reportText().find(L"attention") == std::wstring::npos);
+    CHECK(!panel->locateVisible(1));
+    CHECK(located == 2);
+    panel->locationControl()->setSelectedIndexAndNotify(0);
+    panel->locationControl()->setSelectedIndexAndNotify(0);
+    CHECK(located == 4);
+    panel->setReport(L"Unmodified bake progress report");
+    CHECK(panel->reportText() == L"Unmodified bake progress report");
+    CHECK(!panel->locateVisible(0));
+    panel->setEntries(entries); CHECK(located == 4);
+    panel->setOnLocate({}); CHECK(!panel->locateVisible(0));
+    ayt::ui::destroyWidgetTree(panel);
 }
 TEST_SUITE_END
 

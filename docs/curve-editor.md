@@ -64,6 +64,14 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 通用诊断展示
+
+`DiagnosticsPanel` 接受 owner 的 severity/code/message/opaque target，提供数量限制、
+展开更多、级别筛选和 Locate 下拉；刷新不触发定位。定位是宿主回调，页面重新验证
+目标有效性后只改变选择/显示。不会执行资源检查、重定向或烘焙。
+动画诊断、骨骼 preflight、dry-run 所有问题/操作/依赖已接入（不再在页面截断报告）。
+进度及模板说明使用 `setReport` 保留原文并隐藏结构化筛选；日志不是伪造的 issue。
+
 ### 选择操作与 Editor 通知桥接
 
 `TimelineSelectionOps` 在原 `TimelineSelection` 上执行规范化单选、多选、清空和

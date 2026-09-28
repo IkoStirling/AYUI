@@ -1124,6 +1124,14 @@ Basics/Images/Input/Collections/Layout/Capabilities/Backend/Product 为 `7 → 7
 
 ## 16. 相关文档
 
+### 2026-09-28：作者公共组件第二批收口
+
+已实现资源无关的预览 orbit/拟合投影/缓存、资源引用字段、选择操作和诊断面板，
+统一放在 `AYUI/Authoring`；控件仍只链接独立作者目标，不进入普通运行时 JSON Widget。
+AYEditor 的命令按钮和 selection context 桥接归 AYEditor，公共 AYUI 不反向依赖编辑器。
+文档/领域模型保留采样、加载校验、唯一历史、重定向求解和烘焙引用安全。
+接入及限制见 [公共作者控件](docs/curve-editor.md)。
+
 - [README.md](README.md)
 - [AYUI-v1-Design.md](AYUI-v1-Design.md)
 - [UI Flow contract](docs/UIFlow.md)

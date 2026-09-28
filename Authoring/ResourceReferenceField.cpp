@@ -50,7 +50,11 @@ bool ResourceReferenceField::requestLoad() {
 }
 bool ResourceReferenceField::requestPick() {
     if (_readOnly || _requesting || !_picker) return false;
-    const auto path = _picker();
+    _requesting = true;
+    std::wstring path;
+    try { path = _picker(); }
+    catch (...) { _requesting = false; throw; }
+    _requesting = false;
     if (path.empty()) return false;
     setPath(path); return requestLoad();
 }
