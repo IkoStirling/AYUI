@@ -64,6 +64,14 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### AYEditor 命令按钮适配
+
+`AYEditor/EditorCommandButtons.h` 为现有 `IEditorCommandTarget` 创建按钮绑定，
+不注册另一套命令/历史；每次执行重新解析当前 target，并重新检查 handles/canExecute。
+动画/骨骼页面保存、撤销、重做和动画曲线删除已使用相同的 view 命令入口供快捷键路由。
+宿主在状态改变后 refresh，销毁控件树前 detach；保留的按钮闭包在 detach/析构后失效。
+普通公共 AYUI 控件不依赖此适配器或 AYEditor。
+
 ### 预览视口基础
 
 `PreviewViewport.h` 的 `PreviewOrbit` 管理旋转/缩放/重置/取消；`PreviewBounds`
