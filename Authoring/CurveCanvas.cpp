@@ -1,4 +1,5 @@
 #include "AYUI/Authoring/CurveCanvas.h"
+#include <AYUI/Authoring/TimelineSelectionOps.h>
 
 #include <AYUI/IRenderBackend.h>
 
@@ -67,11 +68,7 @@ void CurveCanvas::setTrackId(std::string trackId)
     if (_trackId == trackId) return;
     finishGesture(true);
     _trackId = std::move(trackId);
-    if (_selection->trackId != _trackId) {
-        _selection->trackId = _trackId;
-        _selection->primaryKeyId.clear();
-        _selection->keyIds.clear();
-    }
+    if (_selection->trackId != _trackId) TimelineSelectionOps::single(*_selection, _trackId, "");
     _viewValid = false;
     markDirty();
 }
@@ -102,23 +99,19 @@ void CurveCanvas::selectAllKeys()
     const auto snapshot = loadTrack();
     if (!snapshot) return;
     const auto& track = *snapshot;
-    _selection->trackId = _trackId;
-    _selection->component = 0u;
-    _selection->keyIds.clear();
-    for (const auto& key : track.keys) _selection->keyIds.push_back(key.id);
-    _selection->primaryKeyId = _selection->keyIds.empty() ? std::string{}
-                                             : _selection->keyIds.front();
-    if (_onSelectionChanged && !_selection->primaryKeyId.empty()) {
-        _onSelectionChanged(_selection->primaryKeyId, 0u);
-    }
+    std::vector<std::string> ids;
+    for (const auto& key : track.keys) ids.push_back(key.id);
+    TimelineSelectionOps::keys(*_selection, _trackId, std::move(ids), 0u, [this](const auto& selection) {
+        if (_onSelectionChanged) _onSelectionChanged(selection.primaryKeyId, selection.component);
+    });
     markDirty();
 }
 
 void CurveCanvas::clearSelection()
 {
-    if (_selection->keyIds.empty()) return;
-    _selection->keyIds.clear();
-    _selection->primaryKeyId.clear();
+    TimelineSelectionOps::clear(*_selection, [this](const auto& selection) {
+        if (_onSelectionChanged) _onSelectionChanged(selection.primaryKeyId, selection.component);
+    });
     markDirty();
 }
 
@@ -277,17 +270,11 @@ bool CurveCanvas::onMouseButtonDown(
         _boxSelecting = true;
         _boxMoved = false;
         _boxStart = _boxEnd = event.mousePos;
-        _selection->keyIds.clear();
-        _selection->primaryKeyId.clear();
+        TimelineSelectionOps::clear(*_selection);
         markDirty();
         return true;
     }
-    if (!isSelected(hit.keyId)) {
-        _selection->keyIds = {hit.keyId};
-    }
-    _selection->primaryKeyId = hit.keyId;
-    _selection->trackId = _trackId;
-    _selection->component = hit.component;
+    TimelineSelectionOps::single(*_selection, _trackId, hit.keyId, hit.component, true);
     _dragHit = hit;
     _gestureChanged = false;
     if (_onSelectionChanged) {
@@ -330,7 +317,7 @@ bool CurveCanvas::onMouseMove(
         const auto snapshot = loadTrack();
         if (snapshot) {
             const auto& track = *snapshot;
-            _selection->keyIds.clear();
+            std::vector<std::string> ids;
             for (const auto& key : track.keys) {
                 bool selected = false;
                 for (std::size_t component = 0u;
@@ -343,10 +330,9 @@ bool CurveCanvas::onMouseMove(
                         break;
                     }
                 }
-                if (selected) _selection->keyIds.push_back(key.id);
+                if (selected) ids.push_back(key.id);
             }
-            _selection->primaryKeyId = _selection->keyIds.empty() ? std::string{}
-                                                     : _selection->keyIds.front();
+            TimelineSelectionOps::keys(*_selection, _trackId, std::move(ids));
         }
         markDirty();
         return true;
@@ -382,11 +368,12 @@ bool CurveCanvas::onMouseMove(
                 _selection->keyIds.end(), _dragHit.keyId);
             const std::size_t primaryIndex = primary == _selection->keyIds.end()
                 ? 0u : static_cast<std::size_t>(primary - _selection->keyIds.begin());
-            if (_document->transformKeys(_selection->keyIds,
+            const auto previousIds = _selection->keyIds;
+            auto updatedIds = previousIds;
+            if (_document->transformKeys(updatedIds,
                     deltaTime, _dragHit.component, deltaValue)) {
-                _dragHit.keyId = _selection->keyIds[std::min(
-                    primaryIndex, _selection->keyIds.size() - 1u)];
-                _selection->primaryKeyId = _dragHit.keyId;
+                TimelineSelectionOps::remap(*_selection, previousIds, updatedIds);
+                _dragHit.keyId = _selection->keyIds[std::min(primaryIndex, _selection->keyIds.size() - 1u)];
                 _gestureChanged = true;
                 _lastPointer = event.mousePos;
                 if (_onSelectionChanged) {
@@ -405,8 +392,7 @@ bool CurveCanvas::onMouseMove(
         std::string updatedId = _dragHit.keyId;
         if (_document->updateKey(updatedId, seconds, values)) {
             _dragHit.keyId = updatedId;
-            _selection->primaryKeyId = updatedId;
-            _selection->keyIds = {updatedId};
+            TimelineSelectionOps::single(*_selection, _trackId, updatedId, _dragHit.component);
             _gestureChanged = true;
             (void)_document->seek(seconds);
             if (_onSelectionChanged) {
@@ -454,7 +440,7 @@ bool CurveCanvas::onMouseButtonUp(
         if (!_boxMoved && _document != nullptr) {
             (void)_document->seek(secondsAt(event.mousePos.x));
         }
-        if (_onSelectionChanged && !_selection->primaryKeyId.empty()) {
+        if (_onSelectionChanged) {
             _onSelectionChanged(_selection->primaryKeyId, 0u);
         }
         markDirty();
@@ -490,7 +476,11 @@ bool CurveCanvas::onMouseWheel(
 
 void CurveCanvas::finishGesture(bool cancel)
 {
-    (void)_gesture.finish(cancel);
+    const auto previous = *_selection;
+    const bool finished = _gesture.finish(cancel);
+    if (finished && cancel && _onSelectionChanged
+        && (previous.primaryKeyId != _selection->primaryKeyId || previous.keyIds != _selection->keyIds))
+        _onSelectionChanged(_selection->primaryKeyId, _selection->component);
     const bool changed = _gestureChanged;
     _dragHit = {};
     _gestureChanged = false;

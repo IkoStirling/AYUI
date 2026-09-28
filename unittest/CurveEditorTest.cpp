@@ -7,6 +7,7 @@
 #include <AYUI/Authoring/NumericFields.h>
 #include <AYUI/Authoring/PreviewViewport.h>
 #include <AYUI/Authoring/ResourceReferenceField.h>
+#include <AYUI/Authoring/TimelineSelectionOps.h>
 #include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
@@ -377,6 +378,34 @@ TEST_CASE(resource_reference_refresh_pick_rejection_and_readonly)
     CHECK(!field->requestLoad()); CHECK(!field->requestPick()); CHECK(loads == 2);
     field->setPath(L"refresh"); CHECK(loads == 2);
     ayt::ui::destroyWidgetTree(field);
+}
+TEST_CASE(selection_operations_normalize_preserve_remap_and_notify_empty)
+{
+    using namespace ayt::ui::authoring;
+    TimelineSelection selection;
+    int notifications = 0;
+    const auto notify = [&](const auto&) { ++notifications; };
+    CHECK(TimelineSelectionOps::keys(selection, "track", {"a", "b", "a", ""}, 2, notify));
+    CHECK(selection.keyIds == std::vector<std::string>({"a", "b"}));
+    CHECK(selection.primaryKeyId == "a");
+    CHECK(!TimelineSelectionOps::single(selection, "track", "a", 2, true, notify));
+    CHECK(notifications == 1);
+    CHECK(TimelineSelectionOps::single(selection, "track", "b", 1, true, notify));
+    CHECK(selection.keyIds.size() == 2u);
+    CHECK(!TimelineSelectionOps::remap(selection, {"a", "b"}, {"new"}, notify));
+    CHECK(selection.primaryKeyId == "b");
+    CHECK(TimelineSelectionOps::remap(selection, {"a", "b"}, {"renamed-a", "renamed-b"}, notify));
+    CHECK(selection.primaryKeyId == "renamed-b");
+    CHECK(TimelineSelectionOps::clear(selection, notify));
+    CHECK(selection.primaryKeyId.empty()); CHECK(selection.keyIds.empty());
+    CHECK(!TimelineSelectionOps::clear(selection, notify));
+    CHECK(notifications == 4);
+    auto source = std::make_shared<TestCurveOwner>();
+    CurveCanvas view(source);
+    int cleared = 0;
+    view.setOnSelectionChanged([&](const std::string& key, std::size_t) { if (key.empty()) ++cleared; });
+    view.setTrackId("gain"); view.selectAllKeys(); view.clearSelection();
+    CHECK(cleared == 1);
 }
 TEST_SUITE_END
 

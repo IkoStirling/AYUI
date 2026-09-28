@@ -1,4 +1,5 @@
 #include "AYUI/Authoring/DopeSheet.h"
+#include <AYUI/Authoring/TimelineSelectionOps.h>
 
 #include <AYUI/IRenderBackend.h>
 #include <AYUI/UnicodeText.h>
@@ -44,10 +45,7 @@ void DopeSheet::setSelection(
     std::string trackId, std::string keyId)
 {
     if (_selection->trackId == trackId && _selection->primaryKeyId == keyId) return;
-    _selection->trackId = std::move(trackId);
-    _selection->primaryKeyId = std::move(keyId);
-    _selection->keyIds = _selection->primaryKeyId.empty()
-        ? std::vector<std::string>{} : std::vector<std::string>{_selection->primaryKeyId};
+    TimelineSelectionOps::single(*_selection, std::move(trackId), std::move(keyId), _selection->component);
     markDirty();
 }
 
@@ -120,9 +118,7 @@ bool DopeSheet::onMouseButtonDown(
         markDirty();
         return true;
     }
-    _selection->trackId = hit.trackId;
-    _selection->primaryKeyId = hit.keyId;
-    _selection->keyIds = {hit.keyId};
+    TimelineSelectionOps::single(*_selection, hit.trackId, hit.keyId);
     _dragKeyId = hit.keyId;
     _gestureChanged = false;
     if (_onSelectionChanged) {
@@ -159,9 +155,7 @@ bool DopeSheet::onMouseMove(
     std::string updatedTrack = _selection->trackId;
     if (_document->moveTimelineKey(updatedTrack, updatedKey, seconds)) {
         _dragKeyId = updatedKey;
-        _selection->primaryKeyId = updatedKey;
-        _selection->keyIds = {updatedKey};
-        _selection->trackId = updatedTrack;
+        TimelineSelectionOps::single(*_selection, updatedTrack, updatedKey);
         _gestureChanged = true;
         (void)_document->seek(seconds);
         if (_onSelectionChanged)
@@ -203,7 +197,12 @@ bool DopeSheet::onMouseWheel(
 
 void DopeSheet::finishDrag(bool cancel)
 {
-    (void)_gesture.finish(cancel);
+    const auto previous = *_selection;
+    const bool finished = _gesture.finish(cancel);
+    if (finished && cancel && _onSelectionChanged
+        && (previous.primaryKeyId != _selection->primaryKeyId || previous.keyIds != _selection->keyIds
+            || previous.trackId != _selection->trackId))
+        _onSelectionChanged(_selection->trackId, _selection->primaryKeyId);
     const bool changed = _gestureChanged;
     _draggingKey = false;
     _dragKeyId.clear();

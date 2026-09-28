@@ -64,6 +64,17 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 选择操作与 Editor 通知桥接
+
+`TimelineSelectionOps` 在原 `TimelineSelection` 上执行规范化单选、多选、清空和
+位置对应的 ID 重映射：去重/过滤空 ID、保持主选中有效，失败不部分更改。
+可选 changed 回调只在真实变更后调用；空选择也可通知。程序化视图同步仍静默。
+CurveCanvas/DopeSheet 已迁移；取消手势恢复选择后通知宿主。未改变原数据/owner ABI。
+`EditorAuthoringSelectionBridge` 将 owner 选择单向投射到现有 `EditorSelectionContext`。
+受管理文档使用真实 workspace documentId，每次重新解析，关闭后不保留旧 context；
+独立 view 使用本地 context。动画键/轨道和骨骼选择已接入并暴露 view.selectionContext。
+不自动反向应用外部选择，不把骨骼/事件 ID 解释移入公共控件。
+
 ### AYEditor 命令按钮适配
 
 `AYEditor/EditorCommandButtons.h` 为现有 `IEditorCommandTarget` 创建按钮绑定，
