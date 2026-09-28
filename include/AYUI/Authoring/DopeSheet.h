@@ -57,6 +57,11 @@ private:
     bool _viewValid = false;
     bool _panning = false;
     bool _draggingKey = false;
+    bool _boxSelecting = false;
+    bool _boxMoved = false;
+    ayt::math::FVector2 _boxStart{}, _boxEnd{};
+    TimelineSelection _boxBefore;
+    double _dragPointerTime = 0, _dragKeyTime = 0;
     bool _gestureChanged = false;
     EditGestureSession _gesture;
     ayt::math::FVector2 _lastPointer{};

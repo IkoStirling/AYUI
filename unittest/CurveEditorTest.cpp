@@ -70,6 +70,17 @@ public:
         publish();
         return true;
     }
+    bool transformKeys(std::vector<std::string>& ids, double delta,
+                       std::size_t, float value) override {
+        if (value != 0 || ids != std::vector<std::string>({"cue-opaque", "other-key"})) return false;
+        eventTime = std::clamp(eventTime + delta, 0.0, 1.0);
+        publish();
+        auto timeline = std::make_shared<ayt::ui::authoring::TimelineSnapshot>(*currentTimeline);
+        timeline->tracks.push_back({"other-row", "Other", ayt::ui::authoring::TimelineTrackKind::Value});
+        timeline->keys.push_back({"other-key", "other-row", eventTime});
+        currentTimeline = timeline;
+        return true;
+    }
     std::shared_ptr<const ayt::ui::authoring::CurveTrack> currentCurve;
     std::shared_ptr<const ayt::ui::authoring::TimelineSnapshot> currentTimeline;
     std::uint64_t version = 0;
@@ -80,6 +91,33 @@ public:
 }
 
 TEST_SUITE(AYUI_CurveEditor)
+
+TEST_CASE(dope_sheet_box_selects_cross_rows_and_drag_is_one_gesture) {
+    using namespace ayt::ui::authoring;
+    auto source = std::make_shared<TestCurveOwner>();
+    auto snapshot = std::make_shared<TimelineSnapshot>(*source->currentTimeline);
+    snapshot->tracks.push_back({"other-row", "Other", TimelineTrackKind::Value});
+    snapshot->keys.push_back({"other-key", "other-row", .5});
+    source->currentTimeline = snapshot;
+    DopeSheet view(source);
+    view.setSize({640, 180});
+    ayt::ui::MockRenderer renderer;
+    view.render(renderer);
+    CHECK(view.onMouseButtonDown({{380, 24}, 0}));
+    CHECK(view.onMouseMove({{425, 70}, 0}));
+    CHECK(view.onMouseButtonUp({{425, 70}, 0}));
+    CHECK(source->selectionState()->keyIds.size() == 2);
+    CHECK(view.onMouseButtonDown({{404, 34}, 0}));
+    CHECK(view.onMouseMove({{498.4f, 34}, 0}));
+    CHECK(source->selectionState()->keyIds.size() == 2);
+    CHECK(view.onMouseButtonUp({{498.4f, 34}, 0}));
+    CHECK(source->begins == 1); CHECK(source->commits == 1);
+    CHECK(std::fabs(source->eventTime - .7) < 1e-6);
+    CHECK(view.onMouseButtonDown({{200, 25}, 0}));
+    CHECK(view.onMouseMove({{600, 100}, 0}));
+    view.onCaptureCancelled();
+    CHECK(source->selectionState()->keyIds.size() == 2);
+}
 
 TEST_CASE(numeric_fields_preserve_ids_dimensions_readonly_and_atomic_validation)
 {

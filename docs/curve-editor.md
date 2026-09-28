@@ -185,7 +185,8 @@ UI Layout 的现有 `LayoutAnimationTimelineView` 复用公共 TimeViewport 和�
 顺序，保留毫秒 API、垂直滚动及现有 Bezier/Spring 参数编辑；并未强制替换成新控件。
 
 第一版 CurveCanvas 展示最多四个分量（X/Y/Z/W），单轨框选/批量变换；DopeSheet
-为固定行高的可见轨道区域，暂无专用垂直滚动、跨轨批量编辑、剪贴板或通用 Bezier 手柄。
+为固定行高的可见轨道区域，支持跨行框选/组移动和选中高亮，批量移动由 owner 的
+`transformKeys` 原子执行；暂无专用垂直滚动、公共剪贴板或通用 Bezier 手柄。
 控件不注册为运行时 JSON Widget 类型，也不要求普通游戏链接作者目标。
 
 验证：`AYUICurveEditorTest` 不链接 AYEditor/AYAnimation，覆盖非动画 owner、任意事件 ID、
