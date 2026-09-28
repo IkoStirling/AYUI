@@ -244,6 +244,7 @@ add_library(AYUITimelineCore INTERFACE)
 target_include_directories(AYUITimelineCore INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_library(AYUICurveEditor STATIC
     Authoring/CurveCanvas.cpp
+    Authoring/PlaybackControls.cpp
     Authoring/DopeSheet.cpp)
 target_link_libraries(AYUICurveEditor PUBLIC AYUI AYUITimelineCore)
 if(MSVC)

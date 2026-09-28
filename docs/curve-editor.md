@@ -64,6 +64,19 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 独立播放控制
+
+`IPlaybackSource` 与曲线 source 分离，返回秒制播放状态以及可选 loop/rate；
+`PlaybackControls` 可按 options 组合播放按钮、seek、时间、状态、loop/rate。
+它从不调用 tick，宿主保留唯一播放推进权；`refresh()` 抑制程序化赋值回调，
+不会因刷新或范围变化再次 seek。宿主用 `setOnChanged` 刷新兄弟视图/预览。
+与其他 AYUI 复合控件一样，通过 Widget 树正常销毁其孩子。
+
+AYEditor 的动画页、骨骼页和上下文 Timeline tool 共用该控件；
+`AYEditorTimelinePlaybackSource.h` 适配既有 `IEditorTimelineSource`，每次操作
+获取 shared document，不改变公共 Editor 接口。上下文文档切换/关闭后重新解析
+当前 source，缺少 source 时禁用控件；音频 clip、waveform 和编辑规则仍由文档拥有。
+
 ### 共享作者基础（第二阶段）
 
 `AuthoringPrimitives.h` 属于 UI-free `AYUITimelineCore`：`timelineTicks` 按像素密度

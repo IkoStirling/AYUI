@@ -3,6 +3,10 @@
 #include <AYUI/Authoring/DopeSheet.h>
 #include <AYUI/MockRenderer.h>
 #include <AYMath/CurveMath.h>
+#include <AYUI/Authoring/PlaybackControls.h>
+#include <AYUI/Button.h>
+#include <AYUI/ComboBox.h>
+#include <AYUI/Slider.h>
 #include <cmath>
 
 namespace {
@@ -63,6 +67,47 @@ public:
 }
 
 TEST_SUITE(AYUI_CurveEditor)
+
+TEST_CASE(playback_controls_do_not_seek_while_refreshing_and_hide_optional_capabilities)
+{
+    using namespace ayt::ui::authoring;
+    struct Owner final : IPlaybackSource {
+        PlaybackState state{true, false, 0.5, 1.0, {}, {}};
+        int plays = 0, seeks = 0, rates = 0;
+        PlaybackState playbackState() const override { return state; }
+        void play() override { ++plays; state.playing = true; }
+        void pause() override { state.playing = false; }
+        void stop() override { state.positionSeconds = 0; state.playing = false; }
+        bool seek(double seconds) override { ++seeks; state.positionSeconds = seconds; return true; }
+        bool setRate(float value) override { ++rates; state.rate = value; return true; }
+        bool setLooping(bool value) override { state.looping = value; return true; }
+    };
+    auto owner = std::make_shared<Owner>();
+    auto* view = new PlaybackControls(owner, {true, true, true, true, true, true});
+    view->refresh();
+    CHECK(owner->seeks == 0);
+    CHECK(owner->rates == 0);
+    CHECK(!view->loopButton()->isVisible());
+    CHECK(!view->rateInput()->isVisible());
+    owner->state.positionSeconds = 0.8;
+    view->refresh();
+    CHECK(owner->seeks == 0);
+    CHECK(std::fabs(view->seekInput()->getValue() - 0.8f) < 1e-6f);
+    owner->state.looping = true;
+    owner->state.rate = 1.5f;
+    view->refresh();
+    CHECK(view->loopButton()->isVisible());
+    CHECK(view->rateInput()->getSelectedIndex() == 3);
+    CHECK(owner->rates == 0);
+    view->rateInput()->setSelectedIndexAndNotify(4);
+    CHECK(owner->rates == 1);
+    CHECK(owner->state.rate == 2.0f);
+    owner->state.available = false;
+    view->refresh();
+    CHECK(!view->playButton()->isEnabled());
+    CHECK(!view->seekInput()->isEnabled());
+    ayt::ui::destroyWidgetTree(view);
+}
 
 TEST_CASE(shared_ticks_rows_snap_and_units)
 {
