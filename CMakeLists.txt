@@ -245,6 +245,7 @@ target_include_directories(AYUITimelineCore INTERFACE ${CMAKE_CURRENT_SOURCE_DIR
 add_library(AYUICurveEditor STATIC
     Authoring/CurveCanvas.cpp
     Authoring/PlaybackControls.cpp
+    Authoring/NumericFields.cpp
     Authoring/DopeSheet.cpp)
 target_link_libraries(AYUICurveEditor PUBLIC AYUI AYUITimelineCore)
 if(MSVC)
@@ -301,7 +302,7 @@ target_include_directories(AYUILayoutEditorCore
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/LayoutEditor
 )
-target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI AYUITimelineCore AYEditor::CommandCore)
+target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI AYUITimelineCore AYUICurveEditor AYEditor::CommandCore)
 if(MSVC)
     target_compile_options(AYUILayoutEditorCore PRIVATE
         /Zc:__cplusplus /Zc:preprocessor)

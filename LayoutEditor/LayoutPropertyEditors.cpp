@@ -1,4 +1,6 @@
 #include "AYUI/LayoutEditor/LayoutPropertyEditors.h"
+#include <AYUI/Authoring/NumericFields.h>
+#include <AYUI/UnicodeText.h>
 
 #include "AYUI/Button.h"
 #include "AYUI/ColorPicker.h"
@@ -99,20 +101,10 @@ LayoutVectorPropertyEditor::LayoutVectorPropertyEditor(
     const std::vector<std::string>& componentLabels) {
     setPadding(0.0f, 0.0f, 0.0f, 0.0f);
     setSpacing(6.0f);
-    _inputs.reserve(componentControlIds.size());
-    for (size_t i = 0; i < componentControlIds.size(); ++i) {
-        auto* input = new TextInput();
-        input->setId(componentControlIds[i]);
-        input->setStyleId("__le_input");
-        if (i < componentLabels.size()) {
-            std::wstring label(componentLabels[i].begin(),
-                               componentLabels[i].end());
-            input->setPlaceholder(label);
-        }
-        input->setSize({0.0f, 30.0f});
-        addWidget(input, 0.0f);
-        _inputs.push_back(input);
-    }
+    std::vector<std::wstring> labels;
+    for (const auto& label : componentLabels) labels.push_back(decodeUtf8Text(label));
+    _inputs = authoring::addNumericInputs(*this, componentControlIds, labels,
+                                         {"__le_input", 30.0f, false});
 }
 
 } // namespace ayt::ui

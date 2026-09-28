@@ -11,6 +11,22 @@ namespace ayt::ui::authoring {
 
 enum class TimeDisplay { Seconds, Frames, Adaptive };
 
+// Full-string, finite float parsing; owners retain dimensional/Quaternion validation.
+inline std::optional<float> parseFiniteFloat(const std::wstring& text) {
+    try {
+        std::size_t consumed = 0u;
+        const float value = std::stof(text, &consumed);
+        if (consumed != text.size() || !std::isfinite(value)) return std::nullopt;
+        return value;
+    } catch (...) { return std::nullopt; }
+}
+inline std::wstring formatNumber(float value, int precision = 7) {
+    std::wostringstream text;
+    text.imbue(std::locale::classic());
+    text << std::setprecision(std::clamp(precision, 1, 9)) << value;
+    return text.str();
+}
+
 inline std::wstring formatTime(double seconds, TimeDisplay display = TimeDisplay::Seconds,
                                int precision = 3, double framesPerSecond = 30.0) {
     if (!std::isfinite(seconds)) seconds = 0.0;
@@ -60,9 +76,9 @@ inline std::vector<double> timelineTicks(TimeViewport view, double width, double
 struct TimelineRowLayout {
     double top = 0.0, height = 24.0, scrollOffset = 0.0;
     double rowTop(std::size_t row) const noexcept {
-        return top + static_cast<double>(row) * std::max(1.0, height) - scrollOffset;
+        return top + static_cast<double>(row) * std::max(1.0e-9, height) - scrollOffset;
     }
-    double rowCenter(std::size_t row) const noexcept { return rowTop(row) + std::max(1.0, height) * 0.5; }
+    double rowCenter(std::size_t row) const noexcept { return rowTop(row) + std::max(1.0e-9, height) * 0.5; }
     std::pair<std::size_t, std::size_t> visibleRows(std::size_t count, double viewportHeight) const noexcept {
         if (!std::isfinite(height) || height <= 0.0 || !std::isfinite(scrollOffset)
             || !std::isfinite(viewportHeight) || viewportHeight <= 0.0) return {0u, 0u};

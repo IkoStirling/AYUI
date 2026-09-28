@@ -4,6 +4,8 @@
 #include <AYUI/MockRenderer.h>
 #include <AYMath/CurveMath.h>
 #include <AYUI/Authoring/PlaybackControls.h>
+#include <AYUI/Authoring/NumericFields.h>
+#include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
 #include <AYUI/ComboBox.h>
 #include <AYUI/Slider.h>
@@ -68,6 +70,45 @@ public:
 
 TEST_SUITE(AYUI_CurveEditor)
 
+TEST_CASE(numeric_fields_preserve_ids_dimensions_readonly_and_atomic_validation)
+{
+    using namespace ayt::ui::authoring;
+    CHECK(!parseFiniteFloat(L"nan"));
+    CHECK(!parseFiniteFloat(L"inf"));
+    CHECK(!parseFiniteFloat(L"1.25junk"));
+    CHECK(!parseFiniteFloat(L""));
+    CHECK(parseFiniteFloat(L"1.25") == 1.25f);
+    auto* fields = new NumericFields({"x", "y", "z", "w"}, {L"X", L"Y", L"Z", L"W"});
+    int submissions = 0;
+    fields->setOnSubmitted([&] { ++submissions; });
+    CHECK(fields->setValues({1, 2, 3}));
+    CHECK(fields->componentCount() == 3u);
+    CHECK(fields->inputs()[0]->getId() == "x");
+    CHECK(fields->inputs()[0]->getPlaceholder() == L"X");
+    CHECK(!fields->inputs()[3]->isVisible());
+    std::vector<float> output{99};
+    CHECK(fields->readValues(3, output));
+    CHECK(output == std::vector<float>({1, 2, 3}));
+    fields->inputs()[1]->setText(L"bad");
+    output = {99};
+    CHECK(!fields->readValues(3, output));
+    CHECK(output == std::vector<float>({99}));
+    CHECK(!fields->setValues({1, 2, 3, 4, 5}));
+    CHECK(fields->componentCount() == 3u);
+    CHECK(fields->inputs()[1]->getText() == L"bad");
+    CHECK(fields->setValues({4, 5}, true));
+    CHECK(fields->inputs()[0]->isReadOnly());
+    CHECK(!fields->readValues(2, output));
+    CHECK(fields->setValues({4, 5}, false));
+    CHECK(!fields->inputs()[0]->isReadOnly());
+    CHECK(!fields->readValues(3, output));
+    fields->setUnit(L"value/s");
+    CHECK(submissions == 0);
+    CHECK(fields->setValues({}));
+    CHECK(!fields->readValues(0, output));
+    ayt::ui::destroyWidgetTree(fields);
+}
+
 TEST_CASE(playback_controls_do_not_seek_while_refreshing_and_hide_optional_capabilities)
 {
     using namespace ayt::ui::authoring;
@@ -128,6 +169,8 @@ TEST_CASE(shared_ticks_rows_snap_and_units)
     CHECK(range.second == 4u);
     CHECK(rows.rowCenter(2) == 58.0);
     CHECK(rows.visibleRows(0, 100).second == 0u);
+    const TimelineRowLayout subpixelRows{0, 0.5, 0.25};
+    CHECK(subpixelRows.rowCenter(2) == 1.0);
 }
 
 TEST_CASE(refresh_gate_separates_content_selection_pose_and_transport)

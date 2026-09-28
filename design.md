@@ -25,6 +25,10 @@ AYEditor 的动画页已迁移到该层；UI Layout 时间轴复用秒制坐标�
 快照及曲线采样按内容版本/视区缓存，播放头更新不重建资源快照或重采样。
 契约、限制和新页面接入示例见 [docs/curve-editor.md](docs/curve-editor.md)。
 
+共享作者层已进一步覆盖秒/帧标尺、可见行布局、owner 手势会话、版本刷新分流、
+可选播放条及数值分量字段。动画/骨骼/上下文时间轴共用播放条；动画 key/tangent
+面板与 Layout vector 行共用输入字段基础，Layout 保留自己的 schema 与回调契约。
+
 AYUI 是 AliyatEngine 的 UI 领域层。它管理 UI 状态和控件树，但不持有图形 API 资源，也不决定引擎主循环。
 
 当前范围：

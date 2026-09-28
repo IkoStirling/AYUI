@@ -64,6 +64,19 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 数值与关键帧分量字段
+
+`NumericFields` 共用分量输入创建、格式、维数显隐、只读、unit 标签和提交回调。
+`setValues` 是无提交的界面刷新；`readValues` 要求完整、有限的 Float 数值，失败时
+不改输出数组。超出字段容量或包含非有限值的刷新整体拒绝，不留下半更新界面。
+单位仅用于显示，不在控件中重标定 ticks、归一化 Quaternion 或验证资源。
+动画 key value 与 in/out tangent 面板已迁移，保持原输入 ID 和保存/验证/Undo 行为。
+
+Layout 的 `LayoutVectorPropertyEditor` 保持原类布局与接口，仅将创建逻辑委托给
+`addNumericInputs`，保留 schema 字段 ID、style、尺寸及原字段回调。它不强制采用
+动画面板的完整数值解析规则，避免改变既有 Layout 作者输入语义。
+`AYUILayoutEditorCore` 链接作者控件目标；游戏侧 AYUI runtime 不新增该依赖。
+
 ### 独立播放控制
 
 `IPlaybackSource` 与曲线 source 分离，返回秒制播放状态以及可选 loop/rate；
