@@ -11,6 +11,9 @@
 #include <AYUI/Authoring/DiagnosticsPanel.h>
 #include <AYUI/Authoring/PropertyField.h>
 #include <AYUI/Authoring/JobPresentation.h>
+#include <AYUI/Authoring/StableListRows.h>
+#include <AYUI/Authoring/DragSourceList.h>
+#include <AYUI/UIManager.h>
 #include <AYUI/TextLabel.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
@@ -453,6 +456,69 @@ TEST_CASE(diagnostics_filter_expand_locate_and_plain_reports_are_safe)
 }
 TEST_SUITE_END
 
+TEST_SUITE(AYUI_AuthoringList)
+TEST_CASE(stable_list_rows_preserve_ids_across_filter_sort_and_atomic_rejection)
+{
+    using namespace ayt::ui::authoring;
+    StableListRows<std::string> rows;
+    CHECK(rows.replace({"left", "right", "head"}));
+    CHECK(rows.indexOf("head") == 2); CHECK(*rows.idAt(1) == "right");
+    CHECK(!rows.idAt(-1)); CHECK(!rows.idAt(3));
+    CHECK(rows.replace({"head", "left"}));
+    CHECK(rows.indexOf("head") == 0); CHECK(rows.indexOf("right") == -1);
+    CHECK(!rows.replace({"duplicate", "duplicate"}));
+    CHECK(rows.indexOf("head") == 0); CHECK(rows.size() == 2u);
+    CHECK(rows.replace({})); CHECK(!rows.idAt(0));
+    StableListRows<int> bones; CHECK(bones.replace({0, 12}));
+    CHECK(*bones.idAt(0) == 0); CHECK(bones.indexOf(12) == 1);
+}
+TEST_CASE(authoring_list_drag_threshold_refresh_and_capture_cancel)
+{
+    using namespace ayt::ui;
+    using namespace ayt::ui::authoring;
+    MockRenderer renderer;
+    UIManager ui; ui.initialize(&renderer); ui.setClientSize(400, 300);
+    auto* list = new DragSourceList();
+    list->setPosition({10, 10}); list->setSize({200, 100}); list->setItemHeight(20);
+    list->setItems({L"first", L"second"});
+    ui.getOverlayRoot()->addChild(list);
+    int requests = 0;
+    list->setPayloadProvider([&](int row) {
+        ++requests;
+        DragPayload payload; payload.kind = "OwnerItem"; payload.userData = row + 1;
+        return payload;
+    });
+    ui.layout();
+    list->performLayout();
+    CHECK(ui.onMouseButtonDown(20, 20, 0));
+    ui.onMouseMove(22, 20); CHECK(!ui.isDragging()); CHECK(requests == 0);
+    ui.onMouseMove(26, 20); CHECK(ui.isDragging()); CHECK(requests == 1);
+    CHECK(ui.getDragPayload().kind == "OwnerItem"); CHECK(ui.getDragPayload().userData == 1);
+    list->setItems({L"replacement"}); CHECK(!ui.isDragging()); CHECK(list->getDragPayload().isEmpty());
+    list->onCaptureCancelled(); ui.onMouseButtonUp(26, 20, 0);
+    CHECK(ui.onMouseButtonDown(20, 20, 0));
+    list->onCaptureCancelled(); ui.onMouseMove(50, 20); CHECK(!ui.isDragging());
+    ui.onMouseButtonUp(50, 20, 0);
+    list->setPayloadProvider([](int) { return DragPayload{}; });
+    CHECK(ui.onMouseButtonDown(20, 20, 0));
+    ui.onMouseMove(50, 20); CHECK(!ui.isDragging());
+    ui.onMouseButtonUp(50, 20, 0);
+    list->setPayloadProvider([](int) {
+        DragPayload payload; payload.kind = "OwnerItem"; return payload;
+    });
+    list->setSelectedIndex(-1);
+    bool refreshed = false;
+    list->setOnSelectionChanged([&](int) {
+        if (!refreshed) { refreshed = true; list->setItems({L"callback refresh"}); }
+    });
+    CHECK(ui.onMouseButtonDown(20, 20, 0));
+    CHECK(refreshed);
+    ui.onMouseMove(50, 20); CHECK(!ui.isDragging());
+    ui.onMouseButtonUp(50, 20, 0);
+    ui.shutdown();
+}
+TEST_SUITE_END
+
 TEST_SUITE(AYUI_JobPresentation)
 TEST_CASE(job_presentation_ignores_stale_results_and_notifies_completion_once)
 {
@@ -504,6 +570,22 @@ TEST_CASE(job_progress_and_cancel_use_bounded_values_and_fresh_capabilities)
 TEST_SUITE_END
 
 TEST_SUITE(AYUI_PropertyField)
+TEST_CASE(property_field_submit_callbacks_can_close_the_owned_page_safely)
+{
+    using namespace ayt::ui::authoring;
+    auto* field = new PropertyField();
+    field->setTextValue(L"Name", L"owner");
+    field->setOnSubmitted([&] { ayt::ui::destroyWidgetTree(field); field = nullptr; });
+    CHECK(field->requestSubmit()); CHECK(field == nullptr);
+    field = new PropertyField(); field->setTextValue(L"Name", L"owner");
+    int submitted = 0;
+    field->setOnSubmitted([&] { ++submitted; });
+    field->setValidator([&](const std::wstring&, std::wstring& error) {
+        ayt::ui::destroyWidgetTree(field); field = nullptr;
+        error = L"closed by owner"; return true;
+    });
+    CHECK(!field->requestSubmit()); CHECK(field == nullptr); CHECK(submitted == 0);
+}
 TEST_CASE(property_field_refresh_validation_readonly_and_enum_preservation)
 {
     using namespace ayt::ui::authoring;

@@ -1,6 +1,7 @@
 #pragma once
 #include "AYUI/Box.h"
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,6 +22,7 @@ struct PropertyFieldOptions {
 class PropertyField final : public HBox {
 public:
     explicit PropertyField(PropertyFieldOptions options = {});
+    ~PropertyField() override { _submitState->alive = false; }
     void setTextValue(const std::wstring& label, const std::wstring& value,
                       bool readOnly = false);
     void setChoiceValue(const std::wstring& label, const std::wstring& value,
@@ -42,7 +44,9 @@ private:
     TextLabel* _label = nullptr;
     TextInput* _input = nullptr;
     ComboBox* _choice = nullptr;
-    bool _refreshing = false, _readOnly = false, _choiceMode = false, _submitting = false;
+    struct SubmitState { bool alive = true, submitting = false; };
+    std::shared_ptr<SubmitState> _submitState = std::make_shared<SubmitState>();
+    bool _refreshing = false, _readOnly = false, _choiceMode = false;
     std::wstring _error;
     std::function<bool(const std::wstring&, std::wstring&)> _validator;
     std::function<void()> _onEdited, _onSubmitted;

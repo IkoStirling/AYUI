@@ -24,9 +24,11 @@ PropertyField::PropertyField(PropertyFieldOptions options) {
         _input->setOnFocusLostNotify([this] { (void)requestSubmit(); });
     }
     _choice->setOnSelectionChanged([this, submit = options.submitOnChoice](int) {
+        const auto state = _submitState;
+        const bool shouldSubmit = submit;
         if (_refreshing || _readOnly || !isVisible()) return;
         edited();
-        if (submit) (void)requestSubmit();
+        if (state->alive && shouldSubmit) (void)requestSubmit();
     });
     addWidget(_label, options.labelWidth);
     addWidget(_input, 0);
@@ -35,7 +37,8 @@ PropertyField::PropertyField(PropertyFieldOptions options) {
 void PropertyField::edited() {
     if (_refreshing || _readOnly || !isVisible()) return;
     _error.clear();
-    if (_onEdited) _onEdited();
+    const auto callback = _onEdited;
+    if (callback) callback();
 }
 void PropertyField::setTextValue(const std::wstring& label, const std::wstring& value,
                                bool readOnly) {
@@ -84,12 +87,20 @@ std::wstring PropertyField::value() const {
     return _choiceMode ? _choice->getSelectedItem() : _input->getText();
 }
 bool PropertyField::requestSubmit() {
-    if (_refreshing || _readOnly || _submitting || !isVisible() || !_onSubmitted) return false;
-    _submitting = true;
-    struct Reset { bool& flag; ~Reset() { flag = false; } } reset{_submitting};
+    const auto state = _submitState;
+    if (_refreshing || _readOnly || state->submitting || !isVisible() || !_onSubmitted) return false;
+    state->submitting = true;
+    struct Reset { std::shared_ptr<SubmitState> state; ~Reset() { state->submitting = false; } } reset{state};
+    const auto validator = _validator;
+    const auto submitted = _onSubmitted;
+    const auto draft = value();
     _error.clear();
-    if (_validator && !_validator(value(), _error)) return false;
-    _onSubmitted();
+    std::wstring error;
+    const bool valid = !validator || validator(draft, error);
+    if (!state->alive) return false;
+    _error = std::move(error);
+    if (!valid) return false;
+    submitted();
     return true;
 }
 } // namespace ayt::ui::authoring

@@ -1132,6 +1132,10 @@ AYEditor 的命令按钮和 selection context 桥接归 AYEditor，公共 AYUI �
 文档/领域模型保留采样、加载校验、唯一历史、重定向求解和烘焙引用安全。
 接入及限制见 [公共作者控件](docs/curve-editor.md)。
 
+第三批增加 PropertyField 文本/枚举表单绑定、JobPresentation 后台任务状态/代次保护、
+StableListRows 可见行/ID 映射和 DragSourceList 单选拖放来源。UI 文本编码统一在
+UnicodeText.encodeUtf8Text，领域 schema、历史、任务执行及资源写入仍由宿主拥有。
+
 - [README.md](README.md)
 - [AYUI-v1-Design.md](AYUI-v1-Design.md)
 - [UI Flow contract](docs/UIFlow.md)

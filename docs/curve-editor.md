@@ -64,6 +64,16 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 稳定 ID 列表与拖放来源
+
+`StableListRows<Id>` 保存 owner 范围内的可见行/ID 双向映射；过滤/重排后按选中 ID
+恢复行位置，重复 ID 原子拒绝。映射不拥有文档，不把列表行号当作领域 ID。
+`DragSourceList` 复用 ListView 的绘制、滚动条和键盘导航，阈值到达时才调用宿主
+payload provider；刷新、provider 替换或捕获取消结束旧手势/拖放。选择/provider 回调
+重建列表时旧手势失效。单选用途，Extended 多选拖放仍用专用列表。
+骨骼列表和 GameFlow 动作面板已迁移；过滤文本、骨骼索引校验、动作类型/拖放目标仍归页面。
+通过基类 ListView 引用换行时需先 cancelPendingDrag；正常类型化 setItems 自动取消。
+
 ### 后台任务状态展示与宿主绑定
 
 `JobPresentation.h` 是 UI-free 的任务快照/展示绑定：显式 begin(generation)，忽略旧任务，
@@ -85,6 +95,7 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 `PropertyField` 提供文本/枚举属性行、稳定子控件 ID、静默刷新、只读/显隐、
 可选失焦/枚举提交、owner 校验和提交回调。未列出的枚举值保留，隐藏字段保留草稿，
 校验失败不调用提交，提交回调不能重入。它不解释领域 schema，不建立历史。
+校验或提交回调关闭并销毁页面时，不再访问已释放的字段，也不会继续提交已关闭字段。
 GameFlow 属性行已接入，原草稿整体校验与命令仍由页面拥有。完整表单可组合
 `NumericFields`、`ResourceReferenceField` 与现有 Layout 专用字段；Layout schema 不改名或泛化。
 
