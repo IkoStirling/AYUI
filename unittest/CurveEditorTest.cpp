@@ -5,6 +5,7 @@
 #include <AYMath/CurveMath.h>
 #include <AYUI/Authoring/PlaybackControls.h>
 #include <AYUI/Authoring/NumericFields.h>
+#include <AYUI/Authoring/PreviewViewport.h>
 #include <AYUI/TextInput.h>
 #include <AYUI/Button.h>
 #include <AYUI/ComboBox.h>
@@ -312,6 +313,41 @@ TEST_CASE(view_destruction_cancels_only_its_own_edit)
     { ayt::ui::authoring::CurveCanvas view(source); }
     CHECK(source->active);
     CHECK(source->endEdit(true));
+}
+TEST_CASE(preview_projection_orbit_and_cache_are_resource_neutral)
+{
+    using namespace ayt::ui::authoring;
+    PreviewOrbit orbit;
+    CHECK(!orbit.move({10, 10}));
+    orbit.begin({0, 0});
+    CHECK(orbit.move({10, 1000}));
+    CHECK(orbit.pitch == 1.5f);
+    CHECK(orbit.end());
+    CHECK(!orbit.end());
+    for (int i = 0; i < 100; ++i) orbit.wheel(1);
+    CHECK(orbit.zoom == 8.0f);
+    orbit.reset();
+    CHECK(orbit.zoom == 1.0f);
+    CHECK(!orbit.rotating());
+    const auto zoom = orbit.zoom;
+    orbit.wheel(0);
+    CHECK(orbit.zoom == zoom);
+    PreviewBounds points;
+    points.include({-1, -1, -1}); points.include({1, 1, 1});
+    const PreviewProjection project(points, {0, 0, 100, 100}, orbit, 0.72f);
+    const auto center = project({0, 0, 0});
+    CHECK(center.x == 50.0f);
+    CHECK(center.y == 50.0f);
+    CHECK(std::isfinite(project({1, 1, 1}).depth));
+    PreviewProjectionCache cache;
+    PreviewProjectionStamp stamp{1, 2, {0, 0, 100, 100}, orbit.yaw, orbit.pitch, orbit.zoom};
+    CHECK(cache.consume(stamp));
+    CHECK(!cache.consume(stamp));
+    ++stamp.pose; CHECK(cache.consume(stamp));
+    ++stamp.content; CHECK(cache.consume(stamp));
+    ++stamp.bounds.maxX; CHECK(cache.consume(stamp));
+    ++stamp.yaw; CHECK(cache.consume(stamp));
+    cache.invalidate(); CHECK(cache.consume(stamp));
 }
 TEST_SUITE_END
 

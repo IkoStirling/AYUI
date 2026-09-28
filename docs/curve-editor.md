@@ -64,6 +64,15 @@ auto makeCurveViews(std::shared_ptr<ICurveEditorSource> source,
 
 ## 本次迁移与限制
 
+### 预览视口基础
+
+`PreviewViewport.h` 的 `PreviewOrbit` 管理旋转/缩放/重置/取消；`PreviewBounds`
+收集有限世界点；`PreviewProjection` 按 owner 的视区和覆盖比例作正交投影。
+`PreviewProjectionCache` 仅比较内容、姿势、视角和尺寸，显式失效可强制重建。
+动画/骨骼 canvas 已共用这些基础，保留原覆盖比例、并排布局、蒙皮、绘制和拾取。
+这不是运行时 Camera 或通用 GPU viewport，不持有文档或推进动画。
+宿主在捕获取消和离开视区时结束旋转。测试见 `CurveEditorTest.cpp`。
+
 ### 数值与关键帧分量字段
 
 `NumericFields` 共用分量输入创建、格式、维数显隐、只读、unit 标签和提交回调。
