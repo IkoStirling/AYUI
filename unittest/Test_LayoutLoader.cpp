@@ -1,4 +1,6 @@
 #include "AYTest.h"
+#include "AYUI/WidgetFactory.h"
+#include "AYUI/ComboBox.h"
 #include "AYMath/MathUtils.h"
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/I18n.h"

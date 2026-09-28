@@ -13,6 +13,7 @@
 // recursive content, GridPanel row/column + children, Window minSize,
 // etc.) we provide the smallest valid payload needed.
 #include "AYTest.h"
+#include <nlohmann/json.hpp>
 #include "AYUI/WidgetSerializer.h"
 #include "AYUI/WidgetFactory.h"
 #include <cstdio>

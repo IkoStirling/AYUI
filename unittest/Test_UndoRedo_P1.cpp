@@ -15,6 +15,8 @@
 // post many calls).
 
 #include "AYTest.h"
+#include "AYMath/MathTypes.h"
+using ayt::math::FVector2;
 #include "AYUI/TextArea.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/UIManager.h"

@@ -3,6 +3,7 @@
 // the suite is order-independent.
 
 #include "AYTest.h"
+#include "AYUI/WidgetSerializer.h"
 #include "AYUI/Theme.h"
 #include "AYUI/Style.h"
 #include "AYUI/Widget.h"

@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYUI/ScrollBar.h"
 #include "AYUI/ToolBar.h"
 #include "AYUI/Button.h"
 #include "AYUI/MockRenderer.h"

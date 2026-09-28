@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYUI/MockRenderer.h"
 #include "AYUI/TextInput.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/UIKeyCode.h"

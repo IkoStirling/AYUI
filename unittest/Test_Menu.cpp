@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYUI/TextInput.h"
 #include "AYUI/Menu.h"
 #include "AYUI/MenuItem.h"
 #include "AYUI/UIManager.h"

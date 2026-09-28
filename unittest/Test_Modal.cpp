@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYUI/TextInput.h"
 #include "AYUI/Modal.h"
 #include "AYUI/Dimmer.h"
 #include "AYUI/UIManager.h"

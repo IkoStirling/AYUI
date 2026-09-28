@@ -1,4 +1,6 @@
 #include "AYTest.h"
+#include "AYUI/SplitterHandle.h"
+#include "AYUI/Box.h"
 #include "AYUI/UIManager.h"
 #include "AYUI/MockRenderer.h"
 #include "AYUI/Button.h"
@@ -10,6 +12,7 @@
 #include "AYUI/UIKeyCode.h"
 
 #include <cstdio>
+#include <iostream>
 #include <fstream>
 #include <thread>
 #include <chrono>
