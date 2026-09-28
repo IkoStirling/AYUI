@@ -49,14 +49,19 @@ foreach(group IN LISTS AYUI_TEST_GROUPS)
         list(GET fields 2 case_name)
         list(GET fields 3 tier)
         list(APPEND fast_args --exclude-case "${suite}.${case_name}")
+        set(execution_policy)
+        if(tier STREQUAL "stress")
+            # Performance bounds must not compete with other CTest work.
+            set(execution_policy RUN_SERIAL)
+        endif()
         ay_add_test(${binary} NAME "${binary}.${case_name}"
             SUITE "${suite}" ARGS --case "${case_name}"
             LABELS "ui;ui-full;ui-${tier};${tier};ui-${group_label}"
-            TIMEOUT 60 RUN_SERIAL)
+            TIMEOUT 60 ${execution_policy})
     endforeach()
     ay_add_test(${binary} ARGS ${fast_args}
         LABELS "ui;ui-full;ui-fast;unit;ui-${group_label}"
-        TIMEOUT 30 RUN_SERIAL)
+        TIMEOUT 30)
     list(APPEND AYUI_TEST_OBJECT_TARGETS ${objects})
     list(APPEND AYUI_TEST_GROUP_TARGETS ${binary})
     list(APPEND AYUI_OWNED_TEST_SOURCES ${AYUI_TEST_${group}_SOURCES})
@@ -81,4 +86,4 @@ add_custom_target(AYUI_TestGroups DEPENDS ${AYUI_TEST_GROUP_TARGETS})
 add_executable(AYUICurveEditorTest CurveEditorTest.cpp)
 target_link_libraries(AYUICurveEditorTest PRIVATE AYUICurveEditor AYTest)
 ay_add_test(AYUICurveEditorTest LABELS "ui;ui-full;ui-fast;unit;ui-authoring"
-    TIMEOUT 30 RUN_SERIAL)
+    TIMEOUT 30)

@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYTestFixtures.h"
 #include "AYUI/SplitterHandle.h"
 #include "AYUI/Box.h"
 #include "AYUI/UIManager.h"
@@ -167,10 +168,8 @@ TEST_CASE(test_uimanager_cancel_capture) {
 TEST_CASE(test_uimanager_reload_during_capture) {
     namespace fs = std::filesystem;
 
-    fs::path tmpDir = fs::temp_directory_path() / "ayui_r7_reload_capture";
-    std::error_code ec;
-    fs::remove_all(tmpDir, ec);
-    fs::create_directories(tmpDir);
+    ayt::test::ScratchDirectory scratch("reload-capture");
+    const fs::path tmpDir = scratch.path();
     fs::path jsonPath = tmpDir / "panel.json";
 
     {
@@ -211,17 +210,17 @@ TEST_CASE(test_uimanager_reload_during_capture) {
         })";
     }
 
-    // Allow the watcher thread to enqueue the change event.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
     // R-7 fix path: update() detects a pending reload, calls
     // cancelCapture() notifies the old Window so its _isDragging state
     // clears, then clears _hoverWidget before destroying the tree.
-    ui.update(0.0f);
+    const bool reloaded = ayt::test::waitUntil([&] {
+        ui.update(0.0f);
+        return !ui.isCapturing();
+    });
 
     // After reload the capture must be gone. The previous _capturedWidget
     // pointer is now dangling; reading it would be UB.
-    CHECK(!ui.isCapturing());
+    CHECK(reloaded && !ui.isCapturing());
 
     // Subsequent input handling must not crash on the dangling pointer.
     // If cancelCapture wasn't called, this onMouseButtonUp would
@@ -229,7 +228,6 @@ TEST_CASE(test_uimanager_reload_during_capture) {
     ui.onMouseButtonUp(80.0f, 50.0f, 0);
 
     ui.shutdown();
-    fs::remove_all(tmpDir, ec);
 }
 
 // Bug repro: a splitter between two Window panels must go back to

@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYTestFixtures.h"
 
 #include "AYUI/Packaging/UIAssetCollector.h"
 
@@ -13,19 +14,13 @@ namespace fs = std::filesystem;
 using namespace ayt::ui::packaging;
 
 struct TemporaryContentRoot {
-    fs::path path = fs::temp_directory_path()
-        / "ayui_module_asset_collector";
+    ayt::test::ScratchDirectory scratch{"asset-collector"};
+    fs::path path = scratch.path();
 
     TemporaryContentRoot() {
         std::error_code error;
-        fs::remove_all(path, error);
         fs::create_directories(path / "UI", error);
         fs::create_directories(path / "Textures", error);
-    }
-
-    ~TemporaryContentRoot() {
-        std::error_code error;
-        fs::remove_all(path, error);
     }
 
     void write(const fs::path& relative, const std::string& contents) const {

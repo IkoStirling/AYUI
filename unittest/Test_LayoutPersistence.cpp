@@ -19,6 +19,7 @@
 // =============================================================================
 
 #include "AYTest.h"
+#include "AYTestFixtures.h"
 #include "AYUI/LayoutLoader.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/WidgetSerializer.h"
@@ -144,10 +145,8 @@ TEST_CASE(test_save_layout_to_file_round_trips_via_disk) {
     WidgetFactory::get();
     BuiltDock built;
 
-    const std::string path =
-        (std::filesystem::temp_directory_path() /
-         "ayui_d4_persist_test.json").string();
-    ayt::io::File::remove(path);  // start clean
+    ayt::test::ScratchDirectory scratch("layout-persistence");
+    const std::string path = (scratch.path() / "persist.json").string();
 
     UILayoutLoader saver;
     const bool ok = saver.saveLayout(path, built.dock.get(), true /*pretty*/);

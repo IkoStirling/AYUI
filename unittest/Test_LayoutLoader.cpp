@@ -1,4 +1,5 @@
 #include "AYTest.h"
+#include "AYTestFixtures.h"
 #include "AYUI/WidgetFactory.h"
 #include "AYUI/ComboBox.h"
 #include "AYMath/MathUtils.h"
@@ -475,9 +476,8 @@ TEST_CASE(test_layout_loader_reload_api) {
 TEST_CASE(test_layout_loader_hot_reload_via_file_watcher) {
     namespace fs = std::filesystem;
 
-    // Per-user temp dir; avoid %TEMP% pollution across runs.
-    fs::path tmpDir = fs::temp_directory_path() / "ayui_r4_hot_reload";
-    fs::create_directories(tmpDir);
+    ayt::test::ScratchDirectory scratch("layout-hot-reload");
+    const fs::path tmpDir = scratch.path();
     fs::path jsonPath = tmpDir / "hot.json";
     std::string pathStr = jsonPath.string();
 
@@ -486,15 +486,6 @@ TEST_CASE(test_layout_loader_hot_reload_via_file_watcher) {
         out << body;
         out.close();
     };
-
-    auto removeAll = [&]() {
-        std::error_code ec;
-        fs::remove_all(tmpDir, ec);
-    };
-
-    // Cleanup any leftover from a previous failed run.
-    removeAll();
-    fs::create_directories(tmpDir);
 
     writeJson(R"({
         "type": "Widget",
@@ -527,13 +518,8 @@ TEST_CASE(test_layout_loader_hot_reload_via_file_watcher) {
             ]
         })");
 
-        // Watcher thread latency: ReadDirectoryChangesW typically delivers
-        // within 10-50ms on Windows; inotify similar on POSIX. 200ms gives
-        // generous headroom for slow CI machines without making the test
-        // perceptibly slow.
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        CHECK(loader.isReloadNeeded() == true);
+        // Wait for the observable event, with a deadline for slow CI workers.
+        CHECK(ayt::test::waitUntil([&] { return loader.isReloadNeeded(); }));
         Widget* reloaded = loader.tryReload();
         CHECK(reloaded != nullptr);
 
@@ -548,7 +534,6 @@ TEST_CASE(test_layout_loader_hot_reload_via_file_watcher) {
         destroyWidgetTree(reloaded);
     }
 
-    removeAll();
 }
 
 TEST_CASE(test_layout_loader_partial_height_fills_parent_width) {
