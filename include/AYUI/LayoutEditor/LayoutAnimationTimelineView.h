@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYUI/Widget.h"
+#include "AYUI/Authoring/TimelineModel.h"
 
 #include <functional>
 #include <string>
@@ -13,11 +14,13 @@ struct LayoutAnimationTimelineTrackView {
     std::vector<float> keyTimesMs;
 };
 
+// Keep the existing callback type at the layout-page boundary while sharing
+// phase ordering with the neutral authoring model (no callback ABI change).
 enum class LayoutAnimationKeyDragPhase {
-    Begin,
-    Update,
-    End,
-    Cancel
+    Begin = static_cast<int>(authoring::EditGesturePhase::Begin),
+    Update = static_cast<int>(authoring::EditGesturePhase::Update),
+    End = static_cast<int>(authoring::EditGesturePhase::End),
+    Cancel = static_cast<int>(authoring::EditGesturePhase::Cancel)
 };
 
 // Authoring-only timeline surface. It owns no document data and never creates

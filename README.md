@@ -19,6 +19,8 @@ AYUI 已接入根工程，`CMakeLists.txt` 会加入 `AYRuntime/AYUI`。AYRender
 - VBox/HBox、GridPanel、ScrollView、Splitter、自由布局 Anchor/Offset/Pivot 与约束辅助
 - Button、输入框、ListView、虚拟化 TileView、树、菜单、工具栏、状态栏、Tab、Modal、Tooltip 等控件
 - 通用 `ColorPicker`：HSV/透明度选择、十六进制输入、命名记忆色组及宿主拾色回调
+- 独立 `AYUITimelineCore` / `AYUICurveEditor`：共享秒制时间变换、选择与 owner 契约，
+  通用曲线画布和 Dope Sheet；不依赖 AYEditor 或动画资源，接入见 [curve-editor.md](docs/curve-editor.md)
 - DockArea/DockCard/DockOverlay、嵌套 dock tree、浮动卡片与布局持久化
 - JSON 布局加载、WidgetFactory、WidgetSerializer、文件热重载
 - Application UI Flow 阶段四：`*.uiflow.json` 数据契约、持久 Runtime、真实 Widget Layer 挂载、

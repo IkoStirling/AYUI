@@ -1,6 +1,6 @@
 # AYUI Design
 
-**文档修订：** 2026-09-10
+**文档修订：** 2026-09-28
 
 **CMake 目标版本：** 1.0.0
 
@@ -14,6 +14,16 @@ Layout Editor（schema Inspector、typed undo、宿主交互契约/触发图、�
 > 本文描述当前代码，不再把已完成的 R/C/D 阶段当作未来路线图。历史 v1.2 方案保留在 [AYUI-v1-Design.md](AYUI-v1-Design.md)。发生冲突时，以代码、测试和本文为准。
 
 ## 1. 范围与目标
+
+### 共享时间轴与曲线作者层（2026-09-28）
+
+`AYUITimelineCore` 为 UI-free header-only 数据/owner 契约和 `TimeViewport`；
+`AYUICurveEditor` 单独提供 `CurveCanvas` / `DopeSheet`，只链接 AYUI 与公共契约，
+不将作者控件并入游戏侧 AYUI runtime。资源解释、采样策略、撤销、验证和持久化留在适配器。
+AYEditor 的动画页已迁移到该层；UI Layout 时间轴复用秒制坐标与手势阶段顺序，
+仍保留其毫秒 API、专用滚动视图和 Bezier/Spring 编辑，并未替换为通用 Dope Sheet。
+快照及曲线采样按内容版本/视区缓存，播放头更新不重建资源快照或重采样。
+契约、限制和新页面接入示例见 [docs/curve-editor.md](docs/curve-editor.md)。
 
 AYUI 是 AliyatEngine 的 UI 领域层。它管理 UI 状态和控件树，但不持有图形 API 资源，也不决定引擎主循环。
 

@@ -236,8 +236,9 @@ void LayoutAnimationTimelineView::updateVerticalScrollFromPointer(
 float LayoutAnimationTimelineView::worldXForTime(float timeMs) const {
     const math::FRectangle plot = plotBounds();
     const float width = std::max(1.0f, plot.maxX - plot.minX);
-    return plot.minX + (timeMs - _viewStartMs) /
-        std::max(1.0f, visibleDurationMs()) * width;
+    const authoring::TimeViewport view{_viewStartMs * 0.001,
+                                      visibleDurationMs() * 0.001};
+    return plot.minX + static_cast<float>(view.normalizedAt(timeMs * 0.001)) * width;
 }
 
 float LayoutAnimationTimelineView::timeAtWorldX(float worldX) const {
@@ -245,9 +246,10 @@ float LayoutAnimationTimelineView::timeAtWorldX(float worldX) const {
     const float width = std::max(1.0f, plot.maxX - plot.minX);
     const float normalized = std::clamp(
         (worldX - plot.minX) / width, 0.0f, 1.0f);
-    return std::clamp(
-        _viewStartMs + normalized * visibleDurationMs(),
-        0.0f, _durationMs);
+    const authoring::TimeViewport view{_viewStartMs * 0.001,
+                                      visibleDurationMs() * 0.001};
+    return std::clamp(static_cast<float>(view.timeAt(normalized) * 1000.0),
+                      0.0f, _durationMs);
 }
 
 math::FRectangle LayoutAnimationTimelineView::keyframeBounds(
@@ -429,17 +431,17 @@ bool LayoutAnimationTimelineView::onMouseWheel(
         return true;
     }
     if (!plot.contains(event.mousePos)) return false;
-    const float anchorTime = timeAtWorldX(event.mousePos.x);
     const float oldZoom = _zoom;
-    _zoom = std::clamp(
-        _zoom * std::pow(1.1f, -event.deltaY / 40.0f), 1.0f, 16.0f);
-    if (std::fabs(_zoom - oldZoom) < 0.0001f) return true;
     const float normalized = std::clamp(
         (event.mousePos.x - plot.minX) /
             std::max(1.0f, plot.maxX - plot.minX),
         0.0f, 1.0f);
-    _viewStartMs = clampViewStart(
-        anchorTime - normalized * visibleDurationMs());
+    authoring::TimeViewport view{_viewStartMs * 0.001, visibleDurationMs() * 0.001};
+    view.zoomAt(normalized, std::pow(1.1, event.deltaY / 40.0f),
+                _durationMs * 0.001 / 16.0, _durationMs * 0.001);
+    _zoom = static_cast<float>(_durationMs * 0.001 / view.durationSeconds);
+    if (std::fabs(_zoom - oldZoom) < 0.0001f) return true;
+    _viewStartMs = clampViewStart(static_cast<float>(view.startSeconds * 1000.0));
     markDirty();
     return true;
 }

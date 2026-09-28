@@ -238,6 +238,19 @@ if(MSVC)
         NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
+# Shared authoring surfaces. No AYEditor, AYAnimation or resource dependency.
+# Kept out of the runtime library so ordinary games do not link editor controls.
+add_library(AYUITimelineCore INTERFACE)
+target_include_directories(AYUITimelineCore INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_library(AYUICurveEditor STATIC
+    Authoring/CurveCanvas.cpp
+    Authoring/DopeSheet.cpp)
+target_link_libraries(AYUICurveEditor PUBLIC AYUI AYUITimelineCore)
+if(MSVC)
+    target_compile_options(AYUICurveEditor PRIVATE /Zc:__cplusplus /Zc:preprocessor)
+    target_compile_definitions(AYUICurveEditor PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # Product-grade layout authoring core shared by the standalone Designer,
 # AYEditor and headless regression tools. Keep it separate from AYUI runtime:
 # games that only load .ui.json do not pay for editor models or chrome logic.
@@ -287,7 +300,7 @@ target_include_directories(AYUILayoutEditorCore
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/LayoutEditor
 )
-target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI AYEditor::CommandCore)
+target_link_libraries(AYUILayoutEditorCore PUBLIC AYUI AYUITimelineCore AYEditor::CommandCore)
 if(MSVC)
     target_compile_options(AYUILayoutEditorCore PRIVATE
         /Zc:__cplusplus /Zc:preprocessor)

@@ -29,6 +29,10 @@ target_include_directories(${MODULE_NAME} PRIVATE
 
 ay_add_test(${MODULE_NAME})
 
+add_executable(AYUICurveEditorTest CurveEditorTest.cpp)
+target_link_libraries(AYUICurveEditorTest PRIVATE AYUICurveEditor AYTest)
+ay_add_test(AYUICurveEditorTest)
+
 # Tests run from the build directory; pass the AYUI source root so
 # they can locate source files via the AYUI_SOURCE_DIR macro.
 target_compile_definitions(${MODULE_NAME} PRIVATE
