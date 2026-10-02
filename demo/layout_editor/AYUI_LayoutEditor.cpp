@@ -490,7 +490,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     session.setThemePathPicker([hwnd]() { return showOpenUiJsonDialog(hwnd); });
     session.setTextureResourceProvider([]() { return enumeratePreviewTextures(); });
     session.setExternalComponentLibraryPath(
-        "assets/project.ayuicomponents.json");
+        "assets/project.uic");
     session.setTexturePreviewLoader([&state, &uiBackend](const std::string& path) {
         return loadPreviewTexture(path, uiBackend, state.previewTextures);
     });
